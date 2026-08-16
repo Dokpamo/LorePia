@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-interrupt-provider-discovery-assistant"
+description = "Enables the interrupt_provider_discovery_assistant command without any pre-configured scope."
+commands.allow = ["interrupt_provider_discovery_assistant"]
+
+[[permission]]
+identifier = "deny-interrupt-provider-discovery-assistant"
+description = "Denies the interrupt_provider_discovery_assistant command without any pre-configured scope."
+commands.deny = ["interrupt_provider_discovery_assistant"]

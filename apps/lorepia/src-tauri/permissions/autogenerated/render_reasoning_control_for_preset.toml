@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-render-reasoning-control-for-preset"
+description = "Enables the render_reasoning_control_for_preset command without any pre-configured scope."
+commands.allow = ["render_reasoning_control_for_preset"]
+
+[[permission]]
+identifier = "deny-render-reasoning-control-for-preset"
+description = "Denies the render_reasoning_control_for_preset command without any pre-configured scope."
+commands.deny = ["render_reasoning_control_for_preset"]

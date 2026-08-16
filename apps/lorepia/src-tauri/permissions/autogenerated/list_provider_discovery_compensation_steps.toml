@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-provider-discovery-compensation-steps"
+description = "Enables the list_provider_discovery_compensation_steps command without any pre-configured scope."
+commands.allow = ["list_provider_discovery_compensation_steps"]
+
+[[permission]]
+identifier = "deny-list-provider-discovery-compensation-steps"
+description = "Denies the list_provider_discovery_compensation_steps command without any pre-configured scope."
+commands.deny = ["list_provider_discovery_compensation_steps"]

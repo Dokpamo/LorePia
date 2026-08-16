@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-diff-prompt-preset-revisions"
+description = "Enables the diff_prompt_preset_revisions command without any pre-configured scope."
+commands.allow = ["diff_prompt_preset_revisions"]
+
+[[permission]]
+identifier = "deny-diff-prompt-preset-revisions"
+description = "Denies the diff_prompt_preset_revisions command without any pre-configured scope."
+commands.deny = ["diff_prompt_preset_revisions"]

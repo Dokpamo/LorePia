@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-transform-sets"
+description = "Enables the list_transform_sets command without any pre-configured scope."
+commands.allow = ["list_transform_sets"]
+
+[[permission]]
+identifier = "deny-list-transform-sets"
+description = "Denies the list_transform_sets command without any pre-configured scope."
+commands.deny = ["list_transform_sets"]

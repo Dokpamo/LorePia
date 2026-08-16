@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-evaluate-content-module-share"
+description = "Enables the evaluate_content_module_share command without any pre-configured scope."
+commands.allow = ["evaluate_content_module_share"]
+
+[[permission]]
+identifier = "deny-evaluate-content-module-share"
+description = "Denies the evaluate_content_module_share command without any pre-configured scope."
+commands.deny = ["evaluate_content_module_share"]

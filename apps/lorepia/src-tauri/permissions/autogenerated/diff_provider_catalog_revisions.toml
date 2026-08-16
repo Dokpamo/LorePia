@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-diff-provider-catalog-revisions"
+description = "Enables the diff_provider_catalog_revisions command without any pre-configured scope."
+commands.allow = ["diff_provider_catalog_revisions"]
+
+[[permission]]
+identifier = "deny-diff-provider-catalog-revisions"
+description = "Denies the diff_provider_catalog_revisions command without any pre-configured scope."
+commands.deny = ["diff_provider_catalog_revisions"]

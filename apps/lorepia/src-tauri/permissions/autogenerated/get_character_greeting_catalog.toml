@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-character-greeting-catalog"
+description = "Enables the get_character_greeting_catalog command without any pre-configured scope."
+commands.allow = ["get_character_greeting_catalog"]
+
+[[permission]]
+identifier = "deny-get-character-greeting-catalog"
+description = "Denies the get_character_greeting_catalog command without any pre-configured scope."
+commands.deny = ["get_character_greeting_catalog"]

@@ -1,0 +1,20387 @@
+//! Typed repository facade for durable provider discovery.
+//!
+//! The lower-level [`crate::discovery`] module owns the `SQLite` state-machine
+//! primitives. This module is the product-facing boundary: it hydrates domain
+//! aggregates, validates bounded redacted payloads, and keeps provider graph
+//! publication in the same transaction as discovery commit bookkeeping.
+
+use std::collections::BTreeSet;
+
+use chrono::{DateTime, Utc};
+use lorepia_domain::{
+    ApiFamily, AuthBinding, CanonicalOrigin, CapabilityObservation, Confidence,
+    ConnectionConfigValue, CoreError, CoreErrorCode, CoreResult, CredentialRedirectPolicy,
+    CredentialRef, DiscoverySessionId, EndpointPath, EvidenceId, GenerationPreset, HeaderName,
+    HttpMethod, HttpUrl, ModelMetadataSource, ModelRoute, ObservationSource, ProviderConnection,
+    ProviderConnectionId, ProviderNetworkMode, ProviderTemplate, SupportStatus, TemplateSource,
+    discovery::{
+        DiscoveryActionEnvelope, DiscoveryActionId, DiscoveryActionReceipt,
+        DiscoveryActionRequired, DiscoveryApprovalBinding, DiscoveryApprovalDecision,
+        DiscoveryApprovalGrant, DiscoveryApprovalId, DiscoveryApprovalRecord, DiscoveryCandidate,
+        DiscoveryCandidateId, DiscoveryCommitAttemptId, DiscoveryCommitPhase as DomainCommitPhase,
+        DiscoveryCommitPlan, DiscoveryCompensationKind,
+        DiscoveryCompensationStatus as DomainCompensationStatus, DiscoveryCompensationStep,
+        DiscoveryCompensationTarget, DiscoveryContractError, DiscoveryEffect, DiscoveryEventId,
+        DiscoveryInterruptionOutcome, DiscoveryOperationId, DiscoveryOperationKind,
+        DiscoveryPreviousSelection, DiscoveryProbeBudget, DiscoveryRecoveryCheckpoint,
+        DiscoveryReviewDiff, DiscoverySideEffectClass, DiscoveryState, DiscoveryTransition,
+        DiscoveryUnknownOutcomeResolution, PROVIDER_DISCOVERY_EVENT_VERSION,
+        ProviderDiscoveryAction, ProviderDiscoveryEvent, ProviderDiscoverySession,
+        SanitizedDiscoveryInput,
+    },
+};
+use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use sha2::{Digest, Sha256};
+use uuid::Uuid;
+
+#[cfg(test)]
+use crate::discovery::NewDiscoverySession;
+use crate::{
+    ProviderCredentialAccessAuthority, Storage,
+    database::{
+        StoredDiscoveredProviderGraphRows, clear_provider_selections_for_discovery_compensation,
+        load_discovered_provider_graph_rows, load_discovery_previous_selection,
+        restore_discovery_provider_selection, write_discovered_provider_graph_rows,
+    },
+    discovery::{
+        self, CompletedDiscoveryOperation, DiscoveryRecoveryDisposition, DiscoveryStorageError,
+        DurableDiscoveryEffect, DurableDiscoveryTransition, DurableOperationOutcome,
+        NewDiscoveryApproval, NewDiscoveryCommitAttempt, NewDiscoveryCompensationStep,
+        NewDiscoveryOperation, PersistDiscoveryTransition,
+    },
+    generation_attempt::validate_provider_credential_access_authority_in_transaction,
+    validate_provider_api_route_metadata,
+};
+
+const MAX_DISCOVERY_ROWS: u32 = 1_000;
+const MAX_DISCOVERY_JSON_BYTES: usize = 1024 * 1024;
+const MAX_DISCOVERY_JSON_CHARS: usize = 512 * 1024;
+const MAX_DISCOVERY_JSON_DEPTH: usize = 24;
+const MAX_DISCOVERY_JSON_NODES: usize = 16_384;
+const DETERMINISTIC_DISCOVERY_SCHEMA_VERSION: u32 = 1;
+const DISCOVERY_REDACTION_VERSION: u32 = 1;
+const NATIVE_NO_EFFECT_ATTESTATION_SCHEMA_VERSION: u32 = 1;
+const NATIVE_NO_EFFECT_ATTESTATION_REDACTION_VERSION: u32 = 1;
+const NATIVE_NO_EFFECT_ATTESTATION_INTEGRITY_PAGE_SIZE: u32 = 256;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InitialDeterministicDiscoveryOutput {
+    schema_version: u32,
+    selected_template: Option<ProviderTemplate>,
+    evidence: Vec<InitialRedactedDiscoveryEvidence>,
+    family_candidates: Vec<InitialDiscoveryFamilyCandidate>,
+    manifest_candidates: Vec<InitialDiscoveryManifestCandidate>,
+    connection_hints: Vec<InitialDiscoveryConnectionHint>,
+    fetch_issues: Vec<InitialDiscoveryFetchIssue>,
+    fetch_stopped_by_budget: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InitialRedactedDiscoveryEvidence {
+    kind: String,
+    source_origin: CanonicalOrigin,
+    content_sha256: String,
+    extracted_json: Value,
+    redaction_version: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum InitialDiscoveryCandidateConfidence {
+    Structural,
+    ExactCompiledProvider,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InitialDiscoveryFamilyCandidate {
+    api_family: ApiFamily,
+    confidence: InitialDiscoveryCandidateConfidence,
+    evidence_indices: Vec<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InitialDiscoveryManifestCandidate {
+    template: ProviderTemplate,
+    manifest_sha256: String,
+    confidence: InitialDiscoveryCandidateConfidence,
+    generation_endpoint_evidenced: bool,
+    model_endpoint_evidenced: bool,
+    auth_evidenced: bool,
+    evidence_indices: Vec<usize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum InitialConnectionOriginHintSource {
+    CompiledProviderDefault,
+    OpenApiServer,
+    SanitizedCurlRequest,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InitialDiscoveryConnectionHint {
+    api_family: ApiFamily,
+    api_origin: CanonicalOrigin,
+    api_base_path: Option<EndpointPath>,
+    network_mode: ProviderNetworkMode,
+    auth: AuthBinding,
+    requires_credential_origin_approval: bool,
+    source: InitialConnectionOriginHintSource,
+    evidence_indices: Vec<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InitialDiscoveryFetchIssue {
+    source_origin: CanonicalOrigin,
+    source_path_sha256: String,
+    source_path_is_root: bool,
+    kind: String,
+    http_status: Option<u16>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+enum InitialCurlAuthHint {
+    BearerHeader,
+    AuthorizationHeader,
+    ApiKeyHeader { header_name: HeaderName },
+    CookieHeader { header_name: HeaderName },
+    ApiKeyQuery { parameter_name: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+enum InitialJsonShape {
+    Null,
+    Boolean,
+    Number,
+    String,
+    Array { items: Vec<Self>, truncated: bool },
+    Object { fields: Vec<InitialJsonFieldShape> },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InitialJsonFieldShape {
+    name: String,
+    shape: InitialJsonShape,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InitialSanitizedCurlEvidence {
+    method: HttpMethod,
+    origin: CanonicalOrigin,
+    source_path_sha256: String,
+    source_path_is_root: bool,
+    query_parameter_names: Vec<String>,
+    header_names: Vec<HeaderName>,
+    auth_hints: Vec<InitialCurlAuthHint>,
+    body_json_shape: Option<InitialJsonShape>,
+    stream_hint: Option<bool>,
+    api_family_candidates: Vec<ApiFamily>,
+    trust: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscoverySessionSnapshot {
+    pub session: ProviderDiscoverySession,
+    pub active_operation_id: Option<DiscoveryOperationId>,
+    pub draft_json: Option<Value>,
+    pub review: Option<DiscoveryReviewDiff>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DiscoveryJsonUpdate<T> {
+    Preserve,
+    Clear,
+    Replace(T),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiscoveryEvidenceKind {
+    HtmlDocument,
+    JsonDocument,
+    YamlDocument,
+    XmlDocument,
+    PlainTextDocument,
+    JsonSchema,
+    OpenApi,
+}
+
+impl DiscoveryEvidenceKind {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::HtmlDocument => "html_document",
+            Self::JsonDocument => "json_document",
+            Self::YamlDocument => "yaml_document",
+            Self::XmlDocument => "xml_document",
+            Self::PlainTextDocument => "plain_text_document",
+            Self::JsonSchema => "json_schema",
+            Self::OpenApi => "open_api",
+        }
+    }
+
+    fn parse(value: &str) -> CoreResult<Self> {
+        match value {
+            "html_document" => Ok(Self::HtmlDocument),
+            "json_document" => Ok(Self::JsonDocument),
+            "yaml_document" => Ok(Self::YamlDocument),
+            "xml_document" => Ok(Self::XmlDocument),
+            "plain_text_document" => Ok(Self::PlainTextDocument),
+            "json_schema" => Ok(Self::JsonSchema),
+            "open_api" => Ok(Self::OpenApi),
+            _ => Err(corrupted("stored discovery evidence kind is invalid")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscoveryEvidenceRecord {
+    pub id: EvidenceId,
+    pub session_id: DiscoverySessionId,
+    pub kind: DiscoveryEvidenceKind,
+    pub source_url: HttpUrl,
+    pub content_sha256: String,
+    pub extracted_json: Value,
+    pub fetched_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredDiscoveryCandidate {
+    pub candidate: DiscoveryCandidate,
+    pub proposed_revision: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiscoveryOperationStatus {
+    Prepared,
+    Started,
+    Succeeded,
+    Failed,
+    Interrupted,
+    OutcomeUnknown,
+}
+
+impl DiscoveryOperationStatus {
+    fn parse(value: &str) -> CoreResult<Self> {
+        match value {
+            "prepared" => Ok(Self::Prepared),
+            "started" => Ok(Self::Started),
+            "succeeded" => Ok(Self::Succeeded),
+            "failed" => Ok(Self::Failed),
+            "interrupted" => Ok(Self::Interrupted),
+            "outcome_unknown" => Ok(Self::OutcomeUnknown),
+            _ => Err(corrupted("stored discovery operation status is invalid")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscoveryOperationRecord {
+    pub id: DiscoveryOperationId,
+    pub session_id: DiscoverySessionId,
+    pub kind: DiscoveryOperationKind,
+    pub side_effect_class: DiscoverySideEffectClass,
+    pub status: DiscoveryOperationStatus,
+    pub action_id: DiscoveryActionId,
+    pub expected_revision: u64,
+    pub request_sha256: String,
+    pub approval: Option<DiscoveryApprovalBinding>,
+    pub started_at: Option<DateTime<Utc>>,
+    pub finished_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Immutable binding between one semantic discovery operation and the fresh
+/// physical native credential authority reserved before that operation starts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscoveryNativeCredentialExecutionRecord {
+    pub physical_authority_id: String,
+    pub operation_id: DiscoveryOperationId,
+    pub session_id: DiscoverySessionId,
+    pub commit_attempt_id: DiscoveryCommitAttemptId,
+    pub commit_plan_sha256: String,
+    pub connection_id: ProviderConnectionId,
+    pub connection_binding_sha256: String,
+    pub reserved_at: DateTime<Utc>,
+    pub store_started_at: Option<DateTime<Utc>>,
+}
+
+/// Exact inputs Core has revalidated before reserving a fresh physical slot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscoveryNativeCredentialExecutionReservation {
+    pub operation_id: DiscoveryOperationId,
+    pub session_id: DiscoverySessionId,
+    pub commit_attempt_id: DiscoveryCommitAttemptId,
+    pub commit_plan_sha256: String,
+    pub connection_id: ProviderConnectionId,
+    pub connection_binding_sha256: String,
+    pub reserved_at: DateTime<Utc>,
+}
+
+/// Exact reserved execution whose next native action is the credential store.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscoveryNativeCredentialStoreAttemptStart {
+    pub operation_id: DiscoveryOperationId,
+    pub physical_authority_id: String,
+    pub started_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscoveryOutboxEvent {
+    pub event: ProviderDiscoveryEvent,
+    pub delivery_attempts: u32,
+    pub available_at: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiscoveryCommitPhase {
+    Prepared,
+    DatabaseApplied,
+    CredentialReferenceApplied,
+    Completed,
+    CompensationRequired,
+    Compensating,
+    Compensated,
+    OutcomeUnknown,
+}
+
+impl DiscoveryCommitPhase {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Prepared => "prepared",
+            Self::DatabaseApplied => "database_applied",
+            Self::CredentialReferenceApplied => "credential_reference_applied",
+            Self::Completed => "completed",
+            Self::CompensationRequired => "compensation_required",
+            Self::Compensating => "compensating",
+            Self::Compensated => "compensated",
+            Self::OutcomeUnknown => "outcome_unknown",
+        }
+    }
+
+    fn parse(value: &str) -> CoreResult<Self> {
+        match value {
+            "prepared" => Ok(Self::Prepared),
+            "database_applied" => Ok(Self::DatabaseApplied),
+            "credential_reference_applied" => Ok(Self::CredentialReferenceApplied),
+            "completed" => Ok(Self::Completed),
+            "compensation_required" => Ok(Self::CompensationRequired),
+            "compensating" => Ok(Self::Compensating),
+            "compensated" => Ok(Self::Compensated),
+            "outcome_unknown" => Ok(Self::OutcomeUnknown),
+            _ => Err(corrupted("stored discovery commit phase is invalid")),
+        }
+    }
+}
+
+impl From<DomainCommitPhase> for DiscoveryCommitPhase {
+    fn from(value: DomainCommitPhase) -> Self {
+        match value {
+            DomainCommitPhase::Prepared => Self::Prepared,
+            DomainCommitPhase::DatabaseApplied => Self::DatabaseApplied,
+            DomainCommitPhase::CredentialReferenceApplied => Self::CredentialReferenceApplied,
+            DomainCommitPhase::Completed => Self::Completed,
+            DomainCommitPhase::CompensationRequired => Self::CompensationRequired,
+            DomainCommitPhase::Compensating => Self::Compensating,
+            DomainCommitPhase::Compensated => Self::Compensated,
+            DomainCommitPhase::OutcomeUnknown => Self::OutcomeUnknown,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscoveryCommitAttemptRecord {
+    pub id: DiscoveryCommitAttemptId,
+    pub session_id: DiscoverySessionId,
+    pub attempt_number: u32,
+    pub action_id: DiscoveryActionId,
+    pub expected_revision: u64,
+    pub plan_sha256: String,
+    pub plan: DiscoveryCommitPlan,
+    pub phase: DiscoveryCommitPhase,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub completed_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiscoveryCompensationStatus {
+    Pending,
+    InProgress,
+    Completed,
+    Failed,
+    OutcomeUnknown,
+}
+
+impl DiscoveryCompensationStatus {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::InProgress => "in_progress",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::OutcomeUnknown => "outcome_unknown",
+        }
+    }
+
+    fn parse(value: &str) -> CoreResult<Self> {
+        match value {
+            "pending" => Ok(Self::Pending),
+            "in_progress" => Ok(Self::InProgress),
+            "completed" => Ok(Self::Completed),
+            "failed" => Ok(Self::Failed),
+            "outcome_unknown" => Ok(Self::OutcomeUnknown),
+            _ => Err(corrupted("stored discovery compensation status is invalid")),
+        }
+    }
+}
+
+impl From<DomainCompensationStatus> for DiscoveryCompensationStatus {
+    fn from(value: DomainCompensationStatus) -> Self {
+        match value {
+            DomainCompensationStatus::Pending => Self::Pending,
+            DomainCompensationStatus::InProgress => Self::InProgress,
+            DomainCompensationStatus::Completed => Self::Completed,
+            DomainCompensationStatus::Failed => Self::Failed,
+            DomainCompensationStatus::OutcomeUnknown => Self::OutcomeUnknown,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscoveryCompensationRecord {
+    pub id: String,
+    pub commit_attempt_id: DiscoveryCommitAttemptId,
+    pub ordinal: u32,
+    pub action_id: DiscoveryActionId,
+    pub kind: DiscoveryCompensationKind,
+    pub step: DiscoveryCompensationStep,
+    pub status: DiscoveryCompensationStatus,
+    pub attempt_count: u32,
+    pub last_failure: Option<lorepia_domain::discovery::DiscoveryFailure>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub completed_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreparedDiscoveryCompensationStep {
+    pub id: String,
+    pub step: DiscoveryCompensationStep,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreparedDiscoveryCommit {
+    pub plan: DiscoveryCommitPlan,
+    pub plan_sha256: String,
+    pub attempt_number: u32,
+    pub reuse_existing: bool,
+    pub compensation_steps: Vec<PreparedDiscoveryCompensationStep>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DiscoveredProviderGraph {
+    pub plan: DiscoveryCommitPlan,
+    pub plan_sha256: String,
+    pub template: ProviderTemplate,
+    pub connection: ProviderConnection,
+    pub routes: Vec<ModelRoute>,
+    pub observations: Vec<CapabilityObservation>,
+    pub presets: Vec<GenerationPreset>,
+}
+
+impl DiscoveredProviderGraph {
+    pub fn ownership_sha256(&self) -> CoreResult<String> {
+        provider_graph_ownership_hash(
+            &self.template,
+            &self.connection,
+            &self.routes,
+            &self.observations,
+            &self.presets,
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscoveryCompletedOperationWrite {
+    pub id: DiscoveryOperationId,
+    pub outcome: DurableOperationOutcome,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiscoveryNativeNoEffectAttestationKind {
+    CredentialSlotMissing,
+}
+
+impl DiscoveryNativeNoEffectAttestationKind {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::CredentialSlotMissing => "credential_slot_missing",
+        }
+    }
+
+    fn parse(value: &str) -> CoreResult<Self> {
+        match value {
+            "credential_slot_missing" => Ok(Self::CredentialSlotMissing),
+            _ => Err(corrupted(
+                "stored native no-effect attestation kind is invalid",
+            )),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiscoveryNativeRecoveryOwner {
+    NativePlatform,
+}
+
+impl DiscoveryNativeRecoveryOwner {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::NativePlatform => "native_platform",
+        }
+    }
+
+    fn parse(value: &str) -> CoreResult<Self> {
+        match value {
+            "native_platform" => Ok(Self::NativePlatform),
+            _ => Err(corrupted(
+                "stored native no-effect attestation owner is invalid",
+            )),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscoveryNativeNoEffectAttestationWrite {
+    pub operation_id: DiscoveryOperationId,
+    pub physical_authority_id: String,
+    pub session_id: DiscoverySessionId,
+    pub commit_attempt_id: DiscoveryCommitAttemptId,
+    pub commit_plan_sha256: String,
+    pub connection_id: ProviderConnectionId,
+    pub kind: DiscoveryNativeNoEffectAttestationKind,
+    pub recovery_owner: DiscoveryNativeRecoveryOwner,
+    pub evidence_sha256: String,
+}
+
+impl DiscoveryNativeNoEffectAttestationWrite {
+    pub fn credential_slot_missing(
+        operation_id: DiscoveryOperationId,
+        physical_authority_id: String,
+        session_id: DiscoverySessionId,
+        commit_attempt_id: DiscoveryCommitAttemptId,
+        commit_plan_sha256: String,
+        connection_id: ProviderConnectionId,
+    ) -> CoreResult<Self> {
+        validate_discovery_native_physical_authority_id(&physical_authority_id)
+            .map_err(|_| CoreError::invalid("native no-effect physical authority is invalid"))?;
+        let mut attestation = Self {
+            operation_id,
+            physical_authority_id,
+            session_id,
+            commit_attempt_id,
+            commit_plan_sha256,
+            connection_id,
+            kind: DiscoveryNativeNoEffectAttestationKind::CredentialSlotMissing,
+            recovery_owner: DiscoveryNativeRecoveryOwner::NativePlatform,
+            evidence_sha256: String::new(),
+        };
+        attestation.evidence_sha256 = native_no_effect_evidence_sha256(&attestation)?;
+        Ok(attestation)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscoveryNativeNoEffectAttestationRecord {
+    pub operation_id: DiscoveryOperationId,
+    pub physical_authority_id: String,
+    pub session_id: DiscoverySessionId,
+    pub commit_attempt_id: DiscoveryCommitAttemptId,
+    pub commit_plan_sha256: String,
+    pub connection_id: ProviderConnectionId,
+    pub kind: DiscoveryNativeNoEffectAttestationKind,
+    pub recovery_owner: DiscoveryNativeRecoveryOwner,
+    pub evidence_sha256: String,
+    pub connection_binding_sha256: String,
+    pub execution_binding_sha256: String,
+    pub attested_at: DateTime<Utc>,
+}
+
+#[derive(Serialize)]
+struct NativeNoEffectAttestationEvidence<'a> {
+    schema_version: u32,
+    attestation_kind: &'a str,
+    recovery_owner: &'a str,
+    operation_id: &'a str,
+    session_id: &'a str,
+    commit_attempt_id: &'a str,
+    commit_plan_sha256: &'a str,
+    connection_id: &'a str,
+}
+
+#[derive(Serialize)]
+struct NativeNoEffectExecutionBindingEvidence<'a> {
+    schema_version: u32,
+    redaction_version: u32,
+    operation_id: &'a str,
+    physical_authority_id: &'a str,
+    session_id: &'a str,
+    commit_attempt_id: &'a str,
+    commit_plan_sha256: &'a str,
+    connection_id: &'a str,
+    connection_binding_sha256: &'a str,
+    attestation_evidence_sha256: &'a str,
+    attested_at: &'a str,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DiscoveryTransitionWrite {
+    pub transition: DiscoveryTransition,
+    pub draft: DiscoveryJsonUpdate<Value>,
+    pub review: DiscoveryJsonUpdate<DiscoveryReviewDiff>,
+    pub new_evidence: Vec<DiscoveryEvidenceRecord>,
+    pub new_candidates: Vec<StoredDiscoveryCandidate>,
+    pub approval: Option<DiscoveryApprovalRecord>,
+    pub new_operation_id: Option<DiscoveryOperationId>,
+    pub completed_operation: Option<DiscoveryCompletedOperationWrite>,
+    pub prepared_commit: Option<PreparedDiscoveryCommit>,
+    pub provider_graph: Option<DiscoveredProviderGraph>,
+    pub occurred_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscoveryRecoveryResult {
+    pub operation_id: DiscoveryOperationId,
+    pub session_id: DiscoverySessionId,
+    pub state: DiscoveryState,
+    pub event: ProviderDiscoveryEvent,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscoveryActionReplay {
+    pub receipt: DiscoveryActionReceipt,
+    pub transition: DiscoveryTransition,
+}
+
+fn is_pristine_discovery_session(session: &ProviderDiscoverySession) -> bool {
+    session.state == DiscoveryState::Draft
+        && session.revision == 0
+        && session.next_event_sequence == 1
+        && session.recovery.is_none()
+        && session.unknown_operation.is_none()
+        && session.manifest_sha256.is_none()
+        && session.commit_plan_sha256.is_none()
+        && session.commit_attempt_id.is_none()
+        && session.committed_connection_id.is_none()
+        && !session.cancellation_pending
+        && session.active_effect_approval.is_none()
+        && session.failure.is_none()
+}
+
+fn validate_atomic_discovery_begin(
+    initial_session: &ProviderDiscoverySession,
+    write: &DiscoveryTransitionWrite,
+) -> CoreResult<()> {
+    initial_session.validate().map_err(contract_error)?;
+    validate_sanitized_input(&initial_session.input)?;
+    if !is_pristine_discovery_session(initial_session)
+        || write.transition.previous_revision != 0
+        || write.transition.session.id != initial_session.id
+        || write.transition.receipt.action_kind != "begin"
+    {
+        return Err(CoreError::invalid(
+            "atomic discovery begin requires a pristine matching draft and Begin transition",
+        ));
+    }
+    validate_identifier("discovery session id", initial_session.id.as_str(), 128)?;
+    let begun = &write.transition.session;
+    if begun.input != initial_session.input
+        || begun.state != DiscoveryState::ResolvingKnownProvider
+        || begun.revision != 1
+        || begun.next_event_sequence != 2
+        || begun.recovery.is_some()
+        || begun.unknown_operation.is_some()
+        || begun.manifest_sha256.is_some()
+        || begun.commit_plan_sha256.is_some()
+        || begun.commit_attempt_id.is_some()
+        || begun.committed_connection_id.is_some()
+        || begun.cancellation_pending
+        || begun.active_effect_approval.is_some()
+        || begun.failure.is_some()
+        || write.transition.effect != DiscoveryEffect::ResolveKnownProvider
+        || write.transition.event.progress.is_some()
+        || write.transition.event.action_required.is_some()
+        || write.transition.event.warning.is_some()
+        || write.transition.event.failure.is_some()
+    {
+        return Err(CoreError::invalid(
+            "atomic discovery begin transition contains non-begin state",
+        ));
+    }
+    if !write.new_evidence.is_empty()
+        || !write.new_candidates.is_empty()
+        || write.approval.is_some()
+        || write.prepared_commit.is_some()
+        || write.provider_graph.is_some()
+        || write.completed_operation.is_some()
+        || matches!(write.draft, DiscoveryJsonUpdate::Clear)
+        || matches!(write.review, DiscoveryJsonUpdate::Replace(_))
+    {
+        return Err(CoreError::invalid(
+            "atomic discovery begin cannot publish later-stage artifacts",
+        ));
+    }
+    if let DiscoveryJsonUpdate::Replace(draft) = &write.draft {
+        validate_initial_discovery_draft(draft, &initial_session.input)?;
+    }
+    validate_transition_write(write)
+}
+
+fn ensure_provider_credential_operation_settled_for_discovery(
+    connection: &Connection,
+    connection_id: &ProviderConnectionId,
+) -> CoreResult<()> {
+    let unresolved_exists = connection
+        .query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM provider_credential_operations
+                WHERE connection_id = ?1
+                  AND status IN (
+                    'prepared', 'started', 'cleanup_required', 'outcome_unknown'
+                  )
+             )",
+            [connection_id.as_str()],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(database_error)?;
+    if unresolved_exists {
+        return Err(CoreError::new(
+            CoreErrorCode::InvalidInput,
+            "provider connection cannot begin discovery while its credential operation is unresolved",
+            true,
+        ));
+    }
+    Ok(())
+}
+
+impl Storage {
+    #[cfg(test)]
+    fn create_discovery_session(
+        &self,
+        session: &ProviderDiscoverySession,
+        created_at: DateTime<Utc>,
+    ) -> CoreResult<()> {
+        session.validate().map_err(contract_error)?;
+        validate_sanitized_input(&session.input)?;
+        if !is_pristine_discovery_session(session) {
+            return Err(CoreError::invalid(
+                "a new discovery session must be a pristine draft",
+            ));
+        }
+        validate_identifier("discovery session id", session.id.as_str(), 128)?;
+        let mut connection = self.connection()?;
+        discovery::insert_discovery_session(
+            &mut connection,
+            &NewDiscoverySession {
+                id: session.id.as_str(),
+                input: &session.input,
+                created_at: &created_at.to_rfc3339(),
+            },
+        )
+        .map_err(discovery_error)
+    }
+
+    pub fn get_discovery_session(
+        &self,
+        session_id: &DiscoverySessionId,
+    ) -> CoreResult<DiscoverySessionSnapshot> {
+        let connection = self.connection()?;
+        load_session_snapshot(&connection, session_id.as_str())?.ok_or_else(|| {
+            CoreError::new(
+                CoreErrorCode::NotFound,
+                "provider discovery session was not found",
+                false,
+            )
+        })
+    }
+
+    pub fn list_discovery_sessions(&self, limit: u32) -> CoreResult<Vec<DiscoverySessionSnapshot>> {
+        validate_limit(limit)?;
+        let connection = self.connection()?;
+        let ids = {
+            let mut statement = connection
+                .prepare(
+                    "SELECT id
+                     FROM provider_discovery_sessions
+                     ORDER BY updated_at DESC, id
+                     LIMIT ?1",
+                )
+                .map_err(database_error)?;
+            statement
+                .query_map([limit], |row| row.get::<_, String>(0))
+                .map_err(database_error)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(database_error)?
+        };
+        ids.into_iter()
+            .map(|id| {
+                load_session_snapshot(&connection, &id)?.ok_or_else(|| {
+                    corrupted("discovery session disappeared while it was being listed")
+                })
+            })
+            .collect()
+    }
+
+    /// Returns every session with an unfinished durable operation.
+    ///
+    /// Startup recovery must not infer completeness from the bounded
+    /// user-facing history query. This complete internal scan uses the partial
+    /// `provider_discovery_operations_recovery` index and de-duplicates session
+    /// identifiers while preserving durable operation order.
+    pub fn list_unfinished_discovery_sessions_for_recovery(
+        &self,
+    ) -> CoreResult<Vec<DiscoverySessionSnapshot>> {
+        let connection = self.connection()?;
+        let unfinished = discovery::list_unfinished_discovery_operations(&connection)
+            .map_err(discovery_error)?;
+        let mut seen = BTreeSet::new();
+        unfinished
+            .into_iter()
+            .filter(|operation| seen.insert(operation.session_id.clone()))
+            .map(|operation| operation.session_id)
+            .map(|session_id| {
+                load_session_snapshot(&connection, &session_id)?.ok_or_else(|| {
+                    corrupted("unfinished discovery session disappeared during recovery scan")
+                })
+            })
+            .collect()
+    }
+
+    #[cfg(test)]
+    fn save_discovery_evidence(&self, evidence: &DiscoveryEvidenceRecord) -> CoreResult<()> {
+        validate_discovery_evidence(evidence)?;
+        let mut connection = self.connection()?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(database_error)?;
+        require_session(&transaction, evidence.session_id.as_str())?;
+        let extracted_json = encode_redacted_json(&evidence.extracted_json, "discovery evidence")?;
+        let existing = transaction
+            .query_row(
+                "SELECT session_id, kind, source_url, content_sha256, extracted_json, fetched_at
+                 FROM provider_discovery_evidence
+                 WHERE id = ?1",
+                [evidence.id.as_str()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(database_error)?;
+        let expected = (
+            evidence.session_id.as_str(),
+            evidence.kind.as_str(),
+            evidence.source_url.as_str(),
+            evidence.content_sha256.as_str(),
+            extracted_json.as_str(),
+            evidence.fetched_at.to_rfc3339(),
+        );
+        if let Some(existing) = existing {
+            if existing.0 == expected.0
+                && existing.1 == expected.1
+                && existing.2 == expected.2
+                && existing.3 == expected.3
+                && existing.4 == expected.4
+                && existing.5 == expected.5
+            {
+                return Ok(());
+            }
+            return Err(CoreError::invalid(
+                "discovery evidence identifiers are immutable",
+            ));
+        }
+        transaction
+            .execute(
+                "INSERT INTO provider_discovery_evidence (
+                     id, session_id, kind, source_url, content_sha256,
+                     extracted_json, redaction_version, fetched_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7)",
+                params![
+                    evidence.id.as_str(),
+                    evidence.session_id.as_str(),
+                    evidence.kind.as_str(),
+                    evidence.source_url.as_str(),
+                    evidence.content_sha256,
+                    extracted_json,
+                    evidence.fetched_at.to_rfc3339(),
+                ],
+            )
+            .map_err(database_error)?;
+        transaction.commit().map_err(database_error)
+    }
+
+    pub fn list_discovery_evidence(
+        &self,
+        session_id: &DiscoverySessionId,
+        limit: u32,
+    ) -> CoreResult<Vec<DiscoveryEvidenceRecord>> {
+        validate_limit(limit)?;
+        let connection = self.connection()?;
+        require_session(&connection, session_id.as_str())?;
+        let mut statement = connection
+            .prepare(
+                "SELECT id, session_id, kind, source_url, content_sha256,
+                        extracted_json, fetched_at
+                 FROM provider_discovery_evidence
+                 WHERE session_id = ?1
+                 ORDER BY fetched_at, id
+                 LIMIT ?2",
+            )
+            .map_err(database_error)?;
+        statement
+            .query_map(params![session_id.as_str(), limit], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                ))
+            })
+            .map_err(database_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(database_error)?
+            .into_iter()
+            .map(decode_evidence_row)
+            .collect()
+    }
+
+    pub fn list_discovery_candidates(
+        &self,
+        session_id: &DiscoverySessionId,
+        limit: u32,
+    ) -> CoreResult<Vec<StoredDiscoveryCandidate>> {
+        validate_limit(limit)?;
+        let connection = self.connection()?;
+        require_session(&connection, session_id.as_str())?;
+        let mut statement = connection
+            .prepare(
+                "SELECT id, session_id, candidate_kind, summary_json, evidence_ids_json,
+                        proposed_revision, created_at
+                 FROM provider_discovery_candidates
+                 WHERE session_id = ?1
+                 ORDER BY proposed_revision, created_at, id
+                 LIMIT ?2",
+            )
+            .map_err(database_error)?;
+        statement
+            .query_map(params![session_id.as_str(), limit], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, u64>(5)?,
+                    row.get::<_, String>(6)?,
+                ))
+            })
+            .map_err(database_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(database_error)?
+            .into_iter()
+            .map(decode_candidate_row)
+            .collect()
+    }
+
+    pub fn list_discovery_approvals(
+        &self,
+        session_id: &DiscoverySessionId,
+        limit: u32,
+    ) -> CoreResult<Vec<DiscoveryApprovalRecord>> {
+        validate_limit(limit)?;
+        let connection = self.connection()?;
+        require_session(&connection, session_id.as_str())?;
+        let mut statement = connection
+            .prepare(
+                "SELECT id, session_id, approval_kind, candidate_id, decision,
+                        grant_json, session_revision, grant_sha256, created_at
+                 FROM provider_discovery_approvals
+                 WHERE session_id = ?1
+                 ORDER BY session_revision, created_at, id
+                 LIMIT ?2",
+            )
+            .map_err(database_error)?;
+        statement
+            .query_map(params![session_id.as_str(), limit], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, u64>(6)?,
+                    row.get::<_, String>(7)?,
+                    row.get::<_, String>(8)?,
+                ))
+            })
+            .map_err(database_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(database_error)?
+            .into_iter()
+            .map(decode_approval_row)
+            .collect()
+    }
+
+    pub fn get_discovery_review(
+        &self,
+        session_id: &DiscoverySessionId,
+    ) -> CoreResult<Option<DiscoveryReviewDiff>> {
+        Ok(self.get_discovery_session(session_id)?.review)
+    }
+
+    pub fn get_current_discovery_operation(
+        &self,
+        session_id: &DiscoverySessionId,
+    ) -> CoreResult<Option<DiscoveryOperationRecord>> {
+        let connection = self.connection()?;
+        let snapshot =
+            load_session_snapshot(&connection, session_id.as_str())?.ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorCode::NotFound,
+                    "provider discovery session was not found",
+                    false,
+                )
+            })?;
+        snapshot
+            .active_operation_id
+            .as_ref()
+            .map(|operation_id| load_operation_by_id(&connection, operation_id))
+            .transpose()
+    }
+
+    pub fn mark_discovery_operation_started(
+        &self,
+        operation_id: &DiscoveryOperationId,
+        started_at: DateTime<Utc>,
+    ) -> CoreResult<bool> {
+        let mut connection = self.connection()?;
+        let operation = load_operation_by_id(&connection, operation_id)?;
+        if started_at < operation.created_at {
+            return Err(CoreError::invalid(
+                "discovery operation cannot start before it was created",
+            ));
+        }
+        discovery::mark_discovery_operation_started(
+            &mut connection,
+            operation_id.as_str(),
+            &started_at.to_rfc3339(),
+        )
+        .map_err(discovery_error)
+    }
+
+    pub fn poll_discovery_events(
+        &self,
+        limit: u32,
+        available_at: DateTime<Utc>,
+    ) -> CoreResult<Vec<DiscoveryOutboxEvent>> {
+        validate_limit(limit)?;
+        let mut connection = self.connection()?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(database_error)?;
+        let rows = load_pollable_outbox_rows(&transaction, limit, available_at)?;
+        for row in &rows {
+            transaction
+                .execute(
+                    "UPDATE provider_discovery_event_outbox
+                     SET delivery_attempts = delivery_attempts + 1
+                     WHERE id = ?1 AND delivered_at IS NULL",
+                    [row.event.id.as_str()],
+                )
+                .map_err(database_error)?;
+        }
+        transaction.commit().map_err(database_error)?;
+        Ok(rows
+            .into_iter()
+            .map(|mut row| {
+                row.delivery_attempts += 1;
+                row
+            })
+            .collect())
+    }
+
+    /// Polls only the earliest deliverable event for one discovery session.
+    ///
+    /// Delivery remains at-least-once until the caller acknowledges the event;
+    /// pending events for other sessions are neither attempted nor discarded.
+    pub fn poll_discovery_events_for_session(
+        &self,
+        session_id: &DiscoverySessionId,
+        limit: u32,
+        available_at: DateTime<Utc>,
+    ) -> CoreResult<Vec<DiscoveryOutboxEvent>> {
+        validate_identifier("discovery session id", session_id.as_str(), 128)?;
+        validate_limit(limit)?;
+        let mut connection = self.connection()?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(database_error)?;
+        let rows =
+            load_pollable_outbox_rows_for_session(&transaction, session_id, limit, available_at)?;
+        for row in &rows {
+            transaction
+                .execute(
+                    "UPDATE provider_discovery_event_outbox
+                     SET delivery_attempts = delivery_attempts + 1
+                     WHERE id = ?1 AND delivered_at IS NULL",
+                    [row.event.id.as_str()],
+                )
+                .map_err(database_error)?;
+        }
+        transaction.commit().map_err(database_error)?;
+        Ok(rows
+            .into_iter()
+            .map(|mut row| {
+                row.delivery_attempts += 1;
+                row
+            })
+            .collect())
+    }
+
+    pub fn ack_discovery_event(
+        &self,
+        event_id: &DiscoveryEventId,
+        delivered_at: DateTime<Utc>,
+    ) -> CoreResult<bool> {
+        let changed = self
+            .connection()?
+            .execute(
+                "UPDATE provider_discovery_event_outbox
+                 SET delivered_at = ?2
+                 WHERE id = ?1
+                   AND delivered_at IS NULL
+                   AND delivery_attempts > 0
+                   AND ?2 >= available_at
+                   AND NOT EXISTS (
+                       SELECT 1
+                       FROM provider_discovery_event_outbox AS earlier
+                       WHERE earlier.session_id =
+                             provider_discovery_event_outbox.session_id
+                         AND earlier.delivered_at IS NULL
+                         AND earlier.sequence <
+                             provider_discovery_event_outbox.sequence
+                   )",
+                params![event_id.as_str(), delivered_at.to_rfc3339()],
+            )
+            .map_err(database_error)?;
+        Ok(changed == 1)
+    }
+
+    pub fn persist_discovery_transition(
+        &self,
+        write: &DiscoveryTransitionWrite,
+    ) -> CoreResult<PersistDiscoveryTransition> {
+        if write.completed_operation.as_ref().is_some_and(|completed| {
+            completed.outcome == DurableOperationOutcome::AttestedNoExternalEffect
+        }) {
+            return Err(CoreError::invalid(
+                "native no-effect completion requires its atomic attestation API",
+            ));
+        }
+        if write
+            .provider_graph
+            .as_ref()
+            .is_some_and(|graph| graph.plan.credential_ref.is_some())
+        {
+            return Err(CoreError::invalid(
+                "credentialed provider graphs require native credential confirmation",
+            ));
+        }
+        validate_transition_write(write)?;
+        let mut connection = self.connection()?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(database_error)?;
+        let result = persist_transition_in_transaction(&transaction, write)?;
+        transaction.commit().map_err(database_error)?;
+        Ok(result)
+    }
+
+    /// Atomically stores a native missing-slot attestation and the exact
+    /// `interrupted` transition it authorizes.
+    pub fn persist_native_no_effect_discovery_transition(
+        &self,
+        write: &DiscoveryTransitionWrite,
+        attestation: &DiscoveryNativeNoEffectAttestationWrite,
+    ) -> CoreResult<PersistDiscoveryTransition> {
+        validate_transition_write(write)?;
+        validate_native_no_effect_attestation_write(write, attestation)?;
+        let mut connection = self.connection()?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(database_error)?;
+        insert_or_validate_native_no_effect_attestation(&transaction, write, attestation)?;
+        let result = persist_transition_in_transaction(&transaction, write)?;
+        transaction.commit().map_err(database_error)?;
+        Ok(result)
+    }
+
+    pub fn get_discovery_native_no_effect_attestation(
+        &self,
+        operation_id: &DiscoveryOperationId,
+    ) -> CoreResult<Option<DiscoveryNativeNoEffectAttestationRecord>> {
+        let connection = self.connection()?;
+        load_native_no_effect_attestation(&connection, operation_id.as_str())
+    }
+
+    /// Loads the immutable physical native authority for one discovery
+    /// operation. An unreserved prepared operation returns `None`; a reserved
+    /// prepared operation returns the row without a store-attempt timestamp,
+    /// and a started operation must return the same row with that timestamp.
+    pub fn get_discovery_native_credential_execution(
+        &self,
+        operation_id: &DiscoveryOperationId,
+    ) -> CoreResult<Option<DiscoveryNativeCredentialExecutionRecord>> {
+        let connection = self.connection()?;
+        load_discovery_native_credential_execution(&connection, operation_id)
+    }
+
+    /// Reserves a fresh physical authority while the semantic operation stays
+    /// Prepared. This lets the host finish every fallible slot precondition
+    /// without granting recovery permission to adopt an external effect.
+    pub fn reserve_discovery_credential_install_execution(
+        &self,
+        reservation: &DiscoveryNativeCredentialExecutionReservation,
+    ) -> CoreResult<DiscoveryNativeCredentialExecutionRecord> {
+        validate_sha256(
+            "discovery credential execution plan hash",
+            &reservation.commit_plan_sha256,
+        )?;
+        validate_sha256(
+            "discovery credential execution connection binding",
+            &reservation.connection_binding_sha256,
+        )?;
+        let mut connection = self.connection()?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(database_error)?;
+        validate_native_credential_execution_reservation(&transaction, reservation)?;
+        if load_discovery_native_credential_execution(&transaction, &reservation.operation_id)?
+            .is_some()
+        {
+            return Err(CoreError::invalid(
+                "discovery credential operation already has a native execution authority",
+            ));
+        }
+
+        let physical_authority_id = format!("discovery-native-{}", Uuid::new_v4());
+        transaction
+            .execute(
+                "INSERT INTO provider_discovery_native_credential_executions (
+                     physical_authority_id, operation_id, session_id,
+                     commit_attempt_id, commit_plan_sha256, connection_id,
+                     connection_binding_sha256, reserved_at,
+                     schema_version, redaction_version
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1, 1)",
+                params![
+                    physical_authority_id,
+                    reservation.operation_id.as_str(),
+                    reservation.session_id.as_str(),
+                    reservation.commit_attempt_id.as_str(),
+                    reservation.commit_plan_sha256,
+                    reservation.connection_id.as_str(),
+                    reservation.connection_binding_sha256,
+                    reservation.reserved_at.to_rfc3339(),
+                ],
+            )
+            .map_err(database_error)?;
+        let execution =
+            load_discovery_native_credential_execution(&transaction, &reservation.operation_id)?
+                .ok_or_else(|| {
+                    corrupted("reserved discovery credential execution was not durably recorded")
+                })?;
+        if execution.store_started_at.is_some() {
+            return Err(corrupted(
+                "fresh discovery credential reservation already has a store attempt",
+            ));
+        }
+        transaction.commit().map_err(database_error)?;
+        Ok(execution)
+    }
+
+    /// Commits an append-only store-attempt intent and moves the operation
+    /// Prepared -> Started with its audit in one IMMEDIATE transaction.
+    pub fn start_reserved_discovery_credential_install_execution(
+        &self,
+        start: &DiscoveryNativeCredentialStoreAttemptStart,
+    ) -> CoreResult<DiscoveryNativeCredentialExecutionRecord> {
+        validate_discovery_native_physical_authority_id(&start.physical_authority_id)?;
+        let mut connection = self.connection()?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(database_error)?;
+        let execution =
+            load_discovery_native_credential_execution(&transaction, &start.operation_id)?
+                .ok_or_else(|| {
+                    CoreError::invalid("discovery credential execution is not reserved")
+                })?;
+        let operation = load_operation_by_id(&transaction, &start.operation_id)?;
+        let snapshot = load_session_snapshot(&transaction, execution.session_id.as_str())?
+            .ok_or_else(|| corrupted("reserved discovery credential session is missing"))?;
+        let attempt = load_commit_attempt(&transaction, &execution.commit_attempt_id)?;
+        if execution.physical_authority_id != start.physical_authority_id
+            || execution.store_started_at.is_some()
+            || start.started_at < execution.reserved_at
+            || operation.status != DiscoveryOperationStatus::Prepared
+            || operation.started_at.is_some()
+            || operation.finished_at.is_some()
+            || snapshot.session.state != DiscoveryState::Committing
+            || snapshot.active_operation_id.as_ref() != Some(&start.operation_id)
+            || snapshot.session.revision != operation.expected_revision
+            || snapshot.session.commit_attempt_id.as_ref() != Some(&attempt.id)
+            || snapshot.session.commit_plan_sha256.as_deref() != Some(attempt.plan_sha256.as_str())
+            || snapshot.session.cancellation_pending
+            || attempt.phase != DiscoveryCommitPhase::Prepared
+            || attempt.plan_sha256 != execution.commit_plan_sha256
+        {
+            return Err(CoreError::invalid(
+                "native credential store attempt is detached from its reservation",
+            ));
+        }
+        transaction
+            .execute(
+                "INSERT INTO provider_discovery_native_credential_store_attempts (
+                     operation_id, physical_authority_id, started_at,
+                     schema_version, redaction_version
+                 ) VALUES (?1, ?2, ?3, 1, 1)",
+                params![
+                    start.operation_id.as_str(),
+                    start.physical_authority_id,
+                    start.started_at.to_rfc3339(),
+                ],
+            )
+            .map_err(database_error)?;
+        let changed = transaction
+            .execute(
+                "UPDATE provider_discovery_operations
+                 SET status = 'started', started_at = ?2, updated_at = ?2
+                 WHERE id = ?1 AND status = 'prepared' AND started_at IS NULL
+                   AND finished_at IS NULL",
+                params![start.operation_id.as_str(), start.started_at.to_rfc3339()],
+            )
+            .map_err(database_error)?;
+        if changed != 1 {
+            return Err(CoreError::invalid(
+                "discovery credential operation changed before its store attempt",
+            ));
+        }
+        append_audit(
+            &transaction,
+            execution.session_id.as_str(),
+            operation.expected_revision,
+            "operation_started",
+            Some(operation.action_id.as_str()),
+            Some(start.operation_id.as_str()),
+            "discovery.audit.operation_started",
+            start.started_at,
+        )?;
+        let started =
+            load_discovery_native_credential_execution(&transaction, &start.operation_id)?
+                .ok_or_else(|| corrupted("started discovery credential execution disappeared"))?;
+        if started.store_started_at != Some(start.started_at) {
+            return Err(corrupted(
+                "started discovery credential execution lost its store-attempt cutpoint",
+            ));
+        }
+        transaction.commit().map_err(database_error)?;
+        Ok(started)
+    }
+
+    /// Revalidates that the active native credential-install operation was
+    /// created by the exact immutable commit-start receipt for this attempt.
+    pub fn validate_discovery_credential_install_operation_authority(
+        &self,
+        session_id: &DiscoverySessionId,
+        attempt_id: &DiscoveryCommitAttemptId,
+        plan_sha256: &str,
+        operation_id: &DiscoveryOperationId,
+    ) -> CoreResult<()> {
+        validate_sha256("discovery credential install plan hash", plan_sha256)?;
+        let connection = self.connection()?;
+        let attempt = load_commit_attempt(&connection, attempt_id)?;
+        let snapshot = load_session_snapshot(&connection, session_id.as_str())?
+            .ok_or_else(|| corrupted("discovery credential install session is missing"))?;
+        let operation = load_operation_by_id(&connection, operation_id)?;
+        if attempt.session_id != *session_id
+            || attempt.phase != DiscoveryCommitPhase::Prepared
+            || attempt.plan_sha256 != plan_sha256
+            || attempt.plan.attempt_id != *attempt_id
+            || snapshot.session.state != DiscoveryState::Committing
+            || snapshot.session.commit_attempt_id.as_ref() != Some(attempt_id)
+            || snapshot.session.commit_plan_sha256.as_deref() != Some(plan_sha256)
+            || snapshot.active_operation_id.as_ref() != Some(operation_id)
+            || operation.session_id != *session_id
+            || operation.kind != DiscoveryOperationKind::AtomicCommit
+            || operation.side_effect_class != DiscoverySideEffectClass::Persistent
+            || !matches!(
+                operation.status,
+                DiscoveryOperationStatus::Prepared | DiscoveryOperationStatus::Started
+            )
+            || operation.expected_revision != snapshot.session.revision
+        {
+            return Err(corrupted(
+                "discovery credential install operation is detached from its active commit",
+            ));
+        }
+        validate_native_no_effect_operation_start_receipt(
+            &connection,
+            &attempt,
+            operation.action_id.as_str(),
+            operation.expected_revision,
+            &operation.request_sha256,
+            &operation.created_at.to_rfc3339(),
+        )
+        .map(|_| ())
+    }
+
+    /// Revalidates a credential-install operation before crash recovery.
+    ///
+    /// Unlike the normal execution boundary, recovery may observe an exact
+    /// canonical cancellation chain after the immutable commit-start receipt.
+    /// Only a Prepared or Started operation whose current session is the final
+    /// durable `Cancel` response is accepted with that revision drift. The
+    /// Prepared form covers the crash boundary between persisting cancellation
+    /// and settling the still-unstarted operation.
+    pub fn validate_discovery_credential_install_recovery_authority(
+        &self,
+        session_id: &DiscoverySessionId,
+        attempt_id: &DiscoveryCommitAttemptId,
+        plan_sha256: &str,
+        operation_id: &DiscoveryOperationId,
+    ) -> CoreResult<()> {
+        validate_sha256("discovery credential install plan hash", plan_sha256)?;
+        let connection = self.connection()?;
+        let attempt = load_commit_attempt(&connection, attempt_id)?;
+        let snapshot = load_session_snapshot(&connection, session_id.as_str())?
+            .ok_or_else(|| corrupted("discovery credential install session is missing"))?;
+        let operation = load_operation_by_id(&connection, operation_id)?;
+        if attempt.session_id != *session_id
+            || attempt.phase != DiscoveryCommitPhase::Prepared
+            || attempt.plan_sha256 != plan_sha256
+            || attempt.plan.attempt_id != *attempt_id
+            || snapshot.session.state != DiscoveryState::Committing
+            || snapshot.session.commit_attempt_id.as_ref() != Some(attempt_id)
+            || snapshot.session.commit_plan_sha256.as_deref() != Some(plan_sha256)
+            || snapshot.active_operation_id.as_ref() != Some(operation_id)
+            || operation.session_id != *session_id
+            || operation.kind != DiscoveryOperationKind::AtomicCommit
+            || operation.side_effect_class != DiscoverySideEffectClass::Persistent
+            || !matches!(
+                operation.status,
+                DiscoveryOperationStatus::Prepared | DiscoveryOperationStatus::Started
+            )
+            || operation.expected_revision > snapshot.session.revision
+        {
+            return Err(corrupted(
+                "discovery credential recovery operation is detached from its active commit",
+            ));
+        }
+        let start = validate_native_no_effect_operation_start_receipt(
+            &connection,
+            &attempt,
+            operation.action_id.as_str(),
+            operation.expected_revision,
+            &operation.request_sha256,
+            &operation.created_at.to_rfc3339(),
+        )?;
+        if snapshot.session.cancellation_pending {
+            if snapshot.session.revision <= operation.expected_revision {
+                return Err(corrupted(
+                    "discovery credential recovery cancellation has no revision advance",
+                ));
+            }
+            validate_active_discovery_credential_cancellation_chain(
+                &connection,
+                &attempt,
+                &snapshot,
+                &start,
+            )?;
+        } else if operation.expected_revision != snapshot.session.revision
+            || start.transition.session != snapshot.session
+        {
+            return Err(corrupted(
+                "discovery credential recovery operation has unexplained revision drift",
+            ));
+        }
+        match (
+            operation.status,
+            load_discovery_native_credential_execution(&connection, operation_id)?,
+        ) {
+            (DiscoveryOperationStatus::Prepared | DiscoveryOperationStatus::Started, None) => {
+                Ok(())
+            }
+            (DiscoveryOperationStatus::Prepared, Some(execution))
+                if execution.store_started_at.is_none() =>
+            {
+                Ok(())
+            }
+            (DiscoveryOperationStatus::Started, Some(execution))
+                if execution.store_started_at == operation.started_at =>
+            {
+                Ok(())
+            }
+            _ => Err(corrupted(
+                "discovery credential recovery operation has no exact native execution state",
+            )),
+        }
+    }
+
+    /// Creates the draft row and applies `Begin` in one `SQLite` transaction.
+    ///
+    /// This prevents a process crash from leaving an invisible draft without
+    /// its first operation, action receipt, and outbox event.
+    pub fn begin_discovery_session(
+        &self,
+        initial_session: &ProviderDiscoverySession,
+        write: &DiscoveryTransitionWrite,
+    ) -> CoreResult<PersistDiscoveryTransition> {
+        self.begin_discovery_session_observed(initial_session, write, None, false)
+    }
+
+    /// Production admission boundary after a native credential read. If the
+    /// intended identifier already names an active credential-bound
+    /// connection, the exact durable read authority is compared in the same
+    /// immediate transaction which creates the discovery session and its
+    /// first operation/outbox event.
+    pub fn begin_discovery_session_with_credential_authority(
+        &self,
+        initial_session: &ProviderDiscoverySession,
+        write: &DiscoveryTransitionWrite,
+        credential_authority: Option<&ProviderCredentialAccessAuthority>,
+    ) -> CoreResult<PersistDiscoveryTransition> {
+        self.begin_discovery_session_observed(initial_session, write, credential_authority, true)
+    }
+
+    fn begin_discovery_session_observed(
+        &self,
+        initial_session: &ProviderDiscoverySession,
+        write: &DiscoveryTransitionWrite,
+        credential_authority: Option<&ProviderCredentialAccessAuthority>,
+        require_exact_credential_authority: bool,
+    ) -> CoreResult<PersistDiscoveryTransition> {
+        validate_atomic_discovery_begin(initial_session, write)?;
+        let mut connection = self.connection()?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(database_error)?;
+        let session_exists = transaction
+            .query_row(
+                "SELECT EXISTS(
+                     SELECT 1 FROM provider_discovery_sessions WHERE id = ?1
+                 )",
+                [initial_session.id.as_str()],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(database_error)?;
+        if session_exists {
+            let stored = load_session_snapshot(&transaction, initial_session.id.as_str())?
+                .ok_or_else(|| corrupted("existing discovery session disappeared"))?;
+            if stored.session.input != initial_session.input
+                || stored.created_at != write.occurred_at
+                || (stored.session.revision == 0 && stored.session != *initial_session)
+            {
+                return Err(CoreError::invalid(
+                    "existing discovery session does not match the atomic Begin request",
+                ));
+            }
+        } else {
+            ensure_provider_credential_operation_settled_for_discovery(
+                &transaction,
+                &initial_session.input.connection_id,
+            )?;
+            if require_exact_credential_authority {
+                let active_connection_exists = transaction
+                    .query_row(
+                        "SELECT EXISTS(
+                           SELECT 1
+                           FROM provider_connections
+                           WHERE id = ?1 AND archived_at IS NULL
+                         )",
+                        [initial_session.input.connection_id.as_str()],
+                        |row| row.get::<_, bool>(0),
+                    )
+                    .map_err(database_error)?;
+                if active_connection_exists {
+                    validate_provider_credential_access_authority_in_transaction(
+                        &transaction,
+                        &initial_session.input.connection_id,
+                        credential_authority,
+                    )?;
+                } else if credential_authority.is_some() {
+                    return Err(CoreError::invalid(
+                        "credential authority was supplied for a new provider discovery",
+                    ));
+                }
+            }
+            insert_session_in_transaction(&transaction, initial_session, write.occurred_at)?;
+        }
+        let result = persist_transition_in_transaction(&transaction, write)?;
+        transaction.commit().map_err(database_error)?;
+        Ok(result)
+    }
+
+    pub fn find_discovery_action_replay(
+        &self,
+        session_id: &DiscoverySessionId,
+        action_id: &DiscoveryActionId,
+        request_sha256: &str,
+        action_kind: &str,
+    ) -> CoreResult<Option<DiscoveryActionReplay>> {
+        validate_sha256("discovery action request hash", request_sha256)?;
+        validate_identifier("discovery action kind", action_kind, 128)?;
+        let row = self
+            .connection()?
+            .query_row(
+                "SELECT session_id, action_kind, request_sha256, expected_revision,
+                        resulting_revision, event_sequence, outcome, response_json
+                 FROM provider_discovery_action_receipts
+                 WHERE action_id = ?1",
+                [action_id.as_str()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, u64>(3)?,
+                        row.get::<_, u64>(4)?,
+                        row.get::<_, u64>(5)?,
+                        row.get::<_, String>(6)?,
+                        row.get::<_, String>(7)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(database_error)?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        if row.0 != session_id.as_str() || row.1 != action_kind || row.2 != request_sha256 {
+            return Err(CoreError::invalid(
+                "discovery action identifier was reused with a different request",
+            ));
+        }
+        let transition = serde_json::from_str::<DiscoveryTransition>(&row.7)
+            .map_err(|_| corrupted("stored discovery action response is invalid"))?;
+        let receipt = DiscoveryActionReceipt {
+            action_id: action_id.clone(),
+            session_id: session_id.clone(),
+            action_kind: row.1,
+            request_sha256: row.2,
+            expected_revision: row.3,
+            resulting_revision: row.4,
+            event_sequence: row.5,
+            outcome: serde_json::from_value(Value::String(row.6))
+                .map_err(|_| corrupted("stored discovery receipt outcome is invalid"))?,
+        };
+        if transition.receipt != receipt {
+            return Err(corrupted(
+                "stored discovery replay response does not match its receipt",
+            ));
+        }
+        Ok(Some(DiscoveryActionReplay {
+            receipt,
+            transition,
+        }))
+    }
+
+    /// Finalizes a credential-confirmed discovery commit in one `SQLite`
+    /// transaction. Until this transaction commits, no provider graph row is
+    /// visible to connection, route, preset, model-sync, or generation readers.
+    #[allow(clippy::too_many_lines)]
+    pub fn persist_credential_confirmed_discovery_commit(
+        &self,
+        write: &DiscoveryTransitionWrite,
+    ) -> CoreResult<PersistDiscoveryTransition> {
+        validate_transition_write(write)?;
+        let transition = &write.transition;
+        let graph = write.provider_graph.as_ref().ok_or_else(|| {
+            CoreError::invalid("credential-confirmed commit requires its exact provider graph")
+        })?;
+        if graph.plan.credential_ref.is_none()
+            || graph.connection.credential_ref != graph.plan.credential_ref
+            || transition.receipt.action_kind != "commit_succeeded"
+            || transition.session.state != DiscoveryState::Ready
+            || transition.session.commit_attempt_id.as_ref() != Some(&graph.plan.attempt_id)
+            || transition.session.commit_plan_sha256.as_deref() != Some(graph.plan_sha256.as_str())
+            || transition.session.committed_connection_id.as_ref()
+                != Some(&graph.plan.connection_id)
+            || transition.effect != DiscoveryEffect::None
+            || write.new_operation_id.is_some()
+            || write
+                .completed_operation
+                .as_ref()
+                .is_none_or(|completed| completed.outcome != DurableOperationOutcome::Succeeded)
+        {
+            return Err(CoreError::invalid(
+                "credential-confirmed commit does not match the exact ready transition",
+            ));
+        }
+        let authority_operation_id = &write
+            .completed_operation
+            .as_ref()
+            .ok_or_else(|| {
+                CoreError::invalid("credential-confirmed commit has no successful native operation")
+            })?
+            .id;
+
+        let mut transition_only = write.clone();
+        transition_only.provider_graph = None;
+        let mut connection = self.connection()?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(database_error)?;
+        let receipt_exists = transaction
+            .query_row(
+                "SELECT EXISTS(
+                     SELECT 1 FROM provider_discovery_action_receipts
+                     WHERE action_id = ?1
+                 )",
+                [transition.receipt.action_id.as_str()],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(database_error)?;
+        if !receipt_exists {
+            apply_provider_graph_in_transaction(
+                &transaction,
+                graph,
+                transition.previous_revision,
+                write.occurred_at,
+            )?;
+            let changed = transaction
+                .execute(
+                    "UPDATE provider_discovery_commit_attempts
+                     SET phase = 'credential_reference_applied',
+                         updated_at = ?3,
+                         completed_at = NULL
+                     WHERE id = ?1
+                       AND session_id = ?2
+                       AND plan_sha256 = ?4
+                       AND phase = 'database_applied'",
+                    params![
+                        graph.plan.attempt_id.as_str(),
+                        graph.plan.session_id.as_str(),
+                        write.occurred_at.to_rfc3339(),
+                        graph.plan_sha256.as_str(),
+                    ],
+                )
+                .map_err(database_error)?;
+            if changed != 1 {
+                return Err(CoreError::invalid(
+                    "credential-confirmed commit phase changed concurrently",
+                ));
+            }
+        }
+
+        let result = persist_transition_in_transaction(&transaction, &transition_only)?;
+        let stored = transaction
+            .query_row(
+                "SELECT session.state, session.revision,
+                        session.commit_attempt_id, session.commit_plan_sha256,
+                        session.committed_connection_id, session.active_operation_id,
+                        attempt.phase, attempt.completed_at
+                 FROM provider_discovery_sessions AS session
+                 JOIN provider_discovery_commit_attempts AS attempt
+                   ON attempt.id = session.commit_attempt_id
+                  AND attempt.session_id = session.id
+                 WHERE session.id = ?1",
+                [transition.session.id.as_str()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, u64>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                        row.get::<_, Option<String>>(5)?,
+                        row.get::<_, String>(6)?,
+                        row.get::<_, Option<String>>(7)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(database_error)?
+            .ok_or_else(|| corrupted("finalized discovery commit binding disappeared"))?;
+        if stored.0 != "ready"
+            || stored.1 != transition.session.revision
+            || stored.2.as_deref() != Some(graph.plan.attempt_id.as_str())
+            || stored.3.as_deref() != Some(graph.plan_sha256.as_str())
+            || stored.4.as_deref() != Some(graph.plan.connection_id.as_str())
+            || stored.5.is_some()
+            || stored.6 != "completed"
+            || stored.7.is_none()
+        {
+            return Err(corrupted(
+                "credential-confirmed provider graph was not finalized atomically",
+            ));
+        }
+        let authority_operation = load_operation_by_id(&transaction, authority_operation_id)?;
+        if authority_operation.session_id != transition.session.id
+            || authority_operation.kind != DiscoveryOperationKind::AtomicCommit
+            || authority_operation.side_effect_class != DiscoverySideEffectClass::Persistent
+            || authority_operation.status != DiscoveryOperationStatus::Succeeded
+            || authority_operation.finished_at != Some(write.occurred_at)
+            || authority_operation.updated_at != write.occurred_at
+        {
+            return Err(corrupted(
+                "credential-confirmed provider ownership is detached from its successful native operation",
+            ));
+        }
+        let stored_graph = load_discovered_provider_graph_rows(
+            &transaction,
+            &graph.plan.template_id,
+            graph.plan.template_version,
+            &graph.plan.connection_id,
+        )?
+        .ok_or_else(|| corrupted("finalized discovery provider graph is missing"))?;
+        if stored_provider_graph_ownership_hash(&stored_graph)? != graph.plan.graph_sha256
+            || graph_ownership_audit_hash(&transaction, &graph.plan.session_id)?
+                != graph.plan.graph_sha256
+        {
+            return Err(corrupted(
+                "finalized discovery provider graph differs from its approved ownership",
+            ));
+        }
+        let authority_execution =
+            load_discovery_native_credential_execution(&transaction, authority_operation_id)?
+                .ok_or_else(|| {
+                    corrupted(
+                        "credential-confirmed commit has no physical native execution authority",
+                    )
+                })?;
+        let connection_binding_sha256 = if receipt_exists {
+            authority_execution.connection_binding_sha256.clone()
+        } else {
+            crate::provider_credential_repository::provider_credential_connection_binding_sha256(
+                &transaction,
+                &graph.plan.connection_id,
+            )?
+        };
+        if authority_execution.connection_id != graph.plan.connection_id
+            || authority_execution.commit_attempt_id != graph.plan.attempt_id
+            || authority_execution.commit_plan_sha256 != graph.plan_sha256
+            || authority_execution.connection_binding_sha256 != connection_binding_sha256
+            || authority_execution.store_started_at != authority_operation.started_at
+        {
+            return Err(corrupted(
+                "credential-confirmed physical authority is detached from its successful operation",
+            ));
+        }
+        if receipt_exists {
+            let replayed_projection = transaction
+                .query_row(
+                    "SELECT event.authority_sequence, event.ownership_state,
+                            event.connection_binding_sha256, event.authority_id,
+                            event.source_id, event.created_at,
+                            ownership.ownership_state,
+                            ownership.connection_binding_sha256,
+                            ownership.authority_id, ownership.authority_sequence,
+                            ownership.updated_at
+                     FROM provider_credential_ownership_events AS event
+                     JOIN provider_credential_ownership AS ownership
+                       ON ownership.connection_id = event.connection_id
+                      AND ownership.credential_ref = event.connection_id
+                     WHERE event.connection_id = ?1
+                       AND event.source_kind = 'discovery_commit'
+                       AND event.source_id = ?2",
+                    params![
+                        graph.plan.connection_id.as_str(),
+                        authority_operation_id.as_str(),
+                    ],
+                    |row| {
+                        Ok((
+                            row.get::<_, u64>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, Option<String>>(2)?,
+                            row.get::<_, String>(3)?,
+                            row.get::<_, String>(4)?,
+                            row.get::<_, String>(5)?,
+                            row.get::<_, String>(6)?,
+                            row.get::<_, Option<String>>(7)?,
+                            row.get::<_, String>(8)?,
+                            row.get::<_, u64>(9)?,
+                            row.get::<_, String>(10)?,
+                        ))
+                    },
+                )
+                .optional()
+                .map_err(database_error)?
+                .ok_or_else(|| {
+                    corrupted("replayed credential-confirmed ownership event is missing")
+                })?;
+            let original_event_is_exact = replayed_projection.1 == "discovery_owned"
+                && replayed_projection.2.as_deref() == Some(&connection_binding_sha256)
+                && replayed_projection.3 == authority_execution.physical_authority_id
+                && replayed_projection.4 == authority_operation_id.as_str()
+                && parse_timestamp(
+                    &replayed_projection.5,
+                    "replayed discovery ownership event created_at",
+                )? == write.occurred_at;
+            let current_projection_is_exact = replayed_projection.6 == "discovery_owned"
+                && replayed_projection.7.as_deref() == Some(&connection_binding_sha256)
+                && replayed_projection.8 == authority_execution.physical_authority_id
+                && replayed_projection.9 == replayed_projection.0
+                && parse_timestamp(
+                    &replayed_projection.10,
+                    "replayed discovery ownership projection updated_at",
+                )? == write.occurred_at;
+            if !original_event_is_exact
+                || replayed_projection.9 < replayed_projection.0
+                || (replayed_projection.9 == replayed_projection.0 && !current_projection_is_exact)
+            {
+                return Err(corrupted(
+                    "replayed credential-confirmed ownership projection differs from its physical authority",
+                ));
+            }
+            if replayed_projection.9 == replayed_projection.0 {
+                let active_binding = crate::provider_credential_repository::
+                    provider_credential_connection_binding_sha256(
+                        &transaction,
+                        &graph.plan.connection_id,
+                    )?;
+                if active_binding != connection_binding_sha256 {
+                    return Err(corrupted(
+                        "replayed credential-confirmed ownership binding changed without a journal successor",
+                    ));
+                }
+            } else {
+                crate::provider_credential_repository::validate_superseded_provider_credential_ownership_event_history(
+                    &transaction,
+                    &graph.plan.connection_id,
+                    replayed_projection.0,
+                    &authority_execution.physical_authority_id,
+                    &connection_binding_sha256,
+                )?;
+            }
+            transaction.commit().map_err(database_error)?;
+            return Ok(result);
+        }
+        let authority_sequence = insert_discovery_credential_ownership_event(
+            &transaction,
+            &graph.plan.connection_id,
+            &connection_binding_sha256,
+            &authority_execution.physical_authority_id,
+            authority_operation_id,
+            write.occurred_at,
+        )?;
+        let ownership_changed = transaction
+            .execute(
+                "UPDATE provider_credential_ownership
+                 SET ownership_state = 'discovery_owned',
+                     connection_binding_sha256 = ?2, authority_id = ?3,
+                     authority_sequence = ?4, updated_at = ?5
+                 WHERE connection_id = ?1 AND credential_ref = ?1",
+                params![
+                    graph.plan.connection_id.as_str(),
+                    connection_binding_sha256,
+                    authority_execution.physical_authority_id,
+                    authority_sequence,
+                    write.occurred_at.to_rfc3339(),
+                ],
+            )
+            .map_err(database_error)?;
+        if ownership_changed != 1 {
+            return Err(corrupted(
+                "credential-confirmed discovery lost its ownership projection",
+            ));
+        }
+        transaction.commit().map_err(database_error)?;
+        Ok(result)
+    }
+
+    pub fn get_discovery_commit_attempt(
+        &self,
+        attempt_id: &DiscoveryCommitAttemptId,
+    ) -> CoreResult<DiscoveryCommitAttemptRecord> {
+        let connection = self.connection()?;
+        load_commit_attempt(&connection, attempt_id)
+    }
+
+    /// Returns the operation-scoped physical credential authority that led to
+    /// the current compensation ledger. Selection follows the immutable
+    /// receipt/recovery chain into `compensating`; it never guesses from the
+    /// latest operation or from the reusable commit-attempt identifier.
+    pub fn get_discovery_credential_compensation_operation_id(
+        &self,
+        session_id: &DiscoverySessionId,
+        attempt_id: &DiscoveryCommitAttemptId,
+        plan_sha256: &str,
+    ) -> CoreResult<DiscoveryOperationId> {
+        validate_sha256("discovery compensation plan hash", plan_sha256)?;
+        let connection = self.connection()?;
+        load_discovery_credential_compensation_operation_id(
+            &connection,
+            session_id,
+            attempt_id,
+            plan_sha256,
+        )
+    }
+
+    /// Classifies unfinished work after a crash and records interruption
+    /// transitions. This method never executes or replays an external effect.
+    pub fn recover_unfinished_discovery_operations(
+        &self,
+        recovered_at: DateTime<Utc>,
+    ) -> CoreResult<Vec<DiscoveryRecoveryResult>> {
+        self.recover_unfinished_discovery_operations_except(recovered_at, &BTreeSet::new())
+    }
+
+    /// Recovers every unfinished operation except an exact Core-classified set
+    /// of durably resumable operation identifiers.
+    ///
+    /// Storage never infers resumability from opaque draft JSON. The caller
+    /// must derive this set from a validated product snapshot, and every
+    /// preserved identifier is still checked against the session's active
+    /// operation before it is left untouched.
+    pub fn recover_unfinished_discovery_operations_except(
+        &self,
+        recovered_at: DateTime<Utc>,
+        resumable_operation_ids: &BTreeSet<DiscoveryOperationId>,
+    ) -> CoreResult<Vec<DiscoveryRecoveryResult>> {
+        let unfinished = {
+            let connection = self.connection()?;
+            discovery::list_unfinished_discovery_operations(&connection).map_err(discovery_error)?
+        };
+        let mut recovered = Vec::with_capacity(unfinished.len());
+        for unfinished_operation in unfinished {
+            let session_id = DiscoverySessionId::from(unfinished_operation.session_id);
+            let operation_id =
+                DiscoveryOperationId::parse(unfinished_operation.id).map_err(contract_error)?;
+            let snapshot = self.get_discovery_session(&session_id)?;
+            if snapshot.active_operation_id.as_ref() != Some(&operation_id) {
+                return Err(corrupted(
+                    "unfinished discovery operation is not the session's active operation",
+                ));
+            }
+            let operation = self
+                .get_current_discovery_operation(&session_id)?
+                .ok_or_else(|| corrupted("unfinished discovery operation cannot be hydrated"))?;
+            if resumable_operation_ids.contains(&operation_id) {
+                if operation.kind != DiscoveryOperationKind::BuildAssistantManifestDraft
+                    || unfinished_operation.operation_kind != "build_assistant_manifest_draft"
+                {
+                    return Err(corrupted(
+                        "only setup assistant operations may bypass startup recovery",
+                    ));
+                }
+                continue;
+            }
+            let compensation_already_durable = operation.kind
+                == DiscoveryOperationKind::Compensation
+                && self.compensation_completion_is_durable(&snapshot)?;
+            let interruption = match unfinished_operation.disposition {
+                DiscoveryRecoveryDisposition::MarkInterrupted => {
+                    DiscoveryInterruptionOutcome::ConfirmedNoExternalEffect
+                }
+                DiscoveryRecoveryDisposition::MarkUnknownOutcome => {
+                    DiscoveryInterruptionOutcome::ExternalOutcomeUnknown
+                }
+            };
+            let action = if compensation_already_durable {
+                ProviderDiscoveryAction::CompensationSucceeded
+            } else {
+                ProviderDiscoveryAction::Interrupt {
+                    operation: operation.kind,
+                    outcome: interruption,
+                }
+            };
+            let request_json =
+                canonical_json_result(serde_json::to_value(&action), "discovery recovery action")?;
+            let envelope = DiscoveryActionEnvelope {
+                id: DiscoveryActionId::new(),
+                expected_revision: snapshot.session.revision,
+                request_sha256: sha256_hex(request_json.as_bytes()),
+                action,
+            };
+            let transition = snapshot.session.apply(&envelope).map_err(|error| {
+                CoreError::invalid(format!("recovery transition failed: {error}"))
+            })?;
+            let completed_outcome = if compensation_already_durable {
+                DurableOperationOutcome::Succeeded
+            } else {
+                match unfinished_operation.disposition {
+                    DiscoveryRecoveryDisposition::MarkInterrupted => {
+                        DurableOperationOutcome::Interrupted
+                    }
+                    DiscoveryRecoveryDisposition::MarkUnknownOutcome => {
+                        DurableOperationOutcome::OutcomeUnknown
+                    }
+                }
+            };
+            let write = DiscoveryTransitionWrite {
+                transition,
+                draft: DiscoveryJsonUpdate::Preserve,
+                review: DiscoveryJsonUpdate::Preserve,
+                new_evidence: Vec::new(),
+                new_candidates: Vec::new(),
+                approval: None,
+                new_operation_id: None,
+                completed_operation: Some(DiscoveryCompletedOperationWrite {
+                    id: operation_id.clone(),
+                    outcome: completed_outcome,
+                }),
+                prepared_commit: None,
+                provider_graph: None,
+                occurred_at: recovered_at,
+            };
+            self.persist_discovery_transition(&write)?;
+            recovered.push(DiscoveryRecoveryResult {
+                operation_id,
+                session_id,
+                state: write.transition.session.state,
+                event: write.transition.event,
+            });
+        }
+        Ok(recovered)
+    }
+
+    fn compensation_completion_is_durable(
+        &self,
+        snapshot: &DiscoverySessionSnapshot,
+    ) -> CoreResult<bool> {
+        let attempt_id = snapshot
+            .session
+            .commit_attempt_id
+            .as_ref()
+            .ok_or_else(|| corrupted("compensation recovery has no commit attempt"))?;
+        let phase = self.get_discovery_commit_attempt(attempt_id)?.phase;
+        if phase == DiscoveryCommitPhase::Compensated {
+            return Ok(true);
+        }
+        if phase != DiscoveryCommitPhase::Compensating {
+            return Ok(false);
+        }
+        let steps = self.list_discovery_compensation_steps(attempt_id)?;
+        Ok(!steps.is_empty()
+            && steps
+                .iter()
+                .all(|step| step.status == DiscoveryCompensationStatus::Completed))
+    }
+}
+
+impl Storage {
+    /// Captures the exact route-and-preset selection for an immutable commit
+    /// plan. Both identifiers are read under the same storage lock.
+    pub fn current_discovery_previous_selection(&self) -> CoreResult<DiscoveryPreviousSelection> {
+        let connection = self.connection()?;
+        load_discovery_previous_selection(&connection)
+    }
+
+    pub fn list_discovery_compensation_steps(
+        &self,
+        attempt_id: &DiscoveryCommitAttemptId,
+    ) -> CoreResult<Vec<DiscoveryCompensationRecord>> {
+        let connection = self.connection()?;
+        let attempt = load_commit_attempt(&connection, attempt_id)?;
+        let mut statement = connection
+            .prepare(
+                "SELECT id, commit_attempt_id, ordinal, action_id, step_kind, step_json,
+                        status, attempt_count, last_failure_json, created_at,
+                        updated_at, completed_at
+                 FROM provider_discovery_compensation_steps
+                 WHERE commit_attempt_id = ?1
+                 ORDER BY ordinal DESC, id",
+            )
+            .map_err(database_error)?;
+        statement
+            .query_map([attempt_id.as_str()], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, u32>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, u32>(7)?,
+                    row.get::<_, Option<String>>(8)?,
+                    row.get::<_, String>(9)?,
+                    row.get::<_, String>(10)?,
+                    row.get::<_, Option<String>>(11)?,
+                ))
+            })
+            .map_err(database_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(database_error)?
+            .into_iter()
+            .map(|row| decode_compensation_row(row, &attempt.plan))
+            .collect()
+    }
+
+    /// Advances a compensation step without splitting failure state.
+    ///
+    /// A failed or unknown step must use the matching atomic transition API so
+    /// the step, commit attempt, operation, session, receipt, audit, and outbox
+    /// event commit together.
+    #[allow(clippy::too_many_lines)]
+    pub fn update_discovery_compensation_status(
+        &self,
+        step_id: &str,
+        expected: DiscoveryCompensationStatus,
+        next: DiscoveryCompensationStatus,
+        failure: Option<&lorepia_domain::discovery::DiscoveryFailure>,
+        updated_at: DateTime<Utc>,
+    ) -> CoreResult<()> {
+        validate_identifier("discovery compensation step id", step_id, 128)?;
+        if matches!(
+            next,
+            DiscoveryCompensationStatus::Failed | DiscoveryCompensationStatus::OutcomeUnknown
+        ) || failure.is_some()
+        {
+            return Err(CoreError::invalid(
+                "compensation failures and unknown outcomes require their atomic step-and-session APIs",
+            ));
+        }
+        if !compensation_status_transition_allowed(expected, next) {
+            return Err(CoreError::invalid(
+                "invalid discovery compensation status transition",
+            ));
+        }
+        let mut connection = self.connection()?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(database_error)?;
+        let context = transaction
+            .query_row(
+                "SELECT attempt.session_id, session.revision, attempt.phase,
+                        session.state, step.step_kind, step.ordinal, attempt.id,
+                        step.step_json
+                 FROM provider_discovery_compensation_steps AS step
+                 JOIN provider_discovery_commit_attempts AS attempt
+                   ON attempt.id = step.commit_attempt_id
+                 JOIN provider_discovery_sessions AS session
+                   ON session.id = attempt.session_id
+                 WHERE step.id = ?1 AND step.status = ?2",
+                params![step_id, expected.as_str()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, u64>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, u32>(5)?,
+                        row.get::<_, String>(6)?,
+                        row.get::<_, String>(7)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(database_error)?
+            .ok_or_else(|| {
+                CoreError::invalid("compensation step was missing or changed concurrently")
+            })?;
+        if context.2 != "compensating" || context.3 != "compensating" {
+            return Err(CoreError::invalid(
+                "compensation step work is not authorized by the active commit and session",
+            ));
+        }
+        require_started_session_operation(
+            &transaction,
+            &DiscoverySessionId::from(context.0.clone()),
+            "compensation",
+        )?;
+        let attempt_id =
+            DiscoveryCommitAttemptId::parse(context.6.clone()).map_err(contract_error)?;
+        let attempt = load_commit_attempt(&transaction, &attempt_id)?;
+        let step = serde_json::from_str::<DiscoveryCompensationStep>(&context.7)
+            .map_err(|_| corrupted("stored compensation step is invalid"))?;
+        step.validate_against(&attempt.plan)
+            .map_err(|_| corrupted("stored compensation target differs from its commit plan"))?;
+        let stored_kind = enum_wire_result(
+            serde_json::to_value(step.kind),
+            "stored discovery compensation kind",
+        )?;
+        if stored_kind != context.4 || step.ordinal != context.5 {
+            return Err(corrupted(
+                "stored compensation columns differ from their typed step",
+            ));
+        }
+        if next == DiscoveryCompensationStatus::Completed
+            && step.kind != DiscoveryCompensationKind::RemoveCredentialSlot
+        {
+            return Err(CoreError::invalid(
+                "only native credential removal may use generic compensation completion",
+            ));
+        }
+        if next == DiscoveryCompensationStatus::InProgress {
+            let higher_step_incomplete = transaction
+                .query_row(
+                    "SELECT EXISTS(
+                         SELECT 1
+                         FROM provider_discovery_compensation_steps
+                         WHERE commit_attempt_id = ?1
+                           AND ordinal > ?2
+                           AND status <> 'completed'
+                     )",
+                    params![attempt.id.as_str(), context.5],
+                    |row| row.get::<_, bool>(0),
+                )
+                .map_err(database_error)?;
+            if higher_step_incomplete {
+                return Err(CoreError::invalid(
+                    "compensation steps must start in reverse ordinal order",
+                ));
+            }
+        }
+        let completed_at =
+            (next == DiscoveryCompensationStatus::Completed).then(|| updated_at.to_rfc3339());
+        let changed = transaction
+            .execute(
+                "UPDATE provider_discovery_compensation_steps
+                 SET status = ?2,
+                     attempt_count = attempt_count + CASE WHEN ?2 = 'in_progress' THEN 1 ELSE 0 END,
+                     last_failure_json = ?3,
+                     updated_at = ?4,
+                     completed_at = ?5
+                 WHERE id = ?1 AND status = ?6",
+                params![
+                    step_id,
+                    next.as_str(),
+                    Option::<String>::None,
+                    updated_at.to_rfc3339(),
+                    completed_at,
+                    expected.as_str(),
+                ],
+            )
+            .map_err(database_error)?;
+        if changed != 1 {
+            return Err(CoreError::invalid("compensation step changed concurrently"));
+        }
+        if next == DiscoveryCompensationStatus::InProgress {
+            append_audit(
+                &transaction,
+                &context.0,
+                context.1,
+                "compensation_started",
+                None,
+                Some(step_id),
+                "discovery.audit.compensation_started",
+                updated_at,
+            )?;
+        }
+        transaction.commit().map_err(database_error)
+    }
+
+    /// Atomically records a compensation-step failure and its domain
+    /// transition. This prevents a crash from leaving a failed step without
+    /// the session failure that makes `ResumeCompensation` reachable.
+    #[allow(clippy::too_many_lines)]
+    pub fn fail_discovery_compensation_and_persist_transition(
+        &self,
+        step_id: &str,
+        write: &DiscoveryTransitionWrite,
+    ) -> CoreResult<PersistDiscoveryTransition> {
+        validate_identifier("discovery compensation step id", step_id, 128)?;
+        validate_transition_write(write)?;
+        let transition = &write.transition;
+        let failure =
+            transition.session.failure.as_ref().ok_or_else(|| {
+                CoreError::invalid("compensation failure transition has no failure")
+            })?;
+        failure.validate().map_err(contract_error)?;
+        if transition.receipt.action_kind != "compensation_failed"
+            || transition.session.state != DiscoveryState::Compensating
+            || transition.event.failure.as_ref() != Some(failure)
+            || write
+                .completed_operation
+                .as_ref()
+                .is_none_or(|completed| completed.outcome != DurableOperationOutcome::Failed)
+        {
+            return Err(CoreError::invalid(
+                "atomic compensation failure requires the exact failed operation transition",
+            ));
+        }
+        let failure_json =
+            encode_json_result(serde_json::to_value(failure), "compensation failure")?;
+        let mut connection = self.connection()?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(database_error)?;
+        let receipt_exists = transaction
+            .query_row(
+                "SELECT EXISTS(
+                     SELECT 1 FROM provider_discovery_action_receipts
+                     WHERE action_id = ?1
+                 )",
+                [transition.receipt.action_id.as_str()],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(database_error)?;
+        if !receipt_exists {
+            let context = transaction
+                .query_row(
+                    "SELECT attempt.session_id, session.revision, attempt.phase,
+                            session.state, step.step_kind, step.ordinal, attempt.id,
+                            step.step_json, session.commit_attempt_id,
+                            session.commit_plan_sha256
+                     FROM provider_discovery_compensation_steps AS step
+                     JOIN provider_discovery_commit_attempts AS attempt
+                       ON attempt.id = step.commit_attempt_id
+                     JOIN provider_discovery_sessions AS session
+                       ON session.id = attempt.session_id
+                     WHERE step.id = ?1 AND step.status = 'in_progress'",
+                    [step_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, u64>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, String>(3)?,
+                            row.get::<_, String>(4)?,
+                            row.get::<_, u32>(5)?,
+                            row.get::<_, String>(6)?,
+                            row.get::<_, String>(7)?,
+                            row.get::<_, Option<String>>(8)?,
+                            row.get::<_, Option<String>>(9)?,
+                        ))
+                    },
+                )
+                .optional()
+                .map_err(database_error)?
+                .ok_or_else(|| {
+                    CoreError::invalid(
+                        "compensation step was missing, not in progress, or changed concurrently",
+                    )
+                })?;
+            if context.0 != transition.session.id.as_str()
+                || context.2 != "compensating"
+                || context.3 != "compensating"
+                || context.8.as_deref() != Some(context.6.as_str())
+                || context.9.as_deref() != transition.session.commit_plan_sha256.as_deref()
+            {
+                return Err(CoreError::invalid(
+                    "compensation failure does not match the active session and commit",
+                ));
+            }
+            require_started_session_operation(
+                &transaction,
+                &transition.session.id,
+                "compensation",
+            )?;
+            let attempt_id =
+                DiscoveryCommitAttemptId::parse(context.6.clone()).map_err(contract_error)?;
+            let attempt = load_commit_attempt(&transaction, &attempt_id)?;
+            if attempt.session_id != transition.session.id
+                || attempt.plan_sha256 != context.9.as_deref().unwrap_or_default()
+            {
+                return Err(corrupted(
+                    "compensation failure commit binding is inconsistent",
+                ));
+            }
+            let step = serde_json::from_str::<DiscoveryCompensationStep>(&context.7)
+                .map_err(|_| corrupted("stored compensation step is invalid"))?;
+            step.validate_against(&attempt.plan).map_err(|_| {
+                corrupted("stored compensation target differs from its commit plan")
+            })?;
+            let stored_kind = enum_wire_result(
+                serde_json::to_value(step.kind),
+                "stored discovery compensation kind",
+            )?;
+            if stored_kind != context.4 || step.ordinal != context.5 {
+                return Err(corrupted(
+                    "stored compensation columns differ from their typed step",
+                ));
+            }
+            let changed = transaction
+                .execute(
+                    "UPDATE provider_discovery_compensation_steps
+                     SET status = 'failed',
+                         last_failure_json = ?2,
+                         updated_at = ?3,
+                         completed_at = NULL
+                     WHERE id = ?1 AND status = 'in_progress'",
+                    params![step_id, failure_json, write.occurred_at.to_rfc3339()],
+                )
+                .map_err(database_error)?;
+            if changed != 1 {
+                return Err(CoreError::invalid("compensation step changed concurrently"));
+            }
+        }
+
+        let result = persist_transition_in_transaction(&transaction, write)?;
+        let stored = transaction
+            .query_row(
+                "SELECT step.status, step.last_failure_json, attempt.session_id,
+                        session.commit_attempt_id, session.commit_plan_sha256,
+                        step.step_kind, step.ordinal, step.step_json, attempt.id
+                 FROM provider_discovery_compensation_steps AS step
+                 JOIN provider_discovery_commit_attempts AS attempt
+                   ON attempt.id = step.commit_attempt_id
+                 JOIN provider_discovery_sessions AS session
+                   ON session.id = attempt.session_id
+                 WHERE step.id = ?1",
+                [step_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, u32>(6)?,
+                        row.get::<_, String>(7)?,
+                        row.get::<_, String>(8)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(database_error)?
+            .ok_or_else(|| corrupted("atomically failed compensation step disappeared"))?;
+        if stored.0 != "failed"
+            || stored.1.as_deref() != Some(failure_json.as_str())
+            || stored.2 != transition.session.id.as_str()
+            || stored.3.as_deref() != Some(stored.8.as_str())
+            || stored.4.as_deref() != transition.session.commit_plan_sha256.as_deref()
+        {
+            return Err(corrupted(
+                "atomically failed compensation step does not match its transition",
+            ));
+        }
+        let attempt_id = DiscoveryCommitAttemptId::parse(stored.8).map_err(contract_error)?;
+        let attempt = load_commit_attempt(&transaction, &attempt_id)?;
+        let step = serde_json::from_str::<DiscoveryCompensationStep>(&stored.7)
+            .map_err(|_| corrupted("stored compensation step is invalid"))?;
+        step.validate_against(&attempt.plan)
+            .map_err(|_| corrupted("stored compensation target differs from its commit plan"))?;
+        let stored_kind = enum_wire_result(
+            serde_json::to_value(step.kind),
+            "stored discovery compensation kind",
+        )?;
+        if stored_kind != stored.5 || step.ordinal != stored.6 {
+            return Err(corrupted(
+                "stored compensation columns differ from their typed step",
+            ));
+        }
+        transaction.commit().map_err(database_error)?;
+        Ok(result)
+    }
+
+    /// Atomically records an unknown compensation outcome across the step,
+    /// commit attempt, operation, session, receipt, and event outbox.
+    #[allow(clippy::too_many_lines)]
+    pub fn mark_discovery_compensation_unknown_and_persist_transition(
+        &self,
+        step_id: &str,
+        write: &DiscoveryTransitionWrite,
+    ) -> CoreResult<PersistDiscoveryTransition> {
+        validate_identifier("discovery compensation step id", step_id, 128)?;
+        validate_transition_write(write)?;
+        let transition = &write.transition;
+        if transition.receipt.action_kind != "external_outcome_became_unknown"
+            || transition.session.state != DiscoveryState::UnknownOutcome
+            || transition.session.unknown_operation != Some(DiscoveryOperationKind::Compensation)
+            || transition.session.failure.is_some()
+            || write.completed_operation.as_ref().is_none_or(|completed| {
+                completed.outcome != DurableOperationOutcome::OutcomeUnknown
+            })
+        {
+            return Err(CoreError::invalid(
+                "atomic compensation unknown outcome requires the exact persistent transition",
+            ));
+        }
+
+        let mut connection = self.connection()?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(database_error)?;
+        let receipt_exists = transaction
+            .query_row(
+                "SELECT EXISTS(
+                     SELECT 1 FROM provider_discovery_action_receipts
+                     WHERE action_id = ?1
+                 )",
+                [transition.receipt.action_id.as_str()],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(database_error)?;
+        if !receipt_exists {
+            let context = transaction
+                .query_row(
+                    "SELECT attempt.session_id, attempt.phase, session.state,
+                            step.step_kind, step.ordinal, attempt.id, step.step_json,
+                            session.commit_attempt_id, session.commit_plan_sha256
+                     FROM provider_discovery_compensation_steps AS step
+                     JOIN provider_discovery_commit_attempts AS attempt
+                       ON attempt.id = step.commit_attempt_id
+                     JOIN provider_discovery_sessions AS session
+                       ON session.id = attempt.session_id
+                     WHERE step.id = ?1 AND step.status = 'in_progress'",
+                    [step_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, String>(3)?,
+                            row.get::<_, u32>(4)?,
+                            row.get::<_, String>(5)?,
+                            row.get::<_, String>(6)?,
+                            row.get::<_, Option<String>>(7)?,
+                            row.get::<_, Option<String>>(8)?,
+                        ))
+                    },
+                )
+                .optional()
+                .map_err(database_error)?
+                .ok_or_else(|| {
+                    CoreError::invalid(
+                        "compensation step was missing, not in progress, or changed concurrently",
+                    )
+                })?;
+            if context.0 != transition.session.id.as_str()
+                || context.1 != "compensating"
+                || context.2 != "compensating"
+                || context.7.as_deref() != Some(context.5.as_str())
+                || context.8.as_deref() != transition.session.commit_plan_sha256.as_deref()
+            {
+                return Err(CoreError::invalid(
+                    "unknown compensation outcome does not match the active session and commit",
+                ));
+            }
+            require_started_session_operation(
+                &transaction,
+                &transition.session.id,
+                "compensation",
+            )?;
+            let attempt_id =
+                DiscoveryCommitAttemptId::parse(context.5.clone()).map_err(contract_error)?;
+            let attempt = load_commit_attempt(&transaction, &attempt_id)?;
+            if attempt.session_id != transition.session.id
+                || attempt.plan_sha256 != context.8.as_deref().unwrap_or_default()
+            {
+                return Err(corrupted(
+                    "unknown compensation outcome commit binding is inconsistent",
+                ));
+            }
+            let step = serde_json::from_str::<DiscoveryCompensationStep>(&context.6)
+                .map_err(|_| corrupted("stored compensation step is invalid"))?;
+            step.validate_against(&attempt.plan).map_err(|_| {
+                corrupted("stored compensation target differs from its commit plan")
+            })?;
+            let stored_kind = enum_wire_result(
+                serde_json::to_value(step.kind),
+                "stored discovery compensation kind",
+            )?;
+            if stored_kind != context.3 || step.ordinal != context.4 {
+                return Err(corrupted(
+                    "stored compensation columns differ from their typed step",
+                ));
+            }
+        }
+
+        let result = persist_transition_in_transaction(&transaction, write)?;
+        let stored = transaction
+            .query_row(
+                "SELECT step.status, attempt.phase, session.state,
+                        session.unknown_operation, session.active_operation_id,
+                        attempt.session_id, session.commit_attempt_id,
+                        session.commit_plan_sha256, attempt.plan_sha256
+                 FROM provider_discovery_compensation_steps AS step
+                 JOIN provider_discovery_commit_attempts AS attempt
+                   ON attempt.id = step.commit_attempt_id
+                 JOIN provider_discovery_sessions AS session
+                   ON session.id = attempt.session_id
+                 WHERE step.id = ?1",
+                [step_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, Option<String>>(6)?,
+                        row.get::<_, Option<String>>(7)?,
+                        row.get::<_, String>(8)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(database_error)?
+            .ok_or_else(|| corrupted("unknown compensation step disappeared"))?;
+        if stored.0 != "outcome_unknown"
+            || stored.1 != "outcome_unknown"
+            || stored.2 != "unknown_outcome"
+            || stored.3.as_deref() != Some("compensation")
+            || stored.4.is_some()
+            || stored.5 != transition.session.id.as_str()
+            || stored.6.as_deref()
+                != transition
+                    .session
+                    .commit_attempt_id
+                    .as_ref()
+                    .map(DiscoveryCommitAttemptId::as_str)
+            || stored.7.as_deref() != Some(stored.8.as_str())
+        {
+            return Err(corrupted(
+                "unknown compensation outcome was not recorded atomically",
+            ));
+        }
+        transaction.commit().map_err(database_error)?;
+        Ok(result)
+    }
+
+    #[allow(clippy::too_many_lines)]
+    pub fn restore_discovery_previous_selection(
+        &self,
+        attempt_id: &DiscoveryCommitAttemptId,
+        completed_at: DateTime<Utc>,
+    ) -> CoreResult<()> {
+        let mut connection = self.connection()?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(database_error)?;
+        let attempt = load_commit_attempt(&transaction, attempt_id)?;
+        if attempt.phase != DiscoveryCommitPhase::Compensating {
+            return Err(CoreError::invalid(
+                "selection restoration requires the compensating phase",
+            ));
+        }
+        let state = transaction
+            .query_row(
+                "SELECT state
+                 FROM provider_discovery_sessions
+                 WHERE id = ?1 AND commit_attempt_id = ?2",
+                params![attempt.session_id.as_str(), attempt.id.as_str()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(database_error)?
+            .ok_or_else(|| corrupted("compensating commit is detached from its session"))?;
+        if state != "compensating" {
+            return Err(CoreError::invalid(
+                "selection restoration requires a compensating discovery session",
+            ));
+        }
+        require_started_session_operation(&transaction, &attempt.session_id, "compensation")?;
+        let rows = {
+            let mut statement = transaction
+                .prepare(
+                    "SELECT step.id, step.ordinal, step.step_json, step.status,
+                            authority.selection_revision_after_graph_removal
+                     FROM provider_discovery_compensation_steps AS step
+                     LEFT JOIN provider_discovery_selection_restore_authorities AS authority
+                       ON authority.commit_attempt_id = step.commit_attempt_id
+                      AND authority.restore_step_id = step.id
+                     WHERE step.commit_attempt_id = ?1
+                       AND step.step_kind = 'restore_previous_selection'
+                     ORDER BY step.ordinal, step.id",
+                )
+                .map_err(database_error)?;
+            statement
+                .query_map([attempt.id.as_str()], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, u32>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, Option<i64>>(4)?,
+                    ))
+                })
+                .map_err(database_error)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(database_error)?
+        };
+        let [(step_id, ordinal, step_json, status, expected_selection_revision)] = rows.as_slice()
+        else {
+            return Err(corrupted(
+                "compensation requires exactly one restore-previous-selection step",
+            ));
+        };
+        if status == "completed" {
+            transaction.commit().map_err(database_error)?;
+            return Ok(());
+        }
+        if status != "in_progress" {
+            return Err(CoreError::invalid(
+                "selection restoration step must be in progress",
+            ));
+        }
+        let step = serde_json::from_str::<DiscoveryCompensationStep>(step_json)
+            .map_err(|_| corrupted("stored selection restoration step is invalid"))?;
+        step.validate_against(&attempt.plan)
+            .map_err(|_| corrupted("selection restoration target differs from its commit plan"))?;
+        let DiscoveryCompensationTarget::RestorePreviousSelection { previous_selection } =
+            &step.target
+        else {
+            return Err(corrupted(
+                "selection restoration step has the wrong typed target",
+            ));
+        };
+        let higher_step_incomplete = transaction
+            .query_row(
+                "SELECT EXISTS(
+                     SELECT 1
+                     FROM provider_discovery_compensation_steps
+                     WHERE commit_attempt_id = ?1
+                       AND ordinal > ?2
+                       AND status <> 'completed'
+                 )",
+                params![attempt.id.as_str(), ordinal],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(database_error)?;
+        if higher_step_incomplete {
+            return Err(CoreError::invalid(
+                "selection restoration must follow reverse recipe order",
+            ));
+        }
+        let expected_selection_revision = expected_selection_revision
+            .map(|revision| {
+                u64::try_from(revision)
+                    .map_err(|_| corrupted("stored provider selection revision is negative"))
+            })
+            .transpose()?;
+        restore_discovery_provider_selection(
+            &transaction,
+            previous_selection,
+            expected_selection_revision,
+        )?;
+        let changed = transaction
+            .execute(
+                "UPDATE provider_discovery_compensation_steps
+                 SET status = 'completed',
+                     last_failure_json = NULL,
+                     updated_at = ?2,
+                     completed_at = ?2
+                 WHERE id = ?1
+                   AND step_kind = 'restore_previous_selection'
+                   AND status = 'in_progress'",
+                params![step_id, completed_at.to_rfc3339()],
+            )
+            .map_err(database_error)?;
+        if changed != 1 {
+            return Err(CoreError::invalid(
+                "selection restoration step changed concurrently",
+            ));
+        }
+        transaction.commit().map_err(database_error)
+    }
+
+    /// Removes exactly the graph named by a compensating commit plan.
+    ///
+    /// Foreign keys deliberately make this fail if any generation has begun to
+    /// depend on the graph. Credential-vault deletion remains a separate native
+    /// compensation step and is never attempted here.
+    #[allow(clippy::too_many_lines)]
+    pub fn compensate_discovered_provider_graph(
+        &self,
+        attempt_id: &DiscoveryCommitAttemptId,
+        completed_at: DateTime<Utc>,
+    ) -> CoreResult<()> {
+        let mut connection = self.connection()?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(database_error)?;
+        let attempt = load_commit_attempt(&transaction, attempt_id)?;
+        if attempt.phase != DiscoveryCommitPhase::Compensating {
+            return Err(CoreError::invalid(
+                "provider graph compensation requires the compensating phase",
+            ));
+        }
+        let state = transaction
+            .query_row(
+                "SELECT state
+                 FROM provider_discovery_sessions
+                 WHERE id = ?1 AND commit_attempt_id = ?2",
+                params![attempt.session_id.as_str(), attempt.id.as_str()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(database_error)?
+            .ok_or_else(|| corrupted("compensating commit is detached from its session"))?;
+        if state != "compensating" {
+            return Err(CoreError::invalid(
+                "provider graph compensation requires a compensating discovery session",
+            ));
+        }
+        require_started_session_operation(&transaction, &attempt.session_id, "compensation")?;
+        let graph_steps = {
+            let mut statement = transaction
+                .prepare(
+                    "SELECT id, status, ordinal, step_json
+                     FROM provider_discovery_compensation_steps
+                     WHERE commit_attempt_id = ?1
+                       AND step_kind = 'remove_connection_graph'
+                     ORDER BY ordinal, id",
+                )
+                .map_err(database_error)?;
+            statement
+                .query_map([attempt.id.as_str()], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, u32>(2)?,
+                        row.get::<_, String>(3)?,
+                    ))
+                })
+                .map_err(database_error)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(database_error)?
+        };
+        let [(step_id, step_status, step_ordinal, step_json)] = graph_steps.as_slice() else {
+            return Err(corrupted(
+                "compensation requires exactly one remove-connection-graph step",
+            ));
+        };
+        let step = serde_json::from_str::<DiscoveryCompensationStep>(step_json)
+            .map_err(|_| corrupted("stored graph compensation step is invalid"))?;
+        step.validate_against(&attempt.plan)
+            .map_err(|_| corrupted("graph compensation target differs from its commit plan"))?;
+        if !matches!(
+            &step.target,
+            DiscoveryCompensationTarget::RemoveConnectionGraph { connection_id }
+                if connection_id == &attempt.plan.connection_id
+        ) {
+            return Err(corrupted(
+                "graph compensation step has the wrong typed target",
+            ));
+        }
+        let higher_step_incomplete = transaction
+            .query_row(
+                "SELECT EXISTS(
+                     SELECT 1
+                     FROM provider_discovery_compensation_steps
+                     WHERE commit_attempt_id = ?1
+                       AND ordinal > ?2
+                       AND status <> 'completed'
+                 )",
+                params![attempt.id.as_str(), step_ordinal],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(database_error)?;
+        if higher_step_incomplete {
+            return Err(CoreError::invalid(
+                "provider graph compensation must follow reverse recipe order",
+            ));
+        }
+        let stored_graph = load_discovered_provider_graph_rows(
+            &transaction,
+            &attempt.plan.template_id,
+            attempt.plan.template_version,
+            &attempt.plan.connection_id,
+        )?;
+        if stored_graph.is_none() {
+            let planned_route_remains =
+                attempt
+                    .plan
+                    .model_route_ids
+                    .iter()
+                    .try_fold(false, |found, route_id| {
+                        if found {
+                            return Ok(true);
+                        }
+                        transaction
+                            .query_row(
+                                "SELECT EXISTS(SELECT 1 FROM provider_models WHERE id = ?1)",
+                                [route_id.as_str()],
+                                |row| row.get::<_, bool>(0),
+                            )
+                            .map_err(database_error)
+                    })?;
+            if planned_route_remains {
+                return Err(corrupted(
+                    "compensated connection is absent but one of its planned routes remains",
+                ));
+            }
+            if step_status == "completed" {
+                transaction.commit().map_err(database_error)?;
+                return Ok(());
+            }
+            if step_status != "in_progress" {
+                return Err(CoreError::invalid(
+                    "provider graph compensation step must be in progress",
+                ));
+            }
+            mark_connection_graph_step_completed(&transaction, step_id, completed_at)?;
+            transaction.commit().map_err(database_error)?;
+            return Ok(());
+        }
+        if step_status != "in_progress" {
+            return Err(CoreError::invalid(
+                "provider graph compensation step must be in progress",
+            ));
+        }
+        let Some(stored_graph) = stored_graph else {
+            return Err(corrupted("provider graph disappeared during compensation"));
+        };
+        let expected_ownership_hash =
+            graph_ownership_audit_hash(&transaction, &attempt.session_id)?;
+        if stored_provider_graph_ownership_hash(&stored_graph)? != expected_ownership_hash {
+            return Err(CoreError::invalid(
+                "refusing to compensate a provider graph changed after discovery commit",
+            ));
+        }
+        let stored_routes = stored_graph
+            .routes
+            .iter()
+            .map(|route| route.id.as_str().to_owned())
+            .collect::<BTreeSet<_>>();
+        let planned_routes = attempt
+            .plan
+            .model_route_ids
+            .iter()
+            .map(|id| id.as_str().to_owned())
+            .collect::<BTreeSet<_>>();
+        if stored_routes != planned_routes {
+            return Err(CoreError::invalid(
+                "refusing to compensate a provider graph that changed after commit",
+            ));
+        }
+        let selection_revision_after_graph_removal =
+            clear_provider_selections_for_discovery_compensation(
+                &transaction,
+                attempt.plan.connection_id.as_str(),
+            )?;
+        if let Some(selection_revision) = selection_revision_after_graph_removal {
+            record_discovery_selection_restore_authority(
+                &transaction,
+                &attempt.id,
+                selection_revision,
+                completed_at,
+            )?;
+        }
+        transaction
+            .execute(
+                "DELETE FROM generation_presets
+                 WHERE model_route_id IN (
+                     SELECT id FROM provider_models WHERE connection_id = ?1
+                 )",
+                [attempt.plan.connection_id.as_str()],
+            )
+            .map_err(database_error)?;
+        transaction
+            .execute(
+                "DELETE FROM model_capability_observations
+                 WHERE model_route_id IN (
+                     SELECT id FROM provider_models WHERE connection_id = ?1
+                 )",
+                [attempt.plan.connection_id.as_str()],
+            )
+            .map_err(database_error)?;
+        transaction
+            .execute(
+                "DELETE FROM provider_models WHERE connection_id = ?1",
+                [attempt.plan.connection_id.as_str()],
+            )
+            .map_err(database_error)?;
+        let deleted = transaction
+            .execute(
+                "DELETE FROM provider_connections
+                 WHERE id = ?1 AND template_id = ?2 AND template_version = ?3",
+                params![
+                    attempt.plan.connection_id.as_str(),
+                    attempt.plan.template_id.as_str(),
+                    attempt.plan.template_version,
+                ],
+            )
+            .map_err(database_error)?;
+        if deleted != 1 {
+            return Err(CoreError::invalid(
+                "committed provider connection was missing or changed",
+            ));
+        }
+        if graph_template_was_created(&transaction, &attempt.session_id)? {
+            transaction
+                .execute(
+                    "DELETE FROM provider_templates
+                     WHERE id = ?1 AND version = ?2 AND source_kind = 'user_discovered'
+                       AND NOT EXISTS (
+                           SELECT 1 FROM provider_connections
+                           WHERE template_id = ?1 AND template_version = ?2
+                       )",
+                    params![
+                        attempt.plan.template_id.as_str(),
+                        attempt.plan.template_version
+                    ],
+                )
+                .map_err(database_error)?;
+        }
+        ensure_foreign_keys_clean(&transaction)?;
+        mark_connection_graph_step_completed(&transaction, step_id, completed_at)?;
+        transaction.commit().map_err(database_error)
+    }
+}
+
+fn mark_connection_graph_step_completed(
+    transaction: &Transaction<'_>,
+    step_id: &str,
+    completed_at: DateTime<Utc>,
+) -> CoreResult<()> {
+    let changed = transaction
+        .execute(
+            "UPDATE provider_discovery_compensation_steps
+             SET status = 'completed',
+                 last_failure_json = NULL,
+                 updated_at = ?2,
+                 completed_at = ?2
+             WHERE id = ?1
+               AND step_kind = 'remove_connection_graph'
+               AND status = 'in_progress'",
+            params![step_id, completed_at.to_rfc3339()],
+        )
+        .map_err(database_error)?;
+    if changed != 1 {
+        return Err(CoreError::invalid(
+            "provider graph compensation step changed concurrently",
+        ));
+    }
+    Ok(())
+}
+
+fn record_discovery_selection_restore_authority(
+    transaction: &Transaction<'_>,
+    attempt_id: &DiscoveryCommitAttemptId,
+    selection_revision: u64,
+    created_at: DateTime<Utc>,
+) -> CoreResult<()> {
+    let restore_step_ids = {
+        let mut statement = transaction
+            .prepare(
+                "SELECT id
+                 FROM provider_discovery_compensation_steps
+                 WHERE commit_attempt_id = ?1
+                   AND step_kind = 'restore_previous_selection'
+                 ORDER BY ordinal, id",
+            )
+            .map_err(database_error)?;
+        statement
+            .query_map([attempt_id.as_str()], |row| row.get::<_, String>(0))
+            .map_err(database_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(database_error)?
+    };
+    let [restore_step_id] = restore_step_ids.as_slice() else {
+        return Err(corrupted(
+            "graph removal requires exactly one selection restoration step",
+        ));
+    };
+    let selection_revision = i64::try_from(selection_revision)
+        .map_err(|_| CoreError::internal("provider selection revision exceeds SQLite range"))?;
+    transaction
+        .execute(
+            "INSERT INTO provider_discovery_selection_restore_authorities (
+                 commit_attempt_id, restore_step_id,
+                 selection_revision_after_graph_removal, created_at
+             ) VALUES (?1, ?2, ?3, ?4)",
+            params![
+                attempt_id.as_str(),
+                restore_step_id,
+                selection_revision,
+                created_at.to_rfc3339(),
+            ],
+        )
+        .map_err(database_error)?;
+    Ok(())
+}
+
+fn load_discovery_selection_restore_revision(
+    connection: &Connection,
+    attempt_id: &DiscoveryCommitAttemptId,
+) -> CoreResult<Option<u64>> {
+    connection
+        .query_row(
+            "SELECT selection_revision_after_graph_removal
+             FROM provider_discovery_selection_restore_authorities
+             WHERE commit_attempt_id = ?1",
+            [attempt_id.as_str()],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()
+        .map_err(database_error)?
+        .map(|revision| {
+            u64::try_from(revision)
+                .map_err(|_| corrupted("stored provider selection revision is negative"))
+        })
+        .transpose()
+}
+
+#[allow(clippy::too_many_lines)]
+fn persist_transition_in_transaction(
+    transaction: &Transaction<'_>,
+    write: &DiscoveryTransitionWrite,
+) -> CoreResult<PersistDiscoveryTransition> {
+    let transition = &write.transition;
+    let session_id = transition.session.id.as_str();
+    let (stored_draft, stored_review) = transaction
+        .query_row(
+            "SELECT draft_json, review_diff_json
+             FROM provider_discovery_sessions
+             WHERE id = ?1",
+            [session_id],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(database_error)?
+        .ok_or_else(|| {
+            CoreError::new(
+                CoreErrorCode::NotFound,
+                "provider discovery session was not found",
+                false,
+            )
+        })?;
+
+    let draft_json = resolve_draft_update(&write.draft, stored_draft)?;
+    let review_json = resolve_review_update(&write.review, stored_review)?;
+    let error_json = transition
+        .session
+        .failure
+        .as_ref()
+        .map(|failure| encode_json_result(serde_json::to_value(failure), "discovery failure"))
+        .transpose()?;
+    let recovery_json = transition
+        .session
+        .recovery
+        .as_ref()
+        .map(|recovery| {
+            encode_json_result(
+                serde_json::to_value(recovery),
+                "discovery recovery checkpoint",
+            )
+        })
+        .transpose()?;
+    let state = enum_wire_result(
+        serde_json::to_value(transition.session.state),
+        "discovery state",
+    )?;
+    let unknown_operation = transition
+        .session
+        .unknown_operation
+        .map(|operation| {
+            enum_wire_result(
+                serde_json::to_value(operation),
+                "discovery unknown operation",
+            )
+        })
+        .transpose()?;
+    let event_json =
+        encode_json_result(serde_json::to_value(&transition.event), "discovery event")?;
+    let response_json = encode_json_result(
+        serde_json::to_value(transition),
+        "discovery action response",
+    )?;
+    let receipt_outcome = enum_wire_result(
+        serde_json::to_value(transition.receipt.outcome),
+        "discovery receipt outcome",
+    )?;
+    let occurred_at = write.occurred_at.to_rfc3339();
+
+    let approval_json = write
+        .approval
+        .as_ref()
+        .map(|approval| encode_approval_grant(&approval.grant))
+        .transpose()?;
+    let approval_kind = write
+        .approval
+        .as_ref()
+        .map(|approval| approval_kind(&approval.grant));
+    let approval_decision = write
+        .approval
+        .as_ref()
+        .map(|approval| {
+            enum_wire_result(
+                serde_json::to_value(approval.decision),
+                "discovery approval decision",
+            )
+        })
+        .transpose()?;
+    let approval_candidate_id =
+        write
+            .approval
+            .as_ref()
+            .and_then(|approval| match &approval.grant {
+                DiscoveryApprovalGrant::TemplateSelection { candidate_id } => {
+                    Some(candidate_id.as_str())
+                }
+                _ => None,
+            });
+    let approval = write.approval.as_ref().map(|record| NewDiscoveryApproval {
+        id: record.id.as_str(),
+        approval_kind: approval_kind.expect("approval kind exists with record"),
+        candidate_id: approval_candidate_id,
+        decision: approval_decision
+            .as_deref()
+            .expect("approval decision exists with record"),
+        grant_json: approval_json
+            .as_deref()
+            .expect("approval JSON exists with record"),
+    });
+
+    let (durable_effect, operation_kind, operation_approval) =
+        map_discovery_effect(&transition.effect);
+    let operation_kind_wire = operation_kind
+        .map(|kind| enum_wire_result(serde_json::to_value(kind), "discovery operation kind"))
+        .transpose()?;
+    let side_effect_wire = operation_kind
+        .map(|kind| {
+            enum_wire_result(
+                serde_json::to_value(kind.side_effect_class()),
+                "discovery side-effect class",
+            )
+        })
+        .transpose()?;
+    let operation = write
+        .new_operation_id
+        .as_ref()
+        .map(|operation_id| NewDiscoveryOperation {
+            id: operation_id.as_str(),
+            operation_kind: operation_kind_wire
+                .as_deref()
+                .expect("operation kind exists with operation id"),
+            side_effect_class: side_effect_wire
+                .as_deref()
+                .expect("side-effect class exists with operation id"),
+            approval_id: operation_approval.map(|binding| binding.approval_id.as_str()),
+            approval_grant_sha256: operation_approval.map(|binding| binding.grant_sha256.as_str()),
+        });
+    let completed_operation =
+        write
+            .completed_operation
+            .as_ref()
+            .map(|completed| CompletedDiscoveryOperation {
+                id: completed.id.as_str(),
+                outcome: completed.outcome,
+            });
+
+    let prepared_plan_json = write
+        .prepared_commit
+        .as_ref()
+        .map(|commit| encode_commit_plan_json(&commit.plan))
+        .transpose()?;
+    let prepared_steps_json = write
+        .prepared_commit
+        .as_ref()
+        .map(|commit| {
+            commit
+                .compensation_steps
+                .iter()
+                .map(|step| {
+                    encode_json_result(
+                        serde_json::to_value(&step.step),
+                        "discovery compensation step",
+                    )
+                })
+                .collect::<CoreResult<Vec<_>>>()
+        })
+        .transpose()?
+        .unwrap_or_default();
+    let prepared_step_kinds = write
+        .prepared_commit
+        .as_ref()
+        .map(|commit| {
+            commit
+                .compensation_steps
+                .iter()
+                .map(|step| {
+                    enum_wire_result(
+                        serde_json::to_value(step.step.kind),
+                        "discovery compensation kind",
+                    )
+                })
+                .collect::<CoreResult<Vec<_>>>()
+        })
+        .transpose()?
+        .unwrap_or_default();
+    let prepared_steps = write
+        .prepared_commit
+        .as_ref()
+        .map(|commit| {
+            commit
+                .compensation_steps
+                .iter()
+                .zip(prepared_steps_json.iter())
+                .zip(prepared_step_kinds.iter())
+                .map(
+                    |((step, step_json), step_kind)| NewDiscoveryCompensationStep {
+                        id: &step.id,
+                        ordinal: step.step.ordinal,
+                        action_id: step.step.action_id.as_str(),
+                        step_kind,
+                        step_json,
+                    },
+                )
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let prepared_commit = write
+        .prepared_commit
+        .as_ref()
+        .map(|commit| NewDiscoveryCommitAttempt {
+            id: commit.plan.attempt_id.as_str(),
+            attempt_number: commit.attempt_number,
+            plan_sha256: &commit.plan_sha256,
+            plan_json: prepared_plan_json
+                .as_deref()
+                .expect("commit JSON exists with commit"),
+            reuse_existing: commit.reuse_existing,
+            compensation_steps: &prepared_steps,
+        });
+
+    let durable = DurableDiscoveryTransition {
+        session_id,
+        expected_revision: transition.previous_revision,
+        resulting_revision: transition.session.revision,
+        event_sequence: transition.event.sequence,
+        next_event_sequence: transition.session.next_event_sequence,
+        state: &state,
+        draft_json: draft_json.as_deref(),
+        review_diff_json: review_json.as_deref(),
+        error_json: error_json.as_deref(),
+        recovery_json: recovery_json.as_deref(),
+        unknown_operation: unknown_operation.as_deref(),
+        manifest_sha256: transition.session.manifest_sha256.as_deref(),
+        commit_plan_sha256: transition.session.commit_plan_sha256.as_deref(),
+        commit_attempt_id: transition
+            .session
+            .commit_attempt_id
+            .as_ref()
+            .map(DiscoveryCommitAttemptId::as_str),
+        committed_connection_id: transition
+            .session
+            .committed_connection_id
+            .as_ref()
+            .map(lorepia_domain::ProviderConnectionId::as_str),
+        cancellation_pending: transition.session.cancellation_pending,
+        event_id: transition.event.id.as_str(),
+        event_version: transition.event.version,
+        event_json: &event_json,
+        effect: durable_effect,
+        action_id: transition.receipt.action_id.as_str(),
+        action_kind: &transition.receipt.action_kind,
+        action_approval_id: write.approval.as_ref().map(|record| record.id.as_str()),
+        request_sha256: &transition.receipt.request_sha256,
+        response_json: &response_json,
+        receipt_outcome: &receipt_outcome,
+        audit_kind: audit_kind_for_action(&transition.receipt.action_kind),
+        audit_summary_key: "discovery.audit.transition_applied",
+        occurred_at: &occurred_at,
+        operation,
+        completed_operation,
+        approval,
+        commit: prepared_commit,
+    };
+    let receipt_exists = transaction
+        .query_row(
+            "SELECT EXISTS(
+                 SELECT 1
+                 FROM provider_discovery_action_receipts
+                 WHERE action_id = ?1
+             )",
+            [transition.receipt.action_id.as_str()],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(database_error)?;
+    if receipt_exists {
+        return discovery::persist_discovery_transition_in_transaction(transaction, &durable)
+            .map_err(discovery_error);
+    }
+    validate_completed_operation_binding(transaction, write)?;
+    for evidence in &write.new_evidence {
+        insert_evidence_in_transaction(transaction, evidence)?;
+    }
+    for candidate in &write.new_candidates {
+        insert_candidate_in_transaction(transaction, candidate, transition.previous_revision)?;
+    }
+    if let DiscoveryJsonUpdate::Replace(review) = &write.review {
+        validate_review_evidence_references(transaction, &transition.session.id, review)?;
+    }
+    if let Some(approval) = &write.approval {
+        validate_approval_references(transaction, approval)?;
+    }
+    if let Some(commit) = &write.prepared_commit {
+        validate_prepared_commit_session_binding(transaction, commit)?;
+    }
+    if let Some(graph) = &write.provider_graph {
+        apply_provider_graph_in_transaction(
+            transaction,
+            graph,
+            transition.previous_revision,
+            write.occurred_at,
+        )?;
+    }
+    finalize_commit_failed_before_apply(transaction, write)?;
+    reconcile_discovery_saga_ledger(transaction, write)?;
+    validate_terminal_compensation_transition(transaction, write)?;
+    let result = discovery::persist_discovery_transition_in_transaction(transaction, &durable)
+        .map_err(discovery_error)?;
+    if transition.session.state == DiscoveryState::Ready {
+        complete_commit_attempt_for_ready_transition(transaction, transition, write.occurred_at)?;
+        project_reconciled_discovery_credential_ownership(
+            transaction,
+            transition,
+            write.occurred_at,
+        )?;
+    }
+    Ok(result)
+}
+
+fn validate_initial_discovery_draft(
+    value: &Value,
+    input: &SanitizedDiscoveryInput,
+) -> CoreResult<()> {
+    const EXPECTED_KEYS: [&str; 15] = [
+        "schema_version",
+        "source",
+        "deterministic",
+        "evidence_ids",
+        "extra_evidence_ids",
+        "selected_candidate_id",
+        "template",
+        "connection",
+        "routes",
+        "observations",
+        "presets",
+        "credential_approval_id",
+        "probe_route_ids",
+        "probe_failure_count",
+        "assistant",
+    ];
+    validate_redacted_value(value)?;
+    let object = value
+        .as_object()
+        .ok_or_else(|| CoreError::invalid("initial discovery draft must be a JSON object"))?;
+    if object.len() != EXPECTED_KEYS.len()
+        || EXPECTED_KEYS.iter().any(|key| !object.contains_key(*key))
+        || object.get("schema_version").and_then(Value::as_u64) != Some(1)
+        || object.get("probe_failure_count").and_then(Value::as_u64) != Some(0)
+        || ["selected_candidate_id", "template", "connection"]
+            .into_iter()
+            .chain(["credential_approval_id", "assistant"])
+            .any(|key| !object[key].is_null())
+        || [
+            "evidence_ids",
+            "extra_evidence_ids",
+            "routes",
+            "observations",
+            "presets",
+            "probe_route_ids",
+        ]
+        .into_iter()
+        .any(|key| {
+            object[key]
+                .as_array()
+                .is_none_or(|values| !values.is_empty())
+        })
+    {
+        return Err(CoreError::invalid(
+            "initial discovery draft must contain only pristine source intent",
+        ));
+    }
+    let source = object["source"]
+        .as_object()
+        .ok_or_else(|| CoreError::invalid("initial discovery source intent is invalid"))?;
+    match source.get("kind").and_then(Value::as_str) {
+        Some("site") if source.len() == 1 && object["deterministic"].is_null() => Ok(()),
+        Some("curl") if source.len() == 1 => {
+            validate_initial_curl_deterministic_output(&object["deterministic"], input)
+        }
+        Some("known_provider") if source.len() == 2 => {
+            if !object["deterministic"].is_null() {
+                return Err(CoreError::invalid(
+                    "known-provider discovery cannot begin with transient deterministic output",
+                ));
+            }
+            let template_id = source
+                .get("template_id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    CoreError::invalid("known-provider source intent has no template identifier")
+                })?;
+            validate_identifier("known-provider source template id", template_id, 256)?;
+            if looks_like_secret(template_id) {
+                return Err(CoreError::invalid(
+                    "known-provider source template id resembles credential material",
+                ));
+            }
+            Ok(())
+        }
+        _ => Err(CoreError::invalid(
+            "initial discovery source intent is unsupported or contains payload data",
+        )),
+    }
+}
+
+#[allow(clippy::too_many_lines)]
+fn validate_initial_curl_deterministic_output(
+    value: &Value,
+    input: &SanitizedDiscoveryInput,
+) -> CoreResult<()> {
+    let output = serde_json::from_value::<InitialDeterministicDiscoveryOutput>(value.clone())
+        .map_err(|_| {
+            CoreError::invalid("initial cURL deterministic output has an invalid schema")
+        })?;
+    let canonical = serde_json::to_value(&output)
+        .map_err(|_| CoreError::internal("cannot canonicalize cURL deterministic output"))?;
+    if canonical != *value {
+        return Err(CoreError::invalid(
+            "initial cURL deterministic output contains non-canonical fields",
+        ));
+    }
+    if output.schema_version != DETERMINISTIC_DISCOVERY_SCHEMA_VERSION
+        || output.evidence.len() != 1
+        || output.family_candidates.len() > 5
+        || output.manifest_candidates.len() > 5
+        || output.connection_hints.len() > 5
+        || !output.fetch_issues.is_empty()
+        || output.fetch_stopped_by_budget
+    {
+        return Err(CoreError::invalid(
+            "initial cURL deterministic output violates its bounded contract",
+        ));
+    }
+
+    let input_origin = CanonicalOrigin::parse(input.site_url.as_str())
+        .map_err(|_| CoreError::invalid("initial cURL input site URL is not an origin"))?;
+    let evidence = &output.evidence[0];
+    if evidence.kind != "sanitized_curl_request"
+        || evidence.source_origin != input_origin
+        || evidence.redaction_version != DISCOVERY_REDACTION_VERSION
+    {
+        return Err(CoreError::invalid(
+            "initial cURL evidence is not bound to the sanitized input origin",
+        ));
+    }
+    validate_sha256(
+        "initial cURL evidence content hash",
+        &evidence.content_sha256,
+    )?;
+    let extracted =
+        serde_json::from_value::<InitialSanitizedCurlEvidence>(evidence.extracted_json.clone())
+            .map_err(|_| {
+                CoreError::invalid("initial cURL evidence has an invalid sanitized shape")
+            })?;
+    let canonical_extracted = serde_json::to_value(&extracted)
+        .map_err(|_| CoreError::internal("cannot canonicalize sanitized cURL evidence"))?;
+    if canonical_extracted != evidence.extracted_json {
+        return Err(CoreError::invalid(
+            "initial cURL evidence contains non-canonical fields",
+        ));
+    }
+    let extracted_bytes = serde_json::to_vec(&evidence.extracted_json)
+        .map_err(|_| CoreError::internal("cannot hash sanitized cURL evidence"))?;
+    let extracted_sha256 = format!("{:x}", Sha256::digest(extracted_bytes));
+    if evidence.content_sha256 != extracted_sha256
+        || extracted.origin != evidence.source_origin
+        || extracted.trust != "sanitized_curl_structure"
+    {
+        return Err(CoreError::invalid(
+            "initial cURL evidence content hash or provenance is invalid",
+        ));
+    }
+    validate_sha256(
+        "initial cURL source path hash",
+        &extracted.source_path_sha256,
+    )?;
+    if extracted.query_parameter_names.len() > 64
+        || extracted.header_names.len() > 64
+        || extracted.auth_hints.len() > 64
+        || extracted.api_family_candidates.len() > 5
+    {
+        return Err(CoreError::invalid(
+            "initial cURL evidence exceeds parser collection bounds",
+        ));
+    }
+    for name in &extracted.query_parameter_names {
+        validate_identifier("initial cURL query parameter name", name, 256)?;
+    }
+    for hint in &extracted.auth_hints {
+        if let InitialCurlAuthHint::ApiKeyQuery { parameter_name } = hint {
+            validate_identifier(
+                "initial cURL authentication query parameter name",
+                parameter_name,
+                256,
+            )?;
+        }
+    }
+
+    for (index, candidate) in output.family_candidates.iter().enumerate() {
+        if candidate.confidence != InitialDiscoveryCandidateConfidence::Structural
+            || candidate.evidence_indices.as_slice() != [0]
+            || !extracted
+                .api_family_candidates
+                .contains(&candidate.api_family)
+            || output.family_candidates[..index]
+                .iter()
+                .any(|previous| previous.api_family == candidate.api_family)
+        {
+            return Err(CoreError::invalid(
+                "initial cURL family candidate has invalid evidence provenance",
+            ));
+        }
+    }
+    for (index, candidate) in output.manifest_candidates.iter().enumerate() {
+        validate_sha256(
+            "initial cURL manifest candidate hash",
+            &candidate.manifest_sha256,
+        )?;
+        let manifest_json = canonical_json_result(
+            serde_json::to_value(&candidate.template.default_manifest),
+            "initial cURL provider manifest",
+        )?;
+        let actual_manifest_sha256 = sha256_hex(manifest_json.as_bytes());
+        let expected_template_id = format!("discovered-{}", candidate.manifest_sha256);
+        if candidate.confidence != InitialDiscoveryCandidateConfidence::Structural
+            || !candidate.generation_endpoint_evidenced
+            || candidate.model_endpoint_evidenced
+            || candidate.evidence_indices.as_slice() != [0]
+            || candidate.manifest_sha256 != actual_manifest_sha256
+            || candidate.template.id.as_str() != expected_template_id
+            || candidate.template.manifest_version != 1
+            || candidate.template.source != TemplateSource::UserDiscovered
+            || candidate.template.api_family != candidate.template.default_manifest.api_family
+            || !output
+                .family_candidates
+                .iter()
+                .any(|family| family.api_family == candidate.template.api_family)
+            || output.manifest_candidates[..index]
+                .iter()
+                .any(|previous| previous.manifest_sha256 == candidate.manifest_sha256)
+        {
+            return Err(CoreError::invalid(
+                "initial cURL manifest candidate has invalid deterministic provenance",
+            ));
+        }
+        let default_origin = candidate
+            .template
+            .default_manifest
+            .default_api_origin
+            .as_ref();
+        if input.connection_options.network_mode == ProviderNetworkMode::ApprovedLocalNetwork {
+            if default_origin.is_some() || !candidate.template.default_manifest.sources.is_empty() {
+                return Err(CoreError::invalid(
+                    "initial LAN cURL manifest promoted connection-specific authority",
+                ));
+            }
+        } else if default_origin != Some(&evidence.source_origin) {
+            return Err(CoreError::invalid(
+                "initial cURL manifest origin does not match sanitized evidence",
+            ));
+        }
+    }
+
+    for (index, hint) in output.connection_hints.iter().enumerate() {
+        if hint.source != InitialConnectionOriginHintSource::SanitizedCurlRequest
+            || hint.api_origin != evidence.source_origin
+            || hint.network_mode != input.connection_options.network_mode
+            || hint.evidence_indices.as_slice() != [0]
+            || hint.requires_credential_origin_approval != (hint.auth != AuthBinding::None)
+            || !output
+                .manifest_candidates
+                .iter()
+                .any(|candidate| candidate.template.api_family == hint.api_family)
+            || output.connection_hints[..index].iter().any(|previous| {
+                previous.api_family == hint.api_family
+                    && previous.api_origin == hint.api_origin
+                    && previous.api_base_path == hint.api_base_path
+            })
+        {
+            return Err(CoreError::invalid(
+                "initial cURL connection hint has invalid deterministic provenance",
+            ));
+        }
+    }
+
+    let expected_selected = if output.manifest_candidates.len() == 1 {
+        Some(&output.manifest_candidates[0].template)
+    } else {
+        None
+    };
+    if output.selected_template.as_ref() != expected_selected {
+        return Err(CoreError::invalid(
+            "initial cURL selected template is not bound to the candidate set",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_transition_write(write: &DiscoveryTransitionWrite) -> CoreResult<()> {
+    let transition = &write.transition;
+    transition.session.validate().map_err(contract_error)?;
+    if transition.event.version != PROVIDER_DISCOVERY_EVENT_VERSION
+        || transition.receipt.outcome
+            != lorepia_domain::discovery::DiscoveryActionReceiptOutcome::Applied
+        || transition.session.revision != transition.previous_revision.saturating_add(1)
+        || transition.event.session_id != transition.session.id
+        || transition.event.session_revision != transition.session.revision
+        || transition.event.state != transition.session.state
+        || transition.event.failure != transition.session.failure
+        || transition.event.sequence.saturating_add(1) != transition.session.next_event_sequence
+        || transition.event.action_id != transition.receipt.action_id
+        || transition.receipt.session_id != transition.session.id
+        || transition.receipt.expected_revision != transition.previous_revision
+        || transition.receipt.resulting_revision != transition.session.revision
+        || transition.receipt.event_sequence != transition.event.sequence
+    {
+        return Err(CoreError::invalid(
+            "discovery transition aggregate fields do not agree",
+        ));
+    }
+    let (_, operation_kind, _) = map_discovery_effect(&transition.effect);
+    if operation_kind.is_some() != write.new_operation_id.is_some() {
+        return Err(CoreError::invalid(
+            "discovery external effects require exactly one prepared operation id",
+        ));
+    }
+    if let Some(approval) = &write.approval {
+        approval.validate().map_err(contract_error)?;
+        if approval.session_id != transition.session.id
+            || approval.session_revision != transition.previous_revision
+            || approval.created_at != write.occurred_at
+        {
+            return Err(CoreError::invalid(
+                "discovery approval must match the transition session, revision, and time",
+            ));
+        }
+    }
+    validate_prepared_commit(write)?;
+    validate_provider_graph_publication(write)?;
+    for evidence in &write.new_evidence {
+        if evidence.session_id != transition.session.id {
+            return Err(CoreError::invalid(
+                "transition evidence must belong to the discovery session",
+            ));
+        }
+        validate_discovery_evidence(evidence)?;
+    }
+    for candidate in &write.new_candidates {
+        if candidate.candidate.session_id != transition.session.id {
+            return Err(CoreError::invalid(
+                "transition candidates must belong to the discovery session",
+            ));
+        }
+        candidate.candidate.validate().map_err(contract_error)?;
+    }
+    Ok(())
+}
+
+fn validate_provider_graph_publication(write: &DiscoveryTransitionWrite) -> CoreResult<()> {
+    let transition = &write.transition;
+    let Some(graph) = &write.provider_graph else {
+        if transition.receipt.action_kind == "commit_succeeded" {
+            return Err(CoreError::invalid(
+                "a successful discovery commit must publish its exact provider graph atomically",
+            ));
+        }
+        return Ok(());
+    };
+    validate_provider_graph(graph)?;
+    if transition.receipt.action_kind != "commit_succeeded"
+        || transition.session.state != DiscoveryState::Ready
+        || transition.effect != DiscoveryEffect::None
+        || write.new_operation_id.is_some()
+        || write.prepared_commit.is_some()
+        || write.approval.is_some()
+        || !write.new_evidence.is_empty()
+        || !write.new_candidates.is_empty()
+        || write
+            .completed_operation
+            .as_ref()
+            .is_none_or(|completed| completed.outcome != DurableOperationOutcome::Succeeded)
+        || transition.session.commit_attempt_id.as_ref() != Some(&graph.plan.attempt_id)
+        || transition.session.commit_plan_sha256.as_deref() != Some(graph.plan_sha256.as_str())
+        || transition.session.committed_connection_id.as_ref() != Some(&graph.plan.connection_id)
+        || graph.plan.session_id != transition.session.id
+        || graph.plan.expected_revision >= transition.previous_revision
+    {
+        return Err(CoreError::invalid(
+            "provider graph publication must be the exact atomic Ready transition",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_completed_operation_binding(
+    transaction: &Transaction<'_>,
+    write: &DiscoveryTransitionWrite,
+) -> CoreResult<()> {
+    let active_operation_id = transaction
+        .query_row(
+            "SELECT active_operation_id
+             FROM provider_discovery_sessions
+             WHERE id = ?1",
+            [write.transition.session.id.as_str()],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()
+        .map_err(database_error)?
+        .ok_or_else(|| {
+            CoreError::new(
+                CoreErrorCode::NotFound,
+                "provider discovery session was not found",
+                false,
+            )
+        })?;
+    let action_kind = write.transition.receipt.action_kind.as_str();
+    let expected_outcome = match action_kind {
+        "known_provider_candidates_resolved"
+        | "documents_fetched"
+        | "evidence_extracted"
+        | "manifest_draft_built"
+        | "assistant_requested_more_evidence"
+        | "assistant_resumed_with_evidence"
+        | "manifest_validated"
+        | "models_listed"
+        | "probes_completed"
+        | "commit_succeeded"
+        | "compensation_succeeded" => Some(DurableOperationOutcome::Succeeded),
+        "fail" | "commit_failed_before_apply" | "compensation_required" | "compensation_failed" => {
+            active_operation_id
+                .as_ref()
+                .map(|_| DurableOperationOutcome::Failed)
+        }
+        "external_outcome_became_unknown" => Some(DurableOperationOutcome::OutcomeUnknown),
+        "interrupt" => Some(
+            if write.transition.session.state == DiscoveryState::UnknownOutcome {
+                DurableOperationOutcome::OutcomeUnknown
+            } else {
+                DurableOperationOutcome::Interrupted
+            },
+        ),
+        _ => None,
+    };
+    let completed = match (
+        active_operation_id.as_deref(),
+        expected_outcome,
+        write.completed_operation.as_ref(),
+    ) {
+        (None | Some(_), None, None) => return Ok(()),
+        (Some(active_id), Some(expected), Some(completed))
+            if completed.id.as_str() == active_id
+                && (completed.outcome == expected
+                    || (expected == DurableOperationOutcome::Interrupted
+                        && completed.outcome
+                            == DurableOperationOutcome::AttestedNoExternalEffect)) =>
+        {
+            completed
+        }
+        _ => {
+            return Err(CoreError::invalid(
+                "completed discovery operation does not match the domain action outcome",
+            ));
+        }
+    };
+    let (created_at, started_at) = transaction
+        .query_row(
+            "SELECT created_at, started_at
+             FROM provider_discovery_operations
+             WHERE id = ?1",
+            [completed.id.as_str()],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+        )
+        .optional()
+        .map_err(database_error)?
+        .ok_or_else(|| corrupted("completed discovery operation is missing"))?;
+    let created_at = parse_timestamp(&created_at, "discovery operation created_at")?;
+    let started_at = started_at
+        .as_deref()
+        .map(|value| parse_timestamp(value, "discovery operation started_at"))
+        .transpose()?;
+    if write.occurred_at < created_at || started_at.is_some_and(|time| write.occurred_at < time) {
+        return Err(CoreError::invalid(
+            "discovery operation cannot finish before it was created or started",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_native_no_effect_attestation_write(
+    write: &DiscoveryTransitionWrite,
+    attestation: &DiscoveryNativeNoEffectAttestationWrite,
+) -> CoreResult<()> {
+    let completed = write.completed_operation.as_ref().ok_or_else(|| {
+        CoreError::invalid("native no-effect attestation has no completed operation")
+    })?;
+    validate_sha256(
+        "native no-effect commit plan hash",
+        &attestation.commit_plan_sha256,
+    )?;
+    validate_sha256(
+        "native no-effect evidence hash",
+        &attestation.evidence_sha256,
+    )?;
+    validate_discovery_native_physical_authority_id(&attestation.physical_authority_id)
+        .map_err(|_| CoreError::invalid("native no-effect physical authority is invalid"))?;
+    if completed.outcome != DurableOperationOutcome::AttestedNoExternalEffect
+        || completed.id != attestation.operation_id
+        || write.transition.receipt.action_kind != "interrupt"
+        || write.transition.session.state != DiscoveryState::Interrupted
+        || write.transition.session.id != attestation.session_id
+        || write.transition.session.commit_attempt_id.as_ref()
+            != Some(&attestation.commit_attempt_id)
+        || write.transition.session.commit_plan_sha256.as_deref()
+            != Some(attestation.commit_plan_sha256.as_str())
+        || attestation.kind != DiscoveryNativeNoEffectAttestationKind::CredentialSlotMissing
+        || attestation.recovery_owner != DiscoveryNativeRecoveryOwner::NativePlatform
+        || write.new_operation_id.is_some()
+        || write.approval.is_some()
+        || write.prepared_commit.is_some()
+        || write.provider_graph.is_some()
+        || !write.new_evidence.is_empty()
+        || !write.new_candidates.is_empty()
+    {
+        return Err(CoreError::invalid(
+            "native no-effect attestation does not match the exact interrupt transition",
+        ));
+    }
+    let expected_evidence_sha256 = native_no_effect_evidence_sha256(attestation)?;
+    if attestation.evidence_sha256 != expected_evidence_sha256 {
+        return Err(CoreError::invalid(
+            "native no-effect attestation evidence hash does not match its binding",
+        ));
+    }
+    Ok(())
+}
+
+fn insert_or_validate_native_no_effect_attestation(
+    transaction: &Transaction<'_>,
+    write: &DiscoveryTransitionWrite,
+    attestation: &DiscoveryNativeNoEffectAttestationWrite,
+) -> CoreResult<()> {
+    if let Some(existing) =
+        load_native_no_effect_attestation(transaction, attestation.operation_id.as_str())?
+    {
+        if existing.operation_id == attestation.operation_id
+            && existing.physical_authority_id == attestation.physical_authority_id
+            && existing.session_id == attestation.session_id
+            && existing.commit_attempt_id == attestation.commit_attempt_id
+            && existing.commit_plan_sha256 == attestation.commit_plan_sha256
+            && existing.connection_id == attestation.connection_id
+            && existing.kind == attestation.kind
+            && existing.recovery_owner == attestation.recovery_owner
+            && existing.evidence_sha256 == attestation.evidence_sha256
+            && existing.attested_at == write.occurred_at
+        {
+            return Ok(());
+        }
+        return Err(CoreError::invalid(
+            "native no-effect attestation operation id is already bound differently",
+        ));
+    }
+
+    let execution =
+        validate_native_no_effect_database_binding(transaction, attestation, write.occurred_at)?;
+    let execution_binding_sha256 = native_no_effect_execution_binding_sha256(
+        attestation,
+        &execution.connection_binding_sha256,
+        write.occurred_at,
+    )?;
+    transaction
+        .execute(
+            "INSERT INTO provider_discovery_native_no_effect_execution_bindings (
+                 operation_id, physical_authority_id, session_id,
+                 commit_attempt_id, commit_plan_sha256, connection_id,
+                 connection_binding_sha256, attestation_evidence_sha256,
+                 execution_binding_sha256, attested_at,
+                 schema_version, redaction_version
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 1, 1)",
+            params![
+                attestation.operation_id.as_str(),
+                attestation.physical_authority_id,
+                attestation.session_id.as_str(),
+                attestation.commit_attempt_id.as_str(),
+                attestation.commit_plan_sha256,
+                attestation.connection_id.as_str(),
+                execution.connection_binding_sha256,
+                attestation.evidence_sha256,
+                execution_binding_sha256,
+                write.occurred_at.to_rfc3339(),
+            ],
+        )
+        .map_err(database_error)?;
+    transaction
+        .execute(
+            "INSERT INTO provider_discovery_native_no_effect_attestations (
+                 operation_id,
+                 session_id,
+                 commit_attempt_id,
+                 commit_plan_sha256,
+                 connection_id,
+                 attestation_kind,
+                 evidence_sha256,
+                 recovery_owner,
+                 schema_version,
+                 redaction_version,
+                 attested_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![
+                attestation.operation_id.as_str(),
+                attestation.session_id.as_str(),
+                attestation.commit_attempt_id.as_str(),
+                attestation.commit_plan_sha256,
+                attestation.connection_id.as_str(),
+                attestation.kind.as_str(),
+                attestation.evidence_sha256,
+                attestation.recovery_owner.as_str(),
+                NATIVE_NO_EFFECT_ATTESTATION_SCHEMA_VERSION,
+                NATIVE_NO_EFFECT_ATTESTATION_REDACTION_VERSION,
+                write.occurred_at.to_rfc3339(),
+            ],
+        )
+        .map_err(database_error)?;
+    Ok(())
+}
+
+fn validate_native_credential_execution_reservation(
+    transaction: &Transaction<'_>,
+    reservation: &DiscoveryNativeCredentialExecutionReservation,
+) -> CoreResult<()> {
+    let snapshot = load_session_snapshot(transaction, reservation.session_id.as_str())?
+        .ok_or_else(|| corrupted("discovery credential execution session is missing"))?;
+    let attempt = load_commit_attempt(transaction, &reservation.commit_attempt_id)?;
+    let operation = load_operation_by_id(transaction, &reservation.operation_id)?;
+    if snapshot.session.state != DiscoveryState::Committing
+        || snapshot.session.revision != operation.expected_revision
+        || snapshot.active_operation_id.as_ref() != Some(&reservation.operation_id)
+        || snapshot.session.commit_attempt_id.as_ref() != Some(&reservation.commit_attempt_id)
+        || snapshot.session.commit_plan_sha256.as_deref()
+            != Some(reservation.commit_plan_sha256.as_str())
+        || snapshot.session.cancellation_pending
+        || operation.session_id != reservation.session_id
+        || operation.kind != DiscoveryOperationKind::AtomicCommit
+        || operation.side_effect_class != DiscoverySideEffectClass::Persistent
+        || operation.status != DiscoveryOperationStatus::Prepared
+        || operation.started_at.is_some()
+        || operation.finished_at.is_some()
+        || reservation.reserved_at < operation.created_at
+        || attempt.session_id != reservation.session_id
+        || attempt.id != reservation.commit_attempt_id
+        || attempt.phase != DiscoveryCommitPhase::Prepared
+        || attempt.plan_sha256 != reservation.commit_plan_sha256
+        || attempt.plan.attempt_id != reservation.commit_attempt_id
+        || attempt.plan.connection_id != reservation.connection_id
+        || attempt
+            .plan
+            .credential_ref
+            .as_ref()
+            .map(CredentialRef::as_str)
+            != Some(reservation.connection_id.as_str())
+    {
+        return Err(CoreError::invalid(
+            "native credential reservation is detached from its prepared discovery commit",
+        ));
+    }
+    validate_native_no_effect_operation_start_receipt(
+        transaction,
+        &attempt,
+        operation.action_id.as_str(),
+        operation.expected_revision,
+        &operation.request_sha256,
+        &operation.created_at.to_rfc3339(),
+    )?;
+    let authorized = transaction
+        .query_row(
+            "SELECT COUNT(*)
+             FROM provider_discovery_authorized_native_commit_starts
+             WHERE operation_id = ?1
+               AND session_id = ?2
+               AND commit_attempt_id = ?3
+               AND commit_plan_sha256 = ?4
+               AND operation_expected_revision = ?5",
+            params![
+                reservation.operation_id.as_str(),
+                reservation.session_id.as_str(),
+                reservation.commit_attempt_id.as_str(),
+                reservation.commit_plan_sha256,
+                operation.expected_revision,
+            ],
+            |row| row.get::<_, u64>(0),
+        )
+        .map_err(database_error)?;
+    if authorized != 1 {
+        return Err(corrupted(
+            "native credential reservation has no unique approved start authority",
+        ));
+    }
+    Ok(())
+}
+
+type NativeNoEffectOperationRow = (
+    String,
+    String,
+    String,
+    String,
+    u64,
+    String,
+    String,
+    String,
+    Option<String>,
+    String,
+    u64,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
+
+fn load_native_no_effect_operation_row(
+    connection: &Connection,
+    operation_id: &DiscoveryOperationId,
+) -> CoreResult<NativeNoEffectOperationRow> {
+    connection
+        .query_row(
+            "SELECT operation.session_id,
+                    operation.operation_kind,
+                    operation.side_effect_class,
+                    operation.status,
+                    operation.expected_revision,
+                    operation.action_id,
+                    operation.request_sha256,
+                    operation.created_at,
+                    operation.started_at,
+                    session.state,
+                    session.revision,
+                    session.active_operation_id,
+                    session.commit_attempt_id,
+                    session.commit_plan_sha256
+             FROM provider_discovery_operations AS operation
+             JOIN provider_discovery_sessions AS session
+               ON session.id = operation.session_id
+             WHERE operation.id = ?1",
+            [operation_id.as_str()],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, u64>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, String>(7)?,
+                    row.get::<_, Option<String>>(8)?,
+                    row.get::<_, String>(9)?,
+                    row.get::<_, u64>(10)?,
+                    row.get::<_, Option<String>>(11)?,
+                    row.get::<_, Option<String>>(12)?,
+                    row.get::<_, Option<String>>(13)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(database_error)?
+        .ok_or_else(|| {
+            CoreError::new(
+                CoreErrorCode::NotFound,
+                "native no-effect attestation operation was not found",
+                false,
+            )
+        })
+}
+
+fn validate_native_no_effect_database_binding(
+    transaction: &Transaction<'_>,
+    attestation: &DiscoveryNativeNoEffectAttestationWrite,
+    attested_at: DateTime<Utc>,
+) -> CoreResult<DiscoveryNativeCredentialExecutionRecord> {
+    let operation = load_native_no_effect_operation_row(transaction, &attestation.operation_id)?;
+    let attempt = load_commit_attempt(transaction, &attestation.commit_attempt_id)?;
+    let execution =
+        load_discovery_native_credential_execution(transaction, &attestation.operation_id)?
+            .ok_or_else(|| CoreError::invalid("native no-effect execution is missing"))?;
+    let created_at = parse_timestamp(&operation.7, "native no-effect operation created_at")?;
+    let started_at = operation
+        .8
+        .as_deref()
+        .ok_or_else(|| CoreError::invalid("native no-effect operation was not started"))
+        .and_then(|value| parse_timestamp(value, "native no-effect operation started_at"))?;
+    if operation.0 != attestation.session_id.as_str()
+        || operation.1 != "atomic_commit"
+        || operation.2 != "persistent"
+        || operation.3 != "started"
+        || created_at > started_at
+        || started_at > attested_at
+        || operation.4 != operation.10
+        || operation.9 != "committing"
+        || operation.11.as_deref() != Some(attestation.operation_id.as_str())
+        || operation.12.as_deref() != Some(attestation.commit_attempt_id.as_str())
+        || operation.13.as_deref() != Some(attestation.commit_plan_sha256.as_str())
+        || attempt.session_id != attestation.session_id
+        || attempt.phase != DiscoveryCommitPhase::Prepared
+        || attempt.plan_sha256 != attestation.commit_plan_sha256
+        || attempt.plan.attempt_id != attestation.commit_attempt_id
+        || attempt.plan.connection_id != attestation.connection_id
+        || attempt
+            .plan
+            .credential_ref
+            .as_ref()
+            .map(|value| value.0.as_str())
+            != Some(attestation.connection_id.as_str())
+        || execution.physical_authority_id != attestation.physical_authority_id
+        || execution.operation_id != attestation.operation_id
+        || execution.session_id != attestation.session_id
+        || execution.commit_attempt_id != attestation.commit_attempt_id
+        || execution.commit_plan_sha256 != attestation.commit_plan_sha256
+        || execution.connection_id != attestation.connection_id
+        || execution.store_started_at != Some(started_at)
+    {
+        return Err(CoreError::invalid(
+            "native no-effect attestation is detached from the active credential commit",
+        ));
+    }
+    validate_native_no_effect_operation_start_receipt(
+        transaction,
+        &attempt,
+        &operation.5,
+        operation.4,
+        &operation.6,
+        &operation.7,
+    )?;
+    Ok(execution)
+}
+
+type NativeNoEffectAttestationRow = (
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    u32,
+    u32,
+    String,
+);
+
+fn is_exact_legacy_native_no_effect_snapshot(
+    connection: &Connection,
+    row: &NativeNoEffectAttestationRow,
+) -> CoreResult<bool> {
+    connection
+        .query_row(
+            "SELECT COUNT(*)
+             FROM provider_discovery_native_no_effect_legacy_cutoff_snapshots
+             WHERE operation_id = ?1
+               AND session_id = ?2
+               AND commit_attempt_id = ?3
+               AND commit_plan_sha256 = ?4
+               AND connection_id = ?5
+               AND attestation_kind = ?6
+               AND evidence_sha256 = ?7
+               AND recovery_owner = ?8
+               AND attestation_schema_version = ?9
+               AND attestation_redaction_version = ?10
+               AND attested_at = ?11
+               AND cutoff_before_schema_version = 37
+               AND snapshot_schema_version = 1",
+            params![
+                row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7, row.8, row.9, row.10,
+            ],
+            |query_row| query_row.get::<_, u64>(0),
+        )
+        .map(|count| count == 1)
+        .map_err(database_error)
+}
+
+fn validate_legacy_native_no_effect_attestation(
+    connection: &Connection,
+    row: &NativeNoEffectAttestationRow,
+) -> CoreResult<()> {
+    let operation_id = DiscoveryOperationId::parse(row.0.clone())
+        .map_err(|_| corrupted("legacy native no-effect operation id is invalid"))?;
+    let session_id = DiscoverySessionId::from(row.1.clone());
+    let attempt_id = DiscoveryCommitAttemptId::parse(row.2.clone())
+        .map_err(|_| corrupted("legacy native no-effect commit attempt id is invalid"))?;
+    let connection_id = ProviderConnectionId::from(row.4.clone());
+    let kind = DiscoveryNativeNoEffectAttestationKind::parse(&row.5)?;
+    let recovery_owner = DiscoveryNativeRecoveryOwner::parse(&row.7)?;
+    let attested_at = parse_timestamp(&row.10, "legacy native no-effect attested_at")?;
+    let expected_evidence_sha256 = native_no_effect_binding_sha256(
+        kind,
+        recovery_owner,
+        operation_id.as_str(),
+        session_id.as_str(),
+        attempt_id.as_str(),
+        &row.3,
+        connection_id.as_str(),
+    )?;
+    if expected_evidence_sha256 != row.6 {
+        return Err(corrupted(
+            "legacy native no-effect evidence hash does not match its semantic binding",
+        ));
+    }
+    let operation = load_operation_by_id(connection, &operation_id)?;
+    let attempt = load_commit_attempt(connection, &attempt_id).map_err(|error| {
+        if error.code == CoreErrorCode::NotFound {
+            corrupted("legacy native no-effect commit attempt is missing")
+        } else {
+            error
+        }
+    })?;
+    let has_physical_execution = connection
+        .query_row(
+            "SELECT EXISTS(
+                 SELECT 1
+                 FROM provider_discovery_native_credential_executions
+                 WHERE operation_id = ?1
+             )",
+            [operation_id.as_str()],
+            |query_row| query_row.get::<_, bool>(0),
+        )
+        .map_err(database_error)?;
+    if operation.session_id != session_id
+        || operation.kind != DiscoveryOperationKind::AtomicCommit
+        || operation.side_effect_class != DiscoverySideEffectClass::Persistent
+        || operation.status != DiscoveryOperationStatus::Interrupted
+        || operation.expected_revision != attempt.expected_revision.saturating_add(1)
+        || operation.action_id != attempt.action_id
+        || operation.finished_at != Some(attested_at)
+        || attempt.session_id != session_id
+        || attempt.plan_sha256 != row.3
+        || attempt.plan.attempt_id != attempt_id
+        || attempt.plan.connection_id != connection_id
+        || attempt
+            .plan
+            .credential_ref
+            .as_ref()
+            .map(CredentialRef::as_str)
+            != Some(connection_id.as_str())
+        || has_physical_execution
+    {
+        return Err(corrupted(
+            "legacy native no-effect attestation is detached from its historical commit",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_pre_store_native_credential_interruption(
+    connection: &Connection,
+    operation: &DiscoveryOperationRecord,
+    attempt: &DiscoveryCommitAttemptRecord,
+) -> CoreResult<()> {
+    let finished_at = operation.finished_at.ok_or_else(|| {
+        corrupted("pre-store native credential interruption has no finish timestamp")
+    })?;
+    let started_at = operation.started_at.ok_or_else(|| {
+        corrupted("pre-store native credential interruption has no recovery timestamp")
+    })?;
+    let attestation_count = connection
+        .query_row(
+            "SELECT COUNT(*)
+             FROM provider_discovery_native_no_effect_attestations
+             WHERE operation_id = ?1",
+            [operation.id.as_str()],
+            |row| row.get::<_, u64>(0),
+        )
+        .map_err(database_error)?;
+    if operation.status != DiscoveryOperationStatus::Interrupted
+        || operation.session_id != attempt.session_id
+        || operation.expected_revision < attempt.expected_revision.saturating_add(1)
+        || operation.created_at > started_at
+        || started_at != finished_at
+        || operation.updated_at != finished_at
+        || attestation_count != 0
+    {
+        return Err(corrupted(
+            "pre-store native credential interruption is not an exact prepared recovery",
+        ));
+    }
+    let start = validate_native_no_effect_operation_start_receipt(
+        connection,
+        attempt,
+        operation.action_id.as_str(),
+        operation.expected_revision,
+        &operation.request_sha256,
+        &operation.created_at.to_rfc3339(),
+    )?;
+    let interrupted = load_discovery_operation_terminal_receipt(
+        connection,
+        operation,
+        finished_at,
+        "operation_interrupted",
+    )?;
+    let snapshot = load_session_snapshot(connection, attempt.session_id.as_str())?
+        .ok_or_else(|| corrupted("pre-store native credential session is missing"))?;
+    if interrupted.receipt.expected_revision == start.receipt.resulting_revision {
+        validate_discovery_receipt_follows(&start, &interrupted)?;
+        validate_interrupted_discovery_authority_receipt(
+            &interrupted,
+            attempt,
+            &snapshot,
+            "interrupt",
+            operation.expected_revision,
+        )?;
+    } else {
+        validate_discovery_compensation_cancellation_chain(
+            connection,
+            attempt,
+            &start,
+            &interrupted,
+        )?;
+        validate_cancelled_pre_store_interruption_receipt(
+            &interrupted,
+            attempt,
+            &snapshot,
+            operation.expected_revision,
+        )?;
+    }
+    let start_audit = validate_discovery_operation_start_audit(connection, operation)?;
+    if start_audit.is_some() {
+        return Err(corrupted(
+            "pre-store native credential interruption has a store-start audit",
+        ));
+    }
+    validate_discovery_operation_terminal_audit_order_for_receipt(
+        &start,
+        start_audit,
+        &interrupted,
+    )?;
+    validate_discovery_operation_interrupted_audit(connection, operation, &interrupted)?;
+    validate_interrupted_discovery_operation_evidence(
+        connection,
+        attempt,
+        operation,
+        &interrupted,
+        finished_at,
+    )
+}
+
+fn load_discovery_operation_terminal_receipt(
+    connection: &Connection,
+    operation: &DiscoveryOperationRecord,
+    finished_at: DateTime<Utc>,
+    audit_kind: &str,
+) -> CoreResult<DiscoveryAuthorityReceiptRecord> {
+    let rows = {
+        let mut statement = connection
+            .prepare(
+                "SELECT action_id, session_revision
+                 FROM provider_discovery_audit_log
+                 WHERE session_id = ?1
+                   AND audit_kind = ?2
+                   AND subject_id = ?3
+                   AND summary_key = 'discovery.audit.operation_interrupted'
+                   AND created_at = ?4
+                 ORDER BY audit_sequence",
+            )
+            .map_err(database_error)?;
+        statement
+            .query_map(
+                params![
+                    operation.session_id.as_str(),
+                    audit_kind,
+                    operation.id.as_str(),
+                    finished_at.to_rfc3339(),
+                ],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, u64>(1)?)),
+            )
+            .map_err(database_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(database_error)?
+    };
+    let [(action_id, resulting_revision)] = rows.as_slice() else {
+        return Err(corrupted(
+            "native credential interruption has no unique terminal audit",
+        ));
+    };
+    let action_id = DiscoveryActionId::parse(action_id.clone())
+        .map_err(|_| corrupted("native credential interruption action id is invalid"))?;
+    let receipt =
+        load_discovery_authority_receipt_by_action(connection, &operation.session_id, &action_id)?;
+    if receipt.receipt.resulting_revision != *resulting_revision
+        || receipt.created_at != finished_at
+    {
+        return Err(corrupted(
+            "native credential interruption terminal audit is detached from its receipt",
+        ));
+    }
+    Ok(receipt)
+}
+
+type LegacyStartedRow = (
+    String,
+    String,
+    String,
+    String,
+    bool,
+    u64,
+    u64,
+    String,
+    String,
+    String,
+    u64,
+    u64,
+    u64,
+    String,
+    String,
+    u32,
+    u32,
+    u32,
+);
+
+fn load_legacy_started_cutoff(
+    connection: &Connection,
+    operation_id: &DiscoveryOperationId,
+) -> CoreResult<Option<LegacyStartedRow>> {
+    connection
+        .query_row(
+            "SELECT session_id, commit_attempt_id, commit_plan_sha256,
+                    connection_id, session_cancellation_pending,
+                    session_revision_at_cutoff,
+                    session_next_event_sequence_at_cutoff,
+                    start_action_id, start_action_kind, request_sha256,
+                    operation_expected_revision,
+                    start_transition_audit_sequence,
+                    commit_prepared_audit_sequence,
+                    operation_created_at, operation_started_at,
+                    cutoff_before_schema_version, snapshot_schema_version,
+                    redaction_version
+             FROM provider_discovery_native_credential_legacy_started_cutoff_snapshots
+             WHERE operation_id = ?1",
+            [operation_id.as_str()],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                    row.get(8)?,
+                    row.get(9)?,
+                    row.get(10)?,
+                    row.get(11)?,
+                    row.get(12)?,
+                    row.get(13)?,
+                    row.get(14)?,
+                    row.get(15)?,
+                    row.get(16)?,
+                    row.get(17)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(database_error)
+}
+
+fn validate_legacy_unbound_started_credential_execution(
+    connection: &Connection,
+    operation: &DiscoveryOperationRecord,
+    attempt: &DiscoveryCommitAttemptRecord,
+) -> CoreResult<bool> {
+    let Some(legacy) = load_legacy_started_cutoff(connection, &operation.id)? else {
+        return Ok(false);
+    };
+    let created_at = parse_timestamp(&legacy.13, "legacy native Started created_at")?;
+    let started_at = parse_timestamp(&legacy.14, "legacy native Started started_at")?;
+    let snapshot = load_session_snapshot(connection, operation.session_id.as_str())?
+        .ok_or_else(|| corrupted("legacy native Started session is missing"))?;
+    let detached_physical_or_projection = connection
+        .query_row(
+            "SELECT EXISTS(
+                 SELECT 1 FROM provider_discovery_native_credential_executions
+                 WHERE operation_id = ?1
+                 UNION ALL
+                 SELECT 1 FROM provider_discovery_native_credential_store_attempts
+                 WHERE operation_id = ?1
+                 UNION ALL
+                 SELECT 1 FROM provider_discovery_native_credential_abandoned_reservations
+                 WHERE operation_id = ?1
+                 UNION ALL
+                 SELECT 1 FROM provider_discovery_native_no_effect_execution_bindings
+                 WHERE operation_id = ?1
+                 UNION ALL
+                 SELECT 1 FROM provider_credential_ownership_events
+                 WHERE source_kind = 'discovery_commit' AND source_id = ?1
+             )",
+            [operation.id.as_str()],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(database_error)?;
+    if legacy.0 != operation.session_id.as_str()
+        || legacy.1 != attempt.id.as_str()
+        || legacy.2 != attempt.plan_sha256
+        || legacy.3 != attempt.plan.connection_id.as_str()
+        || legacy.7 != operation.action_id.as_str()
+        || legacy.9 != operation.request_sha256
+        || legacy.10 != operation.expected_revision
+        || created_at != operation.created_at
+        || operation.started_at != Some(started_at)
+        || operation.created_at > started_at
+        || legacy.15 != 37
+        || legacy.16 != 1
+        || legacy.17 != 1
+        || operation.kind != DiscoveryOperationKind::AtomicCommit
+        || operation.side_effect_class != DiscoverySideEffectClass::Persistent
+        || attempt.session_id != operation.session_id
+        || attempt.plan.attempt_id != attempt.id
+        || attempt
+            .plan
+            .credential_ref
+            .as_ref()
+            .map(CredentialRef::as_str)
+            != Some(legacy.3.as_str())
+        || detached_physical_or_projection
+    {
+        return Err(corrupted(
+            "legacy native Started cutoff is detached from its immutable commit",
+        ));
+    }
+    let start = validate_native_no_effect_operation_start_receipt(
+        connection,
+        attempt,
+        operation.action_id.as_str(),
+        operation.expected_revision,
+        &operation.request_sha256,
+        &operation.created_at.to_rfc3339(),
+    )?;
+    if start.receipt.action_kind != legacy.8
+        || start.transition_audit_sequence != legacy.11
+        || start.commit_prepared_audit_sequence != Some(legacy.12)
+        || validate_discovery_operation_start_audit(connection, operation)?.is_none()
+    {
+        return Err(corrupted(
+            "legacy native Started cutoff differs from its exact start history",
+        ));
+    }
+    match operation.status {
+        DiscoveryOperationStatus::Started => validate_active_legacy_started_cutoff(
+            operation, attempt, &snapshot, &legacy, started_at,
+        )?,
+        DiscoveryOperationStatus::OutcomeUnknown => validate_recovered_legacy_started_cutoff(
+            connection, operation, attempt, &snapshot, &legacy, &start,
+        )?,
+        _ => {
+            return Err(corrupted(
+                "legacy native Started cutoff entered an unauthorized terminal state",
+            ));
+        }
+    }
+    Ok(true)
+}
+
+fn validate_active_legacy_started_cutoff(
+    operation: &DiscoveryOperationRecord,
+    attempt: &DiscoveryCommitAttemptRecord,
+    snapshot: &DiscoverySessionSnapshot,
+    legacy: &LegacyStartedRow,
+    started_at: DateTime<Utc>,
+) -> CoreResult<()> {
+    if operation.finished_at.is_some()
+        || operation.updated_at != started_at
+        || snapshot.session.state != DiscoveryState::Committing
+        || snapshot.active_operation_id.as_ref() != Some(&operation.id)
+        || snapshot.session.commit_attempt_id.as_ref() != Some(&attempt.id)
+        || snapshot.session.commit_plan_sha256.as_deref() != Some(attempt.plan_sha256.as_str())
+        || snapshot.session.cancellation_pending != legacy.4
+        || snapshot.session.revision != legacy.5
+        || snapshot.session.next_event_sequence != legacy.6
+    {
+        return Err(corrupted(
+            "legacy native Started cutoff is detached from its active session",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_recovered_legacy_started_cutoff(
+    connection: &Connection,
+    operation: &DiscoveryOperationRecord,
+    attempt: &DiscoveryCommitAttemptRecord,
+    snapshot: &DiscoverySessionSnapshot,
+    legacy: &LegacyStartedRow,
+    start: &DiscoveryAuthorityReceiptRecord,
+) -> CoreResult<()> {
+    let finished_at = operation.finished_at.ok_or_else(|| {
+        corrupted("legacy native Started recovery has no outcome-unknown timestamp")
+    })?;
+    let unknown = load_discovery_authority_receipt_by_revision(
+        connection,
+        &operation.session_id,
+        legacy.5.saturating_add(1),
+    )?;
+    if legacy.4 {
+        validate_discovery_compensation_cancellation_chain(connection, attempt, start, &unknown)?;
+    } else {
+        validate_discovery_receipt_follows(start, &unknown)?;
+        if unknown.receipt.expected_revision != start.receipt.resulting_revision {
+            return Err(corrupted(
+                "legacy native Started recovery has an unsealed cancellation gap",
+            ));
+        }
+    }
+    let recovery_matches = matches!(
+        unknown.receipt.action_kind.as_str(),
+        "interrupt" | "external_outcome_became_unknown"
+    ) && unknown.receipt.expected_revision >= operation.expected_revision
+        && unknown.receipt.resulting_revision
+            == unknown.receipt.expected_revision.saturating_add(1)
+        && unknown.receipt.outcome
+            == lorepia_domain::discovery::DiscoveryActionReceiptOutcome::Applied
+        && unknown.transition.session.state == DiscoveryState::UnknownOutcome
+        && unknown.transition.session.input == snapshot.session.input
+        && unknown.transition.session.commit_attempt_id.as_ref() == Some(&attempt.id)
+        && unknown.transition.session.commit_plan_sha256.as_deref()
+            == Some(attempt.plan_sha256.as_str())
+        && unknown.transition.session.unknown_operation
+            == Some(DiscoveryOperationKind::AtomicCommit)
+        && unknown.transition.session.recovery.is_none()
+        && unknown.transition.session.cancellation_pending == legacy.4
+        && unknown.transition.effect == DiscoveryEffect::None
+        && unknown.created_at == finished_at
+        && operation.updated_at == finished_at
+        && snapshot.session.input == unknown.transition.session.input;
+    if !recovery_matches {
+        return Err(corrupted(
+            "legacy native Started recovery is not its exact unknown outcome",
+        ));
+    }
+    validate_discovery_operation_terminal_audit_order_for_receipt(
+        start,
+        validate_discovery_operation_start_audit(connection, operation)?,
+        &unknown,
+    )?;
+    validate_discovery_operation_interrupted_audit(connection, operation, &unknown).map(|_| ())
+}
+
+fn load_native_no_effect_attestation_row(
+    connection: &Connection,
+    operation_id: &str,
+) -> CoreResult<Option<NativeNoEffectAttestationRow>> {
+    connection
+        .query_row(
+            "SELECT operation_id, session_id, commit_attempt_id, commit_plan_sha256,
+                    connection_id, attestation_kind, evidence_sha256, recovery_owner,
+                    schema_version, redaction_version, attested_at
+             FROM provider_discovery_native_no_effect_attestations
+             WHERE operation_id = ?1",
+            [operation_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, String>(7)?,
+                    row.get::<_, u32>(8)?,
+                    row.get::<_, u32>(9)?,
+                    row.get::<_, String>(10)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(database_error)
+}
+
+type NativeNoEffectExecutionBindingRow = (
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    u32,
+    u32,
+);
+
+fn load_native_no_effect_execution_binding(
+    connection: &Connection,
+    operation_id: &str,
+) -> CoreResult<Option<NativeNoEffectExecutionBindingRow>> {
+    connection
+        .query_row(
+            "SELECT physical_authority_id, session_id, commit_attempt_id,
+                    commit_plan_sha256, connection_id,
+                    connection_binding_sha256, attestation_evidence_sha256,
+                    execution_binding_sha256, attested_at,
+                    schema_version, redaction_version
+             FROM provider_discovery_native_no_effect_execution_bindings
+             WHERE operation_id = ?1",
+            [operation_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, String>(7)?,
+                    row.get::<_, String>(8)?,
+                    row.get::<_, u32>(9)?,
+                    row.get::<_, u32>(10)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(database_error)
+}
+
+fn load_native_no_effect_attestation(
+    connection: &Connection,
+    operation_id: &str,
+) -> CoreResult<Option<DiscoveryNativeNoEffectAttestationRecord>> {
+    let row = load_native_no_effect_attestation_row(connection, operation_id)?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    if row.8 != NATIVE_NO_EFFECT_ATTESTATION_SCHEMA_VERSION
+        || row.9 != NATIVE_NO_EFFECT_ATTESTATION_REDACTION_VERSION
+    {
+        return Err(corrupted(
+            "stored native no-effect attestation version is invalid",
+        ));
+    }
+    validate_sha256("stored native no-effect commit plan hash", &row.3)
+        .map_err(|_| corrupted("stored native no-effect commit plan hash is invalid"))?;
+    validate_sha256("stored native no-effect evidence hash", &row.6)
+        .map_err(|_| corrupted("stored native no-effect evidence hash is invalid"))?;
+    let exact_legacy_snapshot = is_exact_legacy_native_no_effect_snapshot(connection, &row)?;
+    let binding = load_native_no_effect_execution_binding(connection, operation_id)?;
+    if exact_legacy_snapshot {
+        if binding.is_some() {
+            return Err(corrupted(
+                "legacy native no-effect history cannot acquire a physical execution binding",
+            ));
+        }
+        validate_legacy_native_no_effect_attestation(connection, &row)?;
+        return Ok(None);
+    }
+    let binding = binding.ok_or_else(|| {
+        corrupted("stored native no-effect attestation has no physical execution binding")
+    })?;
+    validate_discovery_native_physical_authority_id(&binding.0)?;
+    validate_sha256("stored native no-effect connection binding", &binding.5)
+        .map_err(|_| corrupted("stored native no-effect connection binding is invalid"))?;
+    validate_sha256("stored native no-effect execution binding", &binding.7)
+        .map_err(|_| corrupted("stored native no-effect execution binding is invalid"))?;
+    if binding.9 != 1
+        || binding.10 != 1
+        || binding.1 != row.1
+        || binding.2 != row.2
+        || binding.3 != row.3
+        || binding.4 != row.4
+        || binding.6 != row.6
+        || binding.8 != row.10
+    {
+        return Err(corrupted(
+            "stored native no-effect execution binding differs from its attestation",
+        ));
+    }
+    let record = DiscoveryNativeNoEffectAttestationRecord {
+        operation_id: DiscoveryOperationId::parse(row.0)
+            .map_err(|_| corrupted("stored native no-effect operation id is invalid"))?,
+        physical_authority_id: binding.0,
+        session_id: DiscoverySessionId::from(row.1),
+        commit_attempt_id: DiscoveryCommitAttemptId::parse(row.2)
+            .map_err(|_| corrupted("stored native no-effect commit attempt id is invalid"))?,
+        commit_plan_sha256: row.3,
+        connection_id: ProviderConnectionId::from(row.4),
+        kind: DiscoveryNativeNoEffectAttestationKind::parse(&row.5)?,
+        evidence_sha256: row.6,
+        connection_binding_sha256: binding.5,
+        execution_binding_sha256: binding.7,
+        recovery_owner: DiscoveryNativeRecoveryOwner::parse(&row.7)?,
+        attested_at: parse_timestamp(&row.10, "native no-effect attested_at")?,
+    };
+    let expected = native_no_effect_evidence_sha256_from_record(&record)?;
+    if record.evidence_sha256 != expected {
+        return Err(corrupted(
+            "stored native no-effect evidence hash does not match its binding",
+        ));
+    }
+    validate_stored_native_no_effect_attestation_binding(connection, &record)?;
+    Ok(Some(record))
+}
+
+fn validate_stored_native_no_effect_attestation_binding(
+    connection: &Connection,
+    attestation: &DiscoveryNativeNoEffectAttestationRecord,
+) -> CoreResult<()> {
+    let operation = connection
+        .query_row(
+            "SELECT session_id, operation_kind, side_effect_class, status,
+                    expected_revision, action_id, request_sha256,
+                    started_at, finished_at, created_at
+             FROM provider_discovery_operations
+             WHERE id = ?1",
+            [attestation.operation_id.as_str()],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, u64>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, Option<String>>(7)?,
+                    row.get::<_, Option<String>>(8)?,
+                    row.get::<_, String>(9)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(database_error)?
+        .ok_or_else(|| corrupted("stored native no-effect operation is missing"))?;
+    let attempt =
+        load_commit_attempt(connection, &attestation.commit_attempt_id).map_err(|error| {
+            if error.code == CoreErrorCode::NotFound {
+                corrupted("stored native no-effect commit attempt is missing")
+            } else {
+                error
+            }
+        })?;
+    let execution =
+        load_discovery_native_credential_execution(connection, &attestation.operation_id)?
+            .ok_or_else(|| corrupted("stored native no-effect execution is missing"))?;
+    let finished_at = operation
+        .8
+        .as_deref()
+        .ok_or_else(|| corrupted("stored native no-effect operation is unfinished"))
+        .and_then(|value| parse_timestamp(value, "native no-effect operation finished_at"))?;
+    let started_at = operation
+        .7
+        .as_deref()
+        .ok_or_else(|| corrupted("stored native no-effect operation was never started"))
+        .and_then(|value| parse_timestamp(value, "native no-effect operation started_at"))?;
+    let created_at = parse_timestamp(&operation.9, "native no-effect operation created_at")?;
+    if operation.0 != attestation.session_id.as_str()
+        || operation.1 != "atomic_commit"
+        || operation.2 != "persistent"
+        || operation.3 != "interrupted"
+        || created_at > started_at
+        || started_at > finished_at
+        || finished_at != attestation.attested_at
+        || attempt.session_id != attestation.session_id
+        || attempt.plan_sha256 != attestation.commit_plan_sha256
+        || attempt.plan.attempt_id != attestation.commit_attempt_id
+        || attempt.plan.connection_id != attestation.connection_id
+        || attempt
+            .plan
+            .credential_ref
+            .as_ref()
+            .map(|value| value.0.as_str())
+            != Some(attestation.connection_id.as_str())
+        || execution.physical_authority_id != attestation.physical_authority_id
+        || execution.session_id != attestation.session_id
+        || execution.commit_attempt_id != attestation.commit_attempt_id
+        || execution.commit_plan_sha256 != attestation.commit_plan_sha256
+        || execution.connection_id != attestation.connection_id
+        || execution.connection_binding_sha256 != attestation.connection_binding_sha256
+        || execution.store_started_at != Some(started_at)
+    {
+        return Err(corrupted(
+            "stored native no-effect attestation is detached from its credential commit",
+        ));
+    }
+    validate_native_no_effect_operation_start_receipt(
+        connection,
+        &attempt,
+        &operation.5,
+        operation.4,
+        &operation.6,
+        &operation.9,
+    )?;
+    let expected_execution_binding =
+        native_no_effect_execution_binding_sha256_from_record(attestation)?;
+    if attestation.execution_binding_sha256 != expected_execution_binding {
+        return Err(corrupted(
+            "stored native no-effect execution evidence hash does not match its physical binding",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_native_no_effect_operation_start_receipt(
+    connection: &Connection,
+    attempt: &DiscoveryCommitAttemptRecord,
+    action_id: &str,
+    expected_operation_revision: u64,
+    request_sha256: &str,
+    operation_created_at: &str,
+) -> CoreResult<DiscoveryAuthorityReceiptRecord> {
+    let approval_audits = validate_discovery_authority_approval_rows(connection, attempt)?;
+    let action_id = DiscoveryActionId::parse(action_id)
+        .map_err(|_| corrupted("native no-effect operation action id is invalid"))?;
+    let mut start =
+        load_discovery_authority_receipt_by_action(connection, &attempt.session_id, &action_id)?;
+    let initial_start = start.receipt.action_kind == "approve_review"
+        && start.receipt.action_id == attempt.action_id
+        && start.receipt.expected_revision == attempt.expected_revision;
+    let retry_start = start.receipt.action_kind == "restart_interrupted"
+        && start.receipt.expected_revision > attempt.expected_revision;
+    if (!initial_start && !retry_start)
+        || start.receipt.outcome
+            != lorepia_domain::discovery::DiscoveryActionReceiptOutcome::Applied
+        || start.receipt.resulting_revision != expected_operation_revision
+        || start.receipt.resulting_revision != start.receipt.expected_revision.saturating_add(1)
+        || start.receipt.request_sha256 != request_sha256
+        || start.created_at
+            != parse_timestamp(
+                operation_created_at,
+                "native no-effect operation created_at",
+            )?
+        || start.transition.session.state != DiscoveryState::Committing
+        || start.transition.session.id != attempt.session_id
+        || start.transition.session.input.connection_id != attempt.plan.connection_id
+        || start.transition.session.input.credential_ref != attempt.plan.credential_ref
+        || start.transition.session.manifest_sha256.as_deref()
+            != Some(attempt.plan.manifest_sha256.as_str())
+        || start.transition.session.commit_attempt_id.as_ref() != Some(&attempt.id)
+        || start.transition.session.commit_plan_sha256.as_deref()
+            != Some(attempt.plan_sha256.as_str())
+        || start.transition.session.committed_connection_id.is_some()
+        || start.transition.session.cancellation_pending
+        || start.transition.session.active_effect_approval.is_some()
+        || start.transition.session.failure.is_some()
+        || start.transition.session.recovery.is_some()
+        || start.transition.session.unknown_operation.is_some()
+        || !matches!(
+            &start.transition.effect,
+            DiscoveryEffect::CommitAtomically {
+                commit_attempt_id,
+                plan_sha256,
+            } if commit_attempt_id == &attempt.id && plan_sha256 == &attempt.plan_sha256
+        )
+    {
+        return Err(corrupted(
+            "native no-effect operation is detached from its exact commit start receipt",
+        ));
+    }
+    if retry_start {
+        validate_native_no_effect_retry_predecessor(connection, attempt, &start)?;
+    }
+    let commit_audit_sequence = validate_exact_discovery_authority_audit(
+        connection,
+        &attempt.session_id,
+        "commit_prepared",
+        "discovery.audit.commit_prepared",
+        &start.receipt.action_id,
+        attempt.id.as_str(),
+        start.receipt.resulting_revision,
+        start.created_at,
+    )?;
+    let initial_approval_audit_order_is_invalid = initial_start
+        && !(approval_audits.credential < start.transition_audit_sequence
+            && start.transition_audit_sequence < approval_audits.review
+            && approval_audits.review < commit_audit_sequence);
+    if start.transition_audit_sequence >= commit_audit_sequence
+        || initial_approval_audit_order_is_invalid
+    {
+        return Err(corrupted(
+            "native no-effect commit-start audit order is invalid",
+        ));
+    }
+    start.commit_prepared_audit_sequence = Some(commit_audit_sequence);
+    Ok(start)
+}
+
+fn load_discovery_credential_compensation_operation_id(
+    connection: &Connection,
+    session_id: &DiscoverySessionId,
+    attempt_id: &DiscoveryCommitAttemptId,
+    plan_sha256: &str,
+) -> CoreResult<DiscoveryOperationId> {
+    let attempt = load_commit_attempt(connection, attempt_id)?;
+    let snapshot = load_session_snapshot(connection, session_id.as_str())?
+        .ok_or_else(|| corrupted("credential compensation session is missing"))?;
+    if attempt.session_id != *session_id
+        || attempt.plan_sha256 != plan_sha256
+        || attempt.phase != DiscoveryCommitPhase::Compensating
+        || snapshot.session.state != DiscoveryState::Compensating
+        || snapshot.session.commit_attempt_id.as_ref() != Some(attempt_id)
+        || snapshot.session.commit_plan_sha256.as_deref() != Some(plan_sha256)
+        || snapshot.session.input.connection_id != attempt.plan.connection_id
+        || snapshot.session.input.credential_ref != attempt.plan.credential_ref
+        || attempt
+            .plan
+            .credential_ref
+            .as_ref()
+            .map(CredentialRef::as_str)
+            != Some(attempt.plan.connection_id.as_str())
+    {
+        return Err(corrupted(
+            "credential compensation is detached from its immutable commit attempt",
+        ));
+    }
+    validate_discovery_credential_compensation_step(connection, &attempt)?;
+
+    let origin_revision = connection
+        .query_row(
+            "SELECT MIN(receipt.resulting_revision)
+             FROM provider_discovery_action_receipts AS receipt
+             JOIN provider_discovery_event_outbox AS event
+               ON event.id = receipt.event_id
+              AND event.session_id = receipt.session_id
+             WHERE receipt.session_id = ?1
+               AND event.state = 'compensating'
+               AND receipt.action_kind IN (
+                   'commit_succeeded',
+                   'compensation_required',
+                   'resolve_unknown_outcome',
+                   'restart_interrupted'
+               )",
+            [session_id.as_str()],
+            |row| row.get::<_, Option<u64>>(0),
+        )
+        .map_err(database_error)?
+        .ok_or_else(|| corrupted("credential compensation origin receipt is missing"))?;
+    let origin =
+        load_discovery_authority_receipt_by_revision(connection, session_id, origin_revision)?;
+    validate_discovery_compensation_origin(&origin, &snapshot, &attempt)?;
+
+    let authority_operation_id = match origin.receipt.action_kind.as_str() {
+        "commit_succeeded" => validate_direct_discovery_compensation_operation(
+            connection,
+            &attempt,
+            &origin,
+            DiscoveryOperationStatus::Succeeded,
+        ),
+        "compensation_required" => validate_direct_discovery_compensation_operation(
+            connection,
+            &attempt,
+            &origin,
+            DiscoveryOperationStatus::Failed,
+        ),
+        "resolve_unknown_outcome" => validate_confirmed_commit_compensation_operation(
+            connection, &attempt, &snapshot, &origin,
+        ),
+        "restart_interrupted" => validate_restarted_discovery_compensation_operation(
+            connection, &attempt, &snapshot, &origin,
+        ),
+        _ => Err(corrupted(
+            "credential compensation origin is not bound to a native commit operation",
+        )),
+    }?;
+    validate_current_discovery_compensation_operation(
+        connection,
+        &attempt,
+        &snapshot,
+        origin.receipt.resulting_revision,
+    )?;
+    Ok(authority_operation_id)
+}
+
+fn validate_discovery_credential_compensation_step(
+    connection: &Connection,
+    attempt: &DiscoveryCommitAttemptRecord,
+) -> CoreResult<()> {
+    let rows = {
+        let mut statement = connection
+            .prepare(
+                "SELECT id, commit_attempt_id, ordinal, action_id, step_kind, step_json,
+                        status, attempt_count, last_failure_json, created_at,
+                        updated_at, completed_at
+                 FROM provider_discovery_compensation_steps
+                 WHERE commit_attempt_id = ?1
+                   AND step_kind = 'remove_credential_slot'
+                 ORDER BY ordinal, id",
+            )
+            .map_err(database_error)?;
+        statement
+            .query_map([attempt.id.as_str()], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, u32>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, u32>(7)?,
+                    row.get::<_, Option<String>>(8)?,
+                    row.get::<_, String>(9)?,
+                    row.get::<_, String>(10)?,
+                    row.get::<_, Option<String>>(11)?,
+                ))
+            })
+            .map_err(database_error)?
+            .collect::<Result<Vec<CompensationRow>, _>>()
+            .map_err(database_error)?
+    };
+    let [row] = rows.as_slice() else {
+        return Err(corrupted(
+            "credential compensation requires exactly one immutable slot-removal step",
+        ));
+    };
+    let decoded = decode_compensation_row(row.clone(), &attempt.plan)?;
+    if decoded.commit_attempt_id != attempt.id
+        || decoded.kind != DiscoveryCompensationKind::RemoveCredentialSlot
+    {
+        return Err(corrupted(
+            "credential compensation slot-removal step is detached from its attempt",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_discovery_compensation_origin(
+    origin: &DiscoveryAuthorityReceiptRecord,
+    current: &DiscoverySessionSnapshot,
+    attempt: &DiscoveryCommitAttemptRecord,
+) -> CoreResult<()> {
+    if origin.receipt.outcome != lorepia_domain::discovery::DiscoveryActionReceiptOutcome::Applied
+        || origin.transition.session.state != DiscoveryState::Compensating
+        || origin.transition.session.input != current.session.input
+        || origin.transition.session.commit_attempt_id.as_ref() != Some(&attempt.id)
+        || origin.transition.session.commit_plan_sha256.as_deref()
+            != Some(attempt.plan_sha256.as_str())
+        || origin.transition.session.manifest_sha256.as_deref()
+            != Some(attempt.plan.manifest_sha256.as_str())
+        || origin.transition.session.recovery.is_some()
+        || origin.transition.session.unknown_operation.is_some()
+        || origin.transition.session.failure.is_some()
+        || origin.transition.session.committed_connection_id.is_some()
+        || origin.transition.session.active_effect_approval.is_some()
+        || !origin.transition.session.cancellation_pending
+        || !matches!(
+            &origin.transition.effect,
+            DiscoveryEffect::RunCompensation { commit_attempt_id }
+                if commit_attempt_id == &attempt.id
+        )
+    {
+        return Err(corrupted(
+            "credential compensation origin is detached from its session and attempt",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_direct_discovery_compensation_operation(
+    connection: &Connection,
+    attempt: &DiscoveryCommitAttemptRecord,
+    terminal: &DiscoveryAuthorityReceiptRecord,
+    expected_status: DiscoveryOperationStatus,
+) -> CoreResult<DiscoveryOperationId> {
+    let operation = load_discovery_compensation_source_operation(
+        connection,
+        attempt,
+        terminal,
+        expected_status,
+    )?;
+    let start = validate_native_no_effect_operation_start_receipt(
+        connection,
+        attempt,
+        operation.action_id.as_str(),
+        operation.expected_revision,
+        &operation.request_sha256,
+        &operation.created_at.to_rfc3339(),
+    )?;
+    validate_discovery_compensation_cancellation_chain(connection, attempt, &start, terminal)?;
+    let start_audit = validate_discovery_operation_start_audit(connection, &operation)?;
+    validate_discovery_operation_terminal_audit_order_for_receipt(&start, start_audit, terminal)?;
+    let finished_at = operation
+        .finished_at
+        .ok_or_else(|| corrupted("credential compensation source operation has no finish time"))?;
+    if operation.status != expected_status
+        || operation.created_at > operation.started_at.unwrap_or(finished_at)
+        || operation
+            .started_at
+            .is_none_or(|started_at| started_at > finished_at)
+        || finished_at != terminal.created_at
+        || operation.updated_at != finished_at
+    {
+        return Err(corrupted(
+            "credential compensation source operation is detached from its terminal receipt",
+        ));
+    }
+    Ok(operation.id)
+}
+
+fn validate_confirmed_commit_compensation_operation(
+    connection: &Connection,
+    attempt: &DiscoveryCommitAttemptRecord,
+    current: &DiscoverySessionSnapshot,
+    resolution: &DiscoveryAuthorityReceiptRecord,
+) -> CoreResult<DiscoveryOperationId> {
+    let unknown = load_discovery_authority_receipt_by_revision(
+        connection,
+        &attempt.session_id,
+        resolution.receipt.expected_revision,
+    )?;
+    validate_discovery_receipt_follows(&unknown, resolution)?;
+    if resolution.receipt.expected_revision != unknown.receipt.resulting_revision
+        || resolution.receipt.resulting_revision
+            != resolution.receipt.expected_revision.saturating_add(1)
+        || resolution.receipt.action_kind != "resolve_unknown_outcome"
+        || unknown.created_at > resolution.created_at
+    {
+        return Err(corrupted(
+            "confirmed credential commit compensation has no exact unknown outcome history",
+        ));
+    }
+    let source = validate_discovery_outcome_unknown_compensation_source(
+        connection, attempt, current, &unknown,
+    )?;
+    let approval_audit = validate_discovery_unknown_outcome_resolution(
+        connection,
+        attempt,
+        resolution,
+        &DiscoveryUnknownOutcomeResolution::ConfirmedCommitCompleted {
+            connection_id: attempt.plan.connection_id.clone(),
+        },
+    )?;
+    if source.interrupted_audit_sequence >= resolution.transition_audit_sequence
+        || resolution.transition_audit_sequence >= approval_audit
+    {
+        return Err(corrupted(
+            "confirmed credential commit compensation audit order is invalid",
+        ));
+    }
+    validate_discovery_authority_graph_audits(
+        connection,
+        attempt,
+        source.operation.expected_revision,
+        source.finished_at,
+        false,
+        source.start_audit_sequence,
+        unknown.transition_audit_sequence,
+    )?;
+    Ok(source.operation.id)
+}
+
+struct DiscoveryOutcomeUnknownCompensationSource {
+    operation: DiscoveryOperationRecord,
+    start_audit_sequence: u64,
+    interrupted_audit_sequence: u64,
+    finished_at: DateTime<Utc>,
+}
+
+fn validate_discovery_outcome_unknown_compensation_source(
+    connection: &Connection,
+    attempt: &DiscoveryCommitAttemptRecord,
+    current: &DiscoverySessionSnapshot,
+    unknown: &DiscoveryAuthorityReceiptRecord,
+) -> CoreResult<DiscoveryOutcomeUnknownCompensationSource> {
+    if !matches!(
+        unknown.receipt.action_kind.as_str(),
+        "interrupt" | "external_outcome_became_unknown"
+    ) || unknown.receipt.outcome
+        != lorepia_domain::discovery::DiscoveryActionReceiptOutcome::Applied
+        || unknown.receipt.resulting_revision != unknown.receipt.expected_revision.saturating_add(1)
+        || unknown.transition.session.state != DiscoveryState::UnknownOutcome
+        || unknown.transition.session.input != current.session.input
+        || unknown.transition.session.commit_attempt_id.as_ref() != Some(&attempt.id)
+        || unknown.transition.session.commit_plan_sha256.as_deref()
+            != Some(attempt.plan_sha256.as_str())
+        || unknown.transition.session.manifest_sha256.as_deref()
+            != Some(attempt.plan.manifest_sha256.as_str())
+        || unknown.transition.session.committed_connection_id.is_some()
+        || unknown.transition.session.recovery.is_some()
+        || unknown.transition.session.failure.is_some()
+        || unknown.transition.session.active_effect_approval.is_some()
+        || unknown.transition.session.unknown_operation
+            != Some(DiscoveryOperationKind::AtomicCommit)
+        || !unknown.transition.session.cancellation_pending
+        || unknown.transition.effect != DiscoveryEffect::None
+        || unknown.transition.event.action_required
+            != Some(DiscoveryActionRequired::ReconcileUnknownOutcome {
+                operation: DiscoveryOperationKind::AtomicCommit,
+            })
+    {
+        return Err(corrupted(
+            "credential compensation has no exact outcome-unknown source receipt",
+        ));
+    }
+    let operation = load_discovery_compensation_source_operation(
+        connection,
+        attempt,
+        unknown,
+        DiscoveryOperationStatus::OutcomeUnknown,
+    )?;
+    let start = validate_native_no_effect_operation_start_receipt(
+        connection,
+        attempt,
+        operation.action_id.as_str(),
+        operation.expected_revision,
+        &operation.request_sha256,
+        &operation.created_at.to_rfc3339(),
+    )?;
+    validate_discovery_compensation_cancellation_chain(connection, attempt, &start, unknown)?;
+    let start_audit_sequence = validate_discovery_operation_start_audit(connection, &operation)?
+        .ok_or_else(|| corrupted("outcome-unknown credential commit has no start audit"))?;
+    validate_discovery_operation_terminal_audit_order_for_receipt(
+        &start,
+        Some(start_audit_sequence),
+        unknown,
+    )?;
+    let finished_at = operation
+        .finished_at
+        .ok_or_else(|| corrupted("outcome-unknown credential commit has no finish time"))?;
+    if operation.status != DiscoveryOperationStatus::OutcomeUnknown
+        || operation.created_at > operation.started_at.unwrap_or(finished_at)
+        || operation
+            .started_at
+            .is_none_or(|started_at| started_at > finished_at)
+        || finished_at != unknown.created_at
+        || operation.updated_at != finished_at
+    {
+        return Err(corrupted(
+            "outcome-unknown credential commit is detached from its terminal receipt",
+        ));
+    }
+    let interrupted_audit_sequence =
+        validate_discovery_operation_interrupted_audit(connection, &operation, unknown)?;
+    Ok(DiscoveryOutcomeUnknownCompensationSource {
+        operation,
+        start_audit_sequence,
+        interrupted_audit_sequence,
+        finished_at,
+    })
+}
+
+fn validate_restarted_discovery_compensation_operation(
+    connection: &Connection,
+    attempt: &DiscoveryCommitAttemptRecord,
+    current: &DiscoverySessionSnapshot,
+    restart: &DiscoveryAuthorityReceiptRecord,
+) -> CoreResult<DiscoveryOperationId> {
+    let interrupted = load_discovery_authority_receipt_by_revision(
+        connection,
+        &attempt.session_id,
+        restart.receipt.expected_revision,
+    )?;
+    validate_discovery_receipt_follows(&interrupted, restart)?;
+    let recovery_matches = matches!(
+        interrupted.transition.session.recovery.as_ref(),
+        Some(DiscoveryRecoveryCheckpoint {
+            interrupted_state: DiscoveryState::Compensating,
+            operation: DiscoveryOperationKind::Compensation,
+        })
+    );
+    if restart.receipt.action_kind != "restart_interrupted"
+        || restart.receipt.expected_revision != interrupted.receipt.resulting_revision
+        || restart.receipt.resulting_revision != restart.receipt.expected_revision.saturating_add(1)
+        || interrupted.receipt.outcome
+            != lorepia_domain::discovery::DiscoveryActionReceiptOutcome::Applied
+        || interrupted.transition.session.state != DiscoveryState::Interrupted
+        || interrupted.transition.session.input != current.session.input
+        || interrupted.transition.session.commit_attempt_id.as_ref() != Some(&attempt.id)
+        || interrupted.transition.session.commit_plan_sha256.as_deref()
+            != Some(attempt.plan_sha256.as_str())
+        || interrupted.transition.session.unknown_operation.is_some()
+        || interrupted.transition.session.failure.is_some()
+        || interrupted
+            .transition
+            .session
+            .committed_connection_id
+            .is_some()
+        || interrupted
+            .transition
+            .session
+            .active_effect_approval
+            .is_some()
+        || !interrupted.transition.session.cancellation_pending
+        || interrupted.transition.effect != DiscoveryEffect::None
+        || interrupted.transition.event.action_required
+            != Some(DiscoveryActionRequired::RestartInterrupted {
+                operation: DiscoveryOperationKind::Compensation,
+            })
+        || !recovery_matches
+        || interrupted.created_at > restart.created_at
+    {
+        return Err(corrupted(
+            "credential compensation restart has no exact interrupted predecessor",
+        ));
+    }
+    let (operation_id, authority_audit_sequence) = match interrupted.receipt.action_kind.as_str() {
+        "interrupt" => {
+            validate_attested_no_effect_compensation_source(connection, attempt, &interrupted)
+        }
+        "resolve_unknown_outcome" => validate_confirmed_no_effect_compensation_source(
+            connection,
+            attempt,
+            current,
+            &interrupted,
+        ),
+        _ => Err(corrupted(
+            "credential compensation restart predecessor action is invalid",
+        )),
+    }?;
+    if authority_audit_sequence >= restart.transition_audit_sequence {
+        return Err(corrupted(
+            "credential compensation restart audit order is invalid",
+        ));
+    }
+    Ok(operation_id)
+}
+
+fn validate_attested_no_effect_compensation_source(
+    connection: &Connection,
+    attempt: &DiscoveryCommitAttemptRecord,
+    interrupted: &DiscoveryAuthorityReceiptRecord,
+) -> CoreResult<(DiscoveryOperationId, u64)> {
+    let operation = load_discovery_compensation_source_operation(
+        connection,
+        attempt,
+        interrupted,
+        DiscoveryOperationStatus::Interrupted,
+    )?;
+    let start = validate_native_no_effect_operation_start_receipt(
+        connection,
+        attempt,
+        operation.action_id.as_str(),
+        operation.expected_revision,
+        &operation.request_sha256,
+        &operation.created_at.to_rfc3339(),
+    )?;
+    validate_discovery_compensation_cancellation_chain(connection, attempt, &start, interrupted)?;
+    let start_audit = validate_discovery_operation_start_audit(connection, &operation)?;
+    validate_discovery_operation_terminal_audit_order_for_receipt(
+        &start,
+        start_audit,
+        interrupted,
+    )?;
+    let finished_at = operation
+        .finished_at
+        .ok_or_else(|| corrupted("interrupted credential commit has no finish time"))?;
+    if operation.status != DiscoveryOperationStatus::Interrupted
+        || operation.updated_at != finished_at
+        || interrupted.created_at != finished_at
+    {
+        return Err(corrupted(
+            "interrupted credential commit is detached from its terminal receipt",
+        ));
+    }
+    validate_interrupted_discovery_operation_evidence(
+        connection,
+        attempt,
+        &operation,
+        interrupted,
+        finished_at,
+    )?;
+    let audit =
+        validate_discovery_operation_interrupted_audit(connection, &operation, interrupted)?;
+    Ok((operation.id, audit))
+}
+
+fn validate_confirmed_no_effect_compensation_source(
+    connection: &Connection,
+    attempt: &DiscoveryCommitAttemptRecord,
+    current: &DiscoverySessionSnapshot,
+    resolution: &DiscoveryAuthorityReceiptRecord,
+) -> CoreResult<(DiscoveryOperationId, u64)> {
+    let unknown = load_discovery_authority_receipt_by_revision(
+        connection,
+        &attempt.session_id,
+        resolution.receipt.expected_revision,
+    )?;
+    validate_discovery_receipt_follows(&unknown, resolution)?;
+    if resolution.receipt.expected_revision != unknown.receipt.resulting_revision
+        || resolution.receipt.resulting_revision
+            != resolution.receipt.expected_revision.saturating_add(1)
+        || unknown.created_at > resolution.created_at
+    {
+        return Err(corrupted(
+            "confirmed no-effect compensation is detached from its unknown outcome",
+        ));
+    }
+    let source = validate_discovery_outcome_unknown_compensation_source(
+        connection, attempt, current, &unknown,
+    )?;
+    let approval_audit = validate_discovery_unknown_outcome_resolution(
+        connection,
+        attempt,
+        resolution,
+        &DiscoveryUnknownOutcomeResolution::ConfirmedNoEffect,
+    )?;
+    if source.interrupted_audit_sequence >= resolution.transition_audit_sequence
+        || resolution.transition_audit_sequence >= approval_audit
+    {
+        return Err(corrupted(
+            "confirmed no-effect compensation audit order is invalid",
+        ));
+    }
+    Ok((source.operation.id, approval_audit))
+}
+
+fn validate_current_discovery_compensation_operation(
+    connection: &Connection,
+    attempt: &DiscoveryCommitAttemptRecord,
+    current: &DiscoverySessionSnapshot,
+    origin_revision: u64,
+) -> CoreResult<()> {
+    let operation_id = current
+        .active_operation_id
+        .as_ref()
+        .ok_or_else(|| corrupted("credential compensation has no active operation"))?;
+    let operation = load_operation_by_id(connection, operation_id)?;
+    let start = load_discovery_authority_receipt_by_action(
+        connection,
+        &attempt.session_id,
+        &operation.action_id,
+    )?;
+    if operation.session_id != attempt.session_id
+        || operation.kind != DiscoveryOperationKind::Compensation
+        || operation.side_effect_class != DiscoverySideEffectClass::Persistent
+        || operation.status != DiscoveryOperationStatus::Started
+        || operation.expected_revision != start.receipt.resulting_revision
+        || operation.request_sha256 != start.receipt.request_sha256
+        || operation.approval.is_some()
+        || operation.created_at != start.created_at
+        || operation.finished_at.is_some()
+        || operation.started_at.is_none()
+        || operation.updated_at != operation.started_at.unwrap_or(operation.updated_at)
+        || start.receipt.resulting_revision < origin_revision
+        || !matches!(
+            start.receipt.action_kind.as_str(),
+            "commit_succeeded"
+                | "compensation_required"
+                | "resolve_unknown_outcome"
+                | "restart_interrupted"
+                | "resume_compensation"
+        )
+        || start.receipt.outcome
+            != lorepia_domain::discovery::DiscoveryActionReceiptOutcome::Applied
+        || start.transition.session.state != DiscoveryState::Compensating
+        || start.transition.session.input != current.session.input
+        || start.transition.session.commit_attempt_id.as_ref() != Some(&attempt.id)
+        || start.transition.session.commit_plan_sha256.as_deref()
+            != Some(attempt.plan_sha256.as_str())
+        || start.transition.session.recovery.is_some()
+        || start.transition.session.unknown_operation.is_some()
+        || start.transition.session.failure.is_some()
+        || !start.transition.session.cancellation_pending
+        || !matches!(
+            &start.transition.effect,
+            DiscoveryEffect::RunCompensation { commit_attempt_id }
+                if commit_attempt_id == &attempt.id
+        )
+    {
+        return Err(corrupted(
+            "active credential compensation operation is detached from its creating receipt",
+        ));
+    }
+    let started_at = operation
+        .started_at
+        .ok_or_else(|| corrupted("active credential compensation operation was not started"))?;
+    let start_audit = validate_exact_discovery_authority_audit(
+        connection,
+        &attempt.session_id,
+        "operation_started",
+        "discovery.audit.operation_started",
+        &operation.action_id,
+        operation.id.as_str(),
+        operation.expected_revision,
+        started_at,
+    )?;
+    if start.transition_audit_sequence >= start_audit {
+        return Err(corrupted(
+            "active credential compensation operation audit order is invalid",
+        ));
+    }
+    Ok(())
+}
+
+fn load_discovery_compensation_source_operation(
+    connection: &Connection,
+    attempt: &DiscoveryCommitAttemptRecord,
+    terminal: &DiscoveryAuthorityReceiptRecord,
+    expected_status: DiscoveryOperationStatus,
+) -> CoreResult<DiscoveryOperationRecord> {
+    let status = match expected_status {
+        DiscoveryOperationStatus::Succeeded => "succeeded",
+        DiscoveryOperationStatus::Failed => "failed",
+        DiscoveryOperationStatus::Interrupted => "interrupted",
+        DiscoveryOperationStatus::OutcomeUnknown => "outcome_unknown",
+        _ => {
+            return Err(CoreError::internal(
+                "unsupported direct credential compensation operation status",
+            ));
+        }
+    };
+    let ids = {
+        let mut statement = connection
+            .prepare(
+                "SELECT operation.id
+                 FROM provider_discovery_operations AS operation
+                 JOIN provider_discovery_authorized_native_commit_starts AS authorized
+                   ON authorized.operation_id = operation.id
+                  AND authorized.session_id = operation.session_id
+                  AND authorized.operation_expected_revision = operation.expected_revision
+                 WHERE operation.session_id = ?1
+                   AND operation.operation_kind = 'atomic_commit'
+                   AND operation.side_effect_class = 'persistent'
+                   AND operation.status = ?2
+                   AND operation.finished_at = ?3
+                   AND authorized.commit_attempt_id = ?4
+                   AND authorized.commit_plan_sha256 = ?5
+                 ORDER BY operation.id",
+            )
+            .map_err(database_error)?;
+        statement
+            .query_map(
+                params![
+                    attempt.session_id.as_str(),
+                    status,
+                    terminal.created_at.to_rfc3339(),
+                    attempt.id.as_str(),
+                    attempt.plan_sha256.as_str(),
+                ],
+                |row| row.get::<_, String>(0),
+            )
+            .map_err(database_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(database_error)?
+    };
+    let [operation_id] = ids.as_slice() else {
+        return Err(corrupted(
+            "credential compensation source operation is missing or ambiguous",
+        ));
+    };
+    load_operation_by_id(
+        connection,
+        &DiscoveryOperationId::parse(operation_id)
+            .map_err(|_| corrupted("credential compensation source operation id is invalid"))?,
+    )
+}
+
+fn validate_active_discovery_credential_cancellation_chain(
+    connection: &Connection,
+    attempt: &DiscoveryCommitAttemptRecord,
+    current: &DiscoverySessionSnapshot,
+    start: &DiscoveryAuthorityReceiptRecord,
+) -> CoreResult<()> {
+    if current.session.revision <= start.receipt.resulting_revision {
+        return Err(corrupted(
+            "active discovery credential cancellation has no durable receipt",
+        ));
+    }
+    let mut previous = start;
+    let mut owned = Vec::new();
+    for resulting_revision in
+        start.receipt.resulting_revision.saturating_add(1)..=current.session.revision
+    {
+        let receipt = load_discovery_authority_receipt_by_revision(
+            connection,
+            &attempt.session_id,
+            resulting_revision,
+        )?;
+        validate_discovery_receipt_follows(previous, &receipt)?;
+        let first = owned.is_empty();
+        let effect_matches = if first {
+            receipt.transition.effect
+                == DiscoveryEffect::RequestCancellation {
+                    operation: DiscoveryOperationKind::AtomicCommit,
+                }
+        } else {
+            receipt.transition.effect == DiscoveryEffect::None
+        };
+        if receipt.receipt.action_kind != "cancel"
+            || receipt.receipt.outcome
+                != lorepia_domain::discovery::DiscoveryActionReceiptOutcome::Applied
+            || receipt.receipt.expected_revision != previous.receipt.resulting_revision
+            || receipt.receipt.resulting_revision
+                != receipt.receipt.expected_revision.saturating_add(1)
+            || receipt.transition.session.state != DiscoveryState::Committing
+            || receipt.transition.session.id != attempt.session_id
+            || receipt.transition.session.input != start.transition.session.input
+            || receipt.transition.session.manifest_sha256
+                != start.transition.session.manifest_sha256
+            || receipt.transition.session.commit_attempt_id.as_ref() != Some(&attempt.id)
+            || receipt.transition.session.commit_plan_sha256.as_deref()
+                != Some(attempt.plan_sha256.as_str())
+            || receipt.transition.session.committed_connection_id.is_some()
+            || receipt.transition.session.recovery.is_some()
+            || receipt.transition.session.unknown_operation.is_some()
+            || receipt.transition.session.failure.is_some()
+            || receipt.transition.session.active_effect_approval.is_some()
+            || !receipt.transition.session.cancellation_pending
+            || !effect_matches
+            || previous.transition_audit_sequence >= receipt.transition_audit_sequence
+            || previous.created_at > receipt.created_at
+        {
+            return Err(corrupted(
+                "active discovery credential cancellation history is not canonical",
+            ));
+        }
+        owned.push(receipt);
+        previous = owned
+            .last()
+            .expect("a just-pushed cancellation receipt exists");
+    }
+    if previous.transition.session != current.session {
+        return Err(corrupted(
+            "active discovery credential cancellation is detached from the current session",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_discovery_compensation_cancellation_chain(
+    connection: &Connection,
+    attempt: &DiscoveryCommitAttemptRecord,
+    start: &DiscoveryAuthorityReceiptRecord,
+    terminal: &DiscoveryAuthorityReceiptRecord,
+) -> CoreResult<()> {
+    if terminal.receipt.expected_revision <= start.receipt.resulting_revision {
+        return Err(corrupted(
+            "credential compensation has no durable cancellation receipt",
+        ));
+    }
+    let mut previous = start;
+    let mut owned = Vec::new();
+    for resulting_revision in
+        start.receipt.resulting_revision.saturating_add(1)..=terminal.receipt.expected_revision
+    {
+        let receipt = load_discovery_authority_receipt_by_revision(
+            connection,
+            &attempt.session_id,
+            resulting_revision,
+        )?;
+        validate_discovery_receipt_follows(previous, &receipt)?;
+        let first = owned.is_empty();
+        let effect_matches = if first {
+            receipt.transition.effect
+                == DiscoveryEffect::RequestCancellation {
+                    operation: DiscoveryOperationKind::AtomicCommit,
+                }
+        } else {
+            receipt.transition.effect == DiscoveryEffect::None
+        };
+        if receipt.receipt.action_kind != "cancel"
+            || receipt.receipt.outcome
+                != lorepia_domain::discovery::DiscoveryActionReceiptOutcome::Applied
+            || receipt.receipt.resulting_revision
+                != receipt.receipt.expected_revision.saturating_add(1)
+            || receipt.receipt.expected_revision != previous.receipt.resulting_revision
+            || receipt.transition.session.state != DiscoveryState::Committing
+            || receipt.transition.session.id != attempt.session_id
+            || receipt.transition.session.input.connection_id != attempt.plan.connection_id
+            || receipt.transition.session.input.credential_ref != attempt.plan.credential_ref
+            || receipt.transition.session.commit_attempt_id.as_ref() != Some(&attempt.id)
+            || receipt.transition.session.commit_plan_sha256.as_deref()
+                != Some(attempt.plan_sha256.as_str())
+            || receipt.transition.session.recovery.is_some()
+            || receipt.transition.session.unknown_operation.is_some()
+            || receipt.transition.session.failure.is_some()
+            || !receipt.transition.session.cancellation_pending
+            || !effect_matches
+            || previous.transition_audit_sequence >= receipt.transition_audit_sequence
+            || previous.created_at > receipt.created_at
+            || receipt.created_at > terminal.created_at
+        {
+            return Err(corrupted(
+                "credential compensation cancellation history is not canonical",
+            ));
+        }
+        owned.push(receipt);
+        previous = owned
+            .last()
+            .expect("a just-pushed cancellation receipt exists");
+    }
+    validate_discovery_receipt_follows(previous, terminal)?;
+    if terminal.receipt.expected_revision != previous.receipt.resulting_revision
+        || previous.created_at > terminal.created_at
+        || previous.transition_audit_sequence >= terminal.transition_audit_sequence
+    {
+        return Err(corrupted(
+            "credential compensation terminal audit precedes its cancellation",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_native_no_effect_retry_predecessor(
+    connection: &Connection,
+    attempt: &DiscoveryCommitAttemptRecord,
+    restart: &DiscoveryAuthorityReceiptRecord,
+) -> CoreResult<()> {
+    let predecessor = load_discovery_authority_receipt_by_revision(
+        connection,
+        &attempt.session_id,
+        restart.receipt.expected_revision,
+    )?;
+    validate_discovery_receipt_follows(&predecessor, restart)?;
+    let recovery_matches = matches!(
+        predecessor.transition.session.recovery.as_ref(),
+        Some(DiscoveryRecoveryCheckpoint {
+            interrupted_state: DiscoveryState::Committing,
+            operation: DiscoveryOperationKind::AtomicCommit,
+        })
+    );
+    if predecessor.receipt.outcome
+        != lorepia_domain::discovery::DiscoveryActionReceiptOutcome::Applied
+        || predecessor.receipt.resulting_revision
+            != predecessor.receipt.expected_revision.saturating_add(1)
+        || predecessor.transition.session.state != DiscoveryState::Interrupted
+        || predecessor.transition.session.id != attempt.session_id
+        || predecessor.transition.session.input != restart.transition.session.input
+        || predecessor.transition.session.commit_attempt_id.as_ref() != Some(&attempt.id)
+        || predecessor.transition.session.commit_plan_sha256.as_deref()
+            != Some(attempt.plan_sha256.as_str())
+        || predecessor.transition.session.manifest_sha256.as_deref()
+            != Some(attempt.plan.manifest_sha256.as_str())
+        || predecessor.transition.effect != DiscoveryEffect::None
+        || predecessor.transition.session.unknown_operation.is_some()
+        || predecessor
+            .transition
+            .session
+            .committed_connection_id
+            .is_some()
+        || predecessor.transition.session.failure.is_some()
+        || predecessor
+            .transition
+            .session
+            .active_effect_approval
+            .is_some()
+        || predecessor.transition.session.cancellation_pending
+        || predecessor.transition.event.action_required
+            != Some(DiscoveryActionRequired::RestartInterrupted {
+                operation: DiscoveryOperationKind::AtomicCommit,
+            })
+        || !recovery_matches
+        || predecessor.created_at > restart.created_at
+    {
+        return Err(corrupted(
+            "native no-effect retry has no exact interrupted predecessor",
+        ));
+    }
+    let predecessor_authority_audit_sequence = match predecessor.receipt.action_kind.as_str() {
+        "interrupt" => validate_native_retry_interrupted_operation(
+            connection,
+            attempt,
+            &predecessor,
+            predecessor.receipt.expected_revision,
+        ),
+        "resolve_unknown_outcome" => {
+            validate_native_retry_unknown_predecessor(connection, attempt, &predecessor)
+        }
+        _ => Err(corrupted(
+            "native no-effect retry predecessor action is invalid",
+        )),
+    }?;
+    if predecessor_authority_audit_sequence >= restart.transition_audit_sequence {
+        return Err(corrupted(
+            "native no-effect retry predecessor audit order is invalid",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_native_retry_unknown_predecessor(
+    connection: &Connection,
+    attempt: &DiscoveryCommitAttemptRecord,
+    resolution: &DiscoveryAuthorityReceiptRecord,
+) -> CoreResult<u64> {
+    let approval_audit_sequence = validate_discovery_unknown_outcome_resolution(
+        connection,
+        attempt,
+        resolution,
+        &DiscoveryUnknownOutcomeResolution::ConfirmedNoEffect,
+    )?;
+    let unknown = load_discovery_authority_receipt_by_revision(
+        connection,
+        &attempt.session_id,
+        resolution.receipt.expected_revision,
+    )?;
+    validate_discovery_receipt_follows(&unknown, resolution)?;
+    if !matches!(
+        unknown.receipt.action_kind.as_str(),
+        "interrupt" | "external_outcome_became_unknown"
+    ) || unknown.receipt.outcome
+        != lorepia_domain::discovery::DiscoveryActionReceiptOutcome::Applied
+        || unknown.receipt.resulting_revision != unknown.receipt.expected_revision.saturating_add(1)
+        || unknown.transition.session.state != DiscoveryState::UnknownOutcome
+        || unknown.transition.session.id != attempt.session_id
+        || unknown.transition.session.input != resolution.transition.session.input
+        || unknown.transition.session.unknown_operation
+            != Some(DiscoveryOperationKind::AtomicCommit)
+        || unknown.transition.session.commit_attempt_id.as_ref() != Some(&attempt.id)
+        || unknown.transition.session.commit_plan_sha256.as_deref()
+            != Some(attempt.plan_sha256.as_str())
+        || unknown.transition.session.manifest_sha256.as_deref()
+            != Some(attempt.plan.manifest_sha256.as_str())
+        || unknown.transition.effect != DiscoveryEffect::None
+        || unknown.transition.session.committed_connection_id.is_some()
+        || unknown.transition.session.recovery.is_some()
+        || unknown.transition.session.failure.is_some()
+        || unknown.transition.session.active_effect_approval.is_some()
+        || unknown.transition.session.cancellation_pending
+        || unknown.transition.event.action_required
+            != Some(DiscoveryActionRequired::ReconcileUnknownOutcome {
+                operation: DiscoveryOperationKind::AtomicCommit,
+            })
+        || unknown.created_at > resolution.created_at
+    {
+        return Err(corrupted(
+            "native no-effect retry resolution has no exact unknown predecessor",
+        ));
+    }
+    let interrupted_audit_sequence = validate_native_retry_unknown_operation(
+        connection,
+        attempt,
+        &unknown,
+        unknown.receipt.expected_revision,
+    )?;
+    if interrupted_audit_sequence >= resolution.transition_audit_sequence
+        || resolution.transition_audit_sequence >= approval_audit_sequence
+    {
+        return Err(corrupted(
+            "native no-effect retry resolution audit order is invalid",
+        ));
+    }
+    Ok(approval_audit_sequence)
+}
+
+fn load_native_retry_predecessor_operation(
+    connection: &Connection,
+    attempt: &DiscoveryCommitAttemptRecord,
+    expected_revision: u64,
+) -> CoreResult<DiscoveryOperationRecord> {
+    let ids = {
+        let mut statement = connection
+            .prepare(
+                "SELECT id
+                 FROM provider_discovery_operations
+                 WHERE session_id = ?1
+                   AND operation_kind = 'atomic_commit'
+                   AND side_effect_class = 'persistent'
+                   AND expected_revision = ?2",
+            )
+            .map_err(database_error)?;
+        statement
+            .query_map(
+                params![attempt.session_id.as_str(), expected_revision],
+                |row| row.get::<_, String>(0),
+            )
+            .map_err(database_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(database_error)?
+    };
+    let [operation_id] = ids.as_slice() else {
+        return Err(corrupted(
+            "native no-effect retry predecessor operation is missing or ambiguous",
+        ));
+    };
+    let operation_id = DiscoveryOperationId::parse(operation_id)
+        .map_err(|_| corrupted("native no-effect retry predecessor operation id is invalid"))?;
+    load_operation_by_id(connection, &operation_id)
+}
+
+fn validate_native_retry_interrupted_operation(
+    connection: &Connection,
+    attempt: &DiscoveryCommitAttemptRecord,
+    receipt: &DiscoveryAuthorityReceiptRecord,
+    expected_revision: u64,
+) -> CoreResult<u64> {
+    let operation =
+        load_native_retry_predecessor_operation(connection, attempt, expected_revision)?;
+    let start = validate_native_no_effect_operation_start_receipt(
+        connection,
+        attempt,
+        operation.action_id.as_str(),
+        operation.expected_revision,
+        &operation.request_sha256,
+        &operation.created_at.to_rfc3339(),
+    )?;
+    validate_discovery_receipt_follows(&start, receipt)?;
+    let finished_at = operation
+        .finished_at
+        .ok_or_else(|| corrupted("native retry interrupted operation has no finish timestamp"))?;
+    let started_at = operation
+        .started_at
+        .ok_or_else(|| corrupted("native retry interrupted operation has no start timestamp"))?;
+    if operation.status != DiscoveryOperationStatus::Interrupted
+        || operation.created_at > started_at
+        || started_at > finished_at
+        || operation.updated_at != finished_at
+        || receipt.created_at != finished_at
+    {
+        return Err(corrupted(
+            "native retry interrupted operation is detached from its receipt",
+        ));
+    }
+    let operation_start_audit_sequence =
+        validate_discovery_operation_start_audit(connection, &operation)?;
+    validate_discovery_operation_terminal_audit_order_for_receipt(
+        &start,
+        operation_start_audit_sequence,
+        receipt,
+    )?;
+    let interrupted_audit_sequence =
+        validate_discovery_operation_interrupted_audit(connection, &operation, receipt)?;
+    validate_interrupted_discovery_operation_evidence(
+        connection,
+        attempt,
+        &operation,
+        receipt,
+        finished_at,
+    )?;
+    Ok(interrupted_audit_sequence)
+}
+
+fn validate_native_retry_unknown_operation(
+    connection: &Connection,
+    attempt: &DiscoveryCommitAttemptRecord,
+    receipt: &DiscoveryAuthorityReceiptRecord,
+    expected_revision: u64,
+) -> CoreResult<u64> {
+    let operation =
+        load_native_retry_predecessor_operation(connection, attempt, expected_revision)?;
+    let start = validate_native_no_effect_operation_start_receipt(
+        connection,
+        attempt,
+        operation.action_id.as_str(),
+        operation.expected_revision,
+        &operation.request_sha256,
+        &operation.created_at.to_rfc3339(),
+    )?;
+    validate_discovery_receipt_follows(&start, receipt)?;
+    let finished_at = operation
+        .finished_at
+        .ok_or_else(|| corrupted("native retry unknown operation has no finish timestamp"))?;
+    let started_at = operation
+        .started_at
+        .ok_or_else(|| corrupted("native retry unknown operation has no start timestamp"))?;
+    if operation.status != DiscoveryOperationStatus::OutcomeUnknown
+        || operation.created_at > started_at
+        || started_at > finished_at
+        || operation.updated_at != finished_at
+        || receipt.created_at != finished_at
+    {
+        return Err(corrupted(
+            "native retry unknown operation is detached from its receipt",
+        ));
+    }
+    let operation_start_audit_sequence =
+        validate_discovery_operation_start_audit(connection, &operation)?;
+    validate_discovery_operation_terminal_audit_order_for_receipt(
+        &start,
+        operation_start_audit_sequence,
+        receipt,
+    )?;
+    validate_discovery_operation_interrupted_audit(connection, &operation, receipt)
+}
+
+pub(crate) fn validate_native_no_effect_attestation_integrity(
+    connection: &Connection,
+) -> CoreResult<()> {
+    let has_orphan_binding = connection
+        .query_row(
+            "SELECT EXISTS(
+                 SELECT 1
+                 FROM provider_discovery_native_no_effect_execution_bindings AS binding
+                 LEFT JOIN provider_discovery_native_no_effect_attestations AS attestation
+                   ON attestation.operation_id = binding.operation_id
+                 WHERE attestation.operation_id IS NULL
+             )",
+            [],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(database_error)?;
+    let has_orphan_or_mismatched_legacy_snapshot = connection
+        .query_row(
+            "SELECT EXISTS(
+                 SELECT 1
+                 FROM provider_discovery_native_no_effect_legacy_cutoff_snapshots AS snapshot
+                 LEFT JOIN provider_discovery_native_no_effect_attestations AS attestation
+                   ON attestation.operation_id = snapshot.operation_id
+                  AND attestation.session_id = snapshot.session_id
+                  AND attestation.commit_attempt_id = snapshot.commit_attempt_id
+                  AND attestation.commit_plan_sha256 = snapshot.commit_plan_sha256
+                  AND attestation.connection_id = snapshot.connection_id
+                  AND attestation.attestation_kind = snapshot.attestation_kind
+                  AND attestation.evidence_sha256 = snapshot.evidence_sha256
+                  AND attestation.recovery_owner = snapshot.recovery_owner
+                  AND attestation.schema_version = snapshot.attestation_schema_version
+                  AND attestation.redaction_version = snapshot.attestation_redaction_version
+                  AND attestation.attested_at = snapshot.attested_at
+                 WHERE attestation.operation_id IS NULL
+                    OR snapshot.cutoff_before_schema_version <> 37
+                    OR snapshot.snapshot_schema_version <> 1
+             )",
+            [],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(database_error)?;
+    if has_orphan_binding || has_orphan_or_mismatched_legacy_snapshot {
+        return Err(corrupted(
+            "native no-effect physical or legacy evidence is orphaned from its attestation",
+        ));
+    }
+    let mut after_operation_id = String::new();
+    loop {
+        let operation_ids = {
+            let mut statement = connection
+                .prepare(
+                    "SELECT operation_id
+                     FROM provider_discovery_native_no_effect_attestations
+                     WHERE operation_id > ?1
+                     ORDER BY operation_id
+                     LIMIT ?2",
+                )
+                .map_err(database_error)?;
+            statement
+                .query_map(
+                    params![
+                        after_operation_id,
+                        NATIVE_NO_EFFECT_ATTESTATION_INTEGRITY_PAGE_SIZE
+                    ],
+                    |row| row.get::<_, String>(0),
+                )
+                .map_err(database_error)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(database_error)?
+        };
+        let Some(last_operation_id) = operation_ids.last().cloned() else {
+            return Ok(());
+        };
+        for operation_id in operation_ids {
+            let loaded = load_native_no_effect_attestation(connection, &operation_id)?;
+            if loaded.is_none() {
+                let legacy_snapshot = connection
+                    .query_row(
+                        "SELECT COUNT(*)
+                         FROM provider_discovery_native_no_effect_legacy_cutoff_snapshots
+                         WHERE operation_id = ?1",
+                        [&operation_id],
+                        |row| row.get::<_, u64>(0),
+                    )
+                    .map_err(database_error)?;
+                if legacy_snapshot != 1 {
+                    return Err(corrupted(
+                        "native no-effect attestation disappeared during integrity validation",
+                    ));
+                }
+            }
+        }
+        after_operation_id = last_operation_id;
+    }
+}
+
+fn native_no_effect_evidence_sha256(
+    attestation: &DiscoveryNativeNoEffectAttestationWrite,
+) -> CoreResult<String> {
+    native_no_effect_binding_sha256(
+        attestation.kind,
+        attestation.recovery_owner,
+        attestation.operation_id.as_str(),
+        attestation.session_id.as_str(),
+        attestation.commit_attempt_id.as_str(),
+        &attestation.commit_plan_sha256,
+        attestation.connection_id.as_str(),
+    )
+}
+
+fn native_no_effect_evidence_sha256_from_record(
+    attestation: &DiscoveryNativeNoEffectAttestationRecord,
+) -> CoreResult<String> {
+    native_no_effect_binding_sha256(
+        attestation.kind,
+        attestation.recovery_owner,
+        attestation.operation_id.as_str(),
+        attestation.session_id.as_str(),
+        attestation.commit_attempt_id.as_str(),
+        &attestation.commit_plan_sha256,
+        attestation.connection_id.as_str(),
+    )
+}
+
+fn native_no_effect_execution_binding_sha256(
+    attestation: &DiscoveryNativeNoEffectAttestationWrite,
+    connection_binding_sha256: &str,
+    attested_at: DateTime<Utc>,
+) -> CoreResult<String> {
+    let attested_at = attested_at.to_rfc3339();
+    native_no_effect_execution_binding_sha256_inner(&NativeNoEffectExecutionBindingEvidence {
+        schema_version: NATIVE_NO_EFFECT_ATTESTATION_SCHEMA_VERSION,
+        redaction_version: NATIVE_NO_EFFECT_ATTESTATION_REDACTION_VERSION,
+        operation_id: attestation.operation_id.as_str(),
+        physical_authority_id: &attestation.physical_authority_id,
+        session_id: attestation.session_id.as_str(),
+        commit_attempt_id: attestation.commit_attempt_id.as_str(),
+        commit_plan_sha256: &attestation.commit_plan_sha256,
+        connection_id: attestation.connection_id.as_str(),
+        connection_binding_sha256,
+        attestation_evidence_sha256: &attestation.evidence_sha256,
+        attested_at: &attested_at,
+    })
+}
+
+fn native_no_effect_execution_binding_sha256_from_record(
+    attestation: &DiscoveryNativeNoEffectAttestationRecord,
+) -> CoreResult<String> {
+    let attested_at = attestation.attested_at.to_rfc3339();
+    native_no_effect_execution_binding_sha256_inner(&NativeNoEffectExecutionBindingEvidence {
+        schema_version: NATIVE_NO_EFFECT_ATTESTATION_SCHEMA_VERSION,
+        redaction_version: NATIVE_NO_EFFECT_ATTESTATION_REDACTION_VERSION,
+        operation_id: attestation.operation_id.as_str(),
+        physical_authority_id: &attestation.physical_authority_id,
+        session_id: attestation.session_id.as_str(),
+        commit_attempt_id: attestation.commit_attempt_id.as_str(),
+        commit_plan_sha256: &attestation.commit_plan_sha256,
+        connection_id: attestation.connection_id.as_str(),
+        connection_binding_sha256: &attestation.connection_binding_sha256,
+        attestation_evidence_sha256: &attestation.evidence_sha256,
+        attested_at: &attested_at,
+    })
+}
+
+fn native_no_effect_execution_binding_sha256_inner(
+    evidence: &NativeNoEffectExecutionBindingEvidence<'_>,
+) -> CoreResult<String> {
+    let canonical = canonical_json_result(
+        serde_json::to_value(evidence),
+        "native no-effect execution binding evidence",
+    )?;
+    Ok(sha256_hex(canonical.as_bytes()))
+}
+
+fn native_no_effect_binding_sha256(
+    kind: DiscoveryNativeNoEffectAttestationKind,
+    recovery_owner: DiscoveryNativeRecoveryOwner,
+    operation_id: &str,
+    session_id: &str,
+    commit_attempt_id: &str,
+    commit_plan_sha256: &str,
+    connection_id: &str,
+) -> CoreResult<String> {
+    let evidence = NativeNoEffectAttestationEvidence {
+        schema_version: NATIVE_NO_EFFECT_ATTESTATION_SCHEMA_VERSION,
+        attestation_kind: kind.as_str(),
+        recovery_owner: recovery_owner.as_str(),
+        operation_id,
+        session_id,
+        commit_attempt_id,
+        commit_plan_sha256,
+        connection_id,
+    };
+    let canonical = canonical_json_result(
+        serde_json::to_value(evidence),
+        "native no-effect attestation evidence",
+    )?;
+    Ok(sha256_hex(canonical.as_bytes()))
+}
+
+fn resolve_draft_update(
+    update: &DiscoveryJsonUpdate<Value>,
+    stored: Option<String>,
+) -> CoreResult<Option<String>> {
+    match update {
+        DiscoveryJsonUpdate::Preserve => Ok(stored),
+        DiscoveryJsonUpdate::Clear => Ok(None),
+        DiscoveryJsonUpdate::Replace(value) => {
+            encode_redacted_json(value, "discovery draft").map(Some)
+        }
+    }
+}
+
+fn resolve_review_update(
+    update: &DiscoveryJsonUpdate<DiscoveryReviewDiff>,
+    stored: Option<String>,
+) -> CoreResult<Option<String>> {
+    match update {
+        DiscoveryJsonUpdate::Preserve => Ok(stored),
+        DiscoveryJsonUpdate::Clear => Ok(None),
+        DiscoveryJsonUpdate::Replace(review) => {
+            review.validate().map_err(contract_error)?;
+            encode_json_result(serde_json::to_value(review), "discovery review").map(Some)
+        }
+    }
+}
+
+fn approval_kind(grant: &DiscoveryApprovalGrant) -> &'static str {
+    match grant {
+        DiscoveryApprovalGrant::TemplateSelection { .. } => "template_selection",
+        DiscoveryApprovalGrant::AssistantConsent { .. } => "assistant_consent",
+        DiscoveryApprovalGrant::CredentialOrigin { .. } => "credential_origin",
+        DiscoveryApprovalGrant::CapabilityProbe { .. } => "capability_probe",
+        DiscoveryApprovalGrant::Review { .. } => "review",
+        DiscoveryApprovalGrant::UnknownOutcomeResolution { .. } => "unknown_outcome_resolution",
+    }
+}
+
+fn map_discovery_effect(
+    effect: &lorepia_domain::discovery::DiscoveryEffect,
+) -> (
+    DurableDiscoveryEffect,
+    Option<DiscoveryOperationKind>,
+    Option<&DiscoveryApprovalBinding>,
+) {
+    use lorepia_domain::discovery::DiscoveryEffect;
+    match effect {
+        DiscoveryEffect::None => (DurableDiscoveryEffect::None, None, None),
+        DiscoveryEffect::ResolveKnownProvider => (
+            DurableDiscoveryEffect::ResolveKnownProvider,
+            Some(DiscoveryOperationKind::ResolveKnownProvider),
+            None,
+        ),
+        DiscoveryEffect::FetchDocuments => (
+            DurableDiscoveryEffect::FetchDocuments,
+            Some(DiscoveryOperationKind::FetchDocuments),
+            None,
+        ),
+        DiscoveryEffect::ExtractEvidence => (
+            DurableDiscoveryEffect::ExtractEvidence,
+            Some(DiscoveryOperationKind::ExtractEvidence),
+            None,
+        ),
+        DiscoveryEffect::BuildDeterministicManifestDraft => (
+            DurableDiscoveryEffect::BuildDeterministicManifestDraft,
+            Some(DiscoveryOperationKind::BuildDeterministicManifestDraft),
+            None,
+        ),
+        DiscoveryEffect::BuildAssistantManifestDraft { approval } => (
+            DurableDiscoveryEffect::BuildAssistantManifestDraft,
+            Some(DiscoveryOperationKind::BuildAssistantManifestDraft),
+            Some(approval),
+        ),
+        DiscoveryEffect::ValidateManifest => (
+            DurableDiscoveryEffect::ValidateManifest,
+            Some(DiscoveryOperationKind::ValidateManifest),
+            None,
+        ),
+        DiscoveryEffect::ListModels => (
+            DurableDiscoveryEffect::ListModels,
+            Some(DiscoveryOperationKind::ListModels),
+            None,
+        ),
+        DiscoveryEffect::ProbeCapabilities { approval } => (
+            DurableDiscoveryEffect::ProbeCapabilities,
+            Some(DiscoveryOperationKind::ProbeCapabilities),
+            Some(approval),
+        ),
+        DiscoveryEffect::RequestCancellation { .. } => {
+            (DurableDiscoveryEffect::RequestCancellation, None, None)
+        }
+        DiscoveryEffect::CommitAtomically { .. } => (
+            DurableDiscoveryEffect::CommitAtomically,
+            Some(DiscoveryOperationKind::AtomicCommit),
+            None,
+        ),
+        DiscoveryEffect::RunCompensation { .. } => (
+            DurableDiscoveryEffect::RunCompensation,
+            Some(DiscoveryOperationKind::Compensation),
+            None,
+        ),
+    }
+}
+
+fn audit_kind_for_action(action_kind: &str) -> &'static str {
+    match action_kind {
+        "resolve_unknown_outcome" => "unknown_outcome_reconciled",
+        "compensation_required" => "compensation_started",
+        _ => "transition_applied",
+    }
+}
+
+fn validate_prepared_commit(write: &DiscoveryTransitionWrite) -> CoreResult<()> {
+    let Some(commit) = &write.prepared_commit else {
+        return Ok(());
+    };
+    commit.plan.validate().map_err(contract_error)?;
+    if commit.attempt_number == 0
+        || commit.plan.session_id != write.transition.session.id
+        || (!commit.reuse_existing
+            && commit.plan.expected_revision != write.transition.previous_revision)
+        || (commit.reuse_existing
+            && commit.plan.expected_revision > write.transition.previous_revision)
+        || write.transition.session.commit_attempt_id.as_ref() != Some(&commit.plan.attempt_id)
+        || write.transition.session.commit_plan_sha256.as_deref()
+            != Some(commit.plan_sha256.as_str())
+    {
+        return Err(CoreError::invalid(
+            "prepared discovery commit does not match its transition",
+        ));
+    }
+    let plan_json = encode_commit_plan_json(&commit.plan)?;
+    if sha256_hex(plan_json.as_bytes()) != commit.plan_sha256 {
+        return Err(CoreError::invalid(
+            "discovery commit plan hash does not match its canonical plan",
+        ));
+    }
+    if commit.reuse_existing {
+        if !commit.compensation_steps.is_empty() {
+            return Err(CoreError::invalid(
+                "reused discovery commits must reuse their stored compensation recipe",
+            ));
+        }
+        return Ok(());
+    }
+    let mut ids = BTreeSet::new();
+    let mut ordinals = BTreeSet::new();
+    let mut action_ids = BTreeSet::new();
+    let mut credential_steps = 0_usize;
+    let mut graph_steps = 0_usize;
+    let mut selection_steps = 0_usize;
+    for step in &commit.compensation_steps {
+        validate_identifier("compensation step id", &step.id, 128)?;
+        step.step
+            .validate_against(&commit.plan)
+            .map_err(contract_error)?;
+        if step.step.status != DomainCompensationStatus::Pending
+            || !ids.insert(step.id.as_str())
+            || !ordinals.insert(step.step.ordinal)
+            || !action_ids.insert(step.step.action_id.as_str())
+        {
+            return Err(CoreError::invalid(
+                "prepared compensation steps must be unique pending steps",
+            ));
+        }
+        match step.step.kind {
+            DiscoveryCompensationKind::RemoveCredentialSlot => credential_steps += 1,
+            DiscoveryCompensationKind::RemoveConnectionGraph => graph_steps += 1,
+            DiscoveryCompensationKind::RestorePreviousSelection => selection_steps += 1,
+        }
+    }
+    let expected_ordinals = (0..u32::try_from(commit.compensation_steps.len())
+        .map_err(|_| CoreError::invalid("discovery compensation recipe is too large"))?)
+        .collect::<BTreeSet<_>>();
+    if ordinals != expected_ordinals
+        || graph_steps != 1
+        || credential_steps != usize::from(commit.plan.credential_ref.is_some())
+        || selection_steps != 1
+    {
+        return Err(CoreError::invalid(
+            "fresh discovery commit requires a complete contiguous compensation recipe",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_prepared_commit_session_binding(
+    transaction: &Transaction<'_>,
+    commit: &PreparedDiscoveryCommit,
+) -> CoreResult<()> {
+    let input_json = transaction
+        .query_row(
+            "SELECT sanitized_input_json
+             FROM provider_discovery_sessions
+             WHERE id = ?1",
+            [commit.plan.session_id.as_str()],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(database_error)?
+        .ok_or_else(|| corrupted("prepared commit discovery session is missing"))?;
+    let input = serde_json::from_str::<SanitizedDiscoveryInput>(&input_json)
+        .map_err(|_| corrupted("stored discovery input is invalid"))?;
+    input
+        .validate()
+        .map_err(|_| corrupted("stored discovery input violates its contract"))?;
+    validate_sanitized_input(&input)
+        .map_err(|_| corrupted("stored discovery input contains forbidden data"))?;
+    if commit.plan.connection_id != input.connection_id
+        || commit.plan.credential_ref != input.credential_ref
+    {
+        return Err(CoreError::invalid(
+            "commit plan connection identity differs from its sanitized input",
+        ));
+    }
+    let current_selection = load_discovery_previous_selection(transaction)?;
+    if commit.plan.previous_selection != current_selection {
+        return Err(CoreError::invalid(
+            "commit plan previous selection is not the current atomic snapshot",
+        ));
+    }
+    Ok(())
+}
+
+fn insert_session_in_transaction(
+    transaction: &Transaction<'_>,
+    session: &ProviderDiscoverySession,
+    created_at: DateTime<Utc>,
+) -> CoreResult<()> {
+    let input_json = canonical_json_result(
+        serde_json::to_value(&session.input),
+        "sanitized discovery input",
+    )?;
+    transaction
+        .execute(
+            "INSERT INTO provider_discovery_sessions (
+                 id, state, revision, next_event_sequence, sanitized_input_json,
+                 cancellation_pending, redaction_version, created_at, updated_at
+             ) VALUES (?1, 'draft', 0, 1, ?2, 0, 1, ?3, ?3)",
+            params![session.id.as_str(), input_json, created_at.to_rfc3339()],
+        )
+        .map_err(database_error)?;
+    append_audit(
+        transaction,
+        session.id.as_str(),
+        0,
+        "session_created",
+        None,
+        Some(session.id.as_str()),
+        "discovery.audit.session_created",
+        created_at,
+    )
+}
+
+fn insert_evidence_in_transaction(
+    transaction: &Transaction<'_>,
+    evidence: &DiscoveryEvidenceRecord,
+) -> CoreResult<()> {
+    validate_discovery_evidence(evidence)?;
+    require_session(transaction, evidence.session_id.as_str())?;
+    let extracted_json = encode_redacted_json(&evidence.extracted_json, "discovery evidence")?;
+    let existing = transaction
+        .query_row(
+            "SELECT session_id, kind, source_url, content_sha256, extracted_json, fetched_at
+             FROM provider_discovery_evidence WHERE id = ?1",
+            [evidence.id.as_str()],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(database_error)?;
+    let fetched_at = evidence.fetched_at.to_rfc3339();
+    if let Some(existing) = existing {
+        if existing
+            == (
+                evidence.session_id.as_str().to_owned(),
+                evidence.kind.as_str().to_owned(),
+                evidence.source_url.as_str().to_owned(),
+                evidence.content_sha256.clone(),
+                extracted_json,
+                fetched_at,
+            )
+        {
+            return Ok(());
+        }
+        return Err(CoreError::invalid(
+            "discovery evidence identifiers are immutable",
+        ));
+    }
+    transaction
+        .execute(
+            "INSERT INTO provider_discovery_evidence (
+                 id, session_id, kind, source_url, content_sha256,
+                 extracted_json, redaction_version, fetched_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7)",
+            params![
+                evidence.id.as_str(),
+                evidence.session_id.as_str(),
+                evidence.kind.as_str(),
+                evidence.source_url.as_str(),
+                evidence.content_sha256,
+                extracted_json,
+                fetched_at,
+            ],
+        )
+        .map_err(database_error)?;
+    Ok(())
+}
+
+fn insert_candidate_in_transaction(
+    transaction: &Transaction<'_>,
+    candidate: &StoredDiscoveryCandidate,
+    expected_revision: u64,
+) -> CoreResult<()> {
+    candidate.candidate.validate().map_err(contract_error)?;
+    if candidate.proposed_revision != expected_revision {
+        return Err(CoreError::invalid(
+            "transition candidate revision does not match the source revision",
+        ));
+    }
+    validate_candidate_evidence_references(transaction, candidate)?;
+    let summary_json = encode_json_result(
+        serde_json::to_value(&candidate.candidate.summary),
+        "discovery candidate summary",
+    )?;
+    let evidence_ids_json = encode_json_result(
+        serde_json::to_value(&candidate.candidate.evidence_ids),
+        "candidate evidence references",
+    )?;
+    let kind = candidate_kind(&candidate.candidate);
+    let created_at = candidate.candidate.created_at.to_rfc3339();
+    let existing = transaction
+        .query_row(
+            "SELECT session_id, candidate_kind, summary_json, evidence_ids_json,
+                    proposed_revision, created_at
+             FROM provider_discovery_candidates WHERE id = ?1",
+            [candidate.candidate.id.as_str()],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, u64>(4)?,
+                    row.get::<_, String>(5)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(database_error)?;
+    if let Some(existing) = existing {
+        if existing
+            == (
+                candidate.candidate.session_id.as_str().to_owned(),
+                kind.to_owned(),
+                summary_json,
+                evidence_ids_json,
+                candidate.proposed_revision,
+                created_at,
+            )
+        {
+            return Ok(());
+        }
+        return Err(CoreError::invalid(
+            "discovery candidate identifiers are immutable",
+        ));
+    }
+    transaction
+        .execute(
+            "INSERT INTO provider_discovery_candidates (
+                 id, session_id, candidate_kind, summary_json, evidence_ids_json,
+                 proposed_revision, redaction_version, created_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7)",
+            params![
+                candidate.candidate.id.as_str(),
+                candidate.candidate.session_id.as_str(),
+                kind,
+                summary_json,
+                evidence_ids_json,
+                candidate.proposed_revision,
+                created_at,
+            ],
+        )
+        .map_err(database_error)?;
+    append_audit(
+        transaction,
+        candidate.candidate.session_id.as_str(),
+        candidate.proposed_revision,
+        "candidate_recorded",
+        None,
+        Some(candidate.candidate.id.as_str()),
+        "discovery.audit.candidate_recorded",
+        candidate.candidate.created_at,
+    )
+}
+
+fn require_started_session_operation(
+    transaction: &Transaction<'_>,
+    session_id: &DiscoverySessionId,
+    expected_kind: &str,
+) -> CoreResult<DiscoveryOperationId> {
+    let row = transaction
+        .query_row(
+            "SELECT session.active_operation_id, operation.operation_kind,
+                    operation.side_effect_class, operation.status
+             FROM provider_discovery_sessions AS session
+             LEFT JOIN provider_discovery_operations AS operation
+               ON operation.id = session.active_operation_id
+              AND operation.session_id = session.id
+             WHERE session.id = ?1",
+            [session_id.as_str()],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(database_error)?
+        .ok_or_else(|| {
+            CoreError::new(
+                CoreErrorCode::NotFound,
+                "provider discovery session was not found",
+                false,
+            )
+        })?;
+    let (Some(operation_id), Some(kind), Some(side_effect_class), Some(status)) = row else {
+        return Err(corrupted(
+            "discovery session has no durable active operation",
+        ));
+    };
+    if kind != expected_kind || side_effect_class != "persistent" || status != "started" {
+        return Err(CoreError::invalid(
+            "persistent discovery work requires its exact durable operation to be started",
+        ));
+    }
+    DiscoveryOperationId::parse(operation_id).map_err(contract_error)
+}
+
+fn ensure_provider_graph_ids_vacant(
+    transaction: &Transaction<'_>,
+    graph: &DiscoveredProviderGraph,
+) -> CoreResult<()> {
+    let connection_exists = transaction
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM provider_connections WHERE id = ?1)",
+            [graph.connection.id.as_str()],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(database_error)?;
+    if connection_exists {
+        return Err(CoreError::invalid(
+            "discovery commit connection identifier already belongs to another graph",
+        ));
+    }
+    for route in &graph.routes {
+        if transaction
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM provider_models WHERE id = ?1)",
+                [route.id.as_str()],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(database_error)?
+        {
+            return Err(CoreError::invalid(
+                "discovery commit model route identifier already exists",
+            ));
+        }
+    }
+    for observation in &graph.observations {
+        if transaction
+            .query_row(
+                "SELECT EXISTS(
+                     SELECT 1 FROM model_capability_observations WHERE id = ?1
+                 )",
+                [observation.id.as_str()],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(database_error)?
+        {
+            return Err(CoreError::invalid(
+                "discovery commit capability observation identifier already exists",
+            ));
+        }
+    }
+    for preset in &graph.presets {
+        if transaction
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM generation_presets WHERE id = ?1)",
+                [preset.id.as_str()],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(database_error)?
+        {
+            return Err(CoreError::invalid(
+                "discovery commit generation preset identifier already exists",
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_lines)]
+fn apply_provider_graph_in_transaction(
+    transaction: &Transaction<'_>,
+    graph: &DiscoveredProviderGraph,
+    expected_session_revision: u64,
+    applied_at: DateTime<Utc>,
+) -> CoreResult<()> {
+    validate_provider_graph(graph)?;
+    let plan_json = encode_commit_plan_json(&graph.plan)?;
+    if sha256_hex(plan_json.as_bytes()) != graph.plan_sha256 {
+        return Err(CoreError::invalid(
+            "provider graph plan hash does not match its canonical plan",
+        ));
+    }
+    let session = transaction
+        .query_row(
+            "SELECT state, revision, commit_attempt_id, commit_plan_sha256,
+                    sanitized_input_json
+             FROM provider_discovery_sessions
+             WHERE id = ?1",
+            [graph.plan.session_id.as_str()],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, u64>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, String>(4)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(database_error)?
+        .ok_or_else(|| {
+            CoreError::new(
+                CoreErrorCode::NotFound,
+                "provider discovery session was not found",
+                false,
+            )
+        })?;
+    if session.0 != "committing"
+        || session.1 != expected_session_revision
+        || session.2.as_deref() != Some(graph.plan.attempt_id.as_str())
+        || session.3.as_deref() != Some(graph.plan_sha256.as_str())
+        || graph.plan.expected_revision >= expected_session_revision
+    {
+        return Err(CoreError::invalid(
+            "provider graph commit does not match the active discovery revision",
+        ));
+    }
+    let input = serde_json::from_str::<SanitizedDiscoveryInput>(&session.4)
+        .map_err(|_| corrupted("committing discovery input is invalid"))?;
+    input
+        .validate()
+        .map_err(|_| corrupted("committing discovery input violates its contract"))?;
+    validate_sanitized_input(&input)
+        .map_err(|_| corrupted("committing discovery input contains forbidden data"))?;
+    if graph.connection.id != input.connection_id
+        || graph.connection.display_name != input.display_name
+        || graph.connection.credential_ref != input.credential_ref
+    {
+        return Err(CoreError::invalid(
+            "provider graph connection differs from the user-selected identity",
+        ));
+    }
+    require_started_session_operation(transaction, &graph.plan.session_id, "atomic_commit")?;
+    let attempt = transaction
+        .query_row(
+            "SELECT plan_sha256, plan_json, phase
+             FROM provider_discovery_commit_attempts
+             WHERE id = ?1 AND session_id = ?2",
+            params![
+                graph.plan.attempt_id.as_str(),
+                graph.plan.session_id.as_str()
+            ],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(database_error)?
+        .ok_or_else(|| corrupted("active discovery commit attempt is missing"))?;
+    if attempt.0 != graph.plan_sha256 || attempt.1 != plan_json {
+        return Err(CoreError::invalid(
+            "provider graph differs from its immutable commit attempt",
+        ));
+    }
+    if !matches!(attempt.2.as_str(), "prepared" | "database_applied") {
+        return Err(CoreError::invalid(
+            "provider graph can only be applied from the prepared phase",
+        ));
+    }
+    validate_review_approval(transaction, &graph.plan)?;
+    validate_credential_approval(transaction, graph)?;
+    validate_graph_evidence_references(transaction, graph)?;
+    let requested_ownership_hash = provider_graph_ownership_hash(
+        &graph.template,
+        &graph.connection,
+        &graph.routes,
+        &graph.observations,
+        &graph.presets,
+    )?;
+    if requested_ownership_hash != graph.plan.graph_sha256 {
+        return Err(CoreError::invalid(
+            "provider graph differs from the graph digest approved in the immutable commit plan",
+        ));
+    }
+    if attempt.2 == "database_applied" {
+        let stored_graph = load_discovered_provider_graph_rows(
+            transaction,
+            &graph.plan.template_id,
+            graph.plan.template_version,
+            &graph.plan.connection_id,
+        )?
+        .ok_or_else(|| corrupted("database-applied discovery graph is missing"))?;
+        if stored_provider_graph_ownership_hash(&stored_graph)? != requested_ownership_hash
+            || graph_ownership_audit_hash(transaction, &graph.plan.session_id)?
+                != requested_ownership_hash
+        {
+            return Err(CoreError::invalid(
+                "database-applied discovery graph differs from its immutable ownership record",
+            ));
+        }
+        return Ok(());
+    }
+    ensure_provider_graph_ids_vacant(transaction, graph)?;
+    let template_existed = transaction
+        .query_row(
+            "SELECT EXISTS(
+                 SELECT 1 FROM provider_templates WHERE id = ?1 AND version = ?2
+             )",
+            params![graph.plan.template_id.as_str(), graph.plan.template_version,],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(database_error)?;
+    write_discovered_provider_graph_rows(
+        transaction,
+        &graph.template,
+        &graph.connection,
+        &graph.routes,
+        &graph.observations,
+        &graph.presets,
+    )?;
+    let stored_graph = load_discovered_provider_graph_rows(
+        transaction,
+        &graph.plan.template_id,
+        graph.plan.template_version,
+        &graph.plan.connection_id,
+    )?
+    .ok_or_else(|| corrupted("newly applied discovery graph is missing"))?;
+    if stored_provider_graph_ownership_hash(&stored_graph)? != requested_ownership_hash {
+        return Err(corrupted(
+            "newly applied discovery graph does not match its requested rows",
+        ));
+    }
+    append_audit(
+        transaction,
+        graph.plan.session_id.as_str(),
+        expected_session_revision,
+        "transition_applied",
+        None,
+        Some(&requested_ownership_hash),
+        "discovery.audit.provider_graph_applied",
+        applied_at,
+    )?;
+    append_audit(
+        transaction,
+        graph.plan.session_id.as_str(),
+        expected_session_revision,
+        "transition_applied",
+        None,
+        Some(if template_existed {
+            "reused"
+        } else {
+            "created"
+        }),
+        "discovery.audit.provider_template_ownership",
+        applied_at,
+    )?;
+    let changed = transaction
+        .execute(
+            "UPDATE provider_discovery_commit_attempts
+             SET phase = 'database_applied', updated_at = ?2
+             WHERE id = ?1 AND phase = 'prepared'",
+            params![graph.plan.attempt_id.as_str(), applied_at.to_rfc3339()],
+        )
+        .map_err(database_error)?;
+    if changed != 1 {
+        return Err(CoreError::invalid(
+            "discovery commit phase changed concurrently",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_graph_evidence_references(
+    transaction: &Connection,
+    graph: &DiscoveredProviderGraph,
+) -> CoreResult<()> {
+    for evidence_id in graph
+        .observations
+        .iter()
+        .filter_map(|observation| observation.evidence_ref.as_ref())
+    {
+        let belongs = transaction
+            .query_row(
+                "SELECT EXISTS(
+                     SELECT 1
+                     FROM provider_discovery_evidence
+                     WHERE id = ?1 AND session_id = ?2
+                 )",
+                params![evidence_id.as_str(), graph.plan.session_id.as_str()],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(database_error)?;
+        if !belongs {
+            return Err(CoreError::invalid(
+                "capability observation evidence must belong to the committing discovery session",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn provider_graph_ownership_hash(
+    template: &ProviderTemplate,
+    connection: &ProviderConnection,
+    routes: &[ModelRoute],
+    observations: &[CapabilityObservation],
+    presets: &[GenerationPreset],
+) -> CoreResult<String> {
+    let mut routes = routes.to_vec();
+    routes.sort_by(|left, right| left.id.as_str().cmp(right.id.as_str()));
+    let mut observations = observations.to_vec();
+    observations.sort_by(|left, right| left.id.as_str().cmp(right.id.as_str()));
+    let mut presets = presets.to_vec();
+    presets.sort_by(|left, right| left.id.as_str().cmp(right.id.as_str()));
+    let canonical = canonical_typed_json_result(
+        serde_json::to_value((template, connection, routes, observations, presets)),
+        "discovered provider graph ownership",
+    )?;
+    Ok(sha256_hex(canonical.as_bytes()))
+}
+
+fn stored_provider_graph_ownership_hash(
+    graph: &StoredDiscoveredProviderGraphRows,
+) -> CoreResult<String> {
+    provider_graph_ownership_hash(
+        &graph.template,
+        &graph.connection,
+        &graph.routes,
+        &graph.observations,
+        &graph.presets,
+    )
+}
+
+fn graph_ownership_audit_hash(
+    transaction: &Connection,
+    session_id: &DiscoverySessionId,
+) -> CoreResult<String> {
+    let hashes = {
+        let mut statement = transaction
+            .prepare(
+                "SELECT subject_id
+                 FROM provider_discovery_audit_log
+                 WHERE session_id = ?1
+                   AND summary_key = 'discovery.audit.provider_graph_applied'
+                 ORDER BY audit_sequence",
+            )
+            .map_err(database_error)?;
+        statement
+            .query_map([session_id.as_str()], |row| row.get::<_, Option<String>>(0))
+            .map_err(database_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(database_error)?
+    };
+    if hashes.len() != 1 {
+        return Err(corrupted(
+            "discovery commit must have exactly one provider graph ownership record",
+        ));
+    }
+    let hash = hashes
+        .into_iter()
+        .next()
+        .flatten()
+        .ok_or_else(|| corrupted("provider graph ownership record has no digest"))?;
+    validate_sha256("provider graph ownership digest", &hash)
+        .map_err(|_| corrupted("provider graph ownership digest is invalid"))?;
+    Ok(hash)
+}
+
+fn graph_template_was_created(
+    transaction: &Connection,
+    session_id: &DiscoverySessionId,
+) -> CoreResult<bool> {
+    let records = {
+        let mut statement = transaction
+            .prepare(
+                "SELECT subject_id
+                 FROM provider_discovery_audit_log
+                 WHERE session_id = ?1
+                   AND summary_key = 'discovery.audit.provider_template_ownership'
+                 ORDER BY audit_sequence",
+            )
+            .map_err(database_error)?;
+        statement
+            .query_map([session_id.as_str()], |row| row.get::<_, Option<String>>(0))
+            .map_err(database_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(database_error)?
+    };
+    match records.as_slice() {
+        [Some(value)] if value == "created" => Ok(true),
+        [Some(value)] if value == "reused" => Ok(false),
+        _ => Err(corrupted(
+            "discovery commit has an invalid provider template ownership record",
+        )),
+    }
+}
+
+#[allow(clippy::too_many_lines)]
+fn validate_provider_graph(graph: &DiscoveredProviderGraph) -> CoreResult<()> {
+    graph.plan.validate().map_err(contract_error)?;
+    validate_sha256("provider graph plan hash", &graph.plan_sha256)?;
+    if let Some(reference) = &graph.plan.credential_ref {
+        validate_opaque_credential_reference(reference.as_str())?;
+    }
+    validate_graph_component(serde_json::to_value(&graph.template), "provider template")?;
+    validate_graph_component(
+        serde_json::to_value(&graph.connection),
+        "provider connection",
+    )?;
+    for route in &graph.routes {
+        validate_graph_component(serde_json::to_value(route), "model route")?;
+    }
+    for preset in &graph.presets {
+        validate_graph_component(serde_json::to_value(preset), "generation preset")?;
+    }
+    validate_persistable_discovery_url(
+        graph.connection.api_origin.as_str(),
+        "provider connection origin",
+    )?;
+    if graph.template.id != graph.plan.template_id
+        || graph.template.manifest_version != graph.plan.template_version
+        || graph.connection.id != graph.plan.connection_id
+        || graph.connection.template_id != graph.plan.template_id
+        || graph.connection.template_version != graph.plan.template_version
+        || graph.connection.credential_ref != graph.plan.credential_ref
+    {
+        return Err(CoreError::invalid(
+            "provider graph identities do not match the discovery commit plan",
+        ));
+    }
+    let manifest_json = canonical_json_result(
+        serde_json::to_value(&graph.template.default_manifest),
+        "provider manifest",
+    )?;
+    if sha256_hex(manifest_json.as_bytes()) != graph.plan.manifest_sha256 {
+        return Err(CoreError::invalid(
+            "provider graph manifest does not match the validated manifest hash",
+        ));
+    }
+    for route in &graph.routes {
+        validate_discovery_route_metadata(route)?;
+    }
+    for observation in graph
+        .observations
+        .iter()
+        .filter(|observation| observation.source == ObservationSource::ProviderApi)
+    {
+        let route = graph
+            .routes
+            .iter()
+            .find(|route| route.id == observation.model_route_id)
+            .ok_or_else(|| {
+                CoreError::invalid(
+                    "provider API capability observation references a route outside the graph",
+                )
+            })?;
+        if route.metadata_source != ModelMetadataSource::ProviderApi
+            || route.metadata_observed_at != Some(observation.observed_at)
+            || observation.confidence != Confidence::High
+            || !matches!(
+                observation.status,
+                SupportStatus::Verified | SupportStatus::Unsupported
+            )
+            || observation.evidence_ref.is_some()
+            || observation
+                .expires_at
+                .is_none_or(|expires_at| expires_at <= observation.observed_at)
+        {
+            return Err(CoreError::invalid(
+                "provider API capability observation provenance differs from its route metadata",
+            ));
+        }
+    }
+    for entry in &graph.connection.config.values {
+        if let ConnectionConfigValue::Text(value) = &entry.value
+            && looks_like_secret(value)
+        {
+            return Err(CoreError::invalid(
+                "discovered provider connection configuration contains credential-like material",
+            ));
+        }
+    }
+    for route in &graph.routes {
+        for entry in &route.route_config.values {
+            if let ConnectionConfigValue::Text(value) = &entry.value
+                && looks_like_secret(value)
+            {
+                return Err(CoreError::invalid(
+                    "discovered model route configuration contains credential-like material",
+                ));
+            }
+        }
+    }
+    for observation in &graph.observations {
+        let value = serde_json::to_value(&observation.value)
+            .map_err(|_| CoreError::internal("cannot inspect discovered capability value"))?;
+        validate_redacted_value(&value)?;
+    }
+    let planned = graph.plan.model_route_ids.iter().collect::<BTreeSet<_>>();
+    let actual = graph
+        .routes
+        .iter()
+        .map(|route| &route.id)
+        .collect::<BTreeSet<_>>();
+    if planned.len() != graph.plan.model_route_ids.len()
+        || actual.len() != graph.routes.len()
+        || planned != actual
+        || graph
+            .routes
+            .iter()
+            .any(|route| route.connection_id != graph.connection.id)
+        || graph
+            .observations
+            .iter()
+            .any(|observation| !actual.contains(&observation.model_route_id))
+        || graph
+            .presets
+            .iter()
+            .any(|preset| !actual.contains(&preset.model_route_id))
+    {
+        return Err(CoreError::invalid(
+            "provider graph routes and dependants do not match the commit plan",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_discovery_route_metadata(route: &ModelRoute) -> CoreResult<()> {
+    if route.last_reconciled_sync_job_id.is_some() || route.metadata_sync_job_id.is_some() {
+        return Err(CoreError::invalid(
+            "initial discovery routes cannot claim model synchronization provenance",
+        ));
+    }
+    match (
+        route.raw_metadata.as_ref(),
+        route.metadata_source,
+        route.metadata_observed_at,
+    ) {
+        (Some(metadata), ModelMetadataSource::ProviderApi, Some(observed_at)) => {
+            if route.miss_count != 0
+                || route.first_seen_at != observed_at
+                || route.last_seen_at != Some(observed_at)
+            {
+                return Err(CoreError::invalid(
+                    "discovered provider API route metadata has inconsistent observation times",
+                ));
+            }
+            validate_provider_api_route_metadata(Some(metadata))
+        }
+        (None, ModelMetadataSource::Legacy | ModelMetadataSource::UserOverride, None) => {
+            if route.miss_count != 0 {
+                return Err(CoreError::invalid(
+                    "initial discovery routes cannot carry model synchronization miss counts",
+                ));
+            }
+            Ok(())
+        }
+        _ => Err(CoreError::invalid(
+            "discovered route metadata must be absent or a normalized provider API projection",
+        )),
+    }
+}
+
+fn validate_graph_component(
+    component: Result<Value, serde_json::Error>,
+    label: &str,
+) -> CoreResult<()> {
+    let value = component.map_err(|_| CoreError::internal(format!("cannot inspect {label}")))?;
+    validate_redacted_value(&value)
+        .map_err(|_| CoreError::invalid(format!("{label} contains forbidden data")))
+}
+
+fn validate_review_approval(
+    transaction: &Connection,
+    plan: &DiscoveryCommitPlan,
+) -> CoreResult<()> {
+    let review_json = transaction
+        .query_row(
+            "SELECT review_diff_json
+             FROM provider_discovery_sessions
+             WHERE id = ?1",
+            [plan.session_id.as_str()],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()
+        .map_err(database_error)?
+        .flatten()
+        .ok_or_else(|| CoreError::invalid("provider graph requires a persisted review"))?;
+    let review = serde_json::from_str::<DiscoveryReviewDiff>(&review_json)
+        .map_err(|_| corrupted("stored provider discovery review is invalid"))?;
+    review
+        .validate()
+        .map_err(|_| corrupted("stored provider discovery review digest is invalid"))?;
+    validate_review_evidence_references(transaction, &plan.session_id, &review)?;
+    if review.sha256 != plan.review_sha256 || review.graph_sha256 != plan.graph_sha256 {
+        return Err(CoreError::invalid(
+            "provider graph commit plan differs from the approved review and graph digest",
+        ));
+    }
+    let grants = {
+        let mut statement = transaction
+            .prepare(
+                "SELECT grant_json
+                 FROM provider_discovery_approvals
+                 WHERE session_id = ?1
+                   AND approval_kind = 'review'
+                   AND decision = 'approved'",
+            )
+            .map_err(database_error)?;
+        statement
+            .query_map([plan.session_id.as_str()], |row| row.get::<_, String>(0))
+            .map_err(database_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(database_error)?
+    };
+    let approved = grants.into_iter().any(|grant_json| {
+        serde_json::from_str::<DiscoveryApprovalGrant>(&grant_json)
+            .ok()
+            .is_some_and(|grant| {
+                matches!(
+                    grant,
+                    DiscoveryApprovalGrant::Review {
+                        review_sha256,
+                        graph_sha256,
+                    } if review_sha256 == plan.review_sha256
+                        && graph_sha256 == plan.graph_sha256
+                )
+            })
+    });
+    if !approved {
+        return Err(CoreError::invalid(
+            "provider graph requires an exact approved review hash",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_credential_approval(
+    transaction: &Connection,
+    graph: &DiscoveredProviderGraph,
+) -> CoreResult<()> {
+    let (Some(credential_ref), Some(approval_id)) = (
+        &graph.plan.credential_ref,
+        &graph.plan.credential_approval_id,
+    ) else {
+        if graph.connection.credential_ref.is_some() || graph.connection.credential_scope.is_some()
+        {
+            return Err(CoreError::invalid(
+                "credential-free commit plans cannot publish credential references",
+            ));
+        }
+        return Ok(());
+    };
+    if graph.connection.credential_ref.as_ref() != Some(credential_ref) {
+        return Err(CoreError::invalid(
+            "provider connection credential reference differs from its commit plan",
+        ));
+    }
+    let grant_json = transaction
+        .query_row(
+            "SELECT grant_json
+             FROM provider_discovery_approvals
+             WHERE id = ?1
+               AND session_id = ?2
+               AND approval_kind = 'credential_origin'
+               AND decision = 'approved'",
+            params![approval_id.as_str(), graph.plan.session_id.as_str()],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(database_error)?
+        .ok_or_else(|| {
+            CoreError::invalid("provider graph credential approval was not persisted")
+        })?;
+    let grant = serde_json::from_str::<DiscoveryApprovalGrant>(&grant_json)
+        .map_err(|_| corrupted("stored credential-origin grant is invalid"))?;
+    let DiscoveryApprovalGrant::CredentialOrigin {
+        origin,
+        auth_binding,
+        manifest_sha256,
+    } = grant
+    else {
+        return Err(corrupted(
+            "stored credential approval has the wrong typed grant",
+        ));
+    };
+    let scope =
+        graph.connection.credential_scope.as_ref().ok_or_else(|| {
+            CoreError::invalid("credential reference requires a credential scope")
+        })?;
+    if origin != graph.connection.api_origin
+        || auth_binding != scope.auth_binding
+        || manifest_sha256 != graph.plan.manifest_sha256
+        || scope.allowed_origins.as_slice() != [origin]
+        || scope.redirect_policy != CredentialRedirectPolicy::Deny
+    {
+        return Err(CoreError::invalid(
+            "provider credential scope differs from its approved origin grant",
+        ));
+    }
+    Ok(())
+}
+
+fn finalize_commit_failed_before_apply(
+    transaction: &Transaction<'_>,
+    write: &DiscoveryTransitionWrite,
+) -> CoreResult<()> {
+    if write.transition.receipt.action_kind != "commit_failed_before_apply" {
+        return Ok(());
+    }
+    let attempt_id = write
+        .transition
+        .session
+        .commit_attempt_id
+        .as_ref()
+        .ok_or_else(|| corrupted("failed-before-apply transition has no commit attempt"))?;
+    let attempt = load_commit_attempt(transaction, attempt_id)?;
+    let session_owns_attempt = transaction
+        .query_row(
+            "SELECT commit_attempt_id = ?2
+             FROM provider_discovery_sessions
+             WHERE id = ?1",
+            params![write.transition.session.id.as_str(), attempt.id.as_str(),],
+            |row| row.get::<_, bool>(0),
+        )
+        .optional()
+        .map_err(database_error)?
+        .unwrap_or(false);
+    if attempt.session_id != write.transition.session.id
+        || !session_owns_attempt
+        || attempt.phase != DiscoveryCommitPhase::Prepared
+    {
+        return Err(CoreError::invalid(
+            "failed-before-apply requires the session's own prepared commit attempt",
+        ));
+    }
+    if load_discovered_provider_graph_rows(
+        transaction,
+        &attempt.plan.template_id,
+        attempt.plan.template_version,
+        &attempt.plan.connection_id,
+    )?
+    .is_some()
+    {
+        return Err(CoreError::invalid(
+            "failed-before-apply cannot finalize after provider graph publication",
+        ));
+    }
+    for route_id in &attempt.plan.model_route_ids {
+        let route_exists = transaction
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM provider_models WHERE id = ?1)",
+                [route_id.as_str()],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(database_error)?;
+        if route_exists {
+            return Err(CoreError::invalid(
+                "failed-before-apply found a planned route already persisted",
+            ));
+        }
+    }
+    if attempt.plan.credential_ref.is_some() {
+        return Err(CoreError::invalid(
+            "failed-before-apply cannot attest native credential cleanup",
+        ));
+    }
+    restore_discovery_provider_selection(transaction, &attempt.plan.previous_selection, None)?;
+    transaction
+        .execute(
+            "UPDATE provider_discovery_compensation_steps
+             SET status = 'completed',
+                 last_failure_json = NULL,
+                 updated_at = ?2,
+                 completed_at = ?2
+             WHERE commit_attempt_id = ?1
+               AND status <> 'completed'",
+            params![attempt.id.as_str(), write.occurred_at.to_rfc3339()],
+        )
+        .map_err(database_error)?;
+    let changed = transaction
+        .execute(
+            "UPDATE provider_discovery_commit_attempts
+             SET phase = 'compensated', updated_at = ?2, completed_at = ?2
+             WHERE id = ?1 AND phase = 'prepared'",
+            params![attempt.id.as_str(), write.occurred_at.to_rfc3339()],
+        )
+        .map_err(database_error)?;
+    if changed != 1 {
+        return Err(CoreError::invalid(
+            "failed-before-apply commit attempt changed concurrently",
+        ));
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_lines)]
+fn reconcile_discovery_saga_ledger(
+    transaction: &Transaction<'_>,
+    write: &DiscoveryTransitionWrite,
+) -> CoreResult<()> {
+    let action_kind = write.transition.receipt.action_kind.as_str();
+    if write.transition.session.state == DiscoveryState::Compensating
+        && matches!(
+            action_kind,
+            "commit_succeeded" | "compensation_required" | "restart_interrupted"
+        )
+    {
+        prepare_compensation_ledger(transaction, write)?;
+        return Ok(());
+    }
+    if action_kind == "resume_compensation"
+        && write.transition.session.state == DiscoveryState::Compensating
+    {
+        reset_failed_compensation_steps(transaction, write)?;
+        return Ok(());
+    }
+    if matches!(action_kind, "interrupt" | "external_outcome_became_unknown")
+        && write.transition.session.state == DiscoveryState::UnknownOutcome
+    {
+        let operation = write
+            .transition
+            .session
+            .unknown_operation
+            .ok_or_else(|| corrupted("unknown-outcome transition has no operation"))?;
+        if matches!(
+            operation,
+            DiscoveryOperationKind::AtomicCommit | DiscoveryOperationKind::Compensation
+        ) {
+            record_persistent_unknown_outcome(transaction, write, operation)?;
+        }
+        return Ok(());
+    }
+    if action_kind == "compensation_failed" {
+        return validate_failed_compensation_ledger(transaction, write);
+    }
+    if action_kind != "resolve_unknown_outcome" {
+        if write.approval.as_ref().is_some_and(|approval| {
+            matches!(
+                approval.grant,
+                DiscoveryApprovalGrant::UnknownOutcomeResolution { .. }
+            )
+        }) {
+            return Err(CoreError::invalid(
+                "unknown-outcome approval must accompany its reconciliation action",
+            ));
+        }
+        return Ok(());
+    }
+    let approval = write.approval.as_ref().ok_or_else(|| {
+        CoreError::invalid("unknown-outcome reconciliation requires an approval record")
+    })?;
+    if approval.decision != DiscoveryApprovalDecision::Approved {
+        return Err(CoreError::invalid(
+            "unknown-outcome reconciliation requires an approved grant",
+        ));
+    }
+    let DiscoveryApprovalGrant::UnknownOutcomeResolution {
+        operation,
+        resolution,
+    } = &approval.grant
+    else {
+        return Err(CoreError::invalid(
+            "unknown-outcome reconciliation has the wrong approval grant",
+        ));
+    };
+    let stored = transaction
+        .query_row(
+            "SELECT state, unknown_operation, commit_attempt_id
+             FROM provider_discovery_sessions
+             WHERE id = ?1",
+            [write.transition.session.id.as_str()],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(database_error)?
+        .ok_or_else(|| corrupted("unknown-outcome discovery session is missing"))?;
+    let stored_operation = stored.1.as_deref().map(parse_operation_kind).transpose()?;
+    if stored.0 != "unknown_outcome" || stored_operation.as_ref() != Some(operation) {
+        return Err(CoreError::invalid(
+            "unknown-outcome approval does not match the durable operation",
+        ));
+    }
+    if !matches!(
+        operation,
+        DiscoveryOperationKind::AtomicCommit | DiscoveryOperationKind::Compensation
+    ) {
+        return match resolution {
+            DiscoveryUnknownOutcomeResolution::ConfirmedCommitCompleted { .. }
+            | DiscoveryUnknownOutcomeResolution::ConfirmedCompensated => Err(CoreError::invalid(
+                "non-persistent work cannot use a commit reconciliation",
+            )),
+            DiscoveryUnknownOutcomeResolution::ConfirmedNoEffect
+            | DiscoveryUnknownOutcomeResolution::ManuallyReconciledAsFailed => Ok(()),
+        };
+    }
+    let attempt_id = stored
+        .2
+        .as_deref()
+        .map(DiscoveryCommitAttemptId::parse)
+        .transpose()
+        .map_err(contract_error)?
+        .ok_or_else(|| corrupted("persistent unknown outcome has no commit attempt"))?;
+    let attempt = load_commit_attempt(transaction, &attempt_id)?;
+    if attempt.session_id != write.transition.session.id
+        || write.transition.session.commit_attempt_id.as_ref() != Some(&attempt.id)
+    {
+        return Err(corrupted(
+            "persistent unknown outcome is detached from its commit attempt",
+        ));
+    }
+    match resolution {
+        DiscoveryUnknownOutcomeResolution::ConfirmedNoEffect => {
+            reconcile_confirmed_no_effect(transaction, write, &attempt, *operation)
+        }
+        DiscoveryUnknownOutcomeResolution::ConfirmedCommitCompleted { connection_id } => {
+            if *operation != DiscoveryOperationKind::AtomicCommit
+                || connection_id != &attempt.plan.connection_id
+                || attempt.phase != DiscoveryCommitPhase::OutcomeUnknown
+            {
+                return Err(CoreError::invalid(
+                    "confirmed commit completion does not match the unknown attempt",
+                ));
+            }
+            verify_discovery_attempt_graph(transaction, &attempt)?;
+            let next_phase = match write.transition.session.state {
+                DiscoveryState::Ready => {
+                    if attempt.plan.credential_ref.is_some() {
+                        DiscoveryCommitPhase::CredentialReferenceApplied
+                    } else {
+                        DiscoveryCommitPhase::DatabaseApplied
+                    }
+                }
+                DiscoveryState::Compensating => DiscoveryCommitPhase::CompensationRequired,
+                _ => {
+                    return Err(CoreError::invalid(
+                        "confirmed commit completion produced an invalid session state",
+                    ));
+                }
+            };
+            set_commit_phase_from_unknown(transaction, &attempt, next_phase, write.occurred_at)
+        }
+        DiscoveryUnknownOutcomeResolution::ConfirmedCompensated => {
+            reconcile_confirmed_compensation_in_transaction(transaction, write)
+        }
+        DiscoveryUnknownOutcomeResolution::ManuallyReconciledAsFailed => {
+            if attempt.plan.credential_ref.is_some() {
+                return Err(CoreError::invalid(
+                    "manual failure cannot attest native credential deletion",
+                ));
+            }
+            reconcile_confirmed_compensation_in_transaction(transaction, write)
+        }
+    }
+}
+
+fn reset_failed_compensation_steps(
+    transaction: &Transaction<'_>,
+    write: &DiscoveryTransitionWrite,
+) -> CoreResult<()> {
+    let attempt_id = write
+        .transition
+        .session
+        .commit_attempt_id
+        .as_ref()
+        .ok_or_else(|| corrupted("resumed compensation has no commit attempt"))?;
+    let attempt = load_commit_attempt(transaction, attempt_id)?;
+    if attempt.session_id != write.transition.session.id
+        || attempt.phase != DiscoveryCommitPhase::Compensating
+    {
+        return Err(CoreError::invalid(
+            "compensation resume does not match the durable attempt",
+        ));
+    }
+    let unresolved = transaction
+        .query_row(
+            "SELECT EXISTS(
+                 SELECT 1 FROM provider_discovery_compensation_steps
+                 WHERE commit_attempt_id = ?1
+                   AND status IN ('in_progress', 'outcome_unknown')
+             )",
+            [attempt.id.as_str()],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(database_error)?;
+    if unresolved {
+        return Err(CoreError::invalid(
+            "compensation resume requires every prior step outcome to be known",
+        ));
+    }
+    transaction
+        .execute(
+            "UPDATE provider_discovery_compensation_steps
+             SET status = 'pending',
+                 last_failure_json = NULL,
+                 updated_at = ?2,
+                 completed_at = NULL
+             WHERE commit_attempt_id = ?1 AND status = 'failed'",
+            params![attempt.id.as_str(), write.occurred_at.to_rfc3339()],
+        )
+        .map_err(database_error)?;
+    Ok(())
+}
+
+fn prepare_compensation_ledger(
+    transaction: &Transaction<'_>,
+    write: &DiscoveryTransitionWrite,
+) -> CoreResult<()> {
+    let attempt_id = write
+        .transition
+        .session
+        .commit_attempt_id
+        .as_ref()
+        .ok_or_else(|| corrupted("compensating transition has no commit attempt"))?;
+    let attempt = load_commit_attempt(transaction, attempt_id)?;
+    if attempt.session_id != write.transition.session.id {
+        return Err(CoreError::invalid(
+            "compensation commit attempt belongs to another discovery session",
+        ));
+    }
+    if write.transition.receipt.action_kind == "restart_interrupted"
+        && matches!(
+            attempt.phase,
+            DiscoveryCommitPhase::CompensationRequired | DiscoveryCommitPhase::Compensating
+        )
+    {
+        return Ok(());
+    }
+    if !(matches!(
+        attempt.phase,
+        DiscoveryCommitPhase::DatabaseApplied | DiscoveryCommitPhase::CredentialReferenceApplied
+    ) || (attempt.phase == DiscoveryCommitPhase::Prepared
+        && matches!(
+            write.transition.receipt.action_kind.as_str(),
+            "compensation_required" | "restart_interrupted"
+        )))
+    {
+        return Err(CoreError::invalid(
+            "compensation can start only after a durably applied commit phase",
+        ));
+    }
+    let changed = transaction
+        .execute(
+            "UPDATE provider_discovery_commit_attempts
+             SET phase = 'compensation_required', updated_at = ?2, completed_at = NULL
+             WHERE id = ?1 AND phase = ?3",
+            params![
+                attempt.id.as_str(),
+                write.occurred_at.to_rfc3339(),
+                attempt.phase.as_str(),
+            ],
+        )
+        .map_err(database_error)?;
+    if changed != 1 {
+        return Err(CoreError::invalid(
+            "compensation commit attempt changed concurrently",
+        ));
+    }
+    Ok(())
+}
+
+fn record_persistent_unknown_outcome(
+    transaction: &Transaction<'_>,
+    write: &DiscoveryTransitionWrite,
+    operation: DiscoveryOperationKind,
+) -> CoreResult<()> {
+    let attempt_id = write
+        .transition
+        .session
+        .commit_attempt_id
+        .as_ref()
+        .ok_or_else(|| corrupted("persistent unknown outcome has no commit attempt"))?;
+    let attempt = load_commit_attempt(transaction, attempt_id)?;
+    if attempt.session_id != write.transition.session.id {
+        return Err(corrupted(
+            "persistent unknown outcome has a foreign commit attempt",
+        ));
+    }
+    let allowed_phase = match operation {
+        DiscoveryOperationKind::AtomicCommit => matches!(
+            attempt.phase,
+            DiscoveryCommitPhase::Prepared
+                | DiscoveryCommitPhase::DatabaseApplied
+                | DiscoveryCommitPhase::CredentialReferenceApplied
+        ),
+        DiscoveryOperationKind::Compensation => matches!(
+            attempt.phase,
+            DiscoveryCommitPhase::CompensationRequired | DiscoveryCommitPhase::Compensating
+        ),
+        _ => false,
+    };
+    if !allowed_phase {
+        return Err(CoreError::invalid(
+            "persistent operation cannot become unknown from its durable commit phase",
+        ));
+    }
+    if operation == DiscoveryOperationKind::Compensation {
+        let in_progress_steps = transaction
+            .query_row(
+                "SELECT COUNT(*)
+                 FROM provider_discovery_compensation_steps
+                 WHERE commit_attempt_id = ?1 AND status = 'in_progress'",
+                [attempt.id.as_str()],
+                |row| row.get::<_, u32>(0),
+            )
+            .map_err(database_error)?;
+        if in_progress_steps > 1 {
+            return Err(corrupted("more than one compensation step was in progress"));
+        }
+        transaction
+            .execute(
+                "UPDATE provider_discovery_compensation_steps
+                 SET status = 'outcome_unknown',
+                     updated_at = ?2
+                 WHERE commit_attempt_id = ?1 AND status = 'in_progress'",
+                params![attempt.id.as_str(), write.occurred_at.to_rfc3339()],
+            )
+            .map_err(database_error)?;
+    }
+    let changed = transaction
+        .execute(
+            "UPDATE provider_discovery_commit_attempts
+             SET phase = 'outcome_unknown', updated_at = ?2, completed_at = NULL
+             WHERE id = ?1 AND phase = ?3",
+            params![
+                attempt.id.as_str(),
+                write.occurred_at.to_rfc3339(),
+                attempt.phase.as_str(),
+            ],
+        )
+        .map_err(database_error)?;
+    if changed != 1 {
+        return Err(CoreError::invalid(
+            "unknown-outcome commit attempt changed concurrently",
+        ));
+    }
+    Ok(())
+}
+
+fn reconcile_confirmed_no_effect(
+    transaction: &Transaction<'_>,
+    write: &DiscoveryTransitionWrite,
+    attempt: &DiscoveryCommitAttemptRecord,
+    operation: DiscoveryOperationKind,
+) -> CoreResult<()> {
+    if attempt.phase != DiscoveryCommitPhase::OutcomeUnknown {
+        return Err(CoreError::invalid(
+            "confirmed no-effect resolution requires an unknown commit phase",
+        ));
+    }
+    match operation {
+        DiscoveryOperationKind::AtomicCommit => {
+            reconcile_atomic_commit_confirmed_no_effect(transaction, write, attempt)
+        }
+        DiscoveryOperationKind::Compensation => {
+            reconcile_compensation_confirmed_no_effect(transaction, write, attempt)
+        }
+        _ => Err(CoreError::invalid(
+            "confirmed no-effect ledger reconciliation requires persistent work",
+        )),
+    }
+}
+
+fn reconcile_atomic_commit_confirmed_no_effect(
+    transaction: &Transaction<'_>,
+    write: &DiscoveryTransitionWrite,
+    attempt: &DiscoveryCommitAttemptRecord,
+) -> CoreResult<()> {
+    ensure_discovery_attempt_graph_absent(transaction, attempt)?;
+    let touched_steps = transaction
+        .query_row(
+            "SELECT COUNT(*)
+             FROM provider_discovery_compensation_steps
+             WHERE commit_attempt_id = ?1 AND status <> 'pending'",
+            [attempt.id.as_str()],
+            |row| row.get::<_, u32>(0),
+        )
+        .map_err(database_error)?;
+    if touched_steps != 0 {
+        return Err(CoreError::invalid(
+            "no-effect commit has already touched its compensation recipe",
+        ));
+    }
+    match write.transition.session.state {
+        DiscoveryState::Interrupted => {
+            let next_phase =
+                if write
+                    .transition
+                    .session
+                    .recovery
+                    .as_ref()
+                    .is_some_and(|checkpoint| {
+                        checkpoint.operation == DiscoveryOperationKind::Compensation
+                    })
+                {
+                    DiscoveryCommitPhase::CompensationRequired
+                } else {
+                    DiscoveryCommitPhase::Prepared
+                };
+            set_commit_phase_from_unknown(transaction, attempt, next_phase, write.occurred_at)
+        }
+        DiscoveryState::Cancelled => {
+            restore_discovery_provider_selection(
+                transaction,
+                &attempt.plan.previous_selection,
+                None,
+            )?;
+            complete_no_effect_recipe(transaction, attempt, write.occurred_at)
+        }
+        _ => Err(CoreError::invalid(
+            "confirmed no-effect commit produced an invalid session state",
+        )),
+    }
+}
+
+fn reconcile_compensation_confirmed_no_effect(
+    transaction: &Transaction<'_>,
+    write: &DiscoveryTransitionWrite,
+    attempt: &DiscoveryCommitAttemptRecord,
+) -> CoreResult<()> {
+    transaction
+        .execute(
+            "UPDATE provider_discovery_compensation_steps
+             SET status = 'pending',
+                 last_failure_json = NULL,
+                 updated_at = ?2,
+                 completed_at = NULL
+             WHERE commit_attempt_id = ?1 AND status = 'outcome_unknown'",
+            params![attempt.id.as_str(), write.occurred_at.to_rfc3339()],
+        )
+        .map_err(database_error)?;
+    let in_progress = transaction
+        .query_row(
+            "SELECT EXISTS(
+                 SELECT 1 FROM provider_discovery_compensation_steps
+                 WHERE commit_attempt_id = ?1 AND status = 'in_progress'
+             )",
+            [attempt.id.as_str()],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(database_error)?;
+    if in_progress {
+        return Err(corrupted(
+            "confirmed no-effect compensation left a step in progress",
+        ));
+    }
+    if write.transition.session.state != DiscoveryState::Interrupted {
+        return Err(CoreError::invalid(
+            "incomplete compensation cannot be terminalized as no-effect",
+        ));
+    }
+    set_commit_phase_from_unknown(
+        transaction,
+        attempt,
+        DiscoveryCommitPhase::Compensating,
+        write.occurred_at,
+    )
+}
+
+fn set_commit_phase_from_unknown(
+    transaction: &Transaction<'_>,
+    attempt: &DiscoveryCommitAttemptRecord,
+    next: DiscoveryCommitPhase,
+    updated_at: DateTime<Utc>,
+) -> CoreResult<()> {
+    let changed = transaction
+        .execute(
+            "UPDATE provider_discovery_commit_attempts
+             SET phase = ?2, updated_at = ?3, completed_at = NULL
+             WHERE id = ?1 AND phase = 'outcome_unknown'",
+            params![attempt.id.as_str(), next.as_str(), updated_at.to_rfc3339()],
+        )
+        .map_err(database_error)?;
+    if changed != 1 {
+        return Err(CoreError::invalid(
+            "unknown commit attempt changed concurrently",
+        ));
+    }
+    Ok(())
+}
+
+fn complete_no_effect_recipe(
+    transaction: &Transaction<'_>,
+    attempt: &DiscoveryCommitAttemptRecord,
+    completed_at: DateTime<Utc>,
+) -> CoreResult<()> {
+    transaction
+        .execute(
+            "UPDATE provider_discovery_compensation_steps
+             SET status = 'completed',
+                 last_failure_json = NULL,
+                 updated_at = ?2,
+                 completed_at = ?2
+             WHERE commit_attempt_id = ?1",
+            params![attempt.id.as_str(), completed_at.to_rfc3339()],
+        )
+        .map_err(database_error)?;
+    let changed = transaction
+        .execute(
+            "UPDATE provider_discovery_commit_attempts
+             SET phase = 'compensated', updated_at = ?2, completed_at = ?2
+             WHERE id = ?1 AND phase = 'outcome_unknown'",
+            params![attempt.id.as_str(), completed_at.to_rfc3339()],
+        )
+        .map_err(database_error)?;
+    if changed != 1 {
+        return Err(CoreError::invalid(
+            "no-effect commit attempt changed concurrently",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_failed_compensation_ledger(
+    transaction: &Transaction<'_>,
+    write: &DiscoveryTransitionWrite,
+) -> CoreResult<()> {
+    let attempt_id = write
+        .transition
+        .session
+        .commit_attempt_id
+        .as_ref()
+        .ok_or_else(|| corrupted("failed compensation has no commit attempt"))?;
+    let attempt = load_commit_attempt(transaction, attempt_id)?;
+    if attempt.session_id != write.transition.session.id
+        || write.transition.session.commit_plan_sha256.as_deref()
+            != Some(attempt.plan_sha256.as_str())
+    {
+        return Err(CoreError::invalid(
+            "failed compensation does not own its commit attempt",
+        ));
+    }
+    if attempt.phase != DiscoveryCommitPhase::Compensating {
+        return Err(CoreError::invalid(
+            "failed compensation requires the compensating commit phase",
+        ));
+    }
+    let unresolved_step = transaction
+        .query_row(
+            "SELECT EXISTS(
+                 SELECT 1 FROM provider_discovery_compensation_steps
+                 WHERE commit_attempt_id = ?1
+                   AND status IN ('in_progress', 'outcome_unknown')
+             )",
+            [attempt.id.as_str()],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(database_error)?;
+    if unresolved_step {
+        return Err(CoreError::invalid(
+            "failed compensation must first durably fail its active step",
+        ));
+    }
+    Ok(())
+}
+
+fn ensure_discovery_attempt_graph_absent(
+    transaction: &Transaction<'_>,
+    attempt: &DiscoveryCommitAttemptRecord,
+) -> CoreResult<()> {
+    if load_discovered_provider_graph_rows(
+        transaction,
+        &attempt.plan.template_id,
+        attempt.plan.template_version,
+        &attempt.plan.connection_id,
+    )?
+    .is_some()
+    {
+        return Err(CoreError::invalid(
+            "commit graph must be absent before this ledger transition",
+        ));
+    }
+    for route_id in &attempt.plan.model_route_ids {
+        let exists = transaction
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM provider_models WHERE id = ?1)",
+                [route_id.as_str()],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(database_error)?;
+        if exists {
+            return Err(corrupted(
+                "commit graph is absent but a planned route remains",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn verify_discovery_attempt_graph(
+    transaction: &Transaction<'_>,
+    attempt: &DiscoveryCommitAttemptRecord,
+) -> CoreResult<()> {
+    let graph = load_discovered_provider_graph_rows(
+        transaction,
+        &attempt.plan.template_id,
+        attempt.plan.template_version,
+        &attempt.plan.connection_id,
+    )?
+    .ok_or_else(|| CoreError::invalid("confirmed commit graph is missing"))?;
+    let ownership = stored_provider_graph_ownership_hash(&graph)?;
+    if ownership != attempt.plan.graph_sha256
+        || graph_ownership_audit_hash(transaction, &attempt.session_id)? != ownership
+    {
+        return Err(CoreError::invalid(
+            "confirmed commit graph differs from its approved ownership digest",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_terminal_compensation_transition(
+    transaction: &Transaction<'_>,
+    write: &DiscoveryTransitionWrite,
+) -> CoreResult<()> {
+    let action_is_success = write.transition.receipt.action_kind == "compensation_succeeded";
+    let result_is_terminal_failure = matches!(
+        write.transition.session.state,
+        DiscoveryState::Cancelled | DiscoveryState::Failed
+    );
+    if !action_is_success
+        && (!result_is_terminal_failure || write.transition.session.commit_attempt_id.is_none())
+    {
+        return Ok(());
+    }
+    let attempt_id = write
+        .transition
+        .session
+        .commit_attempt_id
+        .as_ref()
+        .ok_or_else(|| corrupted("terminal compensation transition has no commit attempt"))?;
+    let attempt = load_commit_attempt(transaction, attempt_id)?;
+    if attempt.session_id != write.transition.session.id {
+        return Err(corrupted(
+            "terminal compensation commit attempt belongs to another session",
+        ));
+    }
+    if action_is_success && attempt.phase == DiscoveryCommitPhase::Compensating {
+        validate_commit_phase_preconditions(
+            transaction,
+            &attempt,
+            DiscoveryCommitPhase::Compensated,
+        )?;
+        let changed = transaction
+            .execute(
+                "UPDATE provider_discovery_commit_attempts
+                 SET phase = 'compensated', updated_at = ?2, completed_at = ?2
+                 WHERE id = ?1 AND phase = 'compensating'",
+                params![attempt.id.as_str(), write.occurred_at.to_rfc3339()],
+            )
+            .map_err(database_error)?;
+        if changed != 1 {
+            return Err(CoreError::invalid(
+                "terminal compensation attempt changed concurrently",
+            ));
+        }
+    } else if attempt.phase != DiscoveryCommitPhase::Compensated {
+        return Err(CoreError::invalid(
+            "terminal discovery transition would abandon an incomplete compensation recipe",
+        ));
+    }
+    Ok(())
+}
+
+fn reconcile_confirmed_compensation_in_transaction(
+    transaction: &Transaction<'_>,
+    write: &DiscoveryTransitionWrite,
+) -> CoreResult<()> {
+    let attempt_id = write
+        .transition
+        .session
+        .commit_attempt_id
+        .as_ref()
+        .ok_or_else(|| corrupted("confirmed compensation has no commit attempt"))?;
+    let attempt = load_commit_attempt(transaction, attempt_id)?;
+    if attempt.session_id != write.transition.session.id
+        || !matches!(
+            attempt.phase,
+            DiscoveryCommitPhase::Compensating | DiscoveryCommitPhase::OutcomeUnknown
+        )
+    {
+        return Err(CoreError::invalid(
+            "confirmed compensation does not match an unresolved durable attempt",
+        ));
+    }
+    let graph = load_discovered_provider_graph_rows(
+        transaction,
+        &attempt.plan.template_id,
+        attempt.plan.template_version,
+        &attempt.plan.connection_id,
+    )?;
+    if graph.is_some() {
+        return Err(CoreError::invalid(
+            "cannot confirm compensation while the provider graph still exists",
+        ));
+    }
+    for route_id in &attempt.plan.model_route_ids {
+        let route_exists = transaction
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM provider_models WHERE id = ?1)",
+                [route_id.as_str()],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(database_error)?;
+        if route_exists {
+            return Err(corrupted(
+                "confirmed compensation left a planned model route behind",
+            ));
+        }
+    }
+    let expected_selection_revision =
+        load_discovery_selection_restore_revision(transaction, &attempt.id)?;
+    restore_discovery_provider_selection(
+        transaction,
+        &attempt.plan.previous_selection,
+        expected_selection_revision,
+    )?;
+    transaction
+        .execute(
+            "UPDATE provider_discovery_compensation_steps
+             SET status = 'completed',
+                 last_failure_json = NULL,
+                 updated_at = ?2,
+                 completed_at = ?2
+             WHERE commit_attempt_id = ?1
+               AND status <> 'completed'",
+            params![attempt.id.as_str(), write.occurred_at.to_rfc3339()],
+        )
+        .map_err(database_error)?;
+    let changed = transaction
+        .execute(
+            "UPDATE provider_discovery_commit_attempts
+             SET phase = 'compensated', updated_at = ?2, completed_at = ?2
+             WHERE id = ?1 AND phase IN ('compensating', 'outcome_unknown')",
+            params![attempt.id.as_str(), write.occurred_at.to_rfc3339()],
+        )
+        .map_err(database_error)?;
+    if changed != 1 {
+        return Err(CoreError::invalid(
+            "confirmed compensation attempt changed concurrently",
+        ));
+    }
+    Ok(())
+}
+
+fn complete_commit_attempt_for_ready_transition(
+    transaction: &Transaction<'_>,
+    transition: &DiscoveryTransition,
+    completed_at: DateTime<Utc>,
+) -> CoreResult<()> {
+    let attempt_id = transition
+        .session
+        .commit_attempt_id
+        .as_ref()
+        .ok_or_else(|| corrupted("ready discovery session has no commit attempt"))?;
+    let (phase, plan_sha256, plan_json) = transaction
+        .query_row(
+            "SELECT phase, plan_sha256, plan_json
+             FROM provider_discovery_commit_attempts
+             WHERE id = ?1 AND session_id = ?2",
+            params![attempt_id.as_str(), transition.session.id.as_str()],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(database_error)?
+        .ok_or_else(|| corrupted("ready discovery commit attempt is missing"))?;
+    if phase == "completed" {
+        return Ok(());
+    }
+    let plan = serde_json::from_str::<DiscoveryCommitPlan>(&plan_json)
+        .map_err(|_| corrupted("stored discovery commit plan is invalid"))?;
+    plan.validate()
+        .map_err(|_| corrupted("stored discovery commit plan violates its contract"))?;
+    if sha256_hex(plan_json.as_bytes()) != plan_sha256
+        || transition.session.commit_plan_sha256.as_deref() != Some(plan_sha256.as_str())
+        || transition.session.committed_connection_id.as_ref() != Some(&plan.connection_id)
+    {
+        return Err(CoreError::invalid(
+            "ready discovery session does not match its immutable commit plan",
+        ));
+    }
+    let required_phase = if plan.credential_ref.is_some() {
+        "credential_reference_applied"
+    } else {
+        "database_applied"
+    };
+    if phase != required_phase {
+        return Err(CoreError::invalid(
+            "discovery commit cannot finish before all durable phases are applied",
+        ));
+    }
+    let changed = transaction
+        .execute(
+            "UPDATE provider_discovery_commit_attempts
+             SET phase = 'completed', updated_at = ?2, completed_at = ?2
+             WHERE id = ?1 AND phase = ?3",
+            params![
+                attempt_id.as_str(),
+                completed_at.to_rfc3339(),
+                required_phase
+            ],
+        )
+        .map_err(database_error)?;
+    if changed != 1 {
+        return Err(CoreError::invalid(
+            "discovery commit phase changed concurrently",
+        ));
+    }
+    Ok(())
+}
+
+fn project_reconciled_discovery_credential_ownership(
+    transaction: &Transaction<'_>,
+    transition: &DiscoveryTransition,
+    occurred_at: DateTime<Utc>,
+) -> CoreResult<()> {
+    if transition.receipt.action_kind != "resolve_unknown_outcome" {
+        return Ok(());
+    }
+    let attempt_id = transition
+        .session
+        .commit_attempt_id
+        .as_ref()
+        .ok_or_else(|| corrupted("reconciled credential commit has no attempt"))?;
+    let attempt = load_commit_attempt(transaction, attempt_id)?;
+    if attempt.plan.credential_ref.is_none() {
+        return Ok(());
+    }
+    let snapshot = load_session_snapshot(transaction, transition.session.id.as_str())?
+        .ok_or_else(|| corrupted("reconciled credential session disappeared"))?;
+    if snapshot.session != transition.session || snapshot.active_operation_id.is_some() {
+        return Err(corrupted(
+            "reconciled credential session differs from its ready transition",
+        ));
+    }
+    let authority_operation_id =
+        validate_discovery_credential_completion_evidence(transaction, &attempt, &snapshot)?;
+    let connection_binding_sha256 =
+        crate::provider_credential_repository::provider_credential_connection_binding_sha256(
+            transaction,
+            &attempt.plan.connection_id,
+        )?;
+    let authority_execution =
+        load_discovery_native_credential_execution(transaction, &authority_operation_id)?
+            .ok_or_else(|| {
+                corrupted("reconciled credential commit has no physical execution authority")
+            })?;
+    validate_discovery_credential_ownership_authority_inner(
+        transaction,
+        &attempt.plan.connection_id,
+        &authority_execution.physical_authority_id,
+        authority_operation_id.as_str(),
+        &connection_binding_sha256,
+        DiscoveryCredentialBindingAuthority::Active,
+    )?;
+    let authority_sequence = insert_discovery_credential_ownership_event(
+        transaction,
+        &attempt.plan.connection_id,
+        &connection_binding_sha256,
+        &authority_execution.physical_authority_id,
+        &authority_operation_id,
+        occurred_at,
+    )?;
+    let changed = transaction
+        .execute(
+            "UPDATE provider_credential_ownership
+             SET ownership_state = 'discovery_owned',
+                 connection_binding_sha256 = ?2,
+                 authority_id = ?3,
+                 authority_sequence = ?4,
+                 updated_at = ?5
+             WHERE connection_id = ?1 AND credential_ref = ?1",
+            params![
+                attempt.plan.connection_id.as_str(),
+                connection_binding_sha256,
+                authority_execution.physical_authority_id,
+                authority_sequence,
+                occurred_at.to_rfc3339(),
+            ],
+        )
+        .map_err(database_error)?;
+    if changed != 1 {
+        return Err(corrupted(
+            "reconciled discovery credential lost its ownership projection",
+        ));
+    }
+    Ok(())
+}
+
+fn insert_discovery_credential_ownership_event(
+    transaction: &Transaction<'_>,
+    connection_id: &ProviderConnectionId,
+    connection_binding_sha256: &str,
+    physical_authority_id: &str,
+    source_operation_id: &DiscoveryOperationId,
+    created_at: DateTime<Utc>,
+) -> CoreResult<u64> {
+    validate_discovery_native_physical_authority_id(physical_authority_id)?;
+    validate_sha256(
+        "discovery ownership connection binding",
+        connection_binding_sha256,
+    )?;
+    let authority_sequence = transaction
+        .query_row(
+            "SELECT COALESCE(MAX(authority_sequence), 0) + 1
+             FROM provider_credential_ownership_events
+             WHERE connection_id = ?1",
+            [connection_id.as_str()],
+            |row| row.get::<_, u64>(0),
+        )
+        .map_err(database_error)?;
+    transaction
+        .execute(
+            "INSERT INTO provider_credential_ownership_events (
+                 connection_id, authority_sequence, ownership_state,
+                 connection_binding_sha256, authority_id, source_kind,
+                 source_id, created_at
+             ) VALUES (?1, ?2, 'discovery_owned', ?3, ?4,
+                       'discovery_commit', ?5, ?6)",
+            params![
+                connection_id.as_str(),
+                authority_sequence,
+                connection_binding_sha256,
+                physical_authority_id,
+                source_operation_id.as_str(),
+                created_at.to_rfc3339(),
+            ],
+        )
+        .map_err(database_error)?;
+    Ok(authority_sequence)
+}
+
+fn load_commit_attempt(
+    connection: &Connection,
+    attempt_id: &DiscoveryCommitAttemptId,
+) -> CoreResult<DiscoveryCommitAttemptRecord> {
+    let row = connection
+        .query_row(
+            "SELECT id, session_id, attempt_number, action_id, expected_revision,
+                    plan_sha256, plan_json, phase, created_at, updated_at, completed_at
+             FROM provider_discovery_commit_attempts
+             WHERE id = ?1",
+            [attempt_id.as_str()],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, u32>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, u64>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, String>(7)?,
+                    row.get::<_, String>(8)?,
+                    row.get::<_, String>(9)?,
+                    row.get::<_, Option<String>>(10)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(database_error)?
+        .ok_or_else(|| {
+            CoreError::new(
+                CoreErrorCode::NotFound,
+                "discovery commit attempt was not found",
+                false,
+            )
+        })?;
+    let plan = serde_json::from_str::<DiscoveryCommitPlan>(&row.6)
+        .map_err(|_| corrupted("stored discovery commit plan is invalid"))?;
+    plan.validate()
+        .map_err(|_| corrupted("stored discovery commit plan violates its contract"))?;
+    let canonical_plan_json = encode_commit_plan_json(&plan)
+        .map_err(|_| corrupted("stored discovery commit plan is not canonical"))?;
+    if plan.attempt_id.as_str() != row.0
+        || plan.session_id.as_str() != row.1
+        || plan.expected_revision != row.4
+        || canonical_plan_json != row.6
+        || sha256_hex(row.6.as_bytes()) != row.5
+    {
+        return Err(corrupted(
+            "stored discovery commit attempt does not match its plan",
+        ));
+    }
+    Ok(DiscoveryCommitAttemptRecord {
+        id: DiscoveryCommitAttemptId::parse(row.0).map_err(contract_error)?,
+        session_id: DiscoverySessionId::from(row.1),
+        attempt_number: row.2,
+        action_id: DiscoveryActionId::parse(row.3).map_err(contract_error)?,
+        expected_revision: row.4,
+        plan_sha256: row.5,
+        plan,
+        phase: DiscoveryCommitPhase::parse(&row.7)?,
+        created_at: parse_timestamp(&row.8, "commit attempt created_at")?,
+        updated_at: parse_timestamp(&row.9, "commit attempt updated_at")?,
+        completed_at: row
+            .10
+            .as_deref()
+            .map(|value| parse_timestamp(value, "commit attempt completed_at"))
+            .transpose()?,
+    })
+}
+
+/// Revalidates the complete durable authority behind an active
+/// discovery-owned credential projection. `physical_authority_id` is the
+/// exact native execution while `source_operation_id` is its immutable
+/// semantic atomic-commit source. Archived bindings are rejected here.
+pub(crate) fn validate_discovery_credential_ownership_authority(
+    connection: &Connection,
+    connection_id: &ProviderConnectionId,
+    physical_authority_id: &str,
+    source_operation_id: &str,
+    expected_binding_sha256: &str,
+) -> CoreResult<()> {
+    validate_discovery_credential_ownership_authority_inner(
+        connection,
+        connection_id,
+        physical_authority_id,
+        source_operation_id,
+        expected_binding_sha256,
+        DiscoveryCredentialBindingAuthority::Active,
+    )
+    .map_err(normalize_discovery_credential_authority_error)
+}
+
+/// Revalidates a superseded discovery-owned physical slot after its provider
+/// connection was archived. This is intentionally separate from current
+/// access admission: it exists only so slot-GC can delete an exact historical
+/// authority-derived native slot without reopening archived credentials for
+/// product use.
+pub(crate) fn validate_archived_discovery_credential_ownership_authority_for_slot_gc(
+    connection: &Connection,
+    connection_id: &ProviderConnectionId,
+    physical_authority_id: &str,
+    source_operation_id: &str,
+    expected_binding_sha256: &str,
+) -> CoreResult<()> {
+    validate_discovery_credential_ownership_authority_inner(
+        connection,
+        connection_id,
+        physical_authority_id,
+        source_operation_id,
+        expected_binding_sha256,
+        DiscoveryCredentialBindingAuthority::ArchivedSlotGarbage,
+    )
+    .map_err(normalize_discovery_credential_authority_error)
+}
+
+fn normalize_discovery_credential_authority_error(error: CoreError) -> CoreError {
+    match error.code {
+        CoreErrorCode::StorageUnavailable | CoreErrorCode::StorageCorrupted => error,
+        _ => corrupted(format!(
+            "discovery credential ownership authority is inconsistent: {}",
+            error.message
+        )),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DiscoveryCredentialBindingAuthority {
+    Active,
+    ArchivedSlotGarbage,
+}
+
+#[allow(clippy::too_many_lines)]
+fn validate_discovery_credential_ownership_authority_inner(
+    connection: &Connection,
+    connection_id: &ProviderConnectionId,
+    physical_authority_id: &str,
+    source_operation_id: &str,
+    expected_binding_sha256: &str,
+    binding_authority: DiscoveryCredentialBindingAuthority,
+) -> CoreResult<()> {
+    validate_sha256(
+        "discovery credential ownership binding",
+        expected_binding_sha256,
+    )
+    .map_err(|_| corrupted("discovery credential ownership binding is invalid"))?;
+    validate_discovery_native_physical_authority_id(physical_authority_id)
+        .map_err(|_| corrupted("discovery credential physical authority id is invalid"))?;
+    let authority_operation_id = DiscoveryOperationId::parse(source_operation_id)
+        .map_err(|_| corrupted("discovery credential ownership operation id is invalid"))?;
+    let authority_operation = load_operation_by_id(connection, &authority_operation_id)?;
+    let authority_execution =
+        load_discovery_native_credential_execution(connection, &authority_operation_id)?
+            .ok_or_else(|| {
+                corrupted("discovery credential ownership execution authority is missing")
+            })?;
+    if authority_operation.kind != DiscoveryOperationKind::AtomicCommit
+        || authority_operation.side_effect_class != DiscoverySideEffectClass::Persistent
+        || !matches!(
+            authority_operation.status,
+            DiscoveryOperationStatus::Succeeded | DiscoveryOperationStatus::OutcomeUnknown
+        )
+        || authority_operation.started_at.is_none()
+        || authority_operation.finished_at.is_none()
+        || authority_execution.physical_authority_id != physical_authority_id
+        || authority_execution.operation_id != authority_operation_id
+        || authority_execution.connection_id != *connection_id
+        || authority_execution.connection_binding_sha256 != expected_binding_sha256
+        || authority_execution.store_started_at != authority_operation.started_at
+    {
+        return Err(corrupted(
+            "discovery credential ownership operation is not an exact completed native commit",
+        ));
+    }
+
+    let snapshot = load_session_snapshot(connection, authority_operation.session_id.as_str())?
+        .ok_or_else(|| corrupted("discovery credential ownership session is missing"))?;
+    let attempt_id =
+        snapshot.session.commit_attempt_id.as_ref().ok_or_else(|| {
+            corrupted("discovery credential ownership session has no commit attempt")
+        })?;
+    let attempt = load_commit_attempt(connection, attempt_id).map_err(|error| {
+        if error.code == CoreErrorCode::NotFound {
+            corrupted("discovery credential ownership attempt is missing")
+        } else {
+            error
+        }
+    })?;
+    let attempt_completed_at = attempt.completed_at.ok_or_else(|| {
+        corrupted("discovery credential ownership attempt has no completion time")
+    })?;
+    let operation_finished_at = authority_operation
+        .finished_at
+        .ok_or_else(|| corrupted("discovery credential ownership operation has no finish time"))?;
+    let terminal_chronology_matches = match authority_operation.status {
+        DiscoveryOperationStatus::Succeeded => operation_finished_at == attempt_completed_at,
+        DiscoveryOperationStatus::OutcomeUnknown => operation_finished_at <= attempt_completed_at,
+        _ => false,
+    };
+    if attempt.phase != DiscoveryCommitPhase::Completed
+        || attempt.plan.connection_id != *connection_id
+        || attempt
+            .plan
+            .credential_ref
+            .as_ref()
+            .map(CredentialRef::as_str)
+            != Some(connection_id.as_str())
+        || attempt.plan.credential_approval_id.is_none()
+        || authority_operation.session_id != attempt.session_id
+        || !terminal_chronology_matches
+    {
+        return Err(corrupted(
+            "discovery credential ownership attempt is not an exact completed credential commit",
+        ));
+    }
+
+    if snapshot.session.state != DiscoveryState::Ready
+        || snapshot.session.commit_attempt_id.as_ref() != Some(&attempt.id)
+        || snapshot.session.commit_plan_sha256.as_deref() != Some(attempt.plan_sha256.as_str())
+        || snapshot.session.committed_connection_id.as_ref() != Some(connection_id)
+        || snapshot.session.manifest_sha256.as_deref()
+            != Some(attempt.plan.manifest_sha256.as_str())
+        || snapshot.active_operation_id.is_some()
+        || snapshot.session.input.connection_id != *connection_id
+        || snapshot
+            .session
+            .input
+            .credential_ref
+            .as_ref()
+            .map(CredentialRef::as_str)
+            != Some(connection_id.as_str())
+        || snapshot.session.revision <= attempt.expected_revision
+    {
+        return Err(corrupted(
+            "discovery credential ownership session is detached from its completed commit",
+        ));
+    }
+
+    let graph_rows = load_discovered_provider_graph_rows(
+        connection,
+        &attempt.plan.template_id,
+        attempt.plan.template_version,
+        connection_id,
+    )?
+    .ok_or_else(|| corrupted("discovery credential ownership graph is missing"))?;
+    let current_manifest_json = canonical_json_result(
+        serde_json::to_value(&graph_rows.template.default_manifest),
+        "discovery credential ownership provider manifest",
+    )
+    .map_err(|_| corrupted("discovery credential ownership manifest is invalid"))?;
+    if graph_rows.template.id != attempt.plan.template_id
+        || graph_rows.template.manifest_version != attempt.plan.template_version
+        || graph_rows.connection.id != *connection_id
+        || graph_rows.connection.template_id != attempt.plan.template_id
+        || graph_rows.connection.template_version != attempt.plan.template_version
+        || graph_rows.connection.credential_ref != attempt.plan.credential_ref
+        || sha256_hex(current_manifest_json.as_bytes()) != attempt.plan.manifest_sha256
+    {
+        return Err(corrupted(
+            "discovery credential ownership connection differs from its immutable manifest identity",
+        ));
+    }
+    let graph = DiscoveredProviderGraph {
+        plan: attempt.plan.clone(),
+        plan_sha256: attempt.plan_sha256.clone(),
+        template: graph_rows.template,
+        connection: graph_rows.connection,
+        routes: graph_rows.routes,
+        observations: graph_rows.observations,
+        presets: graph_rows.presets,
+    };
+    validate_graph_component(
+        serde_json::to_value(&graph.template),
+        "discovery credential ownership provider template",
+    )
+    .map_err(|_| corrupted("discovery credential ownership template is invalid"))?;
+    validate_graph_component(
+        serde_json::to_value(&graph.connection),
+        "discovery credential ownership provider connection",
+    )
+    .map_err(|_| corrupted("discovery credential ownership connection is invalid"))?;
+    validate_review_approval(connection, &attempt.plan)
+        .map_err(|_| corrupted("discovery credential ownership review is invalid"))?;
+    validate_credential_approval(connection, &graph)
+        .map_err(|_| corrupted("discovery credential ownership approval is invalid"))?;
+    validate_discovery_authority_approval_rows(connection, &attempt)?;
+    validate_discovery_authority_evidence_rows(
+        connection,
+        &attempt.session_id,
+        snapshot
+            .review
+            .as_ref()
+            .ok_or_else(|| corrupted("discovery credential ownership review is missing"))?,
+    )?;
+    if graph_ownership_audit_hash(connection, &attempt.session_id)? != attempt.plan.graph_sha256 {
+        return Err(corrupted(
+            "discovery credential ownership graph differs from its audit authority",
+        ));
+    }
+    graph_template_was_created(connection, &attempt.session_id)
+        .map_err(|_| corrupted("discovery credential ownership template audit is invalid"))?;
+
+    let actual_binding_sha256 = match binding_authority {
+        DiscoveryCredentialBindingAuthority::Active => {
+            crate::provider_credential_repository::provider_credential_connection_binding_sha256(
+                connection,
+                connection_id,
+            )?
+        }
+        DiscoveryCredentialBindingAuthority::ArchivedSlotGarbage => {
+            crate::provider_credential_repository::provider_credential_archived_connection_binding_sha256(
+                connection,
+                connection_id,
+            )?
+        }
+    };
+    if actual_binding_sha256 != expected_binding_sha256 {
+        return Err(corrupted(
+            "discovery credential ownership binding differs from its connection authority",
+        ));
+    }
+    let completed_operation_id =
+        validate_discovery_credential_completion_evidence(connection, &attempt, &snapshot)?;
+    if completed_operation_id != authority_operation_id {
+        return Err(corrupted(
+            "discovery credential ownership names a different native operation than its completion history",
+        ));
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy)]
+struct DiscoveryAuthorityApprovalAuditSequences {
+    credential: u64,
+    review: u64,
+}
+
+fn validate_discovery_authority_approval_rows(
+    connection: &Connection,
+    attempt: &DiscoveryCommitAttemptRecord,
+) -> CoreResult<DiscoveryAuthorityApprovalAuditSequences> {
+    let rows = {
+        let mut statement = connection
+            .prepare(
+                "SELECT id, session_id, approval_kind, candidate_id, decision,
+                        grant_json, session_revision, grant_sha256, created_at
+                 FROM provider_discovery_approvals
+                 WHERE session_id = ?1
+                   AND (approval_kind = 'review' OR id = ?2)",
+            )
+            .map_err(database_error)?;
+        statement
+            .query_map(
+                params![
+                    attempt.session_id.as_str(),
+                    attempt
+                        .plan
+                        .credential_approval_id
+                        .as_ref()
+                        .map(DiscoveryApprovalId::as_str)
+                ],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                        row.get(8)?,
+                    ))
+                },
+            )
+            .map_err(database_error)?
+            .collect::<Result<Vec<ApprovalRow>, _>>()
+            .map_err(database_error)?
+    };
+    let approvals = rows
+        .into_iter()
+        .map(decode_approval_row)
+        .collect::<CoreResult<Vec<_>>>()?;
+    let credential_approval_id = attempt
+        .plan
+        .credential_approval_id
+        .as_ref()
+        .ok_or_else(|| corrupted("discovery credential authority has no credential approval"))?;
+    let credential_approvals = approvals
+        .iter()
+        .filter(|approval| {
+            approval.id == *credential_approval_id
+                && approval.session_id == attempt.session_id
+                && approval.decision == DiscoveryApprovalDecision::Approved
+                && approval.session_revision < attempt.expected_revision
+                && approval.created_at <= attempt.created_at
+                && matches!(
+                    approval.grant,
+                    DiscoveryApprovalGrant::CredentialOrigin { .. }
+                )
+        })
+        .collect::<Vec<_>>();
+    let review_approvals = approvals
+        .iter()
+        .filter(|approval| {
+            approval.session_id == attempt.session_id
+                && approval.decision == DiscoveryApprovalDecision::Approved
+                && approval.session_revision == attempt.expected_revision
+                && approval.created_at == attempt.created_at
+                && matches!(
+                    &approval.grant,
+                    DiscoveryApprovalGrant::Review {
+                        review_sha256,
+                        graph_sha256,
+                    } if review_sha256 == &attempt.plan.review_sha256
+                        && graph_sha256 == &attempt.plan.graph_sha256
+                )
+        })
+        .collect::<Vec<_>>();
+    if credential_approvals.len() != 1 || review_approvals.len() != 1 {
+        return Err(corrupted(
+            "discovery credential ownership approvals are missing or detached",
+        ));
+    }
+    let credential =
+        validate_discovery_approval_subject_audit(connection, credential_approvals[0])?;
+    let review = validate_discovery_approval_action_audit(
+        connection,
+        review_approvals[0],
+        &attempt.action_id,
+        attempt.expected_revision.saturating_add(1),
+        attempt.created_at,
+    )?;
+    Ok(DiscoveryAuthorityApprovalAuditSequences { credential, review })
+}
+
+fn validate_discovery_approval_subject_audit(
+    connection: &Connection,
+    approval: &DiscoveryApprovalRecord,
+) -> CoreResult<u64> {
+    let records = {
+        let mut statement = connection
+            .prepare(
+                "SELECT audit_sequence, action_id, session_revision, created_at
+                 FROM provider_discovery_audit_log
+                 WHERE session_id = ?1
+                   AND audit_kind = 'approval_recorded'
+                   AND subject_id = ?2
+                   AND summary_key = 'discovery.audit.approval_recorded'",
+            )
+            .map_err(database_error)?;
+        statement
+            .query_map(
+                params![approval.session_id.as_str(), approval.id.as_str()],
+                |row| {
+                    Ok((
+                        row.get::<_, u64>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, u64>(2)?,
+                        row.get::<_, String>(3)?,
+                    ))
+                },
+            )
+            .map_err(database_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(database_error)?
+    };
+    let [(approval_audit_sequence, Some(action_id), session_revision, created_at)] =
+        records.as_slice()
+    else {
+        return Err(corrupted(
+            "discovery credential approval is detached from its audit action",
+        ));
+    };
+    if *session_revision != approval.session_revision.saturating_add(1)
+        || parse_timestamp(created_at, "approval audit created_at")? != approval.created_at
+    {
+        return Err(corrupted(
+            "discovery credential approval is detached from its audit action",
+        ));
+    }
+    let action_id = DiscoveryActionId::parse(action_id)
+        .map_err(|_| corrupted("discovery credential approval action id is invalid"))?;
+    let receipt =
+        load_discovery_authority_receipt_by_action(connection, &approval.session_id, &action_id)?;
+    if receipt.receipt.action_kind != "approve_credential_origin"
+        || receipt.receipt.expected_revision != approval.session_revision
+        || receipt.receipt.resulting_revision != approval.session_revision.saturating_add(1)
+        || receipt.receipt.outcome
+            != lorepia_domain::discovery::DiscoveryActionReceiptOutcome::Applied
+        || receipt.created_at != approval.created_at
+        || receipt.transition.session.state != DiscoveryState::ListingModels
+        || receipt.transition.effect != DiscoveryEffect::ListModels
+        || receipt.transition_audit_sequence >= *approval_audit_sequence
+    {
+        return Err(corrupted(
+            "discovery credential approval is detached from its exact receipt",
+        ));
+    }
+    Ok(*approval_audit_sequence)
+}
+
+fn validate_discovery_approval_action_audit(
+    connection: &Connection,
+    approval: &DiscoveryApprovalRecord,
+    action_id: &DiscoveryActionId,
+    resulting_revision: u64,
+    created_at: DateTime<Utc>,
+) -> CoreResult<u64> {
+    let records = {
+        let mut statement = connection
+            .prepare(
+                "SELECT audit_sequence, subject_id, session_revision, created_at
+                 FROM provider_discovery_audit_log
+                 WHERE session_id = ?1
+                   AND audit_kind = 'approval_recorded'
+                   AND action_id = ?2
+                   AND summary_key = 'discovery.audit.approval_recorded'",
+            )
+            .map_err(database_error)?;
+        statement
+            .query_map(
+                params![approval.session_id.as_str(), action_id.as_str()],
+                |row| {
+                    Ok((
+                        row.get::<_, u64>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, u64>(2)?,
+                        row.get::<_, String>(3)?,
+                    ))
+                },
+            )
+            .map_err(database_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(database_error)?
+    };
+    let exact = matches!(
+        records.as_slice(),
+        [(approval_audit_sequence, Some(subject_id), session_revision, audited_at)]
+            if subject_id == approval.id.as_str()
+                && *session_revision == resulting_revision
+                && parse_timestamp(audited_at, "approval audit created_at")? == created_at
+    );
+    if !exact {
+        return Err(corrupted(
+            "discovery approval is detached from its exact receipt action",
+        ));
+    }
+    let receipt =
+        load_discovery_authority_receipt_by_action(connection, &approval.session_id, action_id)?;
+    if receipt.transition_audit_sequence >= records[0].0 {
+        return Err(corrupted(
+            "discovery approval audit precedes its transition audit",
+        ));
+    }
+    Ok(records[0].0)
+}
+
+fn validate_discovery_authority_evidence_rows(
+    connection: &Connection,
+    session_id: &DiscoverySessionId,
+    review: &DiscoveryReviewDiff,
+) -> CoreResult<()> {
+    let evidence_ids = review
+        .changes
+        .iter()
+        .flat_map(|change| &change.evidence_ids)
+        .collect::<BTreeSet<_>>();
+    for evidence_id in evidence_ids {
+        let row = connection
+            .query_row(
+                "SELECT id, session_id, kind, source_url, content_sha256,
+                        extracted_json, fetched_at
+                 FROM provider_discovery_evidence
+                 WHERE id = ?1 AND session_id = ?2",
+                params![evidence_id.as_str(), session_id.as_str()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, String>(6)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(database_error)?
+            .ok_or_else(|| corrupted("discovery credential authority evidence is missing"))?;
+        let canonical_extracted = encode_redacted_json(
+            &decode_redacted_json(&row.5, "discovery credential authority evidence")?,
+            "discovery credential authority evidence",
+        )?;
+        if canonical_extracted != row.5 {
+            return Err(corrupted(
+                "discovery credential authority evidence is not canonical",
+            ));
+        }
+        let evidence = decode_evidence_row(row)?;
+        if evidence.session_id != *session_id || evidence.id != *evidence_id {
+            return Err(corrupted(
+                "discovery credential authority evidence is detached from its session",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_discovery_credential_completion_evidence(
+    connection: &Connection,
+    attempt: &DiscoveryCommitAttemptRecord,
+    ready: &DiscoverySessionSnapshot,
+) -> CoreResult<DiscoveryOperationId> {
+    let mut start = load_discovery_authority_receipt_by_action(
+        connection,
+        &attempt.session_id,
+        &attempt.action_id,
+    )?;
+    validate_atomic_commit_start_receipt(
+        &start,
+        attempt,
+        ready,
+        "approve_review",
+        attempt.expected_revision,
+    )?;
+    if start.receipt.action_id != attempt.action_id || start.created_at != attempt.created_at {
+        return Err(corrupted(
+            "discovery credential commit preparation receipt is detached from its attempt",
+        ));
+    }
+    let commit_audit_sequence = validate_exact_discovery_authority_audit(
+        connection,
+        &attempt.session_id,
+        "commit_prepared",
+        "discovery.audit.commit_prepared",
+        &attempt.action_id,
+        attempt.id.as_str(),
+        start.receipt.resulting_revision,
+        start.created_at,
+    )?;
+    if start.transition_audit_sequence >= commit_audit_sequence {
+        return Err(corrupted(
+            "discovery credential commit audit order is invalid",
+        ));
+    }
+    let review_approval_audit_sequence = connection
+        .query_row(
+            "SELECT audit_sequence
+             FROM provider_discovery_audit_log
+             WHERE session_id = ?1
+               AND audit_kind = 'approval_recorded'
+               AND action_id = ?2
+               AND summary_key = 'discovery.audit.approval_recorded'",
+            params![attempt.session_id.as_str(), attempt.action_id.as_str()],
+            |row| row.get::<_, u64>(0),
+        )
+        .map_err(database_error)?;
+    if review_approval_audit_sequence <= start.transition_audit_sequence
+        || review_approval_audit_sequence >= commit_audit_sequence
+    {
+        return Err(corrupted(
+            "discovery credential review audit order is invalid",
+        ));
+    }
+    start.commit_prepared_audit_sequence = Some(commit_audit_sequence);
+    let completed_at = attempt
+        .completed_at
+        .ok_or_else(|| corrupted("completed discovery credential attempt has no timestamp"))?;
+    validate_discovery_credential_operation_chain(connection, attempt, ready, start, completed_at)
+}
+
+#[allow(clippy::too_many_lines)]
+fn validate_discovery_credential_operation_chain(
+    connection: &Connection,
+    attempt: &DiscoveryCommitAttemptRecord,
+    ready: &DiscoverySessionSnapshot,
+    mut start: DiscoveryAuthorityReceiptRecord,
+    completed_at: DateTime<Utc>,
+) -> CoreResult<DiscoveryOperationId> {
+    let mut seen_operations = BTreeSet::new();
+    loop {
+        let operation = load_discovery_authority_operation_for_start(
+            connection,
+            attempt,
+            &start,
+            completed_at,
+        )?;
+        if !seen_operations.insert(operation.id.clone()) {
+            return Err(corrupted(
+                "discovery credential completion retry history contains a cycle",
+            ));
+        }
+        let operation_start_audit_sequence =
+            validate_discovery_operation_start_audit(connection, &operation)?;
+        let finished_at = operation
+            .finished_at
+            .ok_or_else(|| corrupted("discovery credential completion has no timestamp"))?;
+        match operation.status {
+            DiscoveryOperationStatus::Succeeded => {
+                validate_discovery_operation_terminal_audit_order(
+                    &start,
+                    operation_start_audit_sequence,
+                    operation.expected_revision.saturating_add(1),
+                    connection,
+                )?;
+                validate_succeeded_discovery_credential_completion(
+                    connection,
+                    attempt,
+                    ready,
+                    &start,
+                    operation_start_audit_sequence.ok_or_else(|| {
+                        corrupted("successful discovery credential operation has no start audit")
+                    })?,
+                    &operation,
+                    completed_at,
+                )?;
+                return Ok(operation.id);
+            }
+            DiscoveryOperationStatus::OutcomeUnknown => {
+                let next_start = validate_outcome_unknown_discovery_credential_completion(
+                    connection,
+                    attempt,
+                    ready,
+                    &start,
+                    operation_start_audit_sequence,
+                    &operation,
+                    completed_at,
+                )?;
+                let Some(next_start) = next_start else {
+                    return Ok(operation.id);
+                };
+                start = next_start;
+            }
+            DiscoveryOperationStatus::Interrupted => {
+                let interrupted = load_discovery_authority_receipt_by_revision(
+                    connection,
+                    &attempt.session_id,
+                    operation.expected_revision.saturating_add(1),
+                )?;
+                validate_discovery_receipt_follows(&start, &interrupted)?;
+                validate_discovery_operation_terminal_audit_order_for_receipt(
+                    &start,
+                    operation_start_audit_sequence,
+                    &interrupted,
+                )?;
+                validate_interrupted_discovery_authority_receipt(
+                    &interrupted,
+                    attempt,
+                    ready,
+                    "interrupt",
+                    operation.expected_revision,
+                )?;
+                validate_discovery_operation_interrupted_audit(
+                    connection,
+                    &operation,
+                    &interrupted,
+                )?;
+                validate_interrupted_discovery_operation_evidence(
+                    connection,
+                    attempt,
+                    &operation,
+                    &interrupted,
+                    finished_at,
+                )?;
+                start = load_restart_discovery_authority_receipt(
+                    connection,
+                    attempt,
+                    ready,
+                    &interrupted,
+                )?;
+            }
+            _ => {
+                return Err(corrupted(
+                    "discovery credential completion has no successful native outcome authority",
+                ));
+            }
+        }
+    }
+}
+
+fn validate_outcome_unknown_discovery_credential_completion(
+    connection: &Connection,
+    attempt: &DiscoveryCommitAttemptRecord,
+    ready: &DiscoverySessionSnapshot,
+    start: &DiscoveryAuthorityReceiptRecord,
+    operation_start_audit_sequence: Option<u64>,
+    operation: &DiscoveryOperationRecord,
+    completed_at: DateTime<Utc>,
+) -> CoreResult<Option<DiscoveryAuthorityReceiptRecord>> {
+    let finished_at = operation
+        .finished_at
+        .ok_or_else(|| corrupted("outcome-unknown discovery operation has no finish timestamp"))?;
+    let unknown = load_discovery_authority_receipt_by_revision(
+        connection,
+        &attempt.session_id,
+        operation.expected_revision.saturating_add(1),
+    )?;
+    validate_discovery_receipt_follows(start, &unknown)?;
+    validate_discovery_operation_terminal_audit_order_for_receipt(
+        start,
+        operation_start_audit_sequence,
+        &unknown,
+    )?;
+    validate_unknown_discovery_credential_receipt(
+        &unknown,
+        attempt,
+        ready,
+        operation.expected_revision,
+        finished_at,
+    )?;
+    validate_discovery_operation_interrupted_audit(connection, operation, &unknown)?;
+    let resolution = load_discovery_authority_receipt_by_revision(
+        connection,
+        &attempt.session_id,
+        unknown.receipt.resulting_revision.saturating_add(1),
+    )?;
+    validate_discovery_receipt_follows(&unknown, &resolution)?;
+    if resolution.transition.session.state == DiscoveryState::Ready {
+        validate_ready_discovery_authority_receipt(
+            &resolution,
+            ready,
+            attempt,
+            "resolve_unknown_outcome",
+            unknown.receipt.resulting_revision,
+        )?;
+        validate_discovery_completion_chronology(attempt, ready, &resolution, completed_at)?;
+        validate_discovery_unknown_outcome_resolution(
+            connection,
+            attempt,
+            &resolution,
+            &DiscoveryUnknownOutcomeResolution::ConfirmedCommitCompleted {
+                connection_id: attempt.plan.connection_id.clone(),
+            },
+        )?;
+        validate_discovery_authority_graph_audits(
+            connection,
+            attempt,
+            operation.expected_revision,
+            finished_at,
+            false,
+            operation_start_audit_sequence.ok_or_else(|| {
+                corrupted("outcome-unknown discovery credential operation has no start audit")
+            })?,
+            unknown.transition_audit_sequence,
+        )?;
+        return Ok(None);
+    }
+    validate_interrupted_discovery_authority_receipt(
+        &resolution,
+        attempt,
+        ready,
+        "resolve_unknown_outcome",
+        unknown.receipt.resulting_revision,
+    )?;
+    validate_discovery_unknown_outcome_resolution(
+        connection,
+        attempt,
+        &resolution,
+        &DiscoveryUnknownOutcomeResolution::ConfirmedNoEffect,
+    )?;
+    load_restart_discovery_authority_receipt(connection, attempt, ready, &resolution).map(Some)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_exact_discovery_authority_audit(
+    connection: &Connection,
+    session_id: &DiscoverySessionId,
+    audit_kind: &str,
+    summary_key: &str,
+    action_id: &DiscoveryActionId,
+    subject_id: &str,
+    session_revision: u64,
+    created_at: DateTime<Utc>,
+) -> CoreResult<u64> {
+    let rows = {
+        let mut statement = connection
+            .prepare(
+                "SELECT audit_sequence, action_id, session_revision, summary_key, created_at
+                 FROM provider_discovery_audit_log
+                 WHERE session_id = ?1
+                   AND audit_kind = ?2
+                   AND subject_id = ?3
+                   AND action_id = ?4",
+            )
+            .map_err(database_error)?;
+        statement
+            .query_map(
+                params![
+                    session_id.as_str(),
+                    audit_kind,
+                    subject_id,
+                    action_id.as_str()
+                ],
+                |row| {
+                    Ok((
+                        row.get::<_, u64>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, u64>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                    ))
+                },
+            )
+            .map_err(database_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(database_error)?
+    };
+    let exact = matches!(
+        rows.as_slice(),
+        [(_audit_sequence, Some(audited_action_id), audited_revision, audited_summary, audited_at)]
+            if audited_action_id == action_id.as_str()
+                && *audited_revision == session_revision
+                && audited_summary == summary_key
+                && parse_timestamp(audited_at, "discovery authority audit created_at")?
+                    == created_at
+    );
+    if !exact {
+        return Err(corrupted(format!(
+            "discovery credential operation history is detached from its exact {audit_kind} audit"
+        )));
+    }
+    Ok(rows[0].0)
+}
+
+type AbandonedNativeCredentialExecutionRow = (
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    u32,
+    u32,
+    String,
+    u32,
+    u32,
+);
+
+fn load_schema37_abandoned_native_credential_reservation(
+    connection: &Connection,
+    operation: &DiscoveryOperationRecord,
+) -> CoreResult<AbandonedNativeCredentialExecutionRow> {
+    connection
+        .query_row(
+            "SELECT execution.physical_authority_id, execution.session_id,
+                    execution.commit_attempt_id, execution.commit_plan_sha256,
+                    execution.connection_id,
+                    execution.connection_binding_sha256, execution.reserved_at,
+                    execution.schema_version, execution.redaction_version,
+                    abandonment.abandoned_at, abandonment.schema_version,
+                    abandonment.redaction_version
+             FROM provider_discovery_native_credential_executions AS execution
+             JOIN provider_discovery_native_credential_abandoned_reservations AS abandonment
+               ON abandonment.operation_id = execution.operation_id
+              AND abandonment.physical_authority_id = execution.physical_authority_id
+              AND abandonment.session_id = execution.session_id
+              AND abandonment.commit_attempt_id = execution.commit_attempt_id
+              AND abandonment.commit_plan_sha256 = execution.commit_plan_sha256
+              AND abandonment.connection_id = execution.connection_id
+              AND abandonment.connection_binding_sha256
+                  = execution.connection_binding_sha256
+              AND abandonment.reserved_at = execution.reserved_at
+              AND abandonment.abandonment_kind
+                  = 'prepared_interrupted_before_native_store'
+             JOIN provider_discovery_commit_attempts AS attempt
+               ON attempt.id = execution.commit_attempt_id
+              AND attempt.session_id = execution.session_id
+              AND attempt.plan_sha256 = execution.commit_plan_sha256
+             JOIN provider_discovery_authorized_native_commit_starts AS authorized
+               ON authorized.operation_id = execution.operation_id
+              AND authorized.session_id = execution.session_id
+              AND authorized.commit_attempt_id = execution.commit_attempt_id
+              AND authorized.commit_plan_sha256 = execution.commit_plan_sha256
+              AND authorized.operation_expected_revision = ?2
+             WHERE execution.operation_id = ?1
+               AND execution.session_id = ?3
+               AND json_extract(attempt.plan_json, '$.connection_id')
+                   = execution.connection_id
+               AND json_extract(attempt.plan_json, '$.credential_ref')
+                   = execution.connection_id
+               AND NOT EXISTS (
+                   SELECT 1
+                   FROM provider_discovery_native_credential_store_attempts AS store_attempt
+                   WHERE store_attempt.operation_id = execution.operation_id
+                      OR store_attempt.physical_authority_id
+                          = execution.physical_authority_id
+               )
+               AND NOT EXISTS (
+                   SELECT 1
+                   FROM provider_discovery_native_no_effect_attestations AS attestation
+                   WHERE attestation.operation_id = execution.operation_id
+               )",
+            params![
+                operation.id.as_str(),
+                operation.expected_revision,
+                operation.session_id.as_str(),
+            ],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, u32>(7)?,
+                    row.get::<_, u32>(8)?,
+                    row.get::<_, String>(9)?,
+                    row.get::<_, u32>(10)?,
+                    row.get::<_, u32>(11)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(database_error)?
+        .ok_or_else(|| {
+            corrupted("schema-37 native credential reservation has no exact abandonment")
+        })
+}
+
+fn validate_schema37_abandoned_native_credential_reservation(
+    connection: &Connection,
+    operation: &DiscoveryOperationRecord,
+) -> CoreResult<bool> {
+    let execution_exists = connection
+        .query_row(
+            "SELECT EXISTS(
+                 SELECT 1
+                 FROM provider_discovery_native_credential_executions
+                 WHERE operation_id = ?1
+             )",
+            [operation.id.as_str()],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(database_error)?;
+    if !execution_exists {
+        return Ok(false);
+    }
+    let exact = load_schema37_abandoned_native_credential_reservation(connection, operation)?;
+    validate_discovery_native_physical_authority_id(&exact.0)?;
+    validate_sha256("abandoned native credential plan hash", &exact.3)
+        .map_err(|_| corrupted("abandoned native credential plan hash is invalid"))?;
+    validate_sha256("abandoned native credential connection binding", &exact.5)
+        .map_err(|_| corrupted("abandoned native credential connection binding is invalid"))?;
+    let attempt_id = DiscoveryCommitAttemptId::parse(exact.2)
+        .map_err(|_| corrupted("abandoned native credential attempt id is invalid"))?;
+    let attempt = load_commit_attempt(connection, &attempt_id)?;
+    let reserved_at = parse_timestamp(&exact.6, "abandoned native credential reserved_at")?;
+    let abandoned_at = parse_timestamp(&exact.9, "abandoned native credential abandoned_at")?;
+    if operation.status != DiscoveryOperationStatus::Interrupted
+        || exact.1 != operation.session_id.as_str()
+        || operation.started_at != Some(abandoned_at)
+        || operation.finished_at != Some(abandoned_at)
+        || operation.updated_at != abandoned_at
+        || operation.created_at > abandoned_at
+        || reserved_at > abandoned_at
+        || exact.7 != 1
+        || exact.8 != 1
+        || exact.10 != 1
+        || exact.11 != 1
+        || attempt.session_id != operation.session_id
+        || attempt.plan_sha256 != exact.3
+        || attempt.plan.connection_id.as_str() != exact.4
+        || attempt
+            .plan
+            .credential_ref
+            .as_ref()
+            .map(CredentialRef::as_str)
+            != Some(exact.4.as_str())
+    {
+        return Err(corrupted(
+            "schema-37 native credential abandonment is detached from its operation",
+        ));
+    }
+    Ok(true)
+}
+
+fn validate_discovery_operation_start_audit(
+    connection: &Connection,
+    operation: &DiscoveryOperationRecord,
+) -> CoreResult<Option<u64>> {
+    let started_at = operation
+        .started_at
+        .ok_or_else(|| corrupted("discovery credential operation has no start timestamp"))?;
+    let attestation_rows = if operation.status == DiscoveryOperationStatus::Interrupted {
+        connection
+            .query_row(
+                "SELECT COUNT(*)
+                 FROM provider_discovery_native_no_effect_attestations
+                 WHERE operation_id = ?1",
+                [operation.id.as_str()],
+                |row| row.get::<_, u64>(0),
+            )
+            .map_err(database_error)?
+    } else {
+        0
+    };
+    let attested = if operation.status == DiscoveryOperationStatus::Interrupted {
+        load_native_no_effect_attestation(connection, operation.id.as_str())?.is_some()
+    } else {
+        false
+    };
+    if attestation_rows > 0 && !attested {
+        return Err(corrupted(
+            "legacy native no-effect history cannot authorize a schema-37 retry",
+        ));
+    }
+    if operation.status == DiscoveryOperationStatus::Interrupted && !attested {
+        validate_schema37_abandoned_native_credential_reservation(connection, operation)?;
+        if operation.finished_at != Some(started_at) {
+            return Err(corrupted(
+                "prepared discovery credential interruption has inconsistent timestamps",
+            ));
+        }
+        let count = connection
+            .query_row(
+                "SELECT COUNT(*)
+                 FROM provider_discovery_audit_log
+                 WHERE session_id = ?1
+                   AND audit_kind = 'operation_started'
+                   AND subject_id = ?2",
+                params![operation.session_id.as_str(), operation.id.as_str()],
+                |row| row.get::<_, u64>(0),
+            )
+            .map_err(database_error)?;
+        if count != 0 {
+            return Err(corrupted(
+                "prepared discovery credential interruption has a forged start audit",
+            ));
+        }
+        return Ok(None);
+    }
+    validate_exact_discovery_authority_audit(
+        connection,
+        &operation.session_id,
+        "operation_started",
+        "discovery.audit.operation_started",
+        &operation.action_id,
+        operation.id.as_str(),
+        operation.expected_revision,
+        started_at,
+    )
+    .map(Some)
+}
+
+fn validate_discovery_operation_terminal_audit_order(
+    start: &DiscoveryAuthorityReceiptRecord,
+    operation_start_audit_sequence: Option<u64>,
+    terminal_revision: u64,
+    connection: &Connection,
+) -> CoreResult<()> {
+    let terminal = load_discovery_authority_receipt_by_revision(
+        connection,
+        &start.receipt.session_id,
+        terminal_revision,
+    )?;
+    validate_discovery_operation_terminal_audit_order_for_receipt(
+        start,
+        operation_start_audit_sequence,
+        &terminal,
+    )
+}
+
+fn validate_discovery_operation_terminal_audit_order_for_receipt(
+    start: &DiscoveryAuthorityReceiptRecord,
+    operation_start_audit_sequence: Option<u64>,
+    terminal: &DiscoveryAuthorityReceiptRecord,
+) -> CoreResult<()> {
+    let commit_audit_sequence = start
+        .commit_prepared_audit_sequence
+        .ok_or_else(|| corrupted("discovery credential commit-start audit is missing"))?;
+    let lower_bound = operation_start_audit_sequence.unwrap_or(commit_audit_sequence);
+    if commit_audit_sequence > lower_bound || lower_bound >= terminal.transition_audit_sequence {
+        return Err(corrupted(
+            "discovery credential operation audit order is invalid",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_discovery_operation_interrupted_audit(
+    connection: &Connection,
+    operation: &DiscoveryOperationRecord,
+    receipt: &DiscoveryAuthorityReceiptRecord,
+) -> CoreResult<u64> {
+    let interrupted_audit_sequence = validate_exact_discovery_authority_audit(
+        connection,
+        &operation.session_id,
+        "operation_interrupted",
+        "discovery.audit.operation_interrupted",
+        &receipt.receipt.action_id,
+        operation.id.as_str(),
+        receipt.receipt.resulting_revision,
+        receipt.created_at,
+    )?;
+    if receipt.transition_audit_sequence >= interrupted_audit_sequence {
+        return Err(corrupted(
+            "discovery credential interruption audit order is invalid",
+        ));
+    }
+    Ok(interrupted_audit_sequence)
+}
+
+fn validate_atomic_commit_start_receipt(
+    start: &DiscoveryAuthorityReceiptRecord,
+    attempt: &DiscoveryCommitAttemptRecord,
+    ready: &DiscoverySessionSnapshot,
+    expected_action_kind: &str,
+    expected_revision: u64,
+) -> CoreResult<()> {
+    if start.receipt.action_kind != expected_action_kind
+        || start.receipt.expected_revision != expected_revision
+        || start.receipt.resulting_revision != expected_revision.saturating_add(1)
+        || start.receipt.outcome
+            != lorepia_domain::discovery::DiscoveryActionReceiptOutcome::Applied
+        || start.transition.session.state != DiscoveryState::Committing
+        || start.transition.session.id != attempt.session_id
+        || start.transition.session.input != ready.session.input
+        || start.transition.session.commit_attempt_id.as_ref() != Some(&attempt.id)
+        || start.transition.session.commit_plan_sha256.as_deref()
+            != Some(attempt.plan_sha256.as_str())
+        || start.transition.session.manifest_sha256.as_deref()
+            != Some(attempt.plan.manifest_sha256.as_str())
+        || start.transition.session.committed_connection_id.is_some()
+        || start.transition.session.cancellation_pending
+        || start.transition.session.failure.is_some()
+        || start.transition.session.recovery.is_some()
+        || start.transition.session.unknown_operation.is_some()
+        || !matches!(
+            &start.transition.effect,
+            DiscoveryEffect::CommitAtomically {
+                commit_attempt_id,
+                plan_sha256,
+            } if commit_attempt_id == &attempt.id && plan_sha256 == &attempt.plan_sha256
+        )
+    {
+        return Err(corrupted(
+            "discovery credential atomic commit start is detached from its attempt",
+        ));
+    }
+    Ok(())
+}
+
+fn load_discovery_authority_operation_for_start(
+    connection: &Connection,
+    attempt: &DiscoveryCommitAttemptRecord,
+    start: &DiscoveryAuthorityReceiptRecord,
+    completed_at: DateTime<Utc>,
+) -> CoreResult<DiscoveryOperationRecord> {
+    let operation_id = connection
+        .query_row(
+            "SELECT id
+             FROM provider_discovery_operations
+             WHERE session_id = ?1 AND action_id = ?2",
+            params![
+                attempt.session_id.as_str(),
+                start.receipt.action_id.as_str()
+            ],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(database_error)?
+        .ok_or_else(|| corrupted("discovery credential completion operation is missing"))?;
+    let operation_id = DiscoveryOperationId::parse(operation_id)
+        .map_err(|_| corrupted("discovery credential completion operation id is invalid"))?;
+    let operation = load_operation_by_id(connection, &operation_id)?;
+    if operation.session_id != attempt.session_id
+        || operation.kind != DiscoveryOperationKind::AtomicCommit
+        || operation.side_effect_class != DiscoverySideEffectClass::Persistent
+        || operation.action_id != start.receipt.action_id
+        || operation.expected_revision != start.receipt.resulting_revision
+        || operation.request_sha256 != start.receipt.request_sha256
+        || operation.approval.is_some()
+        || operation.started_at.is_none()
+        || operation.finished_at.is_none()
+        || operation.created_at != start.created_at
+    {
+        return Err(corrupted(
+            "discovery credential completion operation is detached from its commit attempt",
+        ));
+    }
+    let finished_at = operation
+        .finished_at
+        .ok_or_else(|| corrupted("discovery credential completion has no timestamp"))?;
+    if operation
+        .started_at
+        .is_some_and(|started_at| started_at > finished_at)
+        || finished_at > completed_at
+        || operation.updated_at != finished_at
+    {
+        return Err(corrupted(
+            "discovery credential completion timestamps are inconsistent",
+        ));
+    }
+    Ok(operation)
+}
+
+fn validate_succeeded_discovery_credential_completion(
+    connection: &Connection,
+    attempt: &DiscoveryCommitAttemptRecord,
+    ready: &DiscoverySessionSnapshot,
+    start: &DiscoveryAuthorityReceiptRecord,
+    operation_start_audit_sequence: u64,
+    operation: &DiscoveryOperationRecord,
+    completed_at: DateTime<Utc>,
+) -> CoreResult<()> {
+    let finished_at = operation
+        .finished_at
+        .ok_or_else(|| corrupted("successful discovery operation has no finish timestamp"))?;
+    let ready_receipt = load_discovery_authority_receipt_by_revision(
+        connection,
+        &attempt.session_id,
+        operation.expected_revision.saturating_add(1),
+    )?;
+    validate_discovery_receipt_follows(start, &ready_receipt)?;
+    validate_ready_discovery_authority_receipt(
+        &ready_receipt,
+        ready,
+        attempt,
+        "commit_succeeded",
+        operation.expected_revision,
+    )?;
+    if finished_at != completed_at {
+        return Err(corrupted(
+            "successful discovery credential operation does not finish its attempt",
+        ));
+    }
+    validate_discovery_authority_graph_audits(
+        connection,
+        attempt,
+        ready_receipt.receipt.expected_revision,
+        ready_receipt.created_at,
+        true,
+        operation_start_audit_sequence,
+        ready_receipt.transition_audit_sequence,
+    )?;
+    validate_discovery_completion_chronology(attempt, ready, &ready_receipt, completed_at)
+}
+
+type DiscoveryAuthorityGraphAuditRow = (
+    u64,
+    String,
+    Option<String>,
+    Option<String>,
+    u64,
+    String,
+    String,
+);
+
+fn validate_discovery_authority_graph_audits(
+    connection: &Connection,
+    attempt: &DiscoveryCommitAttemptRecord,
+    authority_revision_bound: u64,
+    authority_time_bound: DateTime<Utc>,
+    applied_with_bound: bool,
+    operation_start_audit_sequence: u64,
+    terminal_audit_sequence: u64,
+) -> CoreResult<()> {
+    let rows = {
+        let mut statement = connection
+            .prepare(
+                "SELECT audit_sequence, audit_kind, action_id, subject_id, session_revision,
+                        summary_key, created_at
+                 FROM provider_discovery_audit_log
+                 WHERE session_id = ?1
+                   AND summary_key IN (
+                       'discovery.audit.provider_graph_applied',
+                       'discovery.audit.provider_template_ownership'
+                   )
+                 ORDER BY summary_key",
+            )
+            .map_err(database_error)?;
+        statement
+            .query_map([attempt.session_id.as_str()], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                ))
+            })
+            .map_err(database_error)?
+            .collect::<Result<Vec<DiscoveryAuthorityGraphAuditRow>, _>>()
+            .map_err(database_error)?
+    };
+    if rows.len() != 2 {
+        return Err(corrupted(
+            "discovery credential graph ownership audits are incomplete",
+        ));
+    }
+    let graph = rows
+        .iter()
+        .find(|row| row.5 == "discovery.audit.provider_graph_applied")
+        .ok_or_else(|| corrupted("discovery credential graph ownership audit is missing"))?;
+    let template = rows
+        .iter()
+        .find(|row| row.5 == "discovery.audit.provider_template_ownership")
+        .ok_or_else(|| corrupted("discovery credential template ownership audit is missing"))?;
+    let graph_at = parse_timestamp(&graph.6, "provider graph authority audit created_at")?;
+    let template_at = parse_timestamp(&template.6, "provider template authority audit created_at")?;
+    let bounded = graph.4 == authority_revision_bound
+        && graph_at <= authority_time_bound
+        && (!applied_with_bound || graph_at == authority_time_bound);
+    if graph.1 != "transition_applied"
+        || template.1 != "transition_applied"
+        || graph.2.is_some()
+        || template.2.is_some()
+        || graph.3.as_deref() != Some(attempt.plan.graph_sha256.as_str())
+        || !matches!(template.3.as_deref(), Some("created" | "reused"))
+        || graph.4 != template.4
+        || graph_at != template_at
+        || operation_start_audit_sequence >= graph.0
+        || graph.0 >= template.0
+        || template.0 >= terminal_audit_sequence
+        || !bounded
+    {
+        return Err(corrupted(
+            "discovery credential graph ownership audits are detached from the terminal history",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_discovery_completion_chronology(
+    attempt: &DiscoveryCommitAttemptRecord,
+    ready: &DiscoverySessionSnapshot,
+    receipt: &DiscoveryAuthorityReceiptRecord,
+    completed_at: DateTime<Utc>,
+) -> CoreResult<()> {
+    if receipt.created_at != completed_at
+        || ready.updated_at != completed_at
+        || attempt.updated_at != completed_at
+        || receipt.receipt.resulting_revision != ready.session.revision
+    {
+        return Err(corrupted(
+            "discovery credential completion chronology is inconsistent",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_unknown_discovery_credential_receipt(
+    unknown: &DiscoveryAuthorityReceiptRecord,
+    attempt: &DiscoveryCommitAttemptRecord,
+    ready: &DiscoverySessionSnapshot,
+    expected_revision: u64,
+    finished_at: DateTime<Utc>,
+) -> CoreResult<()> {
+    if !matches!(
+        unknown.receipt.action_kind.as_str(),
+        "interrupt" | "external_outcome_became_unknown"
+    ) || unknown.receipt.expected_revision != expected_revision
+        || unknown.receipt.resulting_revision != expected_revision.saturating_add(1)
+        || unknown.receipt.outcome
+            != lorepia_domain::discovery::DiscoveryActionReceiptOutcome::Applied
+        || unknown.transition.session.state != DiscoveryState::UnknownOutcome
+        || unknown.transition.session.input != ready.session.input
+        || unknown.transition.session.commit_attempt_id.as_ref() != Some(&attempt.id)
+        || unknown.transition.session.commit_plan_sha256.as_deref()
+            != Some(attempt.plan_sha256.as_str())
+        || unknown.transition.session.unknown_operation
+            != Some(DiscoveryOperationKind::AtomicCommit)
+        || unknown.transition.session.recovery.is_some()
+        || unknown.transition.session.cancellation_pending
+        || unknown.transition.effect != DiscoveryEffect::None
+        || unknown.created_at != finished_at
+    {
+        return Err(corrupted(
+            "outcome-unknown discovery credential receipt is detached from its operation",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_interrupted_discovery_authority_receipt(
+    interrupted: &DiscoveryAuthorityReceiptRecord,
+    attempt: &DiscoveryCommitAttemptRecord,
+    ready: &DiscoverySessionSnapshot,
+    expected_action_kind: &str,
+    expected_revision: u64,
+) -> CoreResult<()> {
+    let recovery_matches = matches!(
+        interrupted.transition.session.recovery.as_ref(),
+        Some(DiscoveryRecoveryCheckpoint {
+            interrupted_state: DiscoveryState::Committing,
+            operation: DiscoveryOperationKind::AtomicCommit,
+        })
+    );
+    if interrupted.receipt.action_kind != expected_action_kind
+        || interrupted.receipt.expected_revision != expected_revision
+        || interrupted.receipt.resulting_revision != expected_revision.saturating_add(1)
+        || interrupted.receipt.outcome
+            != lorepia_domain::discovery::DiscoveryActionReceiptOutcome::Applied
+        || interrupted.transition.session.state != DiscoveryState::Interrupted
+        || interrupted.transition.session.input != ready.session.input
+        || interrupted.transition.session.commit_attempt_id.as_ref() != Some(&attempt.id)
+        || interrupted.transition.session.commit_plan_sha256.as_deref()
+            != Some(attempt.plan_sha256.as_str())
+        || interrupted.transition.session.unknown_operation.is_some()
+        || interrupted.transition.session.cancellation_pending
+        || interrupted.transition.effect != DiscoveryEffect::None
+        || !recovery_matches
+    {
+        return Err(corrupted(
+            "interrupted discovery credential receipt is detached from its retry authority",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_cancelled_pre_store_interruption_receipt(
+    interrupted: &DiscoveryAuthorityReceiptRecord,
+    attempt: &DiscoveryCommitAttemptRecord,
+    current: &DiscoverySessionSnapshot,
+    operation_expected_revision: u64,
+) -> CoreResult<()> {
+    let recovery_matches = matches!(
+        interrupted.transition.session.recovery.as_ref(),
+        Some(DiscoveryRecoveryCheckpoint {
+            interrupted_state: DiscoveryState::Compensating,
+            operation: DiscoveryOperationKind::Compensation,
+        })
+    );
+    if interrupted.receipt.action_kind != "interrupt"
+        || interrupted.receipt.expected_revision <= operation_expected_revision
+        || interrupted.receipt.resulting_revision
+            != interrupted.receipt.expected_revision.saturating_add(1)
+        || interrupted.receipt.outcome
+            != lorepia_domain::discovery::DiscoveryActionReceiptOutcome::Applied
+        || interrupted.transition.session.state != DiscoveryState::Interrupted
+        || interrupted.transition.session.id != attempt.session_id
+        || interrupted.transition.session.input != current.session.input
+        || interrupted.transition.session.manifest_sha256.as_deref()
+            != Some(attempt.plan.manifest_sha256.as_str())
+        || interrupted.transition.session.commit_attempt_id.as_ref() != Some(&attempt.id)
+        || interrupted.transition.session.commit_plan_sha256.as_deref()
+            != Some(attempt.plan_sha256.as_str())
+        || interrupted
+            .transition
+            .session
+            .committed_connection_id
+            .is_some()
+        || interrupted.transition.session.unknown_operation.is_some()
+        || interrupted.transition.session.failure.is_some()
+        || interrupted
+            .transition
+            .session
+            .active_effect_approval
+            .is_some()
+        || !interrupted.transition.session.cancellation_pending
+        || interrupted.transition.effect != DiscoveryEffect::None
+        || interrupted.transition.event.action_required
+            != Some(DiscoveryActionRequired::RestartInterrupted {
+                operation: DiscoveryOperationKind::Compensation,
+            })
+        || !recovery_matches
+    {
+        return Err(corrupted(
+            "cancelled pre-store credential interruption is detached from its recovery authority",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_interrupted_discovery_operation_evidence(
+    connection: &Connection,
+    attempt: &DiscoveryCommitAttemptRecord,
+    operation: &DiscoveryOperationRecord,
+    interrupted: &DiscoveryAuthorityReceiptRecord,
+    finished_at: DateTime<Utc>,
+) -> CoreResult<()> {
+    if interrupted.created_at != finished_at {
+        return Err(corrupted(
+            "interrupted discovery credential operation has inconsistent chronology",
+        ));
+    }
+    let attestation_rows = connection
+        .query_row(
+            "SELECT COUNT(*)
+             FROM provider_discovery_native_no_effect_attestations
+             WHERE operation_id = ?1",
+            [operation.id.as_str()],
+            |row| row.get::<_, u64>(0),
+        )
+        .map_err(database_error)?;
+    if let Some(attestation) = load_native_no_effect_attestation(connection, operation.id.as_str())?
+    {
+        if attestation.session_id != attempt.session_id
+            || attestation.commit_attempt_id != attempt.id
+            || attestation.commit_plan_sha256 != attempt.plan_sha256
+            || attestation.connection_id != attempt.plan.connection_id
+            || attestation.kind != DiscoveryNativeNoEffectAttestationKind::CredentialSlotMissing
+            || attestation.recovery_owner != DiscoveryNativeRecoveryOwner::NativePlatform
+            || attestation.attested_at != finished_at
+        {
+            return Err(corrupted(
+                "native no-effect attestation is detached from its retry operation",
+            ));
+        }
+    } else if attestation_rows > 0 {
+        return Err(corrupted(
+            "legacy native no-effect history cannot authorize a schema-37 retry",
+        ));
+    } else if operation.started_at != Some(finished_at) {
+        return Err(corrupted(
+            "started persistent discovery operation was interrupted without native no-effect evidence",
+        ));
+    }
+    Ok(())
+}
+
+fn load_restart_discovery_authority_receipt(
+    connection: &Connection,
+    attempt: &DiscoveryCommitAttemptRecord,
+    ready: &DiscoverySessionSnapshot,
+    interrupted: &DiscoveryAuthorityReceiptRecord,
+) -> CoreResult<DiscoveryAuthorityReceiptRecord> {
+    if interrupted.receipt.resulting_revision >= ready.session.revision {
+        return Err(corrupted(
+            "interrupted discovery credential history has no bounded restart",
+        ));
+    }
+    let mut restart = load_discovery_authority_receipt_by_revision(
+        connection,
+        &attempt.session_id,
+        interrupted.receipt.resulting_revision.saturating_add(1),
+    )?;
+    validate_discovery_receipt_follows(interrupted, &restart)?;
+    validate_atomic_commit_start_receipt(
+        &restart,
+        attempt,
+        ready,
+        "restart_interrupted",
+        interrupted.receipt.resulting_revision,
+    )?;
+    let commit_audit_sequence = validate_exact_discovery_authority_audit(
+        connection,
+        &attempt.session_id,
+        "commit_prepared",
+        "discovery.audit.commit_prepared",
+        &restart.receipt.action_id,
+        attempt.id.as_str(),
+        restart.receipt.resulting_revision,
+        restart.created_at,
+    )?;
+    if restart.transition_audit_sequence >= commit_audit_sequence {
+        return Err(corrupted(
+            "discovery credential retry commit audit order is invalid",
+        ));
+    }
+    restart.commit_prepared_audit_sequence = Some(commit_audit_sequence);
+    Ok(restart)
+}
+
+fn validate_discovery_receipt_follows(
+    previous: &DiscoveryAuthorityReceiptRecord,
+    next: &DiscoveryAuthorityReceiptRecord,
+) -> CoreResult<()> {
+    if next.receipt.event_sequence != previous.transition.session.next_event_sequence {
+        return Err(corrupted(
+            "discovery credential receipt history has a detached event sequence",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_discovery_unknown_outcome_resolution(
+    connection: &Connection,
+    attempt: &DiscoveryCommitAttemptRecord,
+    resolution_receipt: &DiscoveryAuthorityReceiptRecord,
+    expected_resolution: &DiscoveryUnknownOutcomeResolution,
+) -> CoreResult<u64> {
+    let rows = {
+        let mut statement = connection
+            .prepare(
+                "SELECT id, session_id, approval_kind, candidate_id, decision,
+                        grant_json, session_revision, grant_sha256, created_at
+                 FROM provider_discovery_approvals
+                 WHERE session_id = ?1
+                   AND approval_kind = 'unknown_outcome_resolution'",
+            )
+            .map_err(database_error)?;
+        statement
+            .query_map([attempt.session_id.as_str()], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                    row.get(8)?,
+                ))
+            })
+            .map_err(database_error)?
+            .collect::<Result<Vec<ApprovalRow>, _>>()
+            .map_err(database_error)?
+    };
+    let approvals = rows
+        .into_iter()
+        .map(decode_approval_row)
+        .collect::<CoreResult<Vec<_>>>()?;
+    let confirmed = approvals
+        .iter()
+        .filter(|approval| {
+            approval.decision == DiscoveryApprovalDecision::Approved
+                && approval.session_revision == resolution_receipt.receipt.expected_revision
+                && approval.created_at == resolution_receipt.created_at
+                && matches!(
+                    &approval.grant,
+                    DiscoveryApprovalGrant::UnknownOutcomeResolution {
+                        operation: DiscoveryOperationKind::AtomicCommit,
+                        resolution,
+                    } if resolution == expected_resolution
+                )
+        })
+        .collect::<Vec<_>>();
+    if confirmed.len() != 1 {
+        return Err(corrupted(
+            "outcome-unknown discovery credential commit has no exact approved completion",
+        ));
+    }
+    validate_discovery_approval_action_audit(
+        connection,
+        confirmed[0],
+        &resolution_receipt.receipt.action_id,
+        resolution_receipt.receipt.resulting_revision,
+        resolution_receipt.created_at,
+    )
+}
+
+struct DiscoveryAuthorityReceiptRecord {
+    receipt: DiscoveryActionReceipt,
+    transition: DiscoveryTransition,
+    created_at: DateTime<Utc>,
+    transition_audit_sequence: u64,
+    commit_prepared_audit_sequence: Option<u64>,
+}
+
+type DiscoveryAuthorityReceiptRow = (
+    String,
+    String,
+    String,
+    u64,
+    u64,
+    u64,
+    String,
+    String,
+    u32,
+    String,
+    String,
+    String,
+    u64,
+    u32,
+    u64,
+    String,
+    String,
+    u32,
+    String,
+);
+
+fn load_discovery_authority_receipt_by_action(
+    connection: &Connection,
+    session_id: &DiscoverySessionId,
+    action_id: &DiscoveryActionId,
+) -> CoreResult<DiscoveryAuthorityReceiptRecord> {
+    load_discovery_authority_receipt(
+        connection,
+        session_id,
+        "receipt.action_id = ?2",
+        action_id.as_str(),
+    )
+}
+
+fn load_discovery_authority_receipt_by_revision(
+    connection: &Connection,
+    session_id: &DiscoverySessionId,
+    resulting_revision: u64,
+) -> CoreResult<DiscoveryAuthorityReceiptRecord> {
+    load_discovery_authority_receipt(
+        connection,
+        session_id,
+        "receipt.resulting_revision = ?2",
+        resulting_revision,
+    )
+}
+
+fn load_discovery_authority_receipt(
+    connection: &Connection,
+    session_id: &DiscoverySessionId,
+    predicate: &str,
+    selector: impl rusqlite::ToSql,
+) -> CoreResult<DiscoveryAuthorityReceiptRecord> {
+    let sql = format!(
+        "SELECT receipt.action_id, receipt.action_kind, receipt.request_sha256,
+                receipt.expected_revision, receipt.resulting_revision,
+                receipt.event_sequence, receipt.outcome, receipt.response_json,
+                receipt.redaction_version, receipt.created_at,
+                event.id, event.session_id, event.sequence,
+                event.event_version, event.session_revision, event.state,
+                event.event_json, event.redaction_version, event.created_at
+         FROM provider_discovery_action_receipts AS receipt
+         JOIN provider_discovery_event_outbox AS event
+           ON event.id = receipt.event_id
+          AND event.session_id = receipt.session_id
+         WHERE receipt.session_id = ?1 AND {predicate}"
+    );
+    let row = connection
+        .query_row(&sql, params![session_id.as_str(), selector], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, u64>(3)?,
+                row.get::<_, u64>(4)?,
+                row.get::<_, u64>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, String>(7)?,
+                row.get::<_, u32>(8)?,
+                row.get::<_, String>(9)?,
+                row.get::<_, String>(10)?,
+                row.get::<_, String>(11)?,
+                row.get::<_, u64>(12)?,
+                row.get::<_, u32>(13)?,
+                row.get::<_, u64>(14)?,
+                row.get::<_, String>(15)?,
+                row.get::<_, String>(16)?,
+                row.get::<_, u32>(17)?,
+                row.get::<_, String>(18)?,
+            ))
+        })
+        .optional()
+        .map_err(database_error)?
+        .ok_or_else(|| corrupted("discovery credential authority receipt is missing"))?;
+    let mut record = decode_discovery_authority_receipt_row(row, session_id)?;
+    record.transition_audit_sequence = validate_exact_discovery_authority_audit(
+        connection,
+        session_id,
+        audit_kind_for_action(&record.receipt.action_kind),
+        "discovery.audit.transition_applied",
+        &record.receipt.action_id,
+        record.transition.event.id.as_str(),
+        record.receipt.resulting_revision,
+        record.created_at,
+    )?;
+    Ok(record)
+}
+
+fn decode_discovery_authority_receipt_row(
+    row: DiscoveryAuthorityReceiptRow,
+    session_id: &DiscoverySessionId,
+) -> CoreResult<DiscoveryAuthorityReceiptRecord> {
+    let receipt = DiscoveryActionReceipt {
+        action_id: DiscoveryActionId::parse(&row.0)
+            .map_err(|_| corrupted("discovery credential receipt action id is invalid"))?,
+        session_id: session_id.clone(),
+        action_kind: row.1,
+        request_sha256: row.2,
+        expected_revision: row.3,
+        resulting_revision: row.4,
+        event_sequence: row.5,
+        outcome: serde_json::from_value(Value::String(row.6))
+            .map_err(|_| corrupted("discovery credential receipt outcome is invalid"))?,
+    };
+    let transition = serde_json::from_str::<DiscoveryTransition>(&row.7)
+        .map_err(|_| corrupted("discovery credential receipt response is invalid"))?;
+    let event = serde_json::from_str::<ProviderDiscoveryEvent>(&row.16)
+        .map_err(|_| corrupted("discovery credential receipt event is invalid"))?;
+    let canonical_transition_json = encode_json_result(
+        serde_json::to_value(&transition),
+        "discovery credential receipt response",
+    )?;
+    let canonical_event_json = encode_json_result(
+        serde_json::to_value(&event),
+        "discovery credential receipt event",
+    )?;
+    let event_id = DiscoveryEventId::parse(row.10)
+        .map_err(|_| corrupted("discovery credential receipt event id is invalid"))?;
+    let event_state = parse_discovery_state(&row.15)?;
+    let receipt_created_at = parse_timestamp(&row.9, "credential receipt created_at")?;
+    let event_created_at = parse_timestamp(&row.18, "credential event created_at")?;
+    transition
+        .session
+        .validate()
+        .map_err(|_| corrupted("discovery credential receipt session is invalid"))?;
+    validate_sha256(
+        "discovery credential receipt request",
+        &receipt.request_sha256,
+    )
+    .map_err(|_| corrupted("discovery credential receipt request hash is invalid"))?;
+    if canonical_transition_json != row.7
+        || canonical_event_json != row.16
+        || row.8 != DISCOVERY_REDACTION_VERSION
+        || row.17 != DISCOVERY_REDACTION_VERSION
+        || transition.receipt != receipt
+        || transition.event != event
+        || transition.previous_revision != receipt.expected_revision
+        || transition.session.id != *session_id
+        || transition.session.revision != receipt.resulting_revision
+        || event.id != event_id
+        || event.session_id.as_str() != row.11
+        || event.session_id != *session_id
+        || event.sequence != row.12
+        || event.sequence != receipt.event_sequence
+        || event.version != row.13
+        || event.version != PROVIDER_DISCOVERY_EVENT_VERSION
+        || event.session_revision != row.14
+        || event.session_revision != receipt.resulting_revision
+        || event.state != event_state
+        || event.state != transition.session.state
+        || event.failure != transition.session.failure
+        || event.sequence.saturating_add(1) != transition.session.next_event_sequence
+        || event.action_id != receipt.action_id
+        || event_created_at != receipt_created_at
+    {
+        return Err(corrupted(
+            "discovery credential authority receipt is detached from its event or response",
+        ));
+    }
+    Ok(DiscoveryAuthorityReceiptRecord {
+        receipt,
+        transition,
+        created_at: receipt_created_at,
+        transition_audit_sequence: 0,
+        commit_prepared_audit_sequence: None,
+    })
+}
+
+fn validate_ready_discovery_authority_receipt(
+    receipt: &DiscoveryAuthorityReceiptRecord,
+    ready: &DiscoverySessionSnapshot,
+    attempt: &DiscoveryCommitAttemptRecord,
+    expected_action_kind: &str,
+    expected_revision: u64,
+) -> CoreResult<()> {
+    if receipt.receipt.action_kind != expected_action_kind
+        || receipt.receipt.expected_revision != expected_revision
+        || receipt.receipt.resulting_revision != ready.session.revision
+        || receipt.receipt.outcome
+            != lorepia_domain::discovery::DiscoveryActionReceiptOutcome::Applied
+        || receipt.transition.session != ready.session
+        || receipt.transition.session.state != DiscoveryState::Ready
+        || receipt.transition.session.commit_attempt_id.as_ref() != Some(&attempt.id)
+        || receipt.transition.session.commit_plan_sha256.as_deref()
+            != Some(attempt.plan_sha256.as_str())
+        || receipt.transition.session.committed_connection_id.as_ref()
+            != Some(&attempt.plan.connection_id)
+    {
+        return Err(corrupted(
+            "ready discovery credential receipt is detached from its completed authority",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_commit_phase_preconditions(
+    transaction: &Transaction<'_>,
+    attempt: &DiscoveryCommitAttemptRecord,
+    next: DiscoveryCommitPhase,
+) -> CoreResult<()> {
+    let session_state = transaction
+        .query_row(
+            "SELECT state
+             FROM provider_discovery_sessions
+             WHERE id = ?1 AND commit_attempt_id = ?2",
+            params![attempt.session_id.as_str(), attempt.id.as_str()],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(database_error)?
+        .ok_or_else(|| corrupted("commit attempt is detached from its discovery session"))?;
+    match next {
+        DiscoveryCommitPhase::CredentialReferenceApplied => {
+            if attempt.plan.credential_ref.is_none() || session_state != "committing" {
+                return Err(CoreError::invalid(
+                    "credential confirmation requires a credential-bearing active commit",
+                ));
+            }
+            require_started_session_operation(transaction, &attempt.session_id, "atomic_commit")?;
+            verify_discovery_attempt_graph(transaction, attempt)
+        }
+        DiscoveryCommitPhase::Compensated => {
+            if session_state != "compensating" {
+                return Err(CoreError::invalid(
+                    "compensated phase requires a compensating discovery session",
+                ));
+            }
+            require_started_session_operation(transaction, &attempt.session_id, "compensation")?;
+            let (total_steps, incomplete_steps) = transaction
+                .query_row(
+                    "SELECT COUNT(*),
+                            COALESCE(SUM(
+                                CASE WHEN status = 'completed' THEN 0 ELSE 1 END
+                            ), 0)
+                     FROM provider_discovery_compensation_steps
+                     WHERE commit_attempt_id = ?1",
+                    [attempt.id.as_str()],
+                    |row| Ok((row.get::<_, u32>(0)?, row.get::<_, u32>(1)?)),
+                )
+                .map_err(database_error)?;
+            ensure_discovery_attempt_graph_absent(transaction, attempt)?;
+            if total_steps == 0 || incomplete_steps != 0 {
+                return Err(CoreError::invalid(
+                    "compensated phase requires every recipe step to be complete",
+                ));
+            }
+            Ok(())
+        }
+        _ => Err(CoreError::internal(
+            "unsupported standalone discovery commit phase validation",
+        )),
+    }
+}
+
+type CompensationRow = (
+    String,
+    String,
+    u32,
+    String,
+    String,
+    String,
+    String,
+    u32,
+    Option<String>,
+    String,
+    String,
+    Option<String>,
+);
+
+fn decode_compensation_row(
+    row: CompensationRow,
+    plan: &DiscoveryCommitPlan,
+) -> CoreResult<DiscoveryCompensationRecord> {
+    let kind = serde_json::from_value(Value::String(row.4))
+        .map_err(|_| corrupted("stored discovery compensation kind is invalid"))?;
+    let mut step = serde_json::from_str::<DiscoveryCompensationStep>(&row.5)
+        .map_err(|_| corrupted("stored discovery compensation step is invalid"))?;
+    step.validate_against(plan)
+        .map_err(|_| corrupted("stored compensation target differs from its commit plan"))?;
+    if step.status != DomainCompensationStatus::Pending {
+        return Err(corrupted(
+            "stored immutable compensation recipe is not pending",
+        ));
+    }
+    let status = DiscoveryCompensationStatus::parse(&row.6)?;
+    if step.ordinal != row.2 || step.action_id.as_str() != row.3 || step.kind != kind {
+        return Err(corrupted(
+            "stored compensation columns differ from their typed step",
+        ));
+    }
+    step.status = match status {
+        DiscoveryCompensationStatus::Pending => DomainCompensationStatus::Pending,
+        DiscoveryCompensationStatus::InProgress => DomainCompensationStatus::InProgress,
+        DiscoveryCompensationStatus::Completed => DomainCompensationStatus::Completed,
+        DiscoveryCompensationStatus::Failed => DomainCompensationStatus::Failed,
+        DiscoveryCompensationStatus::OutcomeUnknown => DomainCompensationStatus::OutcomeUnknown,
+    };
+    let last_failure = row
+        .8
+        .as_deref()
+        .map(|json| {
+            let failure = serde_json::from_str(json)
+                .map_err(|_| corrupted("stored compensation failure is invalid"))?;
+            lorepia_domain::discovery::DiscoveryFailure::validate(&failure)
+                .map_err(|_| corrupted("stored compensation failure is invalid"))?;
+            Ok(failure)
+        })
+        .transpose()?;
+    Ok(DiscoveryCompensationRecord {
+        id: row.0,
+        commit_attempt_id: DiscoveryCommitAttemptId::parse(row.1).map_err(contract_error)?,
+        ordinal: row.2,
+        action_id: DiscoveryActionId::parse(row.3).map_err(contract_error)?,
+        kind,
+        step,
+        status,
+        attempt_count: row.7,
+        last_failure,
+        created_at: parse_timestamp(&row.9, "compensation created_at")?,
+        updated_at: parse_timestamp(&row.10, "compensation updated_at")?,
+        completed_at: row
+            .11
+            .as_deref()
+            .map(|value| parse_timestamp(value, "compensation completed_at"))
+            .transpose()?,
+    })
+}
+
+const fn compensation_status_transition_allowed(
+    expected: DiscoveryCompensationStatus,
+    next: DiscoveryCompensationStatus,
+) -> bool {
+    matches!(
+        (expected, next),
+        (
+            DiscoveryCompensationStatus::Pending,
+            DiscoveryCompensationStatus::InProgress
+        ) | (
+            DiscoveryCompensationStatus::InProgress,
+            DiscoveryCompensationStatus::Completed
+                | DiscoveryCompensationStatus::Failed
+                | DiscoveryCompensationStatus::OutcomeUnknown
+        )
+    )
+}
+
+fn ensure_foreign_keys_clean(connection: &Connection) -> CoreResult<()> {
+    let violation = {
+        let mut statement = connection
+            .prepare("PRAGMA foreign_key_check")
+            .map_err(database_error)?;
+        statement
+            .query_row([], |_| Ok(()))
+            .optional()
+            .map_err(database_error)?
+            .is_some()
+    };
+    if violation {
+        Err(corrupted(
+            "provider graph compensation created a foreign-key violation",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+type SessionRow = (
+    String,
+    String,
+    u64,
+    u64,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    bool,
+    Option<String>,
+    Option<String>,
+    String,
+    String,
+);
+
+fn load_session_snapshot(
+    connection: &Connection,
+    session_id: &str,
+) -> CoreResult<Option<DiscoverySessionSnapshot>> {
+    let row = connection
+        .query_row(
+            "SELECT id, state, revision, next_event_sequence, sanitized_input_json,
+                    draft_json, review_diff_json, error_json, recovery_json,
+                    unknown_operation, manifest_sha256, commit_plan_sha256,
+                    commit_attempt_id, committed_connection_id, cancellation_pending,
+                    active_operation_id, active_effect_approval_json,
+                    created_at, updated_at
+             FROM provider_discovery_sessions
+             WHERE id = ?1",
+            [session_id],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                    row.get(8)?,
+                    row.get(9)?,
+                    row.get(10)?,
+                    row.get(11)?,
+                    row.get(12)?,
+                    row.get(13)?,
+                    row.get(14)?,
+                    row.get(15)?,
+                    row.get(16)?,
+                    row.get(17)?,
+                    row.get(18)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(database_error)?;
+    row.map(|row| decode_session_row(connection, row))
+        .transpose()
+}
+
+#[allow(clippy::too_many_lines)]
+fn decode_session_row(
+    connection: &Connection,
+    row: SessionRow,
+) -> CoreResult<DiscoverySessionSnapshot> {
+    let input = serde_json::from_str::<SanitizedDiscoveryInput>(&row.4)
+        .map_err(|_| corrupted("stored discovery input is invalid"))?;
+    input
+        .validate()
+        .map_err(|_| corrupted("stored discovery input violates its contract"))?;
+    validate_sanitized_input(&input)
+        .map_err(|_| corrupted("stored discovery input contains credential-like material"))?;
+    let state = parse_discovery_state(&row.1)?;
+    let recovery = row
+        .8
+        .as_deref()
+        .map(|json| {
+            serde_json::from_str::<DiscoveryRecoveryCheckpoint>(json)
+                .map_err(|_| corrupted("stored discovery recovery checkpoint is invalid"))
+        })
+        .transpose()?;
+    let unknown_operation = row.9.as_deref().map(parse_operation_kind).transpose()?;
+    let failure = row
+        .7
+        .as_deref()
+        .map(|json| {
+            serde_json::from_str(json).map_err(|_| corrupted("stored discovery failure is invalid"))
+        })
+        .transpose()?;
+    let active_operation_id = row
+        .15
+        .map(DiscoveryOperationId::parse)
+        .transpose()
+        .map_err(contract_error)?;
+    let active_effect_approval = row
+        .16
+        .as_deref()
+        .map(|json| {
+            let binding = serde_json::from_str::<DiscoveryApprovalBinding>(json)
+                .map_err(|_| corrupted("stored active discovery approval is invalid"))?;
+            binding
+                .validate()
+                .map_err(|_| corrupted("stored active discovery approval is invalid"))?;
+            if serde_json::to_string(&binding)
+                .map_err(|_| corrupted("stored active discovery approval cannot be encoded"))?
+                != json
+            {
+                return Err(corrupted(
+                    "stored active discovery approval is not canonical",
+                ));
+            }
+            Ok(binding)
+        })
+        .transpose()?;
+    if let Some(operation_id) = &active_operation_id {
+        let operation = load_operation_by_id(connection, operation_id)?;
+        if operation.session_id.as_str() != row.0
+            || state.operation() != Some(operation.kind)
+            || operation.approval != active_effect_approval
+            || !matches!(
+                operation.status,
+                DiscoveryOperationStatus::Prepared | DiscoveryOperationStatus::Started
+            )
+        {
+            return Err(corrupted(
+                "active discovery operation does not match the session binding",
+            ));
+        }
+        if let Some(binding) = &operation.approval {
+            validate_recovery_approval_binding(connection, &row.0, binding, operation.kind)?;
+        }
+    } else if let Some(binding) = &active_effect_approval {
+        let recoverable_operation = match state {
+            DiscoveryState::Interrupted => recovery.as_ref().map(|checkpoint| checkpoint.operation),
+            DiscoveryState::UnknownOutcome => unknown_operation,
+            _ => None,
+        };
+        let Some(operation) = recoverable_operation.filter(|operation| {
+            matches!(
+                operation,
+                DiscoveryOperationKind::BuildAssistantManifestDraft
+                    | DiscoveryOperationKind::ProbeCapabilities
+            )
+        }) else {
+            return Err(corrupted(
+                "active discovery approval exists without recoverable billable work",
+            ));
+        };
+        validate_recovery_approval_binding(connection, &row.0, binding, operation)?;
+    }
+    let session = ProviderDiscoverySession {
+        id: DiscoverySessionId::from(row.0),
+        input,
+        state,
+        revision: row.2,
+        next_event_sequence: row.3,
+        recovery,
+        unknown_operation,
+        manifest_sha256: row.10,
+        commit_plan_sha256: row.11,
+        commit_attempt_id: row
+            .12
+            .map(DiscoveryCommitAttemptId::parse)
+            .transpose()
+            .map_err(contract_error)?,
+        committed_connection_id: row.13.map(Into::into),
+        cancellation_pending: row.14,
+        active_effect_approval,
+        failure,
+    };
+    session
+        .validate()
+        .map_err(|_| corrupted("stored discovery session violates its domain contract"))?;
+    if let Some(attempt_id) = &session.commit_attempt_id {
+        let attempt = load_commit_attempt(connection, attempt_id).map_err(|error| {
+            if error.code == CoreErrorCode::NotFound {
+                corrupted("stored discovery session references a missing commit attempt")
+            } else {
+                error
+            }
+        })?;
+        if attempt.session_id != session.id
+            || session.commit_plan_sha256.as_deref() != Some(attempt.plan_sha256.as_str())
+        {
+            return Err(corrupted(
+                "stored discovery session commit binding does not match its attempt",
+            ));
+        }
+    }
+    let draft_json = row
+        .5
+        .as_deref()
+        .map(|json| decode_redacted_json(json, "stored discovery draft"))
+        .transpose()?;
+    let review = row
+        .6
+        .as_deref()
+        .map(|json| {
+            let review = serde_json::from_str::<DiscoveryReviewDiff>(json)
+                .map_err(|_| corrupted("stored discovery review is invalid"))?;
+            review
+                .validate()
+                .map_err(|_| corrupted("stored discovery review violates its contract"))?;
+            Ok(review)
+        })
+        .transpose()?;
+    if let Some(review) = &review {
+        validate_review_evidence_references(connection, &session.id, review)
+            .map_err(|_| corrupted("stored discovery review has invalid evidence references"))?;
+    }
+    Ok(DiscoverySessionSnapshot {
+        session,
+        active_operation_id,
+        draft_json,
+        review,
+        created_at: parse_timestamp(&row.17, "discovery created_at")?,
+        updated_at: parse_timestamp(&row.18, "discovery updated_at")?,
+    })
+}
+
+fn decode_evidence_row(
+    row: (String, String, String, String, String, String, String),
+) -> CoreResult<DiscoveryEvidenceRecord> {
+    let evidence = DiscoveryEvidenceRecord {
+        id: EvidenceId::from(row.0),
+        session_id: DiscoverySessionId::from(row.1),
+        kind: DiscoveryEvidenceKind::parse(&row.2)?,
+        source_url: HttpUrl::parse(&row.3)
+            .map_err(|_| corrupted("stored discovery evidence URL is invalid"))?,
+        content_sha256: row.4,
+        extracted_json: decode_redacted_json(&row.5, "stored discovery evidence")?,
+        fetched_at: parse_timestamp(&row.6, "discovery evidence fetched_at")?,
+    };
+    validate_discovery_evidence(&evidence)
+        .map_err(|_| corrupted("stored discovery evidence violates its contract"))?;
+    Ok(evidence)
+}
+
+#[allow(clippy::too_many_lines)]
+fn validate_recovery_approval_binding(
+    connection: &Connection,
+    session_id: &str,
+    binding: &DiscoveryApprovalBinding,
+    operation: DiscoveryOperationKind,
+) -> CoreResult<()> {
+    let row = connection
+        .query_row(
+            "SELECT approval_kind, decision, grant_json, grant_sha256
+             FROM provider_discovery_approvals
+             WHERE id = ?1 AND session_id = ?2",
+            params![binding.approval_id.as_str(), session_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(database_error)?
+        .ok_or_else(|| corrupted("recoverable billable approval record is missing"))?;
+    if row.1 != "approved"
+        || row.3 != binding.grant_sha256
+        || sha256_hex(row.2.as_bytes()) != binding.grant_sha256
+    {
+        return Err(corrupted(
+            "recoverable billable approval binding does not match its immutable grant",
+        ));
+    }
+    let grant = serde_json::from_str::<DiscoveryApprovalGrant>(&row.2)
+        .map_err(|_| corrupted("recoverable billable approval grant is invalid"))?;
+    grant
+        .validate()
+        .map_err(|_| corrupted("recoverable billable approval grant is invalid"))?;
+    if serde_json::to_string(&grant)
+        .map_err(|_| corrupted("recoverable billable approval grant cannot be encoded"))?
+        != row.2
+    {
+        return Err(corrupted(
+            "recoverable billable approval grant is not canonical",
+        ));
+    }
+    match &grant {
+        DiscoveryApprovalGrant::AssistantConsent {
+            assistant_route_id,
+            evidence_ids,
+            ..
+        } => {
+            let typed_session_id = DiscoverySessionId::from(session_id);
+            validate_session_evidence_ids(
+                connection,
+                &typed_session_id,
+                evidence_ids,
+                "recoverable assistant consent",
+            )
+            .map_err(|_| {
+                corrupted("recoverable assistant approval has invalid evidence references")
+            })?;
+            let route_exists = connection
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM provider_models WHERE id = ?1)",
+                    [assistant_route_id.as_str()],
+                    |row| row.get::<_, bool>(0),
+                )
+                .map_err(database_error)?;
+            if !route_exists {
+                return Err(corrupted("recoverable assistant approval route is missing"));
+            }
+        }
+        DiscoveryApprovalGrant::CapabilityProbe {
+            model_route_ids,
+            budget,
+        } => {
+            validate_capability_probe_grant(
+                connection,
+                &DiscoverySessionId::from(session_id),
+                model_route_ids,
+                *budget,
+            )
+            .map_err(|_| {
+                corrupted("recoverable capability approval differs from its durable proposal")
+            })?;
+        }
+        _ => {}
+    }
+    let expected_kind = match operation {
+        DiscoveryOperationKind::BuildAssistantManifestDraft => "assistant_consent",
+        DiscoveryOperationKind::ProbeCapabilities => "capability_probe",
+        _ => {
+            return Err(corrupted(
+                "non-billable operation carried a recovery approval",
+            ));
+        }
+    };
+    let grant_matches = matches!(
+        (operation, &grant),
+        (
+            DiscoveryOperationKind::BuildAssistantManifestDraft,
+            DiscoveryApprovalGrant::AssistantConsent { .. }
+        ) | (
+            DiscoveryOperationKind::ProbeCapabilities,
+            DiscoveryApprovalGrant::CapabilityProbe { .. }
+        )
+    );
+    if row.0 != expected_kind || !grant_matches {
+        return Err(corrupted(
+            "recoverable billable approval has the wrong grant type",
+        ));
+    }
+    Ok(())
+}
+
+fn decode_candidate_row(
+    row: (String, String, String, String, String, u64, String),
+) -> CoreResult<StoredDiscoveryCandidate> {
+    let summary = serde_json::from_str(&row.3)
+        .map_err(|_| corrupted("stored discovery candidate summary is invalid"))?;
+    let candidate = DiscoveryCandidate {
+        id: DiscoveryCandidateId::parse(row.0).map_err(contract_error)?,
+        session_id: DiscoverySessionId::from(row.1),
+        summary,
+        evidence_ids: serde_json::from_str(&row.4)
+            .map_err(|_| corrupted("stored candidate evidence references are invalid"))?,
+        created_at: parse_timestamp(&row.6, "discovery candidate created_at")?,
+    };
+    candidate
+        .validate()
+        .map_err(|_| corrupted("stored discovery candidate violates its contract"))?;
+    if candidate_kind(&candidate) != row.2 {
+        return Err(corrupted(
+            "stored discovery candidate kind does not match its typed summary",
+        ));
+    }
+    Ok(StoredDiscoveryCandidate {
+        candidate,
+        proposed_revision: row.5,
+    })
+}
+
+type ApprovalRow = (
+    String,
+    String,
+    String,
+    Option<String>,
+    String,
+    String,
+    u64,
+    String,
+    String,
+);
+
+fn decode_approval_row(row: ApprovalRow) -> CoreResult<DiscoveryApprovalRecord> {
+    let decision = parse_approval_decision(&row.4)?;
+    let grant = serde_json::from_str::<DiscoveryApprovalGrant>(&row.5)
+        .map_err(|_| corrupted("stored discovery approval grant is invalid"))?;
+    let canonical_grant = encode_approval_grant(&grant)
+        .map_err(|_| corrupted("stored discovery approval grant is not canonical"))?;
+    let expected_candidate_id = match &grant {
+        DiscoveryApprovalGrant::TemplateSelection { candidate_id } => Some(candidate_id.as_str()),
+        _ => None,
+    };
+    if row.2 != approval_kind(&grant)
+        || row.3.as_deref() != expected_candidate_id
+        || row.5 != canonical_grant
+        || row.7 != sha256_hex(canonical_grant.as_bytes())
+    {
+        return Err(corrupted(
+            "stored discovery approval columns do not match its typed grant",
+        ));
+    }
+    let approval = DiscoveryApprovalRecord {
+        id: DiscoveryApprovalId::parse(row.0).map_err(contract_error)?,
+        session_id: DiscoverySessionId::from(row.1),
+        session_revision: row.6,
+        decision,
+        grant,
+        created_at: parse_timestamp(&row.8, "discovery approval created_at")?,
+    };
+    approval
+        .validate()
+        .map_err(|_| corrupted("stored discovery approval violates its contract"))?;
+    Ok(approval)
+}
+
+type NativeCredentialExecutionRow = (
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    u32,
+    u32,
+    Option<String>,
+    Option<u32>,
+    Option<u32>,
+);
+
+fn load_native_credential_execution_row(
+    connection: &Connection,
+    operation_id: &DiscoveryOperationId,
+) -> CoreResult<Option<NativeCredentialExecutionRow>> {
+    connection
+        .query_row(
+            "SELECT execution.physical_authority_id, execution.operation_id,
+                    execution.session_id, execution.commit_attempt_id,
+                    execution.commit_plan_sha256, execution.connection_id,
+                    execution.connection_binding_sha256, execution.reserved_at,
+                    execution.schema_version, execution.redaction_version,
+                    store_attempt.started_at, store_attempt.schema_version,
+                    store_attempt.redaction_version
+             FROM provider_discovery_native_credential_executions AS execution
+             LEFT JOIN provider_discovery_native_credential_store_attempts AS store_attempt
+               ON store_attempt.operation_id = execution.operation_id
+              AND store_attempt.physical_authority_id = execution.physical_authority_id
+             WHERE execution.operation_id = ?1",
+            [operation_id.as_str()],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                    row.get(8)?,
+                    row.get(9)?,
+                    row.get(10)?,
+                    row.get(11)?,
+                    row.get(12)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(database_error)
+}
+
+fn validate_missing_native_credential_execution(
+    connection: &Connection,
+    operation: &DiscoveryOperationRecord,
+) -> CoreResult<()> {
+    let authorized_attempts = {
+        let mut statement = connection
+            .prepare(
+                "SELECT commit_attempt_id
+                 FROM provider_discovery_authorized_native_commit_starts
+                 WHERE operation_id = ?1
+                 ORDER BY commit_attempt_id",
+            )
+            .map_err(database_error)?;
+        statement
+            .query_map([operation.id.as_str()], |row| row.get::<_, String>(0))
+            .map_err(database_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(database_error)?
+    };
+    let [] = authorized_attempts.as_slice() else {
+        let [attempt_id] = authorized_attempts.as_slice() else {
+            return Err(corrupted(
+                "native credential operation has ambiguous approved start authority",
+            ));
+        };
+        let attempt_id = DiscoveryCommitAttemptId::parse(attempt_id.clone())
+            .map_err(|_| corrupted("native credential operation approved attempt id is invalid"))?;
+        let attempt = load_commit_attempt(connection, &attempt_id)?;
+        return match operation.status {
+            DiscoveryOperationStatus::Prepared => Ok(()),
+            DiscoveryOperationStatus::Interrupted => {
+                validate_pre_store_native_credential_interruption(connection, operation, &attempt)
+            }
+            DiscoveryOperationStatus::Started | DiscoveryOperationStatus::OutcomeUnknown
+                if validate_legacy_unbound_started_credential_execution(
+                    connection, operation, &attempt,
+                )? =>
+            {
+                Ok(())
+            }
+            _ => Err(corrupted(
+                "started discovery credential operation has no immutable native execution",
+            )),
+        };
+    };
+    Ok(())
+}
+
+fn decode_native_credential_execution_row(
+    row: NativeCredentialExecutionRow,
+) -> CoreResult<(DiscoveryNativeCredentialExecutionRecord, String)> {
+    let (
+        physical_authority_id,
+        operation_id,
+        session_id,
+        commit_attempt_id,
+        commit_plan_sha256,
+        connection_id,
+        connection_binding_sha256,
+        reserved_at,
+        schema_version,
+        redaction_version,
+        store_started_at,
+        store_schema_version,
+        store_redaction_version,
+    ) = row;
+    validate_discovery_native_physical_authority_id(&physical_authority_id)?;
+    validate_sha256("discovery native credential plan hash", &commit_plan_sha256)
+        .map_err(|_| corrupted("stored native credential execution plan hash is invalid"))?;
+    validate_sha256(
+        "discovery native credential connection binding",
+        &connection_binding_sha256,
+    )
+    .map_err(|_| corrupted("stored native credential execution connection binding is invalid"))?;
+    if schema_version != 1
+        || redaction_version != 1
+        || store_started_at.is_some() != store_schema_version.is_some()
+        || store_started_at.is_some() != store_redaction_version.is_some()
+        || store_schema_version.is_some_and(|version| version != 1)
+        || store_redaction_version.is_some_and(|version| version != 1)
+    {
+        return Err(corrupted(
+            "stored native credential execution version is unsupported",
+        ));
+    }
+    let record = DiscoveryNativeCredentialExecutionRecord {
+        physical_authority_id,
+        operation_id: DiscoveryOperationId::parse(operation_id)
+            .map_err(|_| corrupted("stored native credential execution operation id is invalid"))?,
+        session_id: DiscoverySessionId::from(session_id),
+        commit_attempt_id: DiscoveryCommitAttemptId::parse(commit_attempt_id)
+            .map_err(|_| corrupted("stored native credential execution attempt id is invalid"))?,
+        commit_plan_sha256,
+        connection_id: ProviderConnectionId::from(connection_id),
+        connection_binding_sha256,
+        reserved_at: parse_timestamp(&reserved_at, "native credential execution reserved_at")?,
+        store_started_at: store_started_at
+            .as_deref()
+            .map(|value| parse_timestamp(value, "native credential store attempt started_at"))
+            .transpose()?,
+    };
+    Ok((record, reserved_at))
+}
+
+type NativeCredentialAbandonmentRow = (
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    u32,
+    u32,
+);
+
+fn validate_native_credential_abandonment(
+    connection: &Connection,
+    operation: &DiscoveryOperationRecord,
+    execution: &DiscoveryNativeCredentialExecutionRecord,
+    reserved_at_raw: &str,
+) -> CoreResult<bool> {
+    let abandonment: Option<NativeCredentialAbandonmentRow> = connection
+        .query_row(
+            "SELECT physical_authority_id, session_id, commit_attempt_id,
+                    commit_plan_sha256, connection_id,
+                    connection_binding_sha256, reserved_at,
+                    abandonment_kind, abandoned_at,
+                    schema_version, redaction_version
+             FROM provider_discovery_native_credential_abandoned_reservations
+             WHERE operation_id = ?1",
+            [operation.id.as_str()],
+            |query_row| {
+                Ok((
+                    query_row.get::<_, String>(0)?,
+                    query_row.get::<_, String>(1)?,
+                    query_row.get::<_, String>(2)?,
+                    query_row.get::<_, String>(3)?,
+                    query_row.get::<_, String>(4)?,
+                    query_row.get::<_, String>(5)?,
+                    query_row.get::<_, String>(6)?,
+                    query_row.get::<_, String>(7)?,
+                    query_row.get::<_, String>(8)?,
+                    query_row.get::<_, u32>(9)?,
+                    query_row.get::<_, u32>(10)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(database_error)?;
+    let Some(abandonment) = abandonment else {
+        return Ok(false);
+    };
+    let abandoned_at =
+        parse_timestamp(&abandonment.8, "native credential reservation abandoned_at")?;
+    let valid = abandonment.0 == execution.physical_authority_id
+        && abandonment.1 == execution.session_id.as_str()
+        && abandonment.2 == execution.commit_attempt_id.as_str()
+        && abandonment.3 == execution.commit_plan_sha256
+        && abandonment.4 == execution.connection_id.as_str()
+        && abandonment.5 == execution.connection_binding_sha256
+        && abandonment.6 == reserved_at_raw
+        && abandonment.7 == "prepared_interrupted_before_native_store"
+        && operation.finished_at == Some(abandoned_at)
+        && abandonment.9 == 1
+        && abandonment.10 == 1;
+    if !valid {
+        return Err(corrupted(
+            "stored native credential abandonment differs from its reservation",
+        ));
+    }
+    Ok(true)
+}
+
+fn validate_native_credential_execution_commit_binding(
+    connection: &Connection,
+    operation: &DiscoveryOperationRecord,
+    attempt: &DiscoveryCommitAttemptRecord,
+    execution: &DiscoveryNativeCredentialExecutionRecord,
+    valid_abandonment: bool,
+) -> CoreResult<()> {
+    let authorized = connection
+        .query_row(
+            "SELECT COUNT(*)
+             FROM provider_discovery_authorized_native_commit_starts
+             WHERE operation_id = ?1
+               AND session_id = ?2
+               AND commit_attempt_id = ?3
+               AND commit_plan_sha256 = ?4
+               AND operation_expected_revision = ?5",
+            params![
+                operation.id.as_str(),
+                execution.session_id.as_str(),
+                execution.commit_attempt_id.as_str(),
+                execution.commit_plan_sha256,
+                operation.expected_revision,
+            ],
+            |row| row.get::<_, u64>(0),
+        )
+        .map_err(database_error)?;
+    let operation_execution_state_valid = match operation.status {
+        DiscoveryOperationStatus::Prepared => {
+            operation.started_at.is_none()
+                && operation.finished_at.is_none()
+                && execution.store_started_at.is_none()
+                && !valid_abandonment
+        }
+        DiscoveryOperationStatus::Started => {
+            execution.store_started_at.is_some()
+                && operation.started_at == execution.store_started_at
+                && operation.finished_at.is_none()
+                && !valid_abandonment
+        }
+        DiscoveryOperationStatus::Interrupted if execution.store_started_at.is_none() => {
+            if valid_abandonment {
+                validate_pre_store_native_credential_interruption(connection, operation, attempt)?;
+                true
+            } else {
+                false
+            }
+        }
+        DiscoveryOperationStatus::Succeeded
+        | DiscoveryOperationStatus::Failed
+        | DiscoveryOperationStatus::Interrupted
+        | DiscoveryOperationStatus::OutcomeUnknown => {
+            execution.store_started_at.is_some()
+                && operation.started_at == execution.store_started_at
+                && operation.finished_at.is_some()
+                && !valid_abandonment
+        }
+    };
+    if execution.operation_id != operation.id
+        || operation.session_id != execution.session_id
+        || operation.kind != DiscoveryOperationKind::AtomicCommit
+        || operation.side_effect_class != DiscoverySideEffectClass::Persistent
+        || !operation_execution_state_valid
+        || execution
+            .store_started_at
+            .is_some_and(|started| started < execution.reserved_at)
+        || operation.finished_at.is_some_and(|finished| {
+            execution
+                .store_started_at
+                .map_or(finished < execution.reserved_at, |started| {
+                    finished < started
+                })
+        })
+        || attempt.id != execution.commit_attempt_id
+        || attempt.session_id != execution.session_id
+        || attempt.plan_sha256 != execution.commit_plan_sha256
+        || attempt.plan.attempt_id != execution.commit_attempt_id
+        || attempt.plan.connection_id != execution.connection_id
+        || attempt
+            .plan
+            .credential_ref
+            .as_ref()
+            .map(CredentialRef::as_str)
+            != Some(execution.connection_id.as_str())
+        || authorized != 1
+    {
+        return Err(corrupted(
+            "stored native credential execution is detached from its immutable discovery commit",
+        ));
+    }
+    Ok(())
+}
+
+fn load_discovery_native_credential_execution(
+    connection: &Connection,
+    operation_id: &DiscoveryOperationId,
+) -> CoreResult<Option<DiscoveryNativeCredentialExecutionRecord>> {
+    let row = load_native_credential_execution_row(connection, operation_id)?;
+    let operation = load_operation_by_id(connection, operation_id)?;
+    let Some(row) = row else {
+        validate_missing_native_credential_execution(connection, &operation)?;
+        return Ok(None);
+    };
+    let (execution, reserved_at_raw) = decode_native_credential_execution_row(row)?;
+    let attempt = load_commit_attempt(connection, &execution.commit_attempt_id)?;
+    let valid_abandonment = validate_native_credential_abandonment(
+        connection,
+        &operation,
+        &execution,
+        &reserved_at_raw,
+    )?;
+    validate_native_credential_execution_commit_binding(
+        connection,
+        &operation,
+        &attempt,
+        &execution,
+        valid_abandonment,
+    )?;
+    Ok(Some(execution))
+}
+
+fn validate_discovery_native_physical_authority_id(authority_id: &str) -> CoreResult<()> {
+    const PREFIX: &str = "discovery-native-";
+    validate_identifier(
+        "discovery native credential physical authority",
+        authority_id,
+        256,
+    )
+    .map_err(|_| corrupted("stored native credential physical authority id is invalid"))?;
+    let suffix = authority_id
+        .strip_prefix(PREFIX)
+        .ok_or_else(|| corrupted("stored native credential physical authority id is invalid"))?;
+    let parsed = Uuid::parse_str(suffix)
+        .map_err(|_| corrupted("stored native credential physical authority id is invalid"))?;
+    if parsed.get_version() != Some(uuid::Version::Random)
+        || parsed.hyphenated().to_string() != suffix
+    {
+        return Err(corrupted(
+            "stored native credential physical authority id is invalid",
+        ));
+    }
+    Ok(())
+}
+
+fn load_operation_by_id(
+    connection: &Connection,
+    operation_id: &DiscoveryOperationId,
+) -> CoreResult<DiscoveryOperationRecord> {
+    let row = connection
+        .query_row(
+            "SELECT id, session_id, operation_kind, side_effect_class, status,
+                    action_id, expected_revision, request_sha256, approval_id,
+                    approval_grant_sha256, started_at, finished_at, created_at, updated_at
+             FROM provider_discovery_operations
+             WHERE id = ?1",
+            [operation_id.as_str()],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, u64>(6)?,
+                    row.get::<_, String>(7)?,
+                    row.get::<_, Option<String>>(8)?,
+                    row.get::<_, Option<String>>(9)?,
+                    row.get::<_, Option<String>>(10)?,
+                    row.get::<_, Option<String>>(11)?,
+                    row.get::<_, String>(12)?,
+                    row.get::<_, String>(13)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(database_error)?
+        .ok_or_else(|| corrupted("active discovery operation is missing"))?;
+    decode_operation_row(row)
+}
+
+type OperationRow = (
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    u64,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    String,
+    String,
+);
+
+fn decode_operation_row(row: OperationRow) -> CoreResult<DiscoveryOperationRecord> {
+    let approval = match (row.8, row.9) {
+        (None, None) => None,
+        (Some(approval_id), Some(grant_sha256)) => Some(DiscoveryApprovalBinding {
+            approval_id: DiscoveryApprovalId::parse(approval_id).map_err(contract_error)?,
+            grant_sha256,
+        }),
+        _ => {
+            return Err(corrupted(
+                "stored discovery operation has a partial approval binding",
+            ));
+        }
+    };
+    if let Some(binding) = &approval {
+        binding
+            .validate()
+            .map_err(|_| corrupted("stored operation approval binding is invalid"))?;
+    }
+    let kind = parse_operation_kind(&row.2)?;
+    let side_effect_class = parse_side_effect_class(&row.3)?;
+    if kind.side_effect_class() != side_effect_class {
+        return Err(corrupted(
+            "stored discovery operation side-effect class does not match its kind",
+        ));
+    }
+    Ok(DiscoveryOperationRecord {
+        id: DiscoveryOperationId::parse(row.0).map_err(contract_error)?,
+        session_id: DiscoverySessionId::from(row.1),
+        kind,
+        side_effect_class,
+        status: DiscoveryOperationStatus::parse(&row.4)?,
+        action_id: DiscoveryActionId::parse(row.5).map_err(contract_error)?,
+        expected_revision: row.6,
+        request_sha256: row.7,
+        approval,
+        started_at: row
+            .10
+            .as_deref()
+            .map(|value| parse_timestamp(value, "discovery operation started_at"))
+            .transpose()?,
+        finished_at: row
+            .11
+            .as_deref()
+            .map(|value| parse_timestamp(value, "discovery operation finished_at"))
+            .transpose()?,
+        created_at: parse_timestamp(&row.12, "discovery operation created_at")?,
+        updated_at: parse_timestamp(&row.13, "discovery operation updated_at")?,
+    })
+}
+
+fn load_pollable_outbox_rows(
+    transaction: &Transaction<'_>,
+    limit: u32,
+    available_at: DateTime<Utc>,
+) -> CoreResult<Vec<DiscoveryOutboxEvent>> {
+    let mut statement = transaction
+        .prepare(
+            "SELECT event.id, event.session_id, event.sequence, event.event_version,
+                    event.session_revision, event.state, event.event_json,
+                    event.delivery_attempts, event.available_at, event.created_at
+             FROM provider_discovery_event_outbox AS event
+             WHERE event.delivered_at IS NULL
+               AND event.available_at <= ?1
+               AND NOT EXISTS (
+                   SELECT 1
+                   FROM provider_discovery_event_outbox AS earlier
+                   WHERE earlier.session_id = event.session_id
+                     AND earlier.delivered_at IS NULL
+                     AND earlier.sequence < event.sequence
+               )
+             ORDER BY event.available_at, event.session_id, event.sequence
+             LIMIT ?2",
+        )
+        .map_err(database_error)?;
+    statement
+        .query_map(params![available_at.to_rfc3339(), limit], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, u64>(2)?,
+                row.get::<_, u32>(3)?,
+                row.get::<_, u64>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, u32>(7)?,
+                row.get::<_, String>(8)?,
+                row.get::<_, String>(9)?,
+            ))
+        })
+        .map_err(database_error)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(database_error)?
+        .into_iter()
+        .map(decode_outbox_row)
+        .collect()
+}
+
+fn load_pollable_outbox_rows_for_session(
+    transaction: &Transaction<'_>,
+    session_id: &DiscoverySessionId,
+    limit: u32,
+    available_at: DateTime<Utc>,
+) -> CoreResult<Vec<DiscoveryOutboxEvent>> {
+    let mut statement = transaction
+        .prepare(
+            "SELECT event.id, event.session_id, event.sequence, event.event_version,
+                    event.session_revision, event.state, event.event_json,
+                    event.delivery_attempts, event.available_at, event.created_at
+             FROM provider_discovery_event_outbox AS event
+             WHERE event.session_id = ?2
+               AND event.delivered_at IS NULL
+               AND event.available_at <= ?1
+               AND NOT EXISTS (
+                   SELECT 1
+                   FROM provider_discovery_event_outbox AS earlier
+                   WHERE earlier.session_id = event.session_id
+                     AND earlier.delivered_at IS NULL
+                     AND earlier.sequence < event.sequence
+               )
+             ORDER BY event.available_at, event.session_id, event.sequence
+             LIMIT ?3",
+        )
+        .map_err(database_error)?;
+    statement
+        .query_map(
+            params![available_at.to_rfc3339(), session_id.as_str(), limit],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, u64>(2)?,
+                    row.get::<_, u32>(3)?,
+                    row.get::<_, u64>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, u32>(7)?,
+                    row.get::<_, String>(8)?,
+                    row.get::<_, String>(9)?,
+                ))
+            },
+        )
+        .map_err(database_error)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(database_error)?
+        .into_iter()
+        .map(decode_outbox_row)
+        .collect()
+}
+
+type OutboxRow = (
+    String,
+    String,
+    u64,
+    u32,
+    u64,
+    String,
+    String,
+    u32,
+    String,
+    String,
+);
+
+fn decode_outbox_row(row: OutboxRow) -> CoreResult<DiscoveryOutboxEvent> {
+    let event = serde_json::from_str::<ProviderDiscoveryEvent>(&row.6)
+        .map_err(|_| corrupted("stored discovery outbox event is invalid"))?;
+    if event.id.as_str() != row.0
+        || event.session_id.as_str() != row.1
+        || event.sequence != row.2
+        || event.version != row.3
+        || event.session_revision != row.4
+        || enum_wire_result(serde_json::to_value(event.state), "discovery event state")? != row.5
+    {
+        return Err(corrupted(
+            "stored discovery outbox columns do not match the typed event",
+        ));
+    }
+    Ok(DiscoveryOutboxEvent {
+        event,
+        delivery_attempts: row.7,
+        available_at: parse_timestamp(&row.8, "discovery event available_at")?,
+        created_at: parse_timestamp(&row.9, "discovery event created_at")?,
+    })
+}
+
+fn validate_limit(limit: u32) -> CoreResult<()> {
+    if limit == 0 || limit > MAX_DISCOVERY_ROWS {
+        return Err(CoreError::invalid(
+            "discovery list limit must be from 1 to 1000",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_identifier(label: &str, value: &str, maximum: usize) -> CoreResult<()> {
+    if value.is_empty()
+        || value.len() > maximum
+        || value.trim() != value
+        || value.chars().any(char::is_control)
+    {
+        return Err(CoreError::invalid(format!(
+            "{label} must be a bounded trimmed opaque identifier"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_sha256(label: &str, value: &str) -> CoreResult<()> {
+    if value.len() != 64
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(CoreError::invalid(format!(
+            "{label} must be a lowercase SHA-256 digest"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_discovery_evidence(evidence: &DiscoveryEvidenceRecord) -> CoreResult<()> {
+    validate_identifier("discovery evidence id", evidence.id.as_str(), 256)?;
+    validate_identifier(
+        "discovery evidence session id",
+        evidence.session_id.as_str(),
+        128,
+    )?;
+    validate_sha256("discovery evidence content hash", &evidence.content_sha256)?;
+    validate_persistable_discovery_url(
+        evidence.source_url.as_str(),
+        "discovery evidence source URL",
+    )?;
+    if !evidence.extracted_json.is_object() {
+        return Err(CoreError::invalid(
+            "discovery evidence extraction must be a JSON object",
+        ));
+    }
+    encode_redacted_json(&evidence.extracted_json, "discovery evidence")?;
+    Ok(())
+}
+
+fn validate_sanitized_input(input: &SanitizedDiscoveryInput) -> CoreResult<()> {
+    if looks_like_secret(input.connection_id.as_str()) || looks_like_secret(&input.display_name) {
+        return Err(CoreError::invalid(
+            "discovery connection identity contains credential-like material",
+        ));
+    }
+    validate_persistable_discovery_url(input.site_url.as_str(), "discovery site URL")?;
+    if let Some(docs_url) = &input.docs_url {
+        validate_persistable_discovery_url(docs_url.as_str(), "discovery docs URL")?;
+    }
+    if let Some(reference) = &input.credential_ref {
+        validate_opaque_credential_reference(reference.as_str())?;
+    }
+    Ok(())
+}
+
+fn validate_persistable_discovery_url(value: &str, label: &str) -> CoreResult<()> {
+    let parsed =
+        url::Url::parse(value).map_err(|_| CoreError::invalid(format!("{label} is invalid")))?;
+    if parsed.query().is_some()
+        || parsed.fragment().is_some()
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+    {
+        return Err(CoreError::invalid(format!(
+            "{label} must not contain user information, a query, or a fragment"
+        )));
+    }
+    if parsed.host_str().is_some_and(looks_like_secret) {
+        return Err(CoreError::invalid(format!(
+            "{label} contains credential-like host material"
+        )));
+    }
+    for segment in parsed.path().split('/') {
+        let mut decoded = segment.to_owned();
+        for _ in 0..4 {
+            if !decoded.as_bytes().contains(&b'%') {
+                break;
+            }
+            let next = percent_decode_path_segment(&decoded).ok_or_else(|| {
+                CoreError::invalid(format!("{label} contains invalid path encoding"))
+            })?;
+            if next == decoded {
+                break;
+            }
+            decoded = next;
+        }
+        if decoded.as_bytes().contains(&b'%') {
+            return Err(CoreError::invalid(format!(
+                "{label} contains excessively nested path encoding"
+            )));
+        }
+        if looks_like_secret(&decoded) {
+            return Err(CoreError::invalid(format!(
+                "{label} contains credential-like path material"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn percent_decode_path_segment(segment: &str) -> Option<String> {
+    let bytes = segment.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0_usize;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let high = *bytes.get(index + 1)?;
+            let low = *bytes.get(index + 2)?;
+            decoded.push(hex_nibble(high)?.checked_mul(16)? + hex_nibble(low)?);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8(decoded).ok()
+}
+
+const fn hex_nibble(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn validate_opaque_credential_reference(reference: &str) -> CoreResult<()> {
+    let lower = reference.to_ascii_lowercase();
+    if reference.is_empty()
+        || reference.len() > 256
+        || reference.trim() != reference
+        || reference.chars().any(char::is_control)
+        || reference.contains("://")
+        || reference.contains('?')
+        || reference.contains('#')
+        || reference.contains('=')
+        || lower.contains("secret")
+        || lower.contains("password")
+        || lower.contains("api-key")
+        || lower.contains("apikey")
+        || lower.contains("token")
+        || looks_like_secret(reference)
+    {
+        return Err(CoreError::invalid(
+            "discovery credential_ref must be an opaque broker reference, not credential material",
+        ));
+    }
+    Ok(())
+}
+
+fn encode_redacted_json(value: &Value, label: &str) -> CoreResult<String> {
+    if !value.is_object() {
+        return Err(CoreError::invalid(format!("{label} must be a JSON object")));
+    }
+    validate_redacted_value(value)?;
+    let json = serde_json::to_string(value)
+        .map_err(|_| CoreError::internal(format!("cannot encode {label}")))?;
+    if json.len() > MAX_DISCOVERY_JSON_BYTES || json.chars().count() > MAX_DISCOVERY_JSON_CHARS {
+        return Err(CoreError::invalid(format!(
+            "{label} exceeds the persistence bound"
+        )));
+    }
+    Ok(json)
+}
+
+fn decode_redacted_json(json: &str, label: &str) -> CoreResult<Value> {
+    if json.len() > MAX_DISCOVERY_JSON_BYTES || json.chars().count() > MAX_DISCOVERY_JSON_CHARS {
+        return Err(corrupted(format!("{label} exceeds its storage bound")));
+    }
+    let value =
+        serde_json::from_str(json).map_err(|_| corrupted(format!("{label} is invalid JSON")))?;
+    validate_redacted_value(&value)
+        .map_err(|_| corrupted(format!("{label} contains forbidden data")))?;
+    Ok(value)
+}
+
+fn validate_redacted_value(value: &Value) -> CoreResult<()> {
+    let mut nodes = 0_usize;
+    validate_redacted_value_inner(value, 0, &mut nodes)
+}
+
+fn validate_redacted_value_inner(value: &Value, depth: usize, nodes: &mut usize) -> CoreResult<()> {
+    *nodes = nodes.saturating_add(1);
+    if depth > MAX_DISCOVERY_JSON_DEPTH || *nodes > MAX_DISCOVERY_JSON_NODES {
+        return Err(CoreError::invalid(
+            "redacted discovery JSON exceeds structural bounds",
+        ));
+    }
+    match value {
+        Value::Object(object) => {
+            for (key, child) in object {
+                let normalized = key
+                    .bytes()
+                    .filter(u8::is_ascii_alphanumeric)
+                    .map(|byte| byte.to_ascii_lowercase())
+                    .collect::<Vec<_>>();
+                if matches!(
+                    normalized.as_slice(),
+                    b"apikey"
+                        | b"apikeyvalue"
+                        | b"authorization"
+                        | b"authorizationvalue"
+                        | b"proxyauthorization"
+                        | b"cookie"
+                        | b"setcookie"
+                        | b"password"
+                        | b"secret"
+                        | b"clientsecret"
+                        | b"clientsecretvalue"
+                        | b"token"
+                        | b"bearertoken"
+                        | b"idtoken"
+                        | b"sessiontoken"
+                        | b"credential"
+                        | b"credentials"
+                        | b"accesstoken"
+                        | b"refreshtoken"
+                        | b"credentialvalue"
+                        | b"rawcredential"
+                        | b"requestheaders"
+                        | b"responseheaders"
+                        | b"headers"
+                        | b"documentbody"
+                        | b"rawdocument"
+                        | b"rawbody"
+                        | b"rawrequest"
+                        | b"rawresponse"
+                        | b"rawcurl"
+                        | b"pastedcurl"
+                ) {
+                    return Err(CoreError::invalid(
+                        "redacted discovery JSON contains a forbidden sensitive field",
+                    ));
+                }
+                if normalized.as_slice() == b"sourceurl"
+                    && let Some(source_url) = child.as_str()
+                {
+                    validate_persistable_discovery_url(source_url, "source_url")?;
+                }
+                validate_redacted_value_inner(child, depth + 1, nodes)?;
+            }
+        }
+        Value::Array(values) => {
+            for child in values {
+                validate_redacted_value_inner(child, depth + 1, nodes)?;
+            }
+        }
+        Value::String(value) => {
+            if value.chars().count() > MAX_DISCOVERY_JSON_CHARS {
+                return Err(CoreError::invalid(
+                    "redacted discovery JSON contains an oversized string",
+                ));
+            }
+            if looks_like_secret(value) {
+                return Err(CoreError::invalid(
+                    "redacted discovery JSON contains credential-like material",
+                ));
+            }
+            if value.contains("://")
+                && let Ok(url) = url::Url::parse(value)
+                && (!url.username().is_empty() || url.password().is_some())
+            {
+                return Err(CoreError::invalid(
+                    "redacted discovery JSON contains URL user information",
+                ));
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn looks_like_secret(value: &str) -> bool {
+    const SECRET_PREFIXES: [&str; 10] = [
+        "sk-proj-",
+        "sk-ant-",
+        "sk-or-",
+        "sk-",
+        "AIza",
+        "xoxb-",
+        "xoxp-",
+        "ghp_",
+        "github_pat_",
+        "AKIA",
+    ];
+    let trimmed = value.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.starts_with("bearer ")
+        || lower.starts_with("basic ")
+        || lower.contains("api_key=")
+        || lower.contains("apikey=")
+        || lower.contains("access_token=")
+        || lower.contains("secret=")
+        || lower.contains("password=")
+        || lower.contains("-----begin private key-----")
+        || lower.contains("-----begin rsa private key-----")
+        || lower.contains("sk-proj-")
+        || lower.contains("sk-ant-")
+        || lower.contains("sk-or-")
+        || lower.contains("github_pat_")
+    {
+        return true;
+    }
+    if SECRET_PREFIXES
+        .iter()
+        .any(|prefix| trimmed.starts_with(prefix))
+    {
+        return true;
+    }
+    let jwt_parts = trimmed.split('.').collect::<Vec<_>>();
+    jwt_parts.len() == 3
+        && jwt_parts[0].starts_with("eyJ")
+        && jwt_parts[1].starts_with("eyJ")
+        && jwt_parts.iter().all(|part| {
+            part.len() >= 8
+                && part
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+        })
+}
+
+fn encode_json_result(value: Result<Value, serde_json::Error>, label: &str) -> CoreResult<String> {
+    let value = value.map_err(|_| CoreError::internal(format!("cannot encode {label}")))?;
+    validate_redacted_value(&value)?;
+    let json = serde_json::to_string(&value)
+        .map_err(|_| CoreError::internal(format!("cannot encode {label}")))?;
+    if json.len() > MAX_DISCOVERY_JSON_BYTES || json.chars().count() > MAX_DISCOVERY_JSON_CHARS {
+        return Err(CoreError::invalid(format!(
+            "{label} exceeds the persistence bound"
+        )));
+    }
+    Ok(json)
+}
+
+fn encode_approval_grant(grant: &DiscoveryApprovalGrant) -> CoreResult<String> {
+    let json = serde_json::to_string(grant)
+        .map_err(|_| CoreError::internal("cannot encode discovery approval grant"))?;
+    let value = serde_json::from_str(&json)
+        .map_err(|_| CoreError::internal("cannot inspect discovery approval grant"))?;
+    validate_redacted_value(&value)?;
+    if json.len() > MAX_DISCOVERY_JSON_BYTES || json.chars().count() > MAX_DISCOVERY_JSON_CHARS {
+        return Err(CoreError::invalid(
+            "discovery approval grant exceeds the persistence bound",
+        ));
+    }
+    Ok(json)
+}
+
+fn encode_commit_plan_json(plan: &DiscoveryCommitPlan) -> CoreResult<String> {
+    plan.validate().map_err(contract_error)?;
+    if let Some(reference) = &plan.credential_ref {
+        validate_opaque_credential_reference(reference.as_str())?;
+    }
+    let json = serde_json::to_string(plan)
+        .map_err(|_| CoreError::internal("cannot encode discovery commit plan"))?;
+    if json.len() > MAX_DISCOVERY_JSON_BYTES || json.chars().count() > MAX_DISCOVERY_JSON_CHARS {
+        return Err(CoreError::invalid(
+            "discovery commit plan exceeds the persistence bound",
+        ));
+    }
+    Ok(json)
+}
+
+pub(crate) fn canonical_discovery_commit_plan_sha256(plan_json: &str) -> Option<String> {
+    let plan = serde_json::from_str::<DiscoveryCommitPlan>(plan_json).ok()?;
+    let canonical = encode_commit_plan_json(&plan).ok()?;
+    (canonical == plan_json).then(|| sha256_hex(plan_json.as_bytes()))
+}
+
+fn candidate_kind(candidate: &DiscoveryCandidate) -> &'static str {
+    match candidate.summary {
+        lorepia_domain::discovery::DiscoveryCandidateSummary::ProviderTemplate { .. } => {
+            "provider_template"
+        }
+        lorepia_domain::discovery::DiscoveryCandidateSummary::ApiOrigin { .. } => "api_origin",
+        lorepia_domain::discovery::DiscoveryCandidateSummary::OfficialDocument { .. } => {
+            "official_document"
+        }
+        lorepia_domain::discovery::DiscoveryCandidateSummary::ModelRoute { .. } => "model_route",
+        lorepia_domain::discovery::DiscoveryCandidateSummary::ManifestDraft { .. } => {
+            "manifest_draft"
+        }
+    }
+}
+
+fn validate_candidate_evidence_references(
+    transaction: &Transaction<'_>,
+    candidate: &StoredDiscoveryCandidate,
+) -> CoreResult<()> {
+    let mut unique = BTreeSet::new();
+    for evidence_id in &candidate.candidate.evidence_ids {
+        if !unique.insert(evidence_id.as_str()) {
+            return Err(CoreError::invalid(
+                "discovery candidate evidence references must be unique",
+            ));
+        }
+        let belongs = transaction
+            .query_row(
+                "SELECT EXISTS(
+                     SELECT 1
+                     FROM provider_discovery_evidence
+                     WHERE id = ?1 AND session_id = ?2
+                 )",
+                params![
+                    evidence_id.as_str(),
+                    candidate.candidate.session_id.as_str()
+                ],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(database_error)?;
+        if !belongs {
+            return Err(CoreError::invalid(
+                "candidate evidence must exist in the same discovery session",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_session_evidence_ids<'a>(
+    connection: &Connection,
+    session_id: &DiscoverySessionId,
+    evidence_ids: impl IntoIterator<Item = &'a EvidenceId>,
+    label: &str,
+) -> CoreResult<()> {
+    let mut unique = BTreeSet::new();
+    for evidence_id in evidence_ids {
+        if !unique.insert(evidence_id.as_str()) {
+            return Err(CoreError::invalid(format!(
+                "{label} evidence references must be unique"
+            )));
+        }
+        let belongs = connection
+            .query_row(
+                "SELECT EXISTS(
+                     SELECT 1
+                     FROM provider_discovery_evidence
+                     WHERE id = ?1 AND session_id = ?2
+                 )",
+                params![evidence_id.as_str(), session_id.as_str()],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(database_error)?;
+        if !belongs {
+            return Err(CoreError::invalid(format!(
+                "{label} evidence must exist in the same discovery session"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_review_evidence_references(
+    connection: &Connection,
+    session_id: &DiscoverySessionId,
+    review: &DiscoveryReviewDiff,
+) -> CoreResult<()> {
+    for change in &review.changes {
+        validate_session_evidence_ids(
+            connection,
+            session_id,
+            &change.evidence_ids,
+            "discovery review change",
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_approval_references(
+    transaction: &Transaction<'_>,
+    approval: &DiscoveryApprovalRecord,
+) -> CoreResult<()> {
+    match &approval.grant {
+        DiscoveryApprovalGrant::AssistantConsent {
+            assistant_route_id,
+            evidence_ids,
+            ..
+        } => {
+            validate_session_evidence_ids(
+                transaction,
+                &approval.session_id,
+                evidence_ids,
+                "assistant consent",
+            )?;
+            let route_exists = transaction
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM provider_models WHERE id = ?1)",
+                    [assistant_route_id.as_str()],
+                    |row| row.get::<_, bool>(0),
+                )
+                .map_err(database_error)?;
+            if !route_exists {
+                return Err(CoreError::invalid(
+                    "assistant consent route must exist before approval",
+                ));
+            }
+        }
+        DiscoveryApprovalGrant::CapabilityProbe {
+            model_route_ids,
+            budget,
+        } => {
+            let state = transaction
+                .query_row(
+                    "SELECT state FROM provider_discovery_sessions WHERE id = ?1",
+                    [approval.session_id.as_str()],
+                    |row| row.get::<_, String>(0),
+                )
+                .map_err(database_error)?;
+            if state != "awaiting_probe_consent" {
+                return Err(CoreError::invalid(
+                    "capability probe approval requires the consent state",
+                ));
+            }
+            validate_capability_probe_grant(
+                transaction,
+                &approval.session_id,
+                model_route_ids,
+                *budget,
+            )?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn validate_capability_probe_grant(
+    connection: &Connection,
+    session_id: &DiscoverySessionId,
+    model_route_ids: &[lorepia_domain::ModelRouteId],
+    budget: DiscoveryProbeBudget,
+) -> CoreResult<()> {
+    let draft_json = connection
+        .query_row(
+            "SELECT draft_json
+             FROM provider_discovery_sessions
+             WHERE id = ?1",
+            [session_id.as_str()],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()
+        .map_err(database_error)?
+        .flatten()
+        .ok_or_else(|| CoreError::invalid("capability probe proposal has no durable draft"))?;
+    let draft = decode_redacted_json(&draft_json, "stored discovery draft")?;
+    let probe_routes = draft
+        .get("probe_route_ids")
+        .and_then(Value::as_array)
+        .ok_or_else(|| CoreError::invalid("durable probe route proposal is missing"))?;
+    let mut expected = probe_routes
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .map(str::to_owned)
+                .ok_or_else(|| CoreError::invalid("durable probe route identifier is invalid"))
+        })
+        .collect::<CoreResult<Vec<_>>>()?;
+    expected.sort();
+    expected.dedup();
+    if expected.is_empty() {
+        return Err(CoreError::invalid(
+            "durable probe route proposal must not be empty",
+        ));
+    }
+    let graph_route_ids = draft
+        .get("routes")
+        .and_then(Value::as_array)
+        .ok_or_else(|| CoreError::invalid("durable discovery graph routes are missing"))?
+        .iter()
+        .map(|route| {
+            route
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| CoreError::invalid("durable discovery route is invalid"))
+        })
+        .collect::<CoreResult<BTreeSet<_>>>()?;
+    if expected
+        .iter()
+        .any(|route_id| !graph_route_ids.contains(route_id.as_str()))
+    {
+        return Err(CoreError::invalid(
+            "durable probe proposal references a route outside its graph",
+        ));
+    }
+    let actual = model_route_ids
+        .iter()
+        .map(|route_id| route_id.as_str().to_owned())
+        .collect::<Vec<_>>();
+    let expected_budget =
+        DiscoveryProbeBudget::standard_for_route_count(expected.len()).map_err(contract_error)?;
+    if actual != expected || budget != expected_budget {
+        return Err(CoreError::invalid(
+            "capability probe approval differs from its durable proposal",
+        ));
+    }
+    Ok(())
+}
+
+fn current_session_revision(connection: &Connection, session_id: &str) -> CoreResult<u64> {
+    connection
+        .query_row(
+            "SELECT revision FROM provider_discovery_sessions WHERE id = ?1",
+            [session_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(database_error)?
+        .ok_or_else(|| {
+            CoreError::new(
+                CoreErrorCode::NotFound,
+                "provider discovery session was not found",
+                false,
+            )
+        })
+}
+
+fn require_session(connection: &Connection, session_id: &str) -> CoreResult<()> {
+    current_session_revision(connection, session_id).map(|_| ())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_audit(
+    transaction: &Transaction<'_>,
+    session_id: &str,
+    revision: u64,
+    kind: &str,
+    action_id: Option<&str>,
+    subject_id: Option<&str>,
+    summary_key: &str,
+    created_at: DateTime<Utc>,
+) -> CoreResult<()> {
+    let sequence = transaction
+        .query_row(
+            "SELECT COALESCE(MAX(audit_sequence), 0) + 1
+             FROM provider_discovery_audit_log
+             WHERE session_id = ?1",
+            [session_id],
+            |row| row.get::<_, u64>(0),
+        )
+        .map_err(database_error)?;
+    transaction
+        .execute(
+            "INSERT INTO provider_discovery_audit_log (
+                 session_id, audit_sequence, session_revision, audit_kind,
+                 action_id, subject_id, summary_key, created_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                session_id,
+                sequence,
+                revision,
+                kind,
+                action_id,
+                subject_id,
+                summary_key,
+                created_at.to_rfc3339(),
+            ],
+        )
+        .map_err(database_error)?;
+    Ok(())
+}
+
+fn parse_timestamp(value: &str, label: &str) -> CoreResult<DateTime<Utc>> {
+    DateTime::parse_from_rfc3339(value)
+        .map(|value| value.with_timezone(&Utc))
+        .map_err(|_| corrupted(format!("stored {label} is invalid")))
+}
+
+fn parse_discovery_state(value: &str) -> CoreResult<DiscoveryState> {
+    serde_json::from_value(Value::String(value.to_owned()))
+        .map_err(|_| corrupted("stored discovery state is invalid"))
+}
+
+fn parse_operation_kind(value: &str) -> CoreResult<DiscoveryOperationKind> {
+    serde_json::from_value(Value::String(value.to_owned()))
+        .map_err(|_| corrupted("stored discovery operation kind is invalid"))
+}
+
+fn parse_side_effect_class(value: &str) -> CoreResult<DiscoverySideEffectClass> {
+    serde_json::from_value(Value::String(value.to_owned()))
+        .map_err(|_| corrupted("stored discovery side-effect class is invalid"))
+}
+
+fn parse_approval_decision(value: &str) -> CoreResult<DiscoveryApprovalDecision> {
+    serde_json::from_value(Value::String(value.to_owned()))
+        .map_err(|_| corrupted("stored discovery approval decision is invalid"))
+}
+
+fn json_enum_wire(value: Value, label: &str) -> CoreResult<String> {
+    value
+        .as_str()
+        .map(str::to_owned)
+        .ok_or_else(|| CoreError::internal(format!("{label} did not serialize as a string")))
+}
+
+fn enum_wire_result(value: Result<Value, serde_json::Error>, label: &str) -> CoreResult<String> {
+    json_enum_wire(
+        value.map_err(|_| CoreError::internal(format!("cannot encode {label}")))?,
+        label,
+    )
+}
+
+fn canonical_json_result(
+    value: Result<Value, serde_json::Error>,
+    label: &str,
+) -> CoreResult<String> {
+    let value = value.map_err(|_| CoreError::internal(format!("cannot encode {label}")))?;
+    validate_redacted_value(&value)?;
+    canonical_typed_value(value, label)
+}
+
+fn canonical_typed_json_result(
+    value: Result<Value, serde_json::Error>,
+    label: &str,
+) -> CoreResult<String> {
+    let value = value.map_err(|_| CoreError::internal(format!("cannot encode {label}")))?;
+    canonical_typed_value(value, label)
+}
+
+fn canonical_typed_value(value: Value, label: &str) -> CoreResult<String> {
+    let mut output = String::new();
+    write_canonical_json(&value, &mut output)?;
+    if output.len() > MAX_DISCOVERY_JSON_BYTES || output.chars().count() > MAX_DISCOVERY_JSON_CHARS
+    {
+        return Err(CoreError::invalid(format!(
+            "{label} exceeds the persistence bound"
+        )));
+    }
+    Ok(output)
+}
+
+fn write_canonical_json(value: &Value, output: &mut String) -> CoreResult<()> {
+    match value {
+        Value::Null => output.push_str("null"),
+        Value::Bool(value) => output.push_str(if *value { "true" } else { "false" }),
+        Value::Number(value) => {
+            if value.as_f64().is_some_and(|value| value == 0.0) {
+                output.push('0');
+            } else {
+                output.push_str(&value.to_string());
+            }
+        }
+        Value::String(value) => output.push_str(
+            &serde_json::to_string(value)
+                .map_err(|_| CoreError::internal("cannot encode canonical JSON string"))?,
+        ),
+        Value::Array(values) => {
+            output.push('[');
+            for (index, value) in values.iter().enumerate() {
+                if index != 0 {
+                    output.push(',');
+                }
+                write_canonical_json(value, output)?;
+            }
+            output.push(']');
+        }
+        Value::Object(values) => {
+            output.push('{');
+            let mut keys = values.keys().collect::<Vec<_>>();
+            keys.sort_unstable();
+            for (index, key) in keys.into_iter().enumerate() {
+                if index != 0 {
+                    output.push(',');
+                }
+                output.push_str(
+                    &serde_json::to_string(key)
+                        .map_err(|_| CoreError::internal("cannot encode canonical JSON key"))?,
+                );
+                output.push(':');
+                write_canonical_json(&values[key], output)?;
+            }
+            output.push('}');
+        }
+    }
+    Ok(())
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    hex::encode(Sha256::digest(bytes))
+}
+
+fn contract_error(error: DiscoveryContractError) -> CoreError {
+    CoreError::invalid(format!("invalid provider discovery contract: {error}"))
+}
+
+fn database_error(error: rusqlite::Error) -> CoreError {
+    CoreError::new(
+        CoreErrorCode::StorageUnavailable,
+        format!("SQLite discovery operation failed: {error}"),
+        true,
+    )
+}
+
+fn discovery_error(error: DiscoveryStorageError) -> CoreError {
+    match error {
+        DiscoveryStorageError::Database(error) => database_error(error),
+        DiscoveryStorageError::SessionNotFound(_) => CoreError::new(
+            CoreErrorCode::NotFound,
+            "provider discovery session was not found",
+            false,
+        ),
+        DiscoveryStorageError::RevisionConflict { expected, actual } => CoreError::invalid(
+            format!("discovery revision conflict: expected {expected}, current {actual}"),
+        ),
+        DiscoveryStorageError::IdempotencyConflict { .. } => {
+            CoreError::invalid("discovery action identifier was reused with a different request")
+        }
+        DiscoveryStorageError::InvalidTransition(reason) => {
+            CoreError::invalid(format!("invalid durable discovery transition: {reason}"))
+        }
+    }
+}
+
+fn corrupted(message: impl Into<String>) -> CoreError {
+    CoreError::new(CoreErrorCode::StorageCorrupted, message, false)
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{TimeZone, Utc};
+    use lorepia_domain::{
+        CanonicalOrigin, CoreErrorCode, CredentialRef, DiscoverySessionId, EvidenceId, HttpUrl,
+        ModelRouteId, ProviderConnectionId, ProviderProfile, ProviderTemplateId,
+        discovery::{
+            DiscoveryActionEnvelope, DiscoveryActionId, DiscoveryApprovalBinding,
+            DiscoveryApprovalDecision, DiscoveryApprovalGrant, DiscoveryApprovalId,
+            DiscoveryApprovalRecord, DiscoveryCommitAttemptId, DiscoveryCommitPlan,
+            DiscoveryCompensationKind, DiscoveryCompensationStatus, DiscoveryCompensationStep,
+            DiscoveryCompensationTarget, DiscoveryFailure, DiscoveryInterruptionOutcome,
+            DiscoveryOperationId, DiscoveryOperationKind, DiscoveryPreviousSelection,
+            DiscoveryReviewChange, DiscoveryReviewChangeKind, DiscoveryReviewDiff, DiscoveryState,
+            DiscoveryUnknownOutcomeResolution, ProviderDiscoveryAction,
+            ProviderDiscoveryConnectionOptions, ProviderDiscoverySession, SanitizedDiscoveryInput,
+        },
+    };
+    use serde_json::{Value, json};
+    use tempfile::{TempDir, tempdir};
+
+    use crate::{
+        ProviderCredentialObservedStatus, ProviderCredentialOperationKind,
+        ProviderCredentialSlotGarbageStatus,
+    };
+
+    use super::{
+        DiscoveryCompletedOperationWrite, DiscoveryEvidenceKind, DiscoveryEvidenceRecord,
+        DiscoveryJsonUpdate, DiscoveryNativeNoEffectAttestationWrite, DiscoveryTransitionWrite,
+        DurableOperationOutcome, PersistDiscoveryTransition, PreparedDiscoveryCommit, Storage,
+        canonical_json_result, encode_approval_grant, encode_commit_plan_json,
+        provider_graph_ownership_hash, sha256_hex,
+        validate_archived_discovery_credential_ownership_authority_for_slot_gc,
+        validate_discovery_credential_ownership_authority,
+    };
+
+    fn now() -> chrono::DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 7, 31, 12, 0, 0)
+            .single()
+            .expect("valid test time")
+    }
+
+    fn suspend_test_trigger(connection: &rusqlite::Connection, trigger_name: &str) -> String {
+        let trigger_sql = connection
+            .query_row(
+                "SELECT sql FROM sqlite_schema WHERE type = 'trigger' AND name = ?1",
+                [trigger_name],
+                |row| row.get::<_, String>(0),
+            )
+            .expect("load initial-state guard definition");
+        connection
+            .execute_batch(&format!("DROP TRIGGER {trigger_name};"))
+            .expect("suspend initial-state guard for synthetic fixture");
+        trigger_sql
+    }
+
+    fn restore_test_trigger(connection: &rusqlite::Connection, trigger_sql: &str) {
+        connection
+            .execute_batch(trigger_sql)
+            .expect("restore initial-state guard after synthetic fixture");
+    }
+
+    fn draft_session(id: &str) -> ProviderDiscoverySession {
+        ProviderDiscoverySession::new(
+            DiscoverySessionId::from(id),
+            SanitizedDiscoveryInput {
+                connection_id: ProviderConnectionId::from(format!("{id}-connection")),
+                display_name: "Test provider".to_owned(),
+                site_url: HttpUrl::parse("https://provider.example/").expect("site URL"),
+                docs_url: Some(HttpUrl::parse("https://provider.example/docs").expect("docs URL")),
+                credential_ref: None,
+                preferred_assistant: None,
+                connection_options: ProviderDiscoveryConnectionOptions::default(),
+                supplied_evidence_ids: Vec::new(),
+            },
+        )
+        .expect("draft discovery session")
+    }
+
+    fn archive_credential_bound_connection(
+        storage: &Storage,
+        connection_id: &ProviderConnectionId,
+    ) {
+        let archive = storage
+            .prepare_provider_credential_operation(
+                connection_id,
+                ProviderCredentialOperationKind::RemoveForArchive,
+                ProviderCredentialObservedStatus::Missing,
+            )
+            .expect("prepare terminal discovery provider archive");
+        storage
+            .finish_provider_credential_archive(
+                &archive.plan.operation_id,
+                &archive.plan_sha256,
+                ProviderCredentialObservedStatus::Missing,
+            )
+            .expect("terminal discovery history permits provider archive");
+    }
+
+    fn initial_working_draft(source: Value) -> Value {
+        json!({
+            "schema_version": 1,
+            "source": source,
+            "deterministic": null,
+            "evidence_ids": [],
+            "extra_evidence_ids": [],
+            "selected_candidate_id": null,
+            "template": null,
+            "connection": null,
+            "routes": [],
+            "observations": [],
+            "presets": [],
+            "credential_approval_id": null,
+            "probe_route_ids": [],
+            "probe_failure_count": 0,
+            "assistant": null
+        })
+    }
+
+    fn initial_sanitized_curl_output() -> Value {
+        let extracted = json!({
+            "method": "POST",
+            "origin": "https://provider.example",
+            "source_path_sha256": "1".repeat(64),
+            "source_path_is_root": false,
+            "query_parameter_names": [],
+            "header_names": [],
+            "auth_hints": [],
+            "body_json_shape": null,
+            "stream_hint": null,
+            "api_family_candidates": [],
+            "trust": "sanitized_curl_structure"
+        });
+        let content_sha256 =
+            sha256_hex(&serde_json::to_vec(&extracted).expect("sanitized cURL JSON"));
+        json!({
+            "schema_version": 1,
+            "selected_template": null,
+            "evidence": [{
+                "kind": "sanitized_curl_request",
+                "source_origin": "https://provider.example",
+                "content_sha256": content_sha256,
+                "extracted_json": extracted,
+                "redaction_version": 1
+            }],
+            "family_candidates": [],
+            "manifest_candidates": [],
+            "connection_hints": [],
+            "fetch_issues": [],
+            "fetch_stopped_by_budget": false
+        })
+    }
+
+    fn apply(
+        session: &ProviderDiscoverySession,
+        action: ProviderDiscoveryAction,
+        hash_byte: char,
+    ) -> lorepia_domain::discovery::DiscoveryTransition {
+        session
+            .apply(&DiscoveryActionEnvelope {
+                id: DiscoveryActionId::new(),
+                expected_revision: session.revision,
+                request_sha256: std::iter::repeat_n(hash_byte, 64).collect(),
+                action,
+            })
+            .expect("valid discovery action")
+    }
+
+    fn write(
+        transition: lorepia_domain::discovery::DiscoveryTransition,
+        new_operation_id: Option<DiscoveryOperationId>,
+        completed_operation: Option<DiscoveryCompletedOperationWrite>,
+    ) -> DiscoveryTransitionWrite {
+        DiscoveryTransitionWrite {
+            transition,
+            draft: DiscoveryJsonUpdate::Preserve,
+            review: DiscoveryJsonUpdate::Preserve,
+            new_evidence: Vec::new(),
+            new_candidates: Vec::new(),
+            approval: None,
+            new_operation_id,
+            completed_operation,
+            prepared_commit: None,
+            provider_graph: None,
+            occurred_at: now(),
+        }
+    }
+
+    struct CompletedDiscoveryAuthorityFixture {
+        root: TempDir,
+        storage: Storage,
+        session_id: DiscoverySessionId,
+        connection_id: ProviderConnectionId,
+        attempt_id: DiscoveryCommitAttemptId,
+        operation_id: DiscoveryOperationId,
+        authority_operation_id: DiscoveryOperationId,
+        physical_authority_id: String,
+        evidence_id: EvidenceId,
+        binding_sha256: String,
+    }
+
+    struct TestNativeExecution<'a> {
+        operation_id: &'a DiscoveryOperationId,
+        physical_authority_id: &'a str,
+        session_id: &'a DiscoverySessionId,
+        attempt_id: &'a DiscoveryCommitAttemptId,
+        plan_sha256: &'a str,
+        connection_id: &'a ProviderConnectionId,
+        connection_binding_sha256: &'a str,
+        reserved_at: chrono::DateTime<Utc>,
+        store_started_at: chrono::DateTime<Utc>,
+    }
+
+    fn insert_test_native_execution(
+        transaction: &rusqlite::Transaction<'_>,
+        execution: &TestNativeExecution<'_>,
+    ) {
+        transaction
+            .execute(
+                "INSERT INTO provider_discovery_native_credential_executions (
+                     physical_authority_id, operation_id, session_id,
+                     commit_attempt_id, commit_plan_sha256, connection_id,
+                     connection_binding_sha256, reserved_at,
+                     schema_version, redaction_version
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1, 1)",
+                rusqlite::params![
+                    execution.physical_authority_id,
+                    execution.operation_id.as_str(),
+                    execution.session_id.as_str(),
+                    execution.attempt_id.as_str(),
+                    execution.plan_sha256,
+                    execution.connection_id.as_str(),
+                    execution.connection_binding_sha256,
+                    execution.reserved_at.to_rfc3339(),
+                ],
+            )
+            .expect("insert test native execution reservation");
+        transaction
+            .execute(
+                "INSERT INTO provider_discovery_native_credential_store_attempts (
+                     operation_id, physical_authority_id, started_at,
+                     schema_version, redaction_version
+                 ) VALUES (?1, ?2, ?3, 1, 1)",
+                rusqlite::params![
+                    execution.operation_id.as_str(),
+                    execution.physical_authority_id,
+                    execution.store_started_at.to_rfc3339(),
+                ],
+            )
+            .expect("insert test native store attempt");
+    }
+
+    fn project_completed_discovery_credential_authority(
+        fixture: &CompletedDiscoveryAuthorityFixture,
+    ) -> u64 {
+        project_completed_discovery_credential_authority_at(
+            fixture,
+            now() + chrono::Duration::seconds(3),
+        )
+    }
+
+    fn project_completed_discovery_credential_authority_at(
+        fixture: &CompletedDiscoveryAuthorityFixture,
+        occurred_at: chrono::DateTime<Utc>,
+    ) -> u64 {
+        let mut database = fixture.storage.connection().expect("authority database");
+        let transaction = database
+            .transaction()
+            .expect("begin discovery ownership transaction");
+        let authority_sequence = super::insert_discovery_credential_ownership_event(
+            &transaction,
+            &fixture.connection_id,
+            &fixture.binding_sha256,
+            &fixture.physical_authority_id,
+            &fixture.authority_operation_id,
+            occurred_at,
+        )
+        .expect("insert exact discovery execution ownership event");
+        let changed = transaction
+            .execute(
+                "UPDATE provider_credential_ownership
+                 SET ownership_state = 'discovery_owned',
+                     connection_binding_sha256 = ?2,
+                     authority_id = ?3,
+                     authority_sequence = ?4,
+                     updated_at = ?5
+                 WHERE connection_id = ?1 AND credential_ref = ?1",
+                rusqlite::params![
+                    fixture.connection_id.as_str(),
+                    fixture.binding_sha256,
+                    fixture.physical_authority_id,
+                    authority_sequence,
+                    occurred_at.to_rfc3339(),
+                ],
+            )
+            .expect("project exact discovery operation ownership");
+        assert_eq!(changed, 1);
+        transaction
+            .commit()
+            .expect("commit discovery operation ownership");
+        authority_sequence
+    }
+
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum CompletedDiscoveryAuthorityMode {
+        Direct,
+        Reconciled,
+        PendingReconciled,
+        PreparedInterruptedRetry,
+        UnknownNoEffectRetry,
+        ConfirmedCommitCompensation,
+        ConfirmedNoEffectCompensation,
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn seed_completed_discovery_authority(id: &str) -> CompletedDiscoveryAuthorityFixture {
+        seed_completed_discovery_authority_with_mode(id, CompletedDiscoveryAuthorityMode::Direct)
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn seed_completed_discovery_authority_with_mode(
+        id: &str,
+        mode: CompletedDiscoveryAuthorityMode,
+    ) -> CompletedDiscoveryAuthorityFixture {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let mut awaiting_review = draft_session(id);
+        let connection_id = awaiting_review.input.connection_id.clone();
+        awaiting_review.input.credential_ref =
+            Some(CredentialRef(connection_id.as_str().to_owned()));
+        storage
+            .save_provider_profile(&ProviderProfile {
+                id: connection_id.as_str().to_owned(),
+                display_name: awaiting_review.input.display_name.clone(),
+                base_url: "https://provider.example/v1".to_owned(),
+                model: "synthetic".to_owned(),
+                timeout_seconds: 30,
+            })
+            .expect("save authority provider graph");
+        let connection = storage
+            .get_provider_connection(&connection_id)
+            .expect("load authority connection");
+        let binding_sha256 =
+            crate::provider_credential_repository::provider_credential_connection_binding_sha256(
+                &storage.connection().expect("binding database"),
+                &connection_id,
+            )
+            .expect("authority binding hash");
+        let template = storage
+            .get_provider_template(&connection.template_id, connection.template_version)
+            .expect("load authority template");
+        let routes = storage
+            .list_model_routes(&connection_id)
+            .expect("load authority routes");
+        let observations = routes
+            .iter()
+            .flat_map(|route| {
+                storage
+                    .list_capability_observations(&route.id)
+                    .expect("load authority observations")
+            })
+            .collect::<Vec<_>>();
+        let presets = routes
+            .iter()
+            .flat_map(|route| {
+                storage
+                    .list_generation_presets(&route.id)
+                    .expect("load authority presets")
+            })
+            .collect::<Vec<_>>();
+        let graph_sha256 =
+            provider_graph_ownership_hash(&template, &connection, &routes, &observations, &presets)
+                .expect("authority graph hash");
+        let evidence_id = EvidenceId::from(format!("evidence-{id}"));
+        let review = DiscoveryReviewDiff::new(
+            graph_sha256.clone(),
+            vec![DiscoveryReviewChange {
+                kind: DiscoveryReviewChangeKind::Add,
+                target_kind: "provider_connection".to_owned(),
+                target_id: connection_id.as_str().to_owned(),
+                summary_key: "discovery.review.authority_fixture".to_owned(),
+                evidence_ids: vec![evidence_id.clone()],
+            }],
+            0,
+            0,
+        )
+        .expect("authority review");
+        let manifest_json = canonical_json_result(
+            serde_json::to_value(&template.default_manifest),
+            "authority provider manifest",
+        )
+        .expect("authority manifest JSON");
+        let manifest_sha256 = sha256_hex(manifest_json.as_bytes());
+        let attempt_id =
+            DiscoveryCommitAttemptId::parse(format!("attempt-{id}")).expect("authority attempt id");
+        let credential_approval_id =
+            DiscoveryApprovalId::parse(format!("credential-approval-{id}"))
+                .expect("credential approval id");
+        let review_approval_id = DiscoveryApprovalId::parse(format!("review-approval-{id}"))
+            .expect("review approval id");
+        let expected_revision = 10;
+        let plan = DiscoveryCommitPlan {
+            attempt_id: attempt_id.clone(),
+            session_id: awaiting_review.id.clone(),
+            expected_revision,
+            manifest_sha256: manifest_sha256.clone(),
+            graph_sha256: graph_sha256.clone(),
+            template_id: template.id.clone(),
+            template_version: template.manifest_version,
+            connection_id: connection_id.clone(),
+            model_route_ids: routes.iter().map(|route| route.id.clone()).collect(),
+            credential_ref: awaiting_review.input.credential_ref.clone(),
+            credential_approval_id: Some(credential_approval_id.clone()),
+            review_sha256: review.sha256.clone(),
+            previous_selection: DiscoveryPreviousSelection::None,
+        };
+        let plan_json = encode_commit_plan_json(&plan).expect("authority plan JSON");
+        let plan_sha256 = sha256_hex(plan_json.as_bytes());
+        let mut awaiting_credential = awaiting_review.clone();
+        awaiting_credential.state = DiscoveryState::AwaitingCredentialOriginApproval;
+        awaiting_credential.revision = expected_revision.saturating_sub(1);
+        awaiting_credential.next_event_sequence = 20;
+        awaiting_credential.manifest_sha256 = Some(manifest_sha256.clone());
+        awaiting_credential
+            .validate()
+            .expect("awaiting credential authority session");
+        let credential_approved = awaiting_credential
+            .apply(&DiscoveryActionEnvelope {
+                id: DiscoveryActionId::parse(format!("credential-action-{id}"))
+                    .expect("credential action id"),
+                expected_revision: awaiting_credential.revision,
+                request_sha256: "9".repeat(64),
+                action: ProviderDiscoveryAction::ApproveCredentialOrigin {
+                    approval_id: credential_approval_id.clone(),
+                },
+            })
+            .expect("approve credential origin authority");
+        awaiting_review.state = DiscoveryState::AwaitingReview;
+        awaiting_review.revision = expected_revision;
+        awaiting_review.next_event_sequence = 21;
+        awaiting_review.manifest_sha256 = Some(manifest_sha256.clone());
+        awaiting_review
+            .validate()
+            .expect("awaiting review authority session");
+        let prepare = awaiting_review
+            .apply(&DiscoveryActionEnvelope {
+                id: DiscoveryActionId::parse(format!("prepare-action-{id}"))
+                    .expect("prepare action id"),
+                expected_revision,
+                request_sha256: "a".repeat(64),
+                action: ProviderDiscoveryAction::ApproveReview {
+                    approval_id: review_approval_id.clone(),
+                    commit_attempt_id: attempt_id.clone(),
+                    commit_plan_sha256: plan_sha256.clone(),
+                    graph_sha256: graph_sha256.clone(),
+                },
+            })
+            .expect("prepare authority commit");
+        let resolution_approval_id =
+            DiscoveryApprovalId::parse(format!("resolution-approval-{id}"))
+                .expect("resolution approval id");
+        let (cancel, unknown, interrupted, restart, terminal) = match mode {
+            CompletedDiscoveryAuthorityMode::Direct => {
+                let terminal = prepare
+                    .session
+                    .apply(&DiscoveryActionEnvelope {
+                        id: DiscoveryActionId::parse(format!("terminal-action-{id}"))
+                            .expect("terminal action id"),
+                        expected_revision: prepare.session.revision,
+                        request_sha256: "b".repeat(64),
+                        action: ProviderDiscoveryAction::CommitSucceeded {
+                            connection_id: connection_id.clone(),
+                        },
+                    })
+                    .expect("complete authority commit");
+                (None, None, None, None, terminal)
+            }
+            CompletedDiscoveryAuthorityMode::Reconciled
+            | CompletedDiscoveryAuthorityMode::PendingReconciled => {
+                let unknown = prepare
+                    .session
+                    .apply(&DiscoveryActionEnvelope {
+                        id: DiscoveryActionId::parse(format!("unknown-action-{id}"))
+                            .expect("unknown action id"),
+                        expected_revision: prepare.session.revision,
+                        request_sha256: "c".repeat(64),
+                        action: ProviderDiscoveryAction::ExternalOutcomeBecameUnknown,
+                    })
+                    .expect("record unknown authority outcome");
+                let terminal = unknown
+                    .session
+                    .apply(&DiscoveryActionEnvelope {
+                        id: DiscoveryActionId::parse(format!("resolution-action-{id}"))
+                            .expect("resolution action id"),
+                        expected_revision: unknown.session.revision,
+                        request_sha256: "d".repeat(64),
+                        action: ProviderDiscoveryAction::ResolveUnknownOutcome {
+                            approval_id: resolution_approval_id.clone(),
+                            resolution:
+                                DiscoveryUnknownOutcomeResolution::ConfirmedCommitCompleted {
+                                    connection_id: connection_id.clone(),
+                                },
+                        },
+                    })
+                    .expect("reconcile authority commit");
+                (None, Some(unknown), None, None, terminal)
+            }
+            CompletedDiscoveryAuthorityMode::PreparedInterruptedRetry => {
+                let interrupted = prepare
+                    .session
+                    .apply(&DiscoveryActionEnvelope {
+                        id: DiscoveryActionId::parse(format!("interrupt-action-{id}"))
+                            .expect("interrupt action id"),
+                        expected_revision: prepare.session.revision,
+                        request_sha256: "c".repeat(64),
+                        action: ProviderDiscoveryAction::Interrupt {
+                            operation: DiscoveryOperationKind::AtomicCommit,
+                            outcome: DiscoveryInterruptionOutcome::ConfirmedNoExternalEffect,
+                        },
+                    })
+                    .expect("interrupt prepared authority commit");
+                let restart = interrupted
+                    .session
+                    .apply(&DiscoveryActionEnvelope {
+                        id: DiscoveryActionId::parse(format!("restart-action-{id}"))
+                            .expect("restart action id"),
+                        expected_revision: interrupted.session.revision,
+                        request_sha256: "d".repeat(64),
+                        action: ProviderDiscoveryAction::RestartInterrupted,
+                    })
+                    .expect("restart prepared authority commit");
+                let terminal = restart
+                    .session
+                    .apply(&DiscoveryActionEnvelope {
+                        id: DiscoveryActionId::parse(format!("terminal-action-{id}"))
+                            .expect("terminal action id"),
+                        expected_revision: restart.session.revision,
+                        request_sha256: "e".repeat(64),
+                        action: ProviderDiscoveryAction::CommitSucceeded {
+                            connection_id: connection_id.clone(),
+                        },
+                    })
+                    .expect("complete prepared-interrupted authority commit");
+                (None, None, Some(interrupted), Some(restart), terminal)
+            }
+            CompletedDiscoveryAuthorityMode::UnknownNoEffectRetry => {
+                let unknown = prepare
+                    .session
+                    .apply(&DiscoveryActionEnvelope {
+                        id: DiscoveryActionId::parse(format!("unknown-action-{id}"))
+                            .expect("unknown action id"),
+                        expected_revision: prepare.session.revision,
+                        request_sha256: "c".repeat(64),
+                        action: ProviderDiscoveryAction::ExternalOutcomeBecameUnknown,
+                    })
+                    .expect("record retryable unknown authority outcome");
+                let interrupted = unknown
+                    .session
+                    .apply(&DiscoveryActionEnvelope {
+                        id: DiscoveryActionId::parse(format!("resolution-action-{id}"))
+                            .expect("resolution action id"),
+                        expected_revision: unknown.session.revision,
+                        request_sha256: "d".repeat(64),
+                        action: ProviderDiscoveryAction::ResolveUnknownOutcome {
+                            approval_id: resolution_approval_id.clone(),
+                            resolution: DiscoveryUnknownOutcomeResolution::ConfirmedNoEffect,
+                        },
+                    })
+                    .expect("confirm retryable no-effect authority outcome");
+                let restart = interrupted
+                    .session
+                    .apply(&DiscoveryActionEnvelope {
+                        id: DiscoveryActionId::parse(format!("restart-action-{id}"))
+                            .expect("restart action id"),
+                        expected_revision: interrupted.session.revision,
+                        request_sha256: "e".repeat(64),
+                        action: ProviderDiscoveryAction::RestartInterrupted,
+                    })
+                    .expect("restart interrupted authority commit");
+                let terminal = restart
+                    .session
+                    .apply(&DiscoveryActionEnvelope {
+                        id: DiscoveryActionId::parse(format!("terminal-action-{id}"))
+                            .expect("terminal action id"),
+                        expected_revision: restart.session.revision,
+                        request_sha256: "f".repeat(64),
+                        action: ProviderDiscoveryAction::CommitSucceeded {
+                            connection_id: connection_id.clone(),
+                        },
+                    })
+                    .expect("complete restarted authority commit");
+                (
+                    None,
+                    Some(unknown),
+                    Some(interrupted),
+                    Some(restart),
+                    terminal,
+                )
+            }
+            CompletedDiscoveryAuthorityMode::ConfirmedCommitCompensation => {
+                let cancel = prepare
+                    .session
+                    .apply(&DiscoveryActionEnvelope {
+                        id: DiscoveryActionId::parse(format!("cancel-action-{id}"))
+                            .expect("cancel action id"),
+                        expected_revision: prepare.session.revision,
+                        request_sha256: "c".repeat(64),
+                        action: ProviderDiscoveryAction::Cancel,
+                    })
+                    .expect("request authority commit cancellation");
+                let unknown = cancel
+                    .session
+                    .apply(&DiscoveryActionEnvelope {
+                        id: DiscoveryActionId::parse(format!("unknown-action-{id}"))
+                            .expect("unknown action id"),
+                        expected_revision: cancel.session.revision,
+                        request_sha256: "d".repeat(64),
+                        action: ProviderDiscoveryAction::ExternalOutcomeBecameUnknown,
+                    })
+                    .expect("record cancelling unknown authority outcome");
+                let terminal = unknown
+                    .session
+                    .apply(&DiscoveryActionEnvelope {
+                        id: DiscoveryActionId::parse(format!("resolution-action-{id}"))
+                            .expect("resolution action id"),
+                        expected_revision: unknown.session.revision,
+                        request_sha256: "e".repeat(64),
+                        action: ProviderDiscoveryAction::ResolveUnknownOutcome {
+                            approval_id: resolution_approval_id.clone(),
+                            resolution:
+                                DiscoveryUnknownOutcomeResolution::ConfirmedCommitCompleted {
+                                    connection_id: connection_id.clone(),
+                                },
+                        },
+                    })
+                    .expect("confirm cancelling commit completion");
+                (Some(cancel), Some(unknown), None, None, terminal)
+            }
+            CompletedDiscoveryAuthorityMode::ConfirmedNoEffectCompensation => {
+                let cancel = prepare
+                    .session
+                    .apply(&DiscoveryActionEnvelope {
+                        id: DiscoveryActionId::parse(format!("cancel-action-{id}"))
+                            .expect("cancel action id"),
+                        expected_revision: prepare.session.revision,
+                        request_sha256: "c".repeat(64),
+                        action: ProviderDiscoveryAction::Cancel,
+                    })
+                    .expect("request no-effect authority cancellation");
+                let unknown = cancel
+                    .session
+                    .apply(&DiscoveryActionEnvelope {
+                        id: DiscoveryActionId::parse(format!("unknown-action-{id}"))
+                            .expect("unknown action id"),
+                        expected_revision: cancel.session.revision,
+                        request_sha256: "d".repeat(64),
+                        action: ProviderDiscoveryAction::ExternalOutcomeBecameUnknown,
+                    })
+                    .expect("record cancelling no-effect unknown outcome");
+                let interrupted = unknown
+                    .session
+                    .apply(&DiscoveryActionEnvelope {
+                        id: DiscoveryActionId::parse(format!("resolution-action-{id}"))
+                            .expect("resolution action id"),
+                        expected_revision: unknown.session.revision,
+                        request_sha256: "e".repeat(64),
+                        action: ProviderDiscoveryAction::ResolveUnknownOutcome {
+                            approval_id: resolution_approval_id.clone(),
+                            resolution: DiscoveryUnknownOutcomeResolution::ConfirmedNoEffect,
+                        },
+                    })
+                    .expect("confirm cancelling no-effect authority outcome");
+                let terminal = interrupted
+                    .session
+                    .apply(&DiscoveryActionEnvelope {
+                        id: DiscoveryActionId::parse(format!("restart-action-{id}"))
+                            .expect("compensation restart action id"),
+                        expected_revision: interrupted.session.revision,
+                        request_sha256: "f".repeat(64),
+                        action: ProviderDiscoveryAction::RestartInterrupted,
+                    })
+                    .expect("restart interrupted compensation authority");
+                (
+                    Some(cancel),
+                    Some(unknown),
+                    Some(interrupted),
+                    None,
+                    terminal,
+                )
+            }
+        };
+        let operation_id =
+            DiscoveryOperationId::parse(format!("operation-{id}")).expect("authority operation id");
+        let retry_operation_id = restart.as_ref().map(|_| {
+            DiscoveryOperationId::parse(format!("retry-operation-{id}"))
+                .expect("retry operation id")
+        });
+        let compensation_operation_id = matches!(
+            mode,
+            CompletedDiscoveryAuthorityMode::ConfirmedCommitCompensation
+                | CompletedDiscoveryAuthorityMode::ConfirmedNoEffectCompensation
+        )
+        .then(|| {
+            DiscoveryOperationId::parse(format!("compensation-operation-{id}"))
+                .expect("compensation operation id")
+        });
+        let authority_operation_id = retry_operation_id.as_ref().unwrap_or(&operation_id).clone();
+        let initial_physical_authority_id = format!("discovery-native-{}", uuid::Uuid::new_v4());
+        let retry_physical_authority_id = retry_operation_id
+            .as_ref()
+            .map(|_| format!("discovery-native-{}", uuid::Uuid::new_v4()));
+        let physical_authority_id = retry_physical_authority_id
+            .as_ref()
+            .unwrap_or(&initial_physical_authority_id)
+            .clone();
+        let pending_reconciled = mode == CompletedDiscoveryAuthorityMode::PendingReconciled;
+        let persisted_session = if pending_reconciled {
+            &unknown
+                .as_ref()
+                .expect("pending reconciliation has an unknown transition")
+                .session
+        } else {
+            &terminal.session
+        };
+        let prepared_at = now();
+        let compensation_mode = compensation_operation_id.is_some();
+        let cancel_at = prepared_at + chrono::Duration::seconds(1);
+        let operation_finished_at = if compensation_mode {
+            prepared_at + chrono::Duration::seconds(2)
+        } else if unknown.is_some() || interrupted.is_some() {
+            prepared_at + chrono::Duration::seconds(1)
+        } else {
+            prepared_at + chrono::Duration::seconds(2)
+        };
+        let resolution_at =
+            prepared_at + chrono::Duration::seconds(if compensation_mode { 3 } else { 2 });
+        let restart_at =
+            prepared_at + chrono::Duration::seconds(if compensation_mode { 4 } else { 3 });
+        let interrupted_at = if unknown.is_some() {
+            resolution_at
+        } else {
+            operation_finished_at
+        };
+        let completed_at = match mode {
+            CompletedDiscoveryAuthorityMode::ConfirmedCommitCompensation => resolution_at,
+            CompletedDiscoveryAuthorityMode::ConfirmedNoEffectCompensation => restart_at,
+            _ => prepared_at + chrono::Duration::seconds(if restart.is_some() { 4 } else { 2 }),
+        };
+        let compensation_started_at = completed_at + chrono::Duration::seconds(1);
+        let input_json = canonical_json_result(
+            serde_json::to_value(&persisted_session.input),
+            "authority discovery input",
+        )
+        .expect("authority input JSON");
+        let review_json = serde_json::to_string(&review).expect("authority review JSON");
+
+        let mut database = storage.connection().expect("authority database");
+        database
+            .execute_batch(
+                "DROP TRIGGER provider_discovery_session_initial_state_guard;
+                 DROP TRIGGER provider_discovery_commit_attempt_initial_state_guard;
+                 DROP TRIGGER provider_discovery_operation_initial_state_guard;
+                 DROP TRIGGER provider_discovery_native_credential_execution_insert_guard;
+                 DROP TRIGGER provider_discovery_native_credential_store_attempt_insert_guard;",
+            )
+            .expect("drop initial-state guards only for the completed-history fixture");
+        let transaction = database.transaction().expect("authority transaction");
+        transaction
+            .execute(
+                "INSERT INTO provider_discovery_sessions (
+                     id, state, revision, next_event_sequence, sanitized_input_json,
+                     draft_json, review_diff_json, error_json, recovery_json,
+                     unknown_operation, manifest_sha256, commit_plan_sha256,
+                     commit_attempt_id, committed_connection_id, cancellation_pending,
+                     active_operation_id, active_effect_approval_json, redaction_version,
+                     created_at, updated_at
+                 ) VALUES (
+                     ?1, ?2, ?3, ?4, ?5, NULL, ?6, NULL, NULL, ?7,
+                     ?8, ?9, ?10, ?11, ?12, ?13, NULL, 1, ?14, ?15
+                 )",
+                rusqlite::params![
+                    persisted_session.id.as_str(),
+                    if compensation_mode {
+                        "compensating"
+                    } else if pending_reconciled {
+                        "unknown_outcome"
+                    } else {
+                        "ready"
+                    },
+                    persisted_session.revision,
+                    persisted_session.next_event_sequence,
+                    input_json,
+                    review_json,
+                    persisted_session.unknown_operation.map(|operation| {
+                        super::enum_wire_result(
+                            serde_json::to_value(operation),
+                            "pending reconciliation unknown operation",
+                        )
+                        .expect("unknown operation wire")
+                    }),
+                    manifest_sha256,
+                    plan_sha256,
+                    attempt_id.as_str(),
+                    persisted_session
+                        .committed_connection_id
+                        .as_ref()
+                        .map(ProviderConnectionId::as_str),
+                    persisted_session.cancellation_pending,
+                    compensation_operation_id
+                        .as_ref()
+                        .map(DiscoveryOperationId::as_str),
+                    prepared_at.to_rfc3339(),
+                    if pending_reconciled {
+                        operation_finished_at.to_rfc3339()
+                    } else {
+                        completed_at.to_rfc3339()
+                    },
+                ],
+            )
+            .expect("insert authority session");
+        transaction
+            .execute(
+                "INSERT INTO provider_discovery_evidence (
+                     id, session_id, kind, source_url, content_sha256,
+                     extracted_json, redaction_version, fetched_at
+                 ) VALUES (?1, ?2, 'json_document', ?3, ?4, ?5, 1, ?6)",
+                rusqlite::params![
+                    evidence_id.as_str(),
+                    terminal.session.id.as_str(),
+                    "https://provider.example/docs",
+                    "e".repeat(64),
+                    r#"{"shape":"object"}"#,
+                    prepared_at.to_rfc3339(),
+                ],
+            )
+            .expect("insert authority evidence");
+        insert_test_discovery_approval(
+            &transaction,
+            &DiscoveryApprovalRecord {
+                id: credential_approval_id.clone(),
+                session_id: terminal.session.id.clone(),
+                session_revision: expected_revision.saturating_sub(1),
+                decision: DiscoveryApprovalDecision::Approved,
+                grant: DiscoveryApprovalGrant::CredentialOrigin {
+                    origin: connection.api_origin.clone(),
+                    auth_binding: connection
+                        .credential_scope
+                        .as_ref()
+                        .expect("authority credential scope")
+                        .auth_binding
+                        .clone(),
+                    manifest_sha256: manifest_sha256.clone(),
+                },
+                created_at: prepared_at,
+            },
+        );
+        if let Some(unknown) = &unknown
+            && !pending_reconciled
+        {
+            let (resolution, created_at) = if matches!(
+                mode,
+                CompletedDiscoveryAuthorityMode::Reconciled
+                    | CompletedDiscoveryAuthorityMode::ConfirmedCommitCompensation
+            ) {
+                (
+                    DiscoveryUnknownOutcomeResolution::ConfirmedCommitCompleted {
+                        connection_id: connection_id.clone(),
+                    },
+                    completed_at,
+                )
+            } else {
+                (
+                    DiscoveryUnknownOutcomeResolution::ConfirmedNoEffect,
+                    resolution_at,
+                )
+            };
+            insert_test_discovery_approval(
+                &transaction,
+                &DiscoveryApprovalRecord {
+                    id: resolution_approval_id.clone(),
+                    session_id: terminal.session.id.clone(),
+                    session_revision: unknown.session.revision,
+                    decision: DiscoveryApprovalDecision::Approved,
+                    grant: DiscoveryApprovalGrant::UnknownOutcomeResolution {
+                        operation: DiscoveryOperationKind::AtomicCommit,
+                        resolution,
+                    },
+                    created_at,
+                },
+            );
+        }
+        insert_test_discovery_approval(
+            &transaction,
+            &DiscoveryApprovalRecord {
+                id: review_approval_id.clone(),
+                session_id: terminal.session.id.clone(),
+                session_revision: expected_revision,
+                decision: DiscoveryApprovalDecision::Approved,
+                grant: DiscoveryApprovalGrant::Review {
+                    review_sha256: review.sha256.clone(),
+                    graph_sha256: graph_sha256.clone(),
+                },
+                created_at: prepared_at,
+            },
+        );
+        insert_test_discovery_receipt(&transaction, &credential_approved, prepared_at);
+        super::append_audit(
+            &transaction,
+            terminal.session.id.as_str(),
+            expected_revision,
+            "approval_recorded",
+            Some(credential_approved.receipt.action_id.as_str()),
+            Some(credential_approval_id.as_str()),
+            "discovery.audit.approval_recorded",
+            prepared_at,
+        )
+        .expect("insert credential approval audit");
+        insert_test_discovery_receipt(&transaction, &prepare, prepared_at);
+        super::append_audit(
+            &transaction,
+            terminal.session.id.as_str(),
+            prepare.receipt.resulting_revision,
+            "approval_recorded",
+            Some(prepare.receipt.action_id.as_str()),
+            Some(review_approval_id.as_str()),
+            "discovery.audit.approval_recorded",
+            prepared_at,
+        )
+        .expect("insert review approval audit");
+        transaction
+            .execute(
+                "INSERT INTO provider_discovery_commit_attempts (
+                     id, session_id, attempt_number, action_id, expected_revision,
+                     plan_sha256, plan_json, phase, redaction_version,
+                     created_at, updated_at, completed_at
+                 ) VALUES (?1, ?2, 1, ?3, ?4, ?5, ?6, ?7, 1, ?8, ?9, ?10)",
+                rusqlite::params![
+                    attempt_id.as_str(),
+                    terminal.session.id.as_str(),
+                    prepare.receipt.action_id.as_str(),
+                    expected_revision,
+                    plan_sha256,
+                    plan_json,
+                    if compensation_mode {
+                        "compensating"
+                    } else if pending_reconciled {
+                        "outcome_unknown"
+                    } else {
+                        "completed"
+                    },
+                    prepared_at.to_rfc3339(),
+                    if compensation_mode {
+                        compensation_started_at.to_rfc3339()
+                    } else if pending_reconciled {
+                        operation_finished_at.to_rfc3339()
+                    } else {
+                        completed_at.to_rfc3339()
+                    },
+                    (!compensation_mode && !pending_reconciled).then(|| completed_at.to_rfc3339()),
+                ],
+            )
+            .expect("insert authority attempt");
+        let initial_started_at =
+            if mode == CompletedDiscoveryAuthorityMode::PreparedInterruptedRetry {
+                operation_finished_at
+            } else {
+                prepared_at
+            };
+        transaction
+            .execute(
+                &format!(
+                    "INSERT INTO provider_discovery_operations (
+                     id, session_id, operation_kind, side_effect_class, status,
+                     action_id, expected_revision, request_sha256, approval_id,
+                     approval_grant_sha256, started_at, finished_at, created_at, updated_at
+                 ) VALUES (
+                     ?1, ?2, 'atomic_commit', 'persistent', '{}',
+                     ?3, ?4, ?5, NULL, NULL, ?6, ?7, ?8, ?7
+                 )",
+                    if unknown.is_some() {
+                        "outcome_unknown"
+                    } else if interrupted.is_some() {
+                        "interrupted"
+                    } else {
+                        "succeeded"
+                    }
+                ),
+                rusqlite::params![
+                    operation_id.as_str(),
+                    terminal.session.id.as_str(),
+                    prepare.receipt.action_id.as_str(),
+                    prepare.receipt.resulting_revision,
+                    prepare.receipt.request_sha256,
+                    initial_started_at.to_rfc3339(),
+                    operation_finished_at.to_rfc3339(),
+                    prepared_at.to_rfc3339(),
+                ],
+            )
+            .expect("insert authority operation");
+        super::append_audit(
+            &transaction,
+            terminal.session.id.as_str(),
+            prepare.receipt.resulting_revision,
+            "commit_prepared",
+            Some(prepare.receipt.action_id.as_str()),
+            Some(attempt_id.as_str()),
+            "discovery.audit.commit_prepared",
+            prepared_at,
+        )
+        .expect("insert authority commit-prepared audit");
+        if mode != CompletedDiscoveryAuthorityMode::PreparedInterruptedRetry {
+            super::append_audit(
+                &transaction,
+                terminal.session.id.as_str(),
+                prepare.receipt.resulting_revision,
+                "operation_started",
+                Some(prepare.receipt.action_id.as_str()),
+                Some(operation_id.as_str()),
+                "discovery.audit.operation_started",
+                initial_started_at,
+            )
+            .expect("insert authority operation-started audit");
+        }
+        if let Some(cancel) = &cancel {
+            insert_test_discovery_receipt(&transaction, cancel, cancel_at);
+        }
+        if matches!(
+            mode,
+            CompletedDiscoveryAuthorityMode::Reconciled
+                | CompletedDiscoveryAuthorityMode::PendingReconciled
+                | CompletedDiscoveryAuthorityMode::ConfirmedCommitCompensation
+        ) {
+            super::append_audit(
+                &transaction,
+                terminal.session.id.as_str(),
+                prepare.receipt.resulting_revision,
+                "transition_applied",
+                None,
+                Some(&graph_sha256),
+                "discovery.audit.provider_graph_applied",
+                operation_finished_at,
+            )
+            .expect("insert reconciled authority graph audit");
+            super::append_audit(
+                &transaction,
+                terminal.session.id.as_str(),
+                prepare.receipt.resulting_revision,
+                "transition_applied",
+                None,
+                Some("reused"),
+                "discovery.audit.provider_template_ownership",
+                operation_finished_at,
+            )
+            .expect("insert reconciled authority template audit");
+        }
+        if let Some(unknown) = &unknown {
+            insert_test_discovery_receipt(&transaction, unknown, operation_finished_at);
+            super::append_audit(
+                &transaction,
+                terminal.session.id.as_str(),
+                unknown.receipt.resulting_revision,
+                "operation_interrupted",
+                Some(unknown.receipt.action_id.as_str()),
+                Some(operation_id.as_str()),
+                "discovery.audit.operation_interrupted",
+                operation_finished_at,
+            )
+            .expect("insert authority outcome-unknown audit");
+        }
+        if let Some(interrupted) = &interrupted {
+            insert_test_discovery_receipt(&transaction, interrupted, interrupted_at);
+            if unknown.is_none() {
+                super::append_audit(
+                    &transaction,
+                    terminal.session.id.as_str(),
+                    interrupted.receipt.resulting_revision,
+                    "operation_interrupted",
+                    Some(interrupted.receipt.action_id.as_str()),
+                    Some(operation_id.as_str()),
+                    "discovery.audit.operation_interrupted",
+                    interrupted_at,
+                )
+                .expect("insert authority prepared-interruption audit");
+            } else {
+                super::append_audit(
+                    &transaction,
+                    terminal.session.id.as_str(),
+                    interrupted.receipt.resulting_revision,
+                    "approval_recorded",
+                    Some(interrupted.receipt.action_id.as_str()),
+                    Some(resolution_approval_id.as_str()),
+                    "discovery.audit.approval_recorded",
+                    resolution_at,
+                )
+                .expect("insert retry resolution approval audit");
+            }
+        }
+        if let Some(restart) = &restart {
+            insert_test_discovery_receipt(&transaction, restart, restart_at);
+            super::append_audit(
+                &transaction,
+                terminal.session.id.as_str(),
+                restart.receipt.resulting_revision,
+                "commit_prepared",
+                Some(restart.receipt.action_id.as_str()),
+                Some(attempt_id.as_str()),
+                "discovery.audit.commit_prepared",
+                restart_at,
+            )
+            .expect("insert authority retry commit-prepared audit");
+            let retry_operation_id = retry_operation_id
+                .as_ref()
+                .expect("restart has a retry operation id");
+            transaction
+                .execute(
+                    "INSERT INTO provider_discovery_operations (
+                         id, session_id, operation_kind, side_effect_class, status,
+                         action_id, expected_revision, request_sha256, approval_id,
+                         approval_grant_sha256, started_at, finished_at, created_at, updated_at
+                     ) VALUES (
+                         ?1, ?2, 'atomic_commit', 'persistent', 'succeeded',
+                         ?3, ?4, ?5, NULL, NULL, ?6, ?7, ?6, ?7
+                     )",
+                    rusqlite::params![
+                        retry_operation_id.as_str(),
+                        terminal.session.id.as_str(),
+                        restart.receipt.action_id.as_str(),
+                        restart.receipt.resulting_revision,
+                        restart.receipt.request_sha256,
+                        restart_at.to_rfc3339(),
+                        completed_at.to_rfc3339(),
+                    ],
+                )
+                .expect("insert successful retry operation");
+            super::append_audit(
+                &transaction,
+                terminal.session.id.as_str(),
+                restart.receipt.resulting_revision,
+                "operation_started",
+                Some(restart.receipt.action_id.as_str()),
+                Some(retry_operation_id.as_str()),
+                "discovery.audit.operation_started",
+                restart_at,
+            )
+            .expect("insert authority retry operation-started audit");
+        }
+        if matches!(
+            mode,
+            CompletedDiscoveryAuthorityMode::Direct
+                | CompletedDiscoveryAuthorityMode::PreparedInterruptedRetry
+                | CompletedDiscoveryAuthorityMode::UnknownNoEffectRetry
+        ) {
+            super::append_audit(
+                &transaction,
+                terminal.session.id.as_str(),
+                terminal.previous_revision,
+                "transition_applied",
+                None,
+                Some(&graph_sha256),
+                "discovery.audit.provider_graph_applied",
+                completed_at,
+            )
+            .expect("insert authority graph audit");
+            super::append_audit(
+                &transaction,
+                terminal.session.id.as_str(),
+                terminal.previous_revision,
+                "transition_applied",
+                None,
+                Some("reused"),
+                "discovery.audit.provider_template_ownership",
+                completed_at,
+            )
+            .expect("insert authority template audit");
+        }
+        if !pending_reconciled {
+            insert_test_discovery_receipt(&transaction, &terminal, completed_at);
+        }
+        if !pending_reconciled
+            && matches!(
+                mode,
+                CompletedDiscoveryAuthorityMode::Reconciled
+                    | CompletedDiscoveryAuthorityMode::ConfirmedCommitCompensation
+            )
+        {
+            super::append_audit(
+                &transaction,
+                terminal.session.id.as_str(),
+                terminal.receipt.resulting_revision,
+                "approval_recorded",
+                Some(terminal.receipt.action_id.as_str()),
+                Some(resolution_approval_id.as_str()),
+                "discovery.audit.approval_recorded",
+                completed_at,
+            )
+            .expect("insert reconciled resolution approval audit");
+        }
+        if let Some(compensation_operation_id) = &compensation_operation_id {
+            let credential_ref = plan
+                .credential_ref
+                .as_ref()
+                .expect("compensation authority plan has a credential reference");
+            let step = DiscoveryCompensationStep {
+                action_id: DiscoveryActionId::parse(format!("slot-removal-action-{id}"))
+                    .expect("slot-removal action id"),
+                ordinal: 0,
+                kind: DiscoveryCompensationKind::RemoveCredentialSlot,
+                target: DiscoveryCompensationTarget::RemoveCredentialSlot {
+                    connection_id: connection_id.clone(),
+                    credential_ref: credential_ref.clone(),
+                },
+                status: DiscoveryCompensationStatus::Pending,
+            };
+            step.validate_against(&plan)
+                .expect("valid credential compensation step");
+            transaction
+                .execute(
+                    "INSERT INTO provider_discovery_compensation_steps (
+                         id, commit_attempt_id, ordinal, action_id, step_kind,
+                         step_json, status, attempt_count, last_failure_json,
+                         redaction_version, created_at, updated_at, completed_at
+                     ) VALUES (
+                         ?1, ?2, 0, ?3, 'remove_credential_slot',
+                         ?4, 'pending', 0, NULL, 1, ?5, ?5, NULL
+                     )",
+                    rusqlite::params![
+                        format!("slot-removal-step-{id}"),
+                        attempt_id.as_str(),
+                        step.action_id.as_str(),
+                        serde_json::to_string(&step).expect("slot-removal step JSON"),
+                        completed_at.to_rfc3339(),
+                    ],
+                )
+                .expect("insert credential compensation step");
+            transaction
+                .execute(
+                    "INSERT INTO provider_discovery_operations (
+                         id, session_id, operation_kind, side_effect_class, status,
+                         action_id, expected_revision, request_sha256, approval_id,
+                         approval_grant_sha256, started_at, finished_at, created_at, updated_at
+                     ) VALUES (
+                         ?1, ?2, 'compensation', 'persistent', 'started',
+                         ?3, ?4, ?5, NULL, NULL, ?6, NULL, ?7, ?6
+                     )",
+                    rusqlite::params![
+                        compensation_operation_id.as_str(),
+                        terminal.session.id.as_str(),
+                        terminal.receipt.action_id.as_str(),
+                        terminal.receipt.resulting_revision,
+                        terminal.receipt.request_sha256,
+                        compensation_started_at.to_rfc3339(),
+                        completed_at.to_rfc3339(),
+                    ],
+                )
+                .expect("insert started credential compensation operation");
+            super::append_audit(
+                &transaction,
+                terminal.session.id.as_str(),
+                terminal.receipt.resulting_revision,
+                "operation_started",
+                Some(terminal.receipt.action_id.as_str()),
+                Some(compensation_operation_id.as_str()),
+                "discovery.audit.operation_started",
+                compensation_started_at,
+            )
+            .expect("insert credential compensation operation-started audit");
+        }
+        if mode == CompletedDiscoveryAuthorityMode::PreparedInterruptedRetry {
+            transaction
+                .execute(
+                    "INSERT INTO provider_discovery_native_credential_executions (
+                         physical_authority_id, operation_id, session_id,
+                         commit_attempt_id, commit_plan_sha256, connection_id,
+                         connection_binding_sha256, reserved_at,
+                         schema_version, redaction_version
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1, 1)",
+                    rusqlite::params![
+                        initial_physical_authority_id,
+                        operation_id.as_str(),
+                        terminal.session.id.as_str(),
+                        attempt_id.as_str(),
+                        plan_sha256,
+                        connection_id.as_str(),
+                        binding_sha256,
+                        prepared_at.to_rfc3339(),
+                    ],
+                )
+                .expect("insert abandoned native execution reservation");
+            transaction
+                .execute(
+                    "INSERT INTO provider_discovery_native_credential_abandoned_reservations (
+                         operation_id, physical_authority_id, session_id,
+                         commit_attempt_id, commit_plan_sha256, connection_id,
+                         connection_binding_sha256, reserved_at,
+                         abandonment_kind, abandoned_at,
+                         schema_version, redaction_version
+                     ) VALUES (
+                         ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
+                         'prepared_interrupted_before_native_store', ?9, 1, 1
+                     )",
+                    rusqlite::params![
+                        operation_id.as_str(),
+                        initial_physical_authority_id,
+                        terminal.session.id.as_str(),
+                        attempt_id.as_str(),
+                        plan_sha256,
+                        connection_id.as_str(),
+                        binding_sha256,
+                        prepared_at.to_rfc3339(),
+                        operation_finished_at.to_rfc3339(),
+                    ],
+                )
+                .expect("insert exact abandoned reservation evidence");
+        } else {
+            insert_test_native_execution(
+                &transaction,
+                &TestNativeExecution {
+                    operation_id: &operation_id,
+                    physical_authority_id: &initial_physical_authority_id,
+                    session_id: &terminal.session.id,
+                    attempt_id: &attempt_id,
+                    plan_sha256: &plan_sha256,
+                    connection_id: &connection_id,
+                    connection_binding_sha256: &binding_sha256,
+                    reserved_at: prepared_at,
+                    store_started_at: initial_started_at,
+                },
+            );
+        }
+        if let (Some(retry_operation_id), Some(retry_physical_authority_id)) =
+            (&retry_operation_id, &retry_physical_authority_id)
+        {
+            insert_test_native_execution(
+                &transaction,
+                &TestNativeExecution {
+                    operation_id: retry_operation_id,
+                    physical_authority_id: retry_physical_authority_id,
+                    session_id: &terminal.session.id,
+                    attempt_id: &attempt_id,
+                    plan_sha256: &plan_sha256,
+                    connection_id: &connection_id,
+                    connection_binding_sha256: &binding_sha256,
+                    reserved_at: restart_at,
+                    store_started_at: restart_at,
+                },
+            );
+        }
+        transaction.commit().expect("commit authority fixture");
+        drop(database);
+        CompletedDiscoveryAuthorityFixture {
+            root,
+            storage,
+            session_id: terminal.session.id,
+            connection_id,
+            attempt_id,
+            operation_id,
+            authority_operation_id,
+            physical_authority_id,
+            evidence_id,
+            binding_sha256,
+        }
+    }
+
+    fn insert_test_discovery_approval(
+        transaction: &rusqlite::Transaction<'_>,
+        approval: &DiscoveryApprovalRecord,
+    ) {
+        let grant_json = encode_approval_grant(&approval.grant).expect("approval grant JSON");
+        let grant_sha256 = sha256_hex(grant_json.as_bytes());
+        transaction
+            .execute(
+                "INSERT INTO provider_discovery_approvals (
+                     id, session_id, approval_kind, candidate_id, decision,
+                     grant_json, session_revision, grant_sha256, redaction_version, created_at
+                 ) VALUES (?1, ?2, ?3, NULL, 'approved', ?4, ?5, ?6, 1, ?7)",
+                rusqlite::params![
+                    approval.id.as_str(),
+                    approval.session_id.as_str(),
+                    super::approval_kind(&approval.grant),
+                    grant_json,
+                    approval.session_revision,
+                    grant_sha256,
+                    approval.created_at.to_rfc3339(),
+                ],
+            )
+            .expect("insert authority approval");
+    }
+
+    fn insert_test_discovery_receipt(
+        transaction: &rusqlite::Transaction<'_>,
+        transition: &lorepia_domain::discovery::DiscoveryTransition,
+        occurred_at: chrono::DateTime<Utc>,
+    ) {
+        let event_json = super::encode_json_result(
+            serde_json::to_value(&transition.event),
+            "authority event JSON",
+        )
+        .expect("authority event JSON");
+        let response_json = super::encode_json_result(
+            serde_json::to_value(transition),
+            "authority transition response JSON",
+        )
+        .expect("authority transition response JSON");
+        let state = super::enum_wire_result(
+            serde_json::to_value(transition.session.state),
+            "authority event state",
+        )
+        .expect("authority state wire");
+        let outcome = super::enum_wire_result(
+            serde_json::to_value(transition.receipt.outcome),
+            "authority receipt outcome",
+        )
+        .expect("authority outcome wire");
+        transaction
+            .execute(
+                "INSERT INTO provider_discovery_event_outbox (
+                     id, session_id, sequence, event_version, session_revision,
+                     state, event_json, redaction_version, delivery_attempts,
+                     available_at, delivered_at, created_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, 0, ?8, NULL, ?8)",
+                rusqlite::params![
+                    transition.event.id.as_str(),
+                    transition.event.session_id.as_str(),
+                    transition.event.sequence,
+                    transition.event.version,
+                    transition.event.session_revision,
+                    state,
+                    event_json,
+                    occurred_at.to_rfc3339(),
+                ],
+            )
+            .expect("insert authority event");
+        transaction
+            .execute(
+                "INSERT INTO provider_discovery_action_receipts (
+                     action_id, session_id, action_kind, request_sha256,
+                     expected_revision, resulting_revision, event_id,
+                     event_sequence, outcome, response_json, redaction_version, created_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 1, ?11)",
+                rusqlite::params![
+                    transition.receipt.action_id.as_str(),
+                    transition.receipt.session_id.as_str(),
+                    transition.receipt.action_kind,
+                    transition.receipt.request_sha256,
+                    transition.receipt.expected_revision,
+                    transition.receipt.resulting_revision,
+                    transition.event.id.as_str(),
+                    transition.receipt.event_sequence,
+                    outcome,
+                    response_json,
+                    occurred_at.to_rfc3339(),
+                ],
+            )
+            .expect("insert authority receipt");
+        super::append_audit(
+            transaction,
+            transition.session.id.as_str(),
+            transition.receipt.resulting_revision,
+            super::audit_kind_for_action(&transition.receipt.action_kind),
+            Some(transition.receipt.action_id.as_str()),
+            Some(transition.event.id.as_str()),
+            "discovery.audit.transition_applied",
+            occurred_at,
+        )
+        .expect("insert authority transition audit");
+    }
+
+    fn direct_completed_discovery_replay_write(
+        fixture: &CompletedDiscoveryAuthorityFixture,
+    ) -> DiscoveryTransitionWrite {
+        let database = fixture.storage.connection().expect("replay database");
+        let snapshot = super::load_session_snapshot(&database, fixture.session_id.as_str())
+            .expect("load replay session")
+            .expect("replay session exists");
+        let terminal = super::load_discovery_authority_receipt_by_revision(
+            &database,
+            &fixture.session_id,
+            snapshot.session.revision,
+        )
+        .expect("load direct terminal receipt");
+        assert_eq!(terminal.receipt.action_kind, "commit_succeeded");
+        let attempt = super::load_commit_attempt(&database, &fixture.attempt_id)
+            .expect("load replay commit attempt");
+        let graph = crate::database::load_discovered_provider_graph_rows(
+            &database,
+            &attempt.plan.template_id,
+            attempt.plan.template_version,
+            &fixture.connection_id,
+        )
+        .expect("load replay provider graph")
+        .expect("replay provider graph exists");
+        drop(database);
+        let mut replay = write(
+            terminal.transition,
+            None,
+            Some(DiscoveryCompletedOperationWrite {
+                id: fixture.authority_operation_id.clone(),
+                outcome: DurableOperationOutcome::Succeeded,
+            }),
+        );
+        replay.provider_graph = Some(super::DiscoveredProviderGraph {
+            plan: attempt.plan,
+            plan_sha256: attempt.plan_sha256,
+            template: graph.template,
+            connection: graph.connection,
+            routes: graph.routes,
+            observations: graph.observations,
+            presets: graph.presets,
+        });
+        replay.occurred_at = terminal.created_at;
+        replay
+    }
+
+    fn complete_ordinary_credential_successor(fixture: &CompletedDiscoveryAuthorityFixture) {
+        let replacement_authority = fixture
+            .storage
+            .propose_provider_credential_install_authority(&fixture.connection_id)
+            .expect("propose ordinary successor install authority");
+        let replacement = fixture
+            .storage
+            .prepare_provider_credential_operation_with_install_authority(
+                &fixture.connection_id,
+                ProviderCredentialOperationKind::Install,
+                ProviderCredentialObservedStatus::Missing,
+                Some(&replacement_authority),
+            )
+            .expect("prepare ordinary successor install");
+        fixture
+            .storage
+            .start_provider_credential_operation(
+                &replacement.plan.operation_id,
+                &replacement.plan_sha256,
+            )
+            .expect("start ordinary successor install");
+        fixture
+            .storage
+            .attest_provider_credential_predecessor_delete_intent(
+                &replacement.plan.operation_id,
+                &replacement.plan_sha256,
+                ProviderCredentialObservedStatus::Available,
+            )
+            .expect("record predecessor deletion intent");
+        fixture
+            .storage
+            .attest_provider_credential_predecessor_missing(
+                &replacement.plan.operation_id,
+                &replacement.plan_sha256,
+            )
+            .expect("attest discovery predecessor missing");
+        fixture
+            .storage
+            .finish_provider_credential_operation(
+                &replacement.plan.operation_id,
+                &replacement.plan_sha256,
+                ProviderCredentialObservedStatus::Available,
+            )
+            .expect("complete ordinary ownership successor");
+    }
+
+    fn active_credential_ownership_tail(
+        fixture: &CompletedDiscoveryAuthorityFixture,
+    ) -> (u64, u64) {
+        fixture
+            .storage
+            .connection()
+            .expect("ownership tail database")
+            .query_row(
+                "SELECT ownership.authority_sequence, COUNT(event.authority_sequence)
+                 FROM provider_credential_ownership AS ownership
+                 JOIN provider_credential_ownership_events AS event
+                   ON event.connection_id = ownership.connection_id
+                 WHERE ownership.connection_id = ?1
+                 GROUP BY ownership.authority_sequence",
+                [fixture.connection_id.as_str()],
+                |row| Ok((row.get::<_, u64>(0)?, row.get::<_, u64>(1)?)),
+            )
+            .expect("load active ownership tail")
+    }
+
+    #[test]
+    fn completed_discovery_credential_authority_revalidates_the_full_terminal_history() {
+        let fixture = seed_completed_discovery_authority("discovery-authority-valid");
+        let database = fixture.storage.connection().expect("authority database");
+        validate_discovery_credential_ownership_authority(
+            &database,
+            &fixture.connection_id,
+            &fixture.physical_authority_id,
+            fixture.authority_operation_id.as_str(),
+            &fixture.binding_sha256,
+        )
+        .expect("complete discovery authority is valid");
+
+        let error = validate_discovery_credential_ownership_authority(
+            &database,
+            &fixture.connection_id,
+            &fixture.physical_authority_id,
+            fixture.authority_operation_id.as_str(),
+            &"f".repeat(64),
+        )
+        .expect_err("stale connection binding must not retain discovery authority");
+        assert_eq!(error.code, CoreErrorCode::StorageCorrupted);
+    }
+
+    #[test]
+    fn direct_credential_commit_replay_preserves_later_active_ownership_tail() {
+        let fixture = seed_completed_discovery_authority("direct-replay-active-tail");
+        let replay = direct_completed_discovery_replay_write(&fixture);
+        project_completed_discovery_credential_authority_at(&fixture, replay.occurred_at);
+        assert!(matches!(
+            fixture
+                .storage
+                .persist_credential_confirmed_discovery_commit(&replay)
+                .expect("exact direct commit replay"),
+            PersistDiscoveryTransition::Replayed { .. }
+        ));
+
+        complete_ordinary_credential_successor(&fixture);
+        let later = fixture
+            .storage
+            .ensure_provider_credential_access_settled(&fixture.connection_id)
+            .expect("ordinary successor owns current access");
+        let tail_before = active_credential_ownership_tail(&fixture);
+
+        assert!(matches!(
+            fixture
+                .storage
+                .persist_credential_confirmed_discovery_commit(&replay)
+                .expect("historical direct replay after active successor"),
+            PersistDiscoveryTransition::Replayed { .. }
+        ));
+        assert_eq!(
+            fixture
+                .storage
+                .ensure_provider_credential_access_settled(&fixture.connection_id)
+                .expect("replay preserves ordinary successor"),
+            later
+        );
+        assert_eq!(active_credential_ownership_tail(&fixture), tail_before);
+    }
+
+    #[test]
+    fn direct_credential_commit_replay_preserves_archived_ownership_tail() {
+        let fixture = seed_completed_discovery_authority("direct-replay-archived-tail");
+        let replay = direct_completed_discovery_replay_write(&fixture);
+        project_completed_discovery_credential_authority_at(&fixture, replay.occurred_at);
+        archive_credential_bound_connection(&fixture.storage, &fixture.connection_id);
+        let garbage_before = fixture
+            .storage
+            .list_provider_credential_slot_garbage()
+            .expect("load archived ownership tail");
+        assert_eq!(garbage_before.len(), 1);
+
+        assert!(matches!(
+            fixture
+                .storage
+                .persist_credential_confirmed_discovery_commit(&replay)
+                .expect("historical direct replay after archive"),
+            PersistDiscoveryTransition::Replayed { .. }
+        ));
+        fixture
+            .storage
+            .get_provider_connection(&fixture.connection_id)
+            .expect_err("historical replay must not unarchive provider connection");
+        assert_eq!(
+            fixture
+                .storage
+                .list_provider_credential_slot_garbage()
+                .expect("replay preserves archived ownership history"),
+            garbage_before
+        );
+    }
+
+    #[test]
+    fn reconciled_outcome_unknown_discovery_credential_authority_remains_valid() {
+        let fixture = seed_completed_discovery_authority_with_mode(
+            "discovery-authority-reconciled",
+            CompletedDiscoveryAuthorityMode::Reconciled,
+        );
+        validate_discovery_credential_ownership_authority(
+            &fixture.storage.connection().expect("authority database"),
+            &fixture.connection_id,
+            &fixture.physical_authority_id,
+            fixture.authority_operation_id.as_str(),
+            &fixture.binding_sha256,
+        )
+        .expect("exact confirmed commit completion remains valid operation-scoped authority");
+    }
+
+    fn persist_pending_confirmed_commit_completion(
+        fixture: &CompletedDiscoveryAuthorityFixture,
+        action_label: &str,
+        approval_label: &str,
+    ) -> DiscoveryApprovalId {
+        let unknown = fixture
+            .storage
+            .get_discovery_session(&fixture.session_id)
+            .expect("load pending reconciled discovery session");
+        assert_eq!(unknown.session.state, DiscoveryState::UnknownOutcome);
+        let approval_id = DiscoveryApprovalId::parse(approval_label).expect("resolution approval");
+        let resolution = DiscoveryUnknownOutcomeResolution::ConfirmedCommitCompleted {
+            connection_id: fixture.connection_id.clone(),
+        };
+        let occurred_at = now() + chrono::Duration::seconds(2);
+        let transition = unknown
+            .session
+            .apply(&DiscoveryActionEnvelope {
+                id: DiscoveryActionId::parse(action_label).expect("resolution action"),
+                expected_revision: unknown.session.revision,
+                request_sha256: "d".repeat(64),
+                action: ProviderDiscoveryAction::ResolveUnknownOutcome {
+                    approval_id: approval_id.clone(),
+                    resolution: resolution.clone(),
+                },
+            })
+            .expect("resolve graph-backed unknown commit");
+        let mut transition_write = write(transition, None, None);
+        transition_write.approval = Some(DiscoveryApprovalRecord {
+            id: approval_id.clone(),
+            session_id: fixture.session_id.clone(),
+            session_revision: unknown.session.revision,
+            decision: DiscoveryApprovalDecision::Approved,
+            grant: DiscoveryApprovalGrant::UnknownOutcomeResolution {
+                operation: DiscoveryOperationKind::AtomicCommit,
+                resolution,
+            },
+            created_at: occurred_at,
+        });
+        transition_write.occurred_at = occurred_at;
+        assert!(matches!(
+            fixture
+                .storage
+                .persist_discovery_transition(&transition_write)
+                .expect("persist public confirmed-completion transition"),
+            PersistDiscoveryTransition::Applied { .. }
+        ));
+        approval_id
+    }
+
+    #[test]
+    fn confirmed_commit_completion_public_transition_projects_exact_operation_authority() {
+        let fixture = seed_completed_discovery_authority_with_mode(
+            "public-confirmed-completion",
+            CompletedDiscoveryAuthorityMode::PendingReconciled,
+        );
+        persist_pending_confirmed_commit_completion(
+            &fixture,
+            "public-confirmed-completion-action",
+            "public-confirmed-completion-approval",
+        );
+
+        let authority = fixture
+            .storage
+            .ensure_provider_credential_access_settled(&fixture.connection_id)
+            .expect("public confirmed completion grants exact credential authority");
+        assert_eq!(authority.authority_id, fixture.physical_authority_id);
+        let source = fixture
+            .storage
+            .connection()
+            .expect("ownership database")
+            .query_row(
+                "SELECT source_kind, source_id
+                 FROM provider_credential_ownership_events
+                 WHERE connection_id = ?1 AND authority_id = ?2",
+                rusqlite::params![fixture.connection_id.as_str(), authority.authority_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .expect("load projected discovery ownership event");
+        assert_eq!(source.0, "discovery_commit");
+        assert_eq!(source.1, fixture.operation_id.as_str());
+
+        let root_path = fixture.root.path().to_path_buf();
+        let connection_id = fixture.connection_id.clone();
+        let physical_authority_id = fixture.physical_authority_id.clone();
+        drop(fixture.storage);
+        let reopened = Storage::open(&root_path).expect("reopen confirmed-completion authority");
+        let reopened_authority = reopened
+            .ensure_provider_credential_access_settled(&connection_id)
+            .expect("reopen preserves exact confirmed-completion authority");
+        assert_eq!(reopened_authority.authority_id, physical_authority_id);
+    }
+
+    #[test]
+    fn confirmed_commit_completion_projection_fails_closed_after_approval_tamper() {
+        let fixture = seed_completed_discovery_authority_with_mode(
+            "tampered-confirmed-completion",
+            CompletedDiscoveryAuthorityMode::PendingReconciled,
+        );
+        let approval_id = persist_pending_confirmed_commit_completion(
+            &fixture,
+            "tampered-confirmed-completion-action",
+            "tampered-confirmed-completion-approval",
+        );
+        fixture
+            .storage
+            .ensure_provider_credential_access_settled(&fixture.connection_id)
+            .expect("intact confirmed-completion authority is valid");
+
+        let connection = fixture.storage.connection().expect("tamper database");
+        let intact_error = connection
+            .execute(
+                "UPDATE provider_discovery_approvals SET grant_json = '{}' WHERE id = ?1",
+                [approval_id.as_str()],
+            )
+            .expect_err("approval immutability blocks confirmed-completion tampering");
+        assert!(
+            intact_error
+                .to_string()
+                .contains("discovery approvals are immutable")
+        );
+        let approval_guard =
+            suspend_test_trigger(&connection, "provider_discovery_approval_no_update");
+        let forged_grant = DiscoveryApprovalGrant::UnknownOutcomeResolution {
+            operation: DiscoveryOperationKind::AtomicCommit,
+            resolution: DiscoveryUnknownOutcomeResolution::ConfirmedNoEffect,
+        };
+        let forged_json = encode_approval_grant(&forged_grant).expect("forged approval JSON");
+        let forged_sha256 = sha256_hex(forged_json.as_bytes());
+        connection
+            .execute(
+                "UPDATE provider_discovery_approvals
+                 SET grant_json = ?2, grant_sha256 = ?3
+                 WHERE id = ?1",
+                rusqlite::params![approval_id.as_str(), forged_json, forged_sha256],
+            )
+            .expect("inject synthetic approval-history corruption");
+        restore_test_trigger(&connection, &approval_guard);
+        drop(connection);
+
+        let error = fixture
+            .storage
+            .ensure_provider_credential_access_settled(&fixture.connection_id)
+            .expect_err("tampered resolution approval must revoke settled authority");
+        assert_eq!(error.code, CoreErrorCode::StorageCorrupted);
+
+        let root_path = fixture.root.path().to_path_buf();
+        let connection_id = fixture.connection_id.clone();
+        drop(fixture.storage);
+        let reopened = Storage::open(&root_path).expect("reopen tampered authority database");
+        let reopened_error = reopened
+            .ensure_provider_credential_access_settled(&connection_id)
+            .expect_err("reopen must not trust tampered resolution approval");
+        assert_eq!(reopened_error.code, CoreErrorCode::StorageCorrupted);
+    }
+
+    #[test]
+    fn confirmed_no_effect_restart_discovery_credential_authority_remains_valid() {
+        let fixture = seed_completed_discovery_authority_with_mode(
+            "discovery-authority-no-effect-retry",
+            CompletedDiscoveryAuthorityMode::UnknownNoEffectRetry,
+        );
+        validate_discovery_credential_ownership_authority(
+            &fixture.storage.connection().expect("authority database"),
+            &fixture.connection_id,
+            &fixture.physical_authority_id,
+            fixture.authority_operation_id.as_str(),
+            &fixture.binding_sha256,
+        )
+        .expect("confirmed no-effect restart and final success remain valid authority");
+    }
+
+    #[test]
+    fn prepared_interruption_restart_discovery_credential_authority_remains_valid() {
+        let fixture = seed_completed_discovery_authority_with_mode(
+            "discovery-authority-prepared-retry",
+            CompletedDiscoveryAuthorityMode::PreparedInterruptedRetry,
+        );
+        validate_discovery_credential_ownership_authority(
+            &fixture.storage.connection().expect("authority database"),
+            &fixture.connection_id,
+            &fixture.physical_authority_id,
+            fixture.authority_operation_id.as_str(),
+            &fixture.binding_sha256,
+        )
+        .expect("prepared interruption restart and final success remain valid authority");
+    }
+
+    #[test]
+    fn missing_abandonment_ancestor_revokes_active_and_archived_authority() {
+        for archived in [false, true] {
+            let fixture = seed_completed_discovery_authority_with_mode(
+                if archived {
+                    "missing-abandonment-ancestor-archived"
+                } else {
+                    "missing-abandonment-ancestor-active"
+                },
+                CompletedDiscoveryAuthorityMode::PreparedInterruptedRetry,
+            );
+            project_completed_discovery_credential_authority(&fixture);
+            if archived {
+                archive_credential_bound_connection(&fixture.storage, &fixture.connection_id);
+                fixture
+                    .storage
+                    .list_provider_credential_slot_garbage()
+                    .expect("intact abandonment ancestor authorizes archived slot cleanup");
+            } else {
+                fixture
+                    .storage
+                    .ensure_provider_credential_access_settled(&fixture.connection_id)
+                    .expect("intact abandonment ancestor authorizes active access");
+            }
+
+            let database = fixture.storage.connection().expect("abandonment database");
+            let delete = || {
+                database.execute(
+                    "DELETE FROM provider_discovery_native_credential_abandoned_reservations
+                     WHERE operation_id = ?1",
+                    [fixture.operation_id.as_str()],
+                )
+            };
+            delete().expect_err("abandonment deletion guard must preserve retry ancestry");
+            let guard = suspend_test_trigger(
+                &database,
+                "provider_discovery_native_credential_abandonment_no_delete",
+            );
+            delete().expect("inject missing abandonment ancestor after test-only guard bypass");
+            restore_test_trigger(&database, &guard);
+            drop(database);
+
+            let error = if archived {
+                fixture
+                    .storage
+                    .list_provider_credential_slot_garbage()
+                    .expect_err("archived GC must reject a missing abandonment ancestor")
+            } else {
+                fixture
+                    .storage
+                    .ensure_provider_credential_access_settled(&fixture.connection_id)
+                    .expect_err("active access must reject a missing abandonment ancestor")
+            };
+            assert_eq!(error.code, CoreErrorCode::StorageCorrupted);
+        }
+    }
+
+    #[test]
+    fn confirmed_commit_compensation_uses_original_operation_authority_after_reopen() {
+        let fixture = seed_completed_discovery_authority_with_mode(
+            "discovery-compensation-confirmed-commit",
+            CompletedDiscoveryAuthorityMode::ConfirmedCommitCompensation,
+        );
+        let attempt = fixture
+            .storage
+            .get_discovery_commit_attempt(&fixture.attempt_id)
+            .expect("load confirmed-commit compensation attempt");
+        let authority = fixture
+            .storage
+            .get_discovery_credential_compensation_operation_id(
+                &fixture.session_id,
+                &fixture.attempt_id,
+                &attempt.plan_sha256,
+            )
+            .expect("load confirmed-commit compensation authority");
+        assert_eq!(authority, fixture.operation_id);
+
+        let root_path = fixture.root.path().to_path_buf();
+        let session_id = fixture.session_id.clone();
+        let attempt_id = fixture.attempt_id.clone();
+        let operation_id = fixture.operation_id.clone();
+        let plan_sha256 = attempt.plan_sha256;
+        drop(fixture.storage);
+        let reopened = Storage::open_with_deferred_discovery_recovery(root_path)
+            .expect("reopen confirmed-commit compensation with Core-owned recovery");
+        assert_eq!(
+            reopened
+                .get_discovery_credential_compensation_operation_id(
+                    &session_id,
+                    &attempt_id,
+                    &plan_sha256,
+                )
+                .expect("reload confirmed-commit compensation authority"),
+            operation_id
+        );
+    }
+
+    #[test]
+    fn confirmed_no_effect_compensation_uses_original_operation_authority_after_reopen() {
+        let fixture = seed_completed_discovery_authority_with_mode(
+            "discovery-compensation-confirmed-no-effect",
+            CompletedDiscoveryAuthorityMode::ConfirmedNoEffectCompensation,
+        );
+        let attempt = fixture
+            .storage
+            .get_discovery_commit_attempt(&fixture.attempt_id)
+            .expect("load confirmed-no-effect compensation attempt");
+        let authority = fixture
+            .storage
+            .get_discovery_credential_compensation_operation_id(
+                &fixture.session_id,
+                &fixture.attempt_id,
+                &attempt.plan_sha256,
+            )
+            .expect("load confirmed-no-effect compensation authority");
+        assert_eq!(authority, fixture.operation_id);
+
+        let root_path = fixture.root.path().to_path_buf();
+        let session_id = fixture.session_id.clone();
+        let attempt_id = fixture.attempt_id.clone();
+        let operation_id = fixture.operation_id.clone();
+        let plan_sha256 = attempt.plan_sha256;
+        drop(fixture.storage);
+        let reopened = Storage::open_with_deferred_discovery_recovery(root_path)
+            .expect("reopen confirmed-no-effect compensation with Core-owned recovery");
+        assert_eq!(
+            reopened
+                .get_discovery_credential_compensation_operation_id(
+                    &session_id,
+                    &attempt_id,
+                    &plan_sha256,
+                )
+                .expect("reload confirmed-no-effect compensation authority"),
+            operation_id
+        );
+    }
+
+    #[test]
+    fn archived_discovery_owned_slot_garbage_revalidates_after_reopen_without_granting_access() {
+        let fixture = seed_completed_discovery_authority("archived-discovery-slot-gc-reopen");
+        let authority_sequence = project_completed_discovery_credential_authority(&fixture);
+        archive_credential_bound_connection(&fixture.storage, &fixture.connection_id);
+
+        let database = fixture
+            .storage
+            .connection()
+            .expect("archived authority database");
+        let active_error = validate_discovery_credential_ownership_authority(
+            &database,
+            &fixture.connection_id,
+            &fixture.physical_authority_id,
+            fixture.authority_operation_id.as_str(),
+            &fixture.binding_sha256,
+        )
+        .expect_err("archived discovery authority must not grant current credential access");
+        assert_eq!(active_error.code, CoreErrorCode::StorageCorrupted);
+        validate_archived_discovery_credential_ownership_authority_for_slot_gc(
+            &database,
+            &fixture.connection_id,
+            &fixture.physical_authority_id,
+            fixture.authority_operation_id.as_str(),
+            &fixture.binding_sha256,
+        )
+        .expect("archived discovery history retains bounded slot-GC authority");
+        drop(database);
+
+        let garbage = fixture
+            .storage
+            .list_provider_credential_slot_garbage()
+            .expect("list archived discovery slot garbage");
+        assert_eq!(garbage.len(), 1);
+        assert_eq!(garbage[0].connection_id, fixture.connection_id);
+        assert_eq!(garbage[0].authority_sequence, authority_sequence);
+        assert_eq!(
+            garbage[0].authority.authority_id,
+            fixture.physical_authority_id
+        );
+        assert_eq!(
+            garbage[0].authority.connection_binding_sha256,
+            fixture.binding_sha256
+        );
+        assert_eq!(
+            garbage[0].status,
+            ProviderCredentialSlotGarbageStatus::Pending
+        );
+
+        let root_path = fixture.root.path().to_path_buf();
+        let connection_id = fixture.connection_id.clone();
+        drop(fixture.storage);
+        let reopened = Storage::open(root_path).expect("reopen archived authority");
+        let reopened_garbage = reopened
+            .list_provider_credential_slot_garbage()
+            .expect("revalidate archived slot garbage after reopen");
+        assert_eq!(reopened_garbage, garbage);
+        reopened
+            .ensure_provider_credential_access_settled(&connection_id)
+            .expect_err("reopen must not turn historical GC authority into current access");
+    }
+
+    #[test]
+    fn tampered_archived_connection_or_discovery_history_fails_slot_garbage_closed() {
+        for (id, tamper) in [
+            ("archived-discovery-slot-gc-connection-tamper", "connection"),
+            ("archived-discovery-slot-gc-history-tamper", "history"),
+        ] {
+            let fixture = seed_completed_discovery_authority(id);
+            project_completed_discovery_credential_authority(&fixture);
+            archive_credential_bound_connection(&fixture.storage, &fixture.connection_id);
+            fixture
+                .storage
+                .list_provider_credential_slot_garbage()
+                .expect("untampered archived slot garbage is valid");
+
+            let database = fixture
+                .storage
+                .connection()
+                .expect("tamper authority database");
+            if tamper == "connection" {
+                database
+                    .execute(
+                        "UPDATE provider_connections
+                         SET api_origin = 'https://tampered.example'
+                         WHERE id = ?1 AND archived_at IS NOT NULL",
+                        [fixture.connection_id.as_str()],
+                    )
+                    .expect("inject archived connection tamper");
+            } else {
+                let delete_review_approval = || {
+                    database.execute(
+                        "DELETE FROM provider_discovery_approvals
+                         WHERE session_id = ?1 AND approval_kind = 'review'",
+                        [fixture.session_id.as_str()],
+                    )
+                };
+                delete_review_approval()
+                    .expect_err("immutable discovery approval guard must reject history deletion");
+                database
+                    .execute_batch("DROP TRIGGER provider_discovery_approval_no_delete;")
+                    .expect("drop approval delete guard only for corruption fixture");
+                delete_review_approval()
+                    .expect("inject archived discovery-history tamper after dropping test guard");
+                let remaining_review_approvals = database
+                    .query_row(
+                        "SELECT COUNT(*)
+                         FROM provider_discovery_approvals
+                         WHERE session_id = ?1 AND approval_kind = 'review'",
+                        [fixture.session_id.as_str()],
+                        |row| row.get::<_, u32>(0),
+                    )
+                    .expect("count tampered discovery approvals");
+                assert_eq!(remaining_review_approvals, 0);
+            }
+            drop(database);
+
+            let error = fixture
+                .storage
+                .list_provider_credential_slot_garbage()
+                .expect_err("tampered archived authority must fail slot garbage closed");
+            assert_eq!(error.code, CoreErrorCode::StorageCorrupted, "{tamper}");
+        }
+    }
+
+    #[test]
+    fn model_sync_mutation_does_not_expire_discovery_credential_authority() {
+        let fixture = seed_completed_discovery_authority("discovery-authority-model-sync");
+        let before = fixture
+            .storage
+            .list_model_routes(&fixture.connection_id)
+            .expect("load routes before model sync");
+        let observed_at = before
+            .iter()
+            .flat_map(|route| [Some(route.first_seen_at), route.last_seen_at])
+            .flatten()
+            .max()
+            .unwrap_or_else(now)
+            + chrono::Duration::minutes(1);
+        fixture
+            .storage
+            .reconcile_model_routes(&fixture.connection_id, &before, observed_at)
+            .expect("reconcile mutable discovery routes");
+        let after = fixture
+            .storage
+            .list_model_routes(&fixture.connection_id)
+            .expect("load routes after model sync");
+        assert_ne!(before, after, "model sync must mutate the live route graph");
+
+        validate_discovery_credential_ownership_authority(
+            &fixture.storage.connection().expect("authority database"),
+            &fixture.connection_id,
+            &fixture.physical_authority_id,
+            fixture.authority_operation_id.as_str(),
+            &fixture.binding_sha256,
+        )
+        .expect("mutable model-sync graph state does not replace credential authority");
+    }
+
+    #[test]
+    fn replaced_discovery_attempt_cannot_forge_credential_authority() {
+        let fixture = seed_completed_discovery_authority("discovery-authority-attempt-replace");
+        let database = fixture.storage.connection().expect("authority database");
+        let replace_attempt = || {
+            database.execute(
+                "INSERT OR REPLACE INTO provider_discovery_commit_attempts (
+                         id, session_id, attempt_number, action_id, expected_revision,
+                         plan_sha256, plan_json, phase, redaction_version,
+                         created_at, updated_at, completed_at
+                     )
+                     SELECT id, session_id, attempt_number, 'detached-forged-action',
+                            expected_revision, plan_sha256, plan_json, phase,
+                            redaction_version, created_at, updated_at, completed_at
+                     FROM provider_discovery_commit_attempts WHERE id = ?1",
+                [fixture.attempt_id.as_str()],
+            )
+        };
+        replace_attempt().expect_err("attempt REPLACE guard must preserve history");
+        validate_discovery_credential_ownership_authority(
+            &database,
+            &fixture.connection_id,
+            &fixture.physical_authority_id,
+            fixture.authority_operation_id.as_str(),
+            &fixture.binding_sha256,
+        )
+        .expect("rejected attempt replacement preserves authority");
+        database
+            .execute_batch("DROP TRIGGER provider_discovery_commit_attempt_no_replace;")
+            .expect("drop attempt guard only for runtime corruption fixture");
+        database
+            .pragma_update(None, "foreign_keys", false)
+            .expect("suspend foreign keys only for replaced-attempt corruption fixture");
+        replace_attempt().expect("inject replaced authority attempt after dropping test guard");
+        database
+            .pragma_update(None, "foreign_keys", true)
+            .expect("restore foreign keys after replaced-attempt corruption fixture");
+        let error = validate_discovery_credential_ownership_authority(
+            &database,
+            &fixture.connection_id,
+            &fixture.physical_authority_id,
+            fixture.authority_operation_id.as_str(),
+            &fixture.binding_sha256,
+        )
+        .expect_err("replaced terminal attempt must not authorize a credential");
+        assert_eq!(error.code, CoreErrorCode::StorageCorrupted);
+    }
+
+    #[test]
+    fn noncanonical_rehashed_discovery_plan_cannot_authorize_a_credential() {
+        let fixture = seed_completed_discovery_authority("discovery-authority-plan-canonical");
+        let database = fixture.storage.connection().expect("authority database");
+        let plan_json = database
+            .query_row(
+                "SELECT plan_json FROM provider_discovery_commit_attempts WHERE id = ?1",
+                [fixture.attempt_id.as_str()],
+                |row| row.get::<_, String>(0),
+            )
+            .expect("load canonical authority plan");
+        let pretty_plan = serde_json::to_string_pretty(
+            &serde_json::from_str::<Value>(&plan_json).expect("parse authority plan"),
+        )
+        .expect("encode noncanonical authority plan");
+        assert_ne!(pretty_plan, plan_json);
+        database
+            .execute_batch("DROP TRIGGER provider_discovery_commit_attempt_no_replace;")
+            .expect("drop attempt guard only for canonical corruption fixture");
+        database
+            .pragma_update(None, "foreign_keys", false)
+            .expect("suspend foreign keys only for canonical corruption fixture");
+        database
+            .execute(
+                "INSERT OR REPLACE INTO provider_discovery_commit_attempts (
+                     id, session_id, attempt_number, action_id, expected_revision,
+                     plan_sha256, plan_json, phase, redaction_version,
+                     created_at, updated_at, completed_at
+                 )
+                 SELECT id, session_id, attempt_number, action_id, expected_revision,
+                        ?2, ?3, phase, redaction_version,
+                        created_at, updated_at, completed_at
+                 FROM provider_discovery_commit_attempts WHERE id = ?1",
+                rusqlite::params![
+                    fixture.attempt_id.as_str(),
+                    sha256_hex(pretty_plan.as_bytes()),
+                    pretty_plan,
+                ],
+            )
+            .expect("inject noncanonical rehashed authority plan");
+        database
+            .pragma_update(None, "foreign_keys", true)
+            .expect("restore foreign keys after canonical corruption fixture");
+        let error = validate_discovery_credential_ownership_authority(
+            &database,
+            &fixture.connection_id,
+            &fixture.physical_authority_id,
+            fixture.authority_operation_id.as_str(),
+            &fixture.binding_sha256,
+        )
+        .expect_err("noncanonical rehashed plan must not authorize a credential");
+        assert_eq!(error.code, CoreErrorCode::StorageCorrupted);
+    }
+
+    #[test]
+    fn detached_ready_session_cannot_forge_discovery_credential_authority() {
+        let fixture = seed_completed_discovery_authority("discovery-authority-session-detach");
+        let database = fixture.storage.connection().expect("authority database");
+        database
+            .execute(
+                "INSERT OR REPLACE INTO provider_discovery_sessions (
+                     id, state, revision, next_event_sequence, sanitized_input_json,
+                     draft_json, review_diff_json, error_json, recovery_json,
+                     unknown_operation, manifest_sha256, commit_plan_sha256,
+                     commit_attempt_id, committed_connection_id, cancellation_pending,
+                     active_operation_id, active_effect_approval_json, redaction_version,
+                     created_at, updated_at
+                 )
+                 SELECT id, state, revision, next_event_sequence, sanitized_input_json,
+                        draft_json, review_diff_json, error_json, recovery_json,
+                        unknown_operation, manifest_sha256, commit_plan_sha256,
+                        commit_attempt_id, committed_connection_id, cancellation_pending,
+                        active_operation_id, active_effect_approval_json, redaction_version,
+                        created_at, updated_at
+                 FROM provider_discovery_sessions WHERE commit_attempt_id = ?1",
+                [fixture.attempt_id.as_str()],
+            )
+            .expect_err("session REPLACE guard must preserve history");
+        validate_discovery_credential_ownership_authority(
+            &database,
+            &fixture.connection_id,
+            &fixture.physical_authority_id,
+            fixture.authority_operation_id.as_str(),
+            &fixture.binding_sha256,
+        )
+        .expect("rejected session replacement preserves authority");
+        database
+            .execute_batch("DROP TRIGGER provider_discovery_session_revision_guard;")
+            .expect("drop session guard only for corruption fixture");
+        database
+            .execute(
+                "UPDATE provider_discovery_sessions
+                 SET committed_connection_id = NULL
+                 WHERE commit_attempt_id = ?1",
+                [fixture.attempt_id.as_str()],
+            )
+            .expect("detach authority session corruption fixture");
+        let error = validate_discovery_credential_ownership_authority(
+            &database,
+            &fixture.connection_id,
+            &fixture.physical_authority_id,
+            fixture.authority_operation_id.as_str(),
+            &fixture.binding_sha256,
+        )
+        .expect_err("detached ready session must not authorize a credential");
+        assert_eq!(error.code, CoreErrorCode::StorageCorrupted);
+    }
+
+    #[test]
+    fn replaced_terminal_operation_and_graph_audit_fail_discovery_authority_closed() {
+        for (id, corrupt) in [
+            ("discovery-authority-operation-replace", "operation"),
+            ("discovery-authority-audit-replace", "audit"),
+        ] {
+            let fixture = seed_completed_discovery_authority(id);
+            let database = fixture.storage.connection().expect("authority database");
+            if corrupt == "operation" {
+                let replace_operation = || {
+                    database.execute(
+                        "INSERT OR REPLACE INTO provider_discovery_operations (
+                             id, session_id, operation_kind, side_effect_class, status,
+                             action_id, expected_revision, request_sha256, approval_id,
+                             approval_grant_sha256, started_at, finished_at,
+                             created_at, updated_at
+                         )
+                         SELECT id, session_id, operation_kind, side_effect_class, 'failed',
+                                action_id, expected_revision, request_sha256, approval_id,
+                                approval_grant_sha256, started_at, finished_at,
+                                created_at, updated_at
+                         FROM provider_discovery_operations WHERE id = ?1",
+                        [fixture.operation_id.as_str()],
+                    )
+                };
+                replace_operation().expect_err("operation REPLACE guard must preserve history");
+                validate_discovery_credential_ownership_authority(
+                    &database,
+                    &fixture.connection_id,
+                    &fixture.physical_authority_id,
+                    fixture.authority_operation_id.as_str(),
+                    &fixture.binding_sha256,
+                )
+                .expect("rejected operation replacement preserves authority");
+                database
+                    .execute_batch("DROP TRIGGER provider_discovery_operation_no_replace;")
+                    .expect("drop operation guard only for runtime corruption fixture");
+                database
+                    .pragma_update(None, "foreign_keys", false)
+                    .expect("suspend foreign keys only for replaced-operation fixture");
+                replace_operation()
+                    .expect("inject replaced terminal operation after dropping test guard");
+                database
+                    .pragma_update(None, "foreign_keys", true)
+                    .expect("restore foreign keys after replaced-operation fixture");
+            } else {
+                let replace_audit = || {
+                    database.execute(
+                        "INSERT OR REPLACE INTO provider_discovery_audit_log (
+                             id, session_id, audit_sequence, session_revision, audit_kind,
+                             action_id, subject_id, summary_key, created_at
+                         )
+                         SELECT id, session_id, audit_sequence, session_revision, audit_kind,
+                                action_id, ?2, summary_key, created_at
+                         FROM provider_discovery_audit_log
+                         WHERE session_id = ?1
+                           AND summary_key = 'discovery.audit.provider_graph_applied'",
+                        rusqlite::params![fixture.session_id.as_str(), "f".repeat(64)],
+                    )
+                };
+                replace_audit().expect_err("audit REPLACE guard must preserve history");
+                validate_discovery_credential_ownership_authority(
+                    &database,
+                    &fixture.connection_id,
+                    &fixture.physical_authority_id,
+                    fixture.authority_operation_id.as_str(),
+                    &fixture.binding_sha256,
+                )
+                .expect("rejected audit replacement preserves authority");
+                database
+                    .execute_batch("DROP TRIGGER provider_discovery_audit_no_replace;")
+                    .expect("drop audit guard only for runtime corruption fixture");
+                replace_audit().expect("inject replaced graph audit after dropping test guard");
+            }
+            let error = validate_discovery_credential_ownership_authority(
+                &database,
+                &fixture.connection_id,
+                &fixture.physical_authority_id,
+                fixture.authority_operation_id.as_str(),
+                &fixture.binding_sha256,
+            )
+            .expect_err("replaced terminal authority evidence must fail closed");
+            assert_eq!(error.code, CoreErrorCode::StorageCorrupted);
+        }
+    }
+
+    fn assert_discovery_authority_history_replace_is_guarded_and_revalidated(
+        fixture: &CompletedDiscoveryAuthorityFixture,
+        trigger_name: &str,
+        replacement_sql: &str,
+        selector: &str,
+        replacement: &str,
+        disable_foreign_keys_for_corruption: bool,
+    ) {
+        let database = fixture.storage.connection().expect("authority database");
+        let replace =
+            || database.execute(replacement_sql, rusqlite::params![selector, replacement]);
+        let trigger_error = replace().expect_err("authority history REPLACE guard must reject");
+        assert!(
+            trigger_error.to_string().contains("cannot replace history"),
+            "replacement was not rejected by the expected no-REPLACE guard: {trigger_error}"
+        );
+        validate_discovery_credential_ownership_authority(
+            &database,
+            &fixture.connection_id,
+            &fixture.physical_authority_id,
+            fixture.authority_operation_id.as_str(),
+            &fixture.binding_sha256,
+        )
+        .expect("rejected authority history replacement preserves the original authority");
+
+        database
+            .execute_batch(&format!("DROP TRIGGER {trigger_name};"))
+            .expect("drop only the selected no-REPLACE guard for corruption fixture");
+        if disable_foreign_keys_for_corruption {
+            database
+                .pragma_update(None, "foreign_keys", false)
+                .expect("temporarily disable foreign keys for physical corruption fixture");
+        }
+        replace().expect("inject replaced authority history after dropping its test guard");
+        if disable_foreign_keys_for_corruption {
+            database
+                .pragma_update(None, "foreign_keys", true)
+                .expect("restore foreign keys after physical corruption fixture");
+        }
+        let error = validate_discovery_credential_ownership_authority(
+            &database,
+            &fixture.connection_id,
+            &fixture.physical_authority_id,
+            fixture.authority_operation_id.as_str(),
+            &fixture.binding_sha256,
+        )
+        .expect_err("replaced authority history must fail runtime validation closed");
+        assert_eq!(error.code, CoreErrorCode::StorageCorrupted);
+    }
+
+    #[test]
+    fn replaced_approval_receipt_event_and_evidence_fail_discovery_authority_closed() {
+        let approval = seed_completed_discovery_authority("discovery-authority-approval-replace");
+        assert_discovery_authority_history_replace_is_guarded_and_revalidated(
+            &approval,
+            "provider_discovery_approval_no_replace",
+            "INSERT OR REPLACE INTO provider_discovery_approvals (
+                 id, session_id, approval_kind, candidate_id, decision,
+                 grant_json, session_revision, grant_sha256, redaction_version, created_at
+             )
+             SELECT id, session_id, approval_kind, candidate_id, decision,
+                    grant_json, session_revision, ?2, redaction_version, created_at
+             FROM provider_discovery_approvals
+             WHERE session_id = ?1 AND approval_kind = 'review'",
+            approval.session_id.as_str(),
+            &"f".repeat(64),
+            false,
+        );
+
+        let receipt = seed_completed_discovery_authority("discovery-authority-receipt-replace");
+        assert_discovery_authority_history_replace_is_guarded_and_revalidated(
+            &receipt,
+            "provider_discovery_receipt_no_replace",
+            "INSERT OR REPLACE INTO provider_discovery_action_receipts (
+                 action_id, session_id, action_kind, request_sha256,
+                 expected_revision, resulting_revision, event_id,
+                 event_sequence, outcome, response_json, redaction_version, created_at
+             )
+             SELECT action_id, session_id, action_kind, ?2,
+                    expected_revision, resulting_revision, event_id,
+                    event_sequence, outcome, response_json, redaction_version, created_at
+             FROM provider_discovery_action_receipts
+             WHERE session_id = ?1 AND action_kind = 'commit_succeeded'",
+            receipt.session_id.as_str(),
+            &"f".repeat(64),
+            false,
+        );
+
+        let event = seed_completed_discovery_authority("discovery-authority-outbox-replace");
+        assert_discovery_authority_history_replace_is_guarded_and_revalidated(
+            &event,
+            "provider_discovery_outbox_no_replace",
+            "INSERT OR REPLACE INTO provider_discovery_event_outbox (
+                 id, session_id, sequence, event_version, session_revision,
+                 state, event_json, redaction_version, delivery_attempts,
+                 available_at, delivered_at, created_at
+             )
+             SELECT id, session_id, sequence, event_version, session_revision,
+                    ?2, event_json, redaction_version, delivery_attempts,
+                    available_at, delivered_at, created_at
+             FROM provider_discovery_event_outbox
+             WHERE session_id = ?1 AND state = 'ready'",
+            event.session_id.as_str(),
+            "failed",
+            true,
+        );
+
+        let evidence = seed_completed_discovery_authority("discovery-authority-evidence-replace");
+        assert_discovery_authority_history_replace_is_guarded_and_revalidated(
+            &evidence,
+            "provider_discovery_evidence_no_replace",
+            "INSERT OR REPLACE INTO provider_discovery_evidence (
+                 id, session_id, kind, source_url, content_sha256,
+                 extracted_json, redaction_version, fetched_at
+             )
+             SELECT id, session_id, ?2, source_url, content_sha256,
+                    extracted_json, redaction_version, fetched_at
+             FROM provider_discovery_evidence WHERE id = ?1",
+            evidence.evidence_id.as_str(),
+            "forged_kind",
+            false,
+        );
+    }
+
+    #[test]
+    fn terminal_discovery_history_cannot_be_inserted_as_initial_state() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let draft = draft_session("discovery-initial-state-guard");
+        let input_json = canonical_json_result(
+            serde_json::to_value(&draft.input),
+            "initial-state guard input",
+        )
+        .expect("canonical input JSON");
+        let timestamp = now().to_rfc3339();
+        let database = storage.connection().expect("database connection");
+        let session_error = database
+            .execute(
+                "INSERT INTO provider_discovery_sessions (
+                     id, state, revision, next_event_sequence, sanitized_input_json,
+                     redaction_version, created_at, updated_at
+                 ) VALUES (?1, 'ready', 1, 2, ?2, 1, ?3, ?3)",
+                rusqlite::params!["forged-ready-session", input_json, timestamp],
+            )
+            .expect_err("terminal discovery session insert must be rejected");
+        assert!(
+            session_error
+                .to_string()
+                .contains("provider discovery session must begin in its initial state")
+        );
+        drop(database);
+        storage
+            .create_discovery_session(&draft, now())
+            .expect("create canonical draft session");
+        let database = storage.connection().expect("database connection");
+        let attempt_error = database
+            .execute(
+                "INSERT INTO provider_discovery_commit_attempts (
+                     id, session_id, attempt_number, action_id, expected_revision,
+                     plan_sha256, plan_json, phase, redaction_version,
+                     created_at, updated_at, completed_at
+                 ) VALUES (?1, ?2, 1, ?3, 0, ?4, '{}', 'completed', 1, ?5, ?5, ?5)",
+                rusqlite::params![
+                    "forged-completed-attempt",
+                    draft.id.as_str(),
+                    "forged-completed-action",
+                    "a".repeat(64),
+                    timestamp,
+                ],
+            )
+            .expect_err("terminal discovery attempt insert must be rejected");
+        assert!(
+            attempt_error
+                .to_string()
+                .contains("provider discovery commit attempt must begin prepared")
+        );
+        let operation_error = database
+            .execute(
+                "INSERT INTO provider_discovery_operations (
+                     id, session_id, operation_kind, side_effect_class, status,
+                     action_id, expected_revision, request_sha256,
+                     started_at, finished_at, created_at, updated_at
+                 ) VALUES (
+                     ?1, ?2, 'atomic_commit', 'persistent', 'succeeded',
+                     ?3, 1, ?4, ?5, ?5, ?5, ?5
+                 )",
+                rusqlite::params![
+                    "forged-succeeded-operation",
+                    draft.id.as_str(),
+                    "forged-operation-action",
+                    "b".repeat(64),
+                    timestamp,
+                ],
+            )
+            .expect_err("terminal discovery operation insert must be rejected");
+        assert!(
+            operation_error
+                .to_string()
+                .contains("provider discovery operation must begin prepared")
+        );
+    }
+
+    struct NativeNoEffectFixture {
+        session: ProviderDiscoverySession,
+        operation_id: DiscoveryOperationId,
+        attempt_id: DiscoveryCommitAttemptId,
+        plan_sha256: String,
+    }
+
+    struct RestartedNativeCommitFixture {
+        session: ProviderDiscoverySession,
+        operation_id: DiscoveryOperationId,
+        predecessor_action_id: DiscoveryActionId,
+    }
+
+    struct UnstartedPreparedNativeRetryStep {
+        next_operation_id: DiscoveryOperationId,
+        interrupt_hash_byte: char,
+        restart_hash_byte: char,
+        interrupted_at_millis: i64,
+        restarted_at_millis: i64,
+    }
+
+    fn seed_started_native_credential_commit(storage: &Storage, id: &str) -> NativeNoEffectFixture {
+        let fixture = seed_native_credential_commit(storage, id);
+        reserve_and_start_test_native_execution(
+            storage,
+            &fixture.session,
+            &fixture.attempt_id,
+            &fixture.plan_sha256,
+            &fixture.operation_id,
+            now() + chrono::Duration::milliseconds(1),
+        );
+        fixture
+    }
+
+    fn seed_prepared_native_credential_commit(
+        storage: &Storage,
+        id: &str,
+    ) -> NativeNoEffectFixture {
+        seed_native_credential_commit(storage, id)
+    }
+
+    fn reserve_and_start_test_native_execution(
+        storage: &Storage,
+        session: &ProviderDiscoverySession,
+        attempt_id: &DiscoveryCommitAttemptId,
+        plan_sha256: &str,
+        operation_id: &DiscoveryOperationId,
+        started_at: chrono::DateTime<Utc>,
+    ) -> super::DiscoveryNativeCredentialExecutionRecord {
+        let reserved = storage
+            .reserve_discovery_credential_install_execution(
+                &super::DiscoveryNativeCredentialExecutionReservation {
+                    operation_id: operation_id.clone(),
+                    session_id: session.id.clone(),
+                    commit_attempt_id: attempt_id.clone(),
+                    commit_plan_sha256: plan_sha256.to_owned(),
+                    connection_id: session.input.connection_id.clone(),
+                    connection_binding_sha256: "b".repeat(64),
+                    reserved_at: started_at,
+                },
+            )
+            .expect("reserve test native credential execution");
+        storage
+            .start_reserved_discovery_credential_install_execution(
+                &super::DiscoveryNativeCredentialStoreAttemptStart {
+                    operation_id: operation_id.clone(),
+                    physical_authority_id: reserved.physical_authority_id,
+                    started_at,
+                },
+            )
+            .expect("start exact test native credential execution")
+    }
+
+    fn test_native_physical_authority_id(
+        storage: &Storage,
+        operation_id: &DiscoveryOperationId,
+    ) -> String {
+        storage
+            .get_discovery_native_credential_execution(operation_id)
+            .expect("load test native credential execution")
+            .expect("test native credential execution exists")
+            .physical_authority_id
+    }
+
+    fn raw_test_native_physical_authority_id(
+        storage: &Storage,
+        operation_id: &DiscoveryOperationId,
+    ) -> String {
+        storage
+            .connection()
+            .expect("load raw test native execution database")
+            .query_row(
+                "SELECT physical_authority_id
+                 FROM provider_discovery_native_credential_executions
+                 WHERE operation_id = ?1",
+                [operation_id.as_str()],
+                |row| row.get(0),
+            )
+            .expect("load raw test native physical authority")
+    }
+
+    fn assert_native_execution_table_is_append_only(
+        database: &rusqlite::Connection,
+        table: &str,
+        operation_id: &DiscoveryOperationId,
+    ) {
+        database
+            .execute(
+                &format!(
+                    "INSERT OR REPLACE INTO {table} SELECT * FROM {table} WHERE operation_id = ?1"
+                ),
+                [operation_id.as_str()],
+            )
+            .expect_err("native execution history cannot be replaced");
+        database
+            .execute(
+                &format!(
+                    "UPDATE {table} SET schema_version = schema_version WHERE operation_id = ?1"
+                ),
+                [operation_id.as_str()],
+            )
+            .expect_err("native execution history cannot be updated");
+        database
+            .execute(
+                &format!("DELETE FROM {table} WHERE operation_id = ?1"),
+                [operation_id.as_str()],
+            )
+            .expect_err("native execution history cannot be deleted");
+    }
+
+    fn bypass_native_execution_table_version_guard(
+        database: &rusqlite::Connection,
+        table: &str,
+        update_trigger: &str,
+        operation_id: &DiscoveryOperationId,
+    ) {
+        let guard = suspend_test_trigger(database, update_trigger);
+        database
+            .execute_batch("PRAGMA ignore_check_constraints = ON;")
+            .expect("suspend version CHECK only for corruption fixture");
+        database
+            .execute(
+                &format!("UPDATE {table} SET schema_version = 2 WHERE operation_id = ?1"),
+                [operation_id.as_str()],
+            )
+            .expect("inject unsupported native execution table version");
+        database
+            .execute_batch("PRAGMA ignore_check_constraints = OFF;")
+            .expect("restore version CHECK enforcement");
+        restore_test_trigger(database, &guard);
+    }
+
+    fn native_credential_commit_plan(
+        session: &ProviderDiscoverySession,
+        id: &str,
+        attempt_id: DiscoveryCommitAttemptId,
+        credential_approval_id: DiscoveryApprovalId,
+    ) -> DiscoveryCommitPlan {
+        DiscoveryCommitPlan {
+            attempt_id,
+            session_id: session.id.clone(),
+            expected_revision: 2,
+            manifest_sha256: "1".repeat(64),
+            graph_sha256: "2".repeat(64),
+            template_id: ProviderTemplateId::from(format!("template-{id}")),
+            template_version: 1,
+            connection_id: session.input.connection_id.clone(),
+            model_route_ids: vec![ModelRouteId::from(format!("route-{id}"))],
+            credential_ref: session.input.credential_ref.clone(),
+            credential_approval_id: Some(credential_approval_id),
+            review_sha256: "3".repeat(64),
+            previous_selection: DiscoveryPreviousSelection::None,
+        }
+    }
+
+    fn native_fixture_approvals(
+        session: &ProviderDiscoverySession,
+        plan: &DiscoveryCommitPlan,
+        credential_approval_id: DiscoveryApprovalId,
+        review_approval_id: DiscoveryApprovalId,
+        prepared_at: chrono::DateTime<Utc>,
+    ) -> (DiscoveryApprovalRecord, DiscoveryApprovalRecord) {
+        let credential_approval = DiscoveryApprovalRecord {
+            id: credential_approval_id,
+            session_id: session.id.clone(),
+            session_revision: 1,
+            decision: DiscoveryApprovalDecision::Approved,
+            grant: DiscoveryApprovalGrant::CredentialOrigin {
+                origin: CanonicalOrigin::parse("https://provider.example/")
+                    .expect("credential approval origin"),
+                auth_binding: lorepia_domain::AuthBinding::BearerHeader,
+                manifest_sha256: plan.manifest_sha256.clone(),
+            },
+            created_at: prepared_at,
+        };
+        let review_approval = DiscoveryApprovalRecord {
+            id: review_approval_id,
+            session_id: session.id.clone(),
+            session_revision: plan.expected_revision,
+            decision: DiscoveryApprovalDecision::Approved,
+            grant: DiscoveryApprovalGrant::Review {
+                review_sha256: plan.review_sha256.clone(),
+                graph_sha256: plan.graph_sha256.clone(),
+            },
+            created_at: prepared_at,
+        };
+        (credential_approval, review_approval)
+    }
+
+    fn seed_native_credential_commit(storage: &Storage, id: &str) -> NativeNoEffectFixture {
+        let mut session = draft_session(id);
+        session.input.credential_ref = Some(CredentialRef(
+            session.input.connection_id.as_str().to_owned(),
+        ));
+        session.validate().expect("valid credential draft");
+        storage
+            .create_discovery_session(&session, now())
+            .expect("create credential discovery session");
+
+        let attempt_id =
+            DiscoveryCommitAttemptId::parse(format!("attempt-{id}")).expect("commit attempt id");
+        let action_id = DiscoveryActionId::parse(format!("action-{id}")).expect("commit action id");
+        let operation_id =
+            DiscoveryOperationId::parse(format!("operation-{id}")).expect("operation id");
+        let credential_approval_id =
+            DiscoveryApprovalId::parse(format!("approval-{id}")).expect("approval id");
+        let plan = native_credential_commit_plan(
+            &session,
+            id,
+            attempt_id.clone(),
+            credential_approval_id.clone(),
+        );
+        plan.validate().expect("valid credential commit plan");
+        let plan_json = encode_commit_plan_json(&plan).expect("commit plan JSON");
+        let plan_sha256 = sha256_hex(plan_json.as_bytes());
+        let mut awaiting_credential = session.clone();
+        awaiting_credential.state = DiscoveryState::AwaitingCredentialOriginApproval;
+        awaiting_credential.revision = 1;
+        awaiting_credential.next_event_sequence = 2;
+        awaiting_credential.manifest_sha256 = Some(plan.manifest_sha256.clone());
+        awaiting_credential
+            .validate()
+            .expect("valid credential-origin approval session");
+        let credential_approved = awaiting_credential
+            .apply(&DiscoveryActionEnvelope {
+                id: DiscoveryActionId::parse(format!("credential-action-{id}"))
+                    .expect("credential approval action id"),
+                expected_revision: awaiting_credential.revision,
+                request_sha256: "3".repeat(64),
+                action: ProviderDiscoveryAction::ApproveCredentialOrigin {
+                    approval_id: credential_approval_id.clone(),
+                },
+            })
+            .expect("approve native credential origin");
+        let mut awaiting_review = credential_approved.session.clone();
+        awaiting_review.state = DiscoveryState::AwaitingReview;
+        awaiting_review.manifest_sha256 = Some(plan.manifest_sha256.clone());
+        awaiting_review
+            .validate()
+            .expect("valid awaiting-review credential session");
+        let review_approval_id = DiscoveryApprovalId::parse(format!("review-approval-{id}"))
+            .expect("review approval id");
+        let prepare = awaiting_review
+            .apply(&DiscoveryActionEnvelope {
+                id: action_id,
+                expected_revision: awaiting_review.revision,
+                request_sha256: "4".repeat(64),
+                action: ProviderDiscoveryAction::ApproveReview {
+                    approval_id: review_approval_id.clone(),
+                    commit_attempt_id: attempt_id.clone(),
+                    commit_plan_sha256: plan_sha256.clone(),
+                    graph_sha256: plan.graph_sha256.clone(),
+                },
+            })
+            .expect("prepare native credential commit");
+        let prepared_at = now();
+        let (credential_approval, review_approval) = native_fixture_approvals(
+            &session,
+            &plan,
+            credential_approval_id,
+            review_approval_id,
+            prepared_at,
+        );
+        persist_native_fixture_authority_history(
+            storage,
+            &credential_approved,
+            &credential_approval,
+            &prepare,
+            &review_approval,
+            &attempt_id,
+            prepared_at,
+        );
+        persist_native_fixture_rows(
+            storage,
+            &prepare,
+            &attempt_id,
+            &operation_id,
+            &plan_sha256,
+            &plan_json,
+            prepared_at,
+        );
+
+        session = prepare.session;
+        NativeNoEffectFixture {
+            session,
+            operation_id,
+            attempt_id,
+            plan_sha256,
+        }
+    }
+
+    fn persist_native_fixture_authority_history(
+        storage: &Storage,
+        credential_approved: &lorepia_domain::discovery::DiscoveryTransition,
+        credential_approval: &DiscoveryApprovalRecord,
+        prepare: &lorepia_domain::discovery::DiscoveryTransition,
+        review_approval: &DiscoveryApprovalRecord,
+        attempt_id: &DiscoveryCommitAttemptId,
+        prepared_at: chrono::DateTime<Utc>,
+    ) {
+        let mut connection = storage.connection().expect("database connection");
+        let transaction = connection.transaction().expect("authority transaction");
+        insert_test_discovery_approval(&transaction, credential_approval);
+        insert_test_discovery_approval(&transaction, review_approval);
+        insert_test_discovery_receipt(&transaction, credential_approved, prepared_at);
+        super::append_audit(
+            &transaction,
+            prepare.session.id.as_str(),
+            credential_approved.receipt.resulting_revision,
+            "approval_recorded",
+            Some(credential_approved.receipt.action_id.as_str()),
+            Some(credential_approval.id.as_str()),
+            "discovery.audit.approval_recorded",
+            prepared_at,
+        )
+        .expect("insert credential-origin approval audit");
+        insert_test_discovery_receipt(&transaction, prepare, prepared_at);
+        super::append_audit(
+            &transaction,
+            prepare.session.id.as_str(),
+            prepare.receipt.resulting_revision,
+            "approval_recorded",
+            Some(prepare.receipt.action_id.as_str()),
+            Some(review_approval.id.as_str()),
+            "discovery.audit.approval_recorded",
+            prepared_at,
+        )
+        .expect("insert review approval audit");
+        super::append_audit(
+            &transaction,
+            prepare.session.id.as_str(),
+            prepare.receipt.resulting_revision,
+            "commit_prepared",
+            Some(prepare.receipt.action_id.as_str()),
+            Some(attempt_id.as_str()),
+            "discovery.audit.commit_prepared",
+            prepared_at,
+        )
+        .expect("insert native commit-prepared audit");
+        transaction.commit().expect("commit authority history");
+    }
+
+    fn persist_native_fixture_rows(
+        storage: &Storage,
+        prepare: &lorepia_domain::discovery::DiscoveryTransition,
+        attempt_id: &DiscoveryCommitAttemptId,
+        operation_id: &DiscoveryOperationId,
+        plan_sha256: &str,
+        plan_json: &str,
+        prepared_at: chrono::DateTime<Utc>,
+    ) {
+        let mut connection = storage.connection().expect("database connection");
+        let session_guard =
+            suspend_test_trigger(&connection, "provider_discovery_session_revision_guard");
+        let transaction = connection.transaction().expect("fixture transaction");
+        transaction
+            .execute(
+                "INSERT INTO provider_discovery_commit_attempts (
+                     id, session_id, attempt_number, action_id, expected_revision,
+                     plan_sha256, plan_json, phase, redaction_version,
+                     created_at, updated_at, completed_at
+                 ) VALUES (?1, ?2, 1, ?3, ?4, ?5, ?6, 'prepared', 1, ?7, ?7, NULL)",
+                rusqlite::params![
+                    attempt_id.as_str(),
+                    prepare.session.id.as_str(),
+                    prepare.receipt.action_id.as_str(),
+                    prepare.receipt.expected_revision,
+                    plan_sha256,
+                    plan_json,
+                    prepared_at.to_rfc3339(),
+                ],
+            )
+            .expect("insert prepared credential commit");
+        transaction
+            .execute(
+                "INSERT INTO provider_discovery_operations (
+                     id, session_id, operation_kind, side_effect_class, status,
+                     action_id, expected_revision, request_sha256, approval_id,
+                     approval_grant_sha256, started_at, finished_at, created_at, updated_at
+                 ) VALUES (
+                     ?1, ?2, 'atomic_commit', 'persistent', 'prepared',
+                     ?3, ?4, ?5, NULL, NULL, NULL, NULL, ?6, ?6
+                 )",
+                rusqlite::params![
+                    operation_id.as_str(),
+                    prepare.session.id.as_str(),
+                    prepare.receipt.action_id.as_str(),
+                    prepare.receipt.resulting_revision,
+                    prepare.receipt.request_sha256,
+                    prepared_at.to_rfc3339(),
+                ],
+            )
+            .expect("insert started credential operation");
+        transaction
+            .execute(
+                "UPDATE provider_discovery_sessions
+                 SET state = 'committing',
+                     revision = ?2,
+                     next_event_sequence = ?3,
+                     manifest_sha256 = ?4,
+                     commit_plan_sha256 = ?5,
+                     commit_attempt_id = ?6,
+                     active_operation_id = ?7,
+                     updated_at = ?8
+                 WHERE id = ?1",
+                rusqlite::params![
+                    prepare.session.id.as_str(),
+                    prepare.session.revision,
+                    prepare.session.next_event_sequence,
+                    prepare.session.manifest_sha256.as_deref(),
+                    plan_sha256,
+                    attempt_id.as_str(),
+                    operation_id.as_str(),
+                    prepared_at.to_rfc3339(),
+                ],
+            )
+            .expect("activate credential commit fixture");
+        restore_test_trigger(&transaction, &session_guard);
+        transaction.commit().expect("commit credential fixture");
+    }
+
+    fn native_no_effect_completion(
+        storage: &Storage,
+        fixture: &NativeNoEffectFixture,
+        session: &ProviderDiscoverySession,
+    ) -> (
+        DiscoveryTransitionWrite,
+        DiscoveryNativeNoEffectAttestationWrite,
+    ) {
+        let transition = apply(
+            session,
+            ProviderDiscoveryAction::Interrupt {
+                operation: DiscoveryOperationKind::AtomicCommit,
+                outcome: DiscoveryInterruptionOutcome::ConfirmedNoExternalEffect,
+            },
+            '5',
+        );
+        let mut write = write(
+            transition,
+            None,
+            Some(DiscoveryCompletedOperationWrite {
+                id: fixture.operation_id.clone(),
+                outcome: DurableOperationOutcome::AttestedNoExternalEffect,
+            }),
+        );
+        write.occurred_at = now() + chrono::Duration::milliseconds(2);
+        let attestation = DiscoveryNativeNoEffectAttestationWrite::credential_slot_missing(
+            fixture.operation_id.clone(),
+            test_native_physical_authority_id(storage, &fixture.operation_id),
+            fixture.session.id.clone(),
+            fixture.attempt_id.clone(),
+            fixture.plan_sha256.clone(),
+            fixture.session.input.connection_id.clone(),
+        )
+        .expect("native no-effect attestation");
+        (write, attestation)
+    }
+
+    fn restart_started_native_credential_commit(
+        storage: &Storage,
+        fixture: &NativeNoEffectFixture,
+        retry_operation_id: DiscoveryOperationId,
+    ) -> RestartedNativeCommitFixture {
+        let (first_write, first_attestation) =
+            native_no_effect_completion(storage, fixture, &fixture.session);
+        let predecessor_action_id = first_write.transition.receipt.action_id.clone();
+        storage
+            .persist_native_no_effect_discovery_transition(&first_write, &first_attestation)
+            .expect("interrupt initial native credential operation");
+
+        let interrupted = storage
+            .get_discovery_session(&fixture.session.id)
+            .expect("load interrupted credential commit");
+        let restart = apply(
+            &interrupted.session,
+            ProviderDiscoveryAction::RestartInterrupted,
+            '6',
+        );
+        let attempt = storage
+            .get_discovery_commit_attempt(&fixture.attempt_id)
+            .expect("load reusable credential commit attempt");
+        let mut restart_write = write(restart, Some(retry_operation_id.clone()), None);
+        restart_write.prepared_commit = Some(PreparedDiscoveryCommit {
+            plan: attempt.plan,
+            plan_sha256: attempt.plan_sha256,
+            attempt_number: attempt.attempt_number,
+            reuse_existing: true,
+            compensation_steps: Vec::new(),
+        });
+        restart_write.occurred_at = now() + chrono::Duration::milliseconds(3);
+        storage
+            .persist_discovery_transition(&restart_write)
+            .expect("persist exact interrupted credential retry");
+        reserve_and_start_test_native_execution(
+            storage,
+            &restart_write.transition.session,
+            &fixture.attempt_id,
+            &fixture.plan_sha256,
+            &retry_operation_id,
+            now() + chrono::Duration::milliseconds(4),
+        );
+
+        RestartedNativeCommitFixture {
+            session: storage
+                .get_discovery_session(&fixture.session.id)
+                .expect("load retrying credential commit")
+                .session,
+            operation_id: retry_operation_id,
+            predecessor_action_id,
+        }
+    }
+
+    fn restart_prepared_native_credential_commit(
+        storage: &Storage,
+        fixture: &NativeNoEffectFixture,
+        retry_operation_id: DiscoveryOperationId,
+    ) -> RestartedNativeCommitFixture {
+        let interrupted = apply(
+            &fixture.session,
+            ProviderDiscoveryAction::Interrupt {
+                operation: DiscoveryOperationKind::AtomicCommit,
+                outcome: DiscoveryInterruptionOutcome::ConfirmedNoExternalEffect,
+            },
+            '5',
+        );
+        let predecessor_action_id = interrupted.receipt.action_id.clone();
+        let mut interrupted_write = write(
+            interrupted,
+            None,
+            Some(DiscoveryCompletedOperationWrite {
+                id: fixture.operation_id.clone(),
+                outcome: DurableOperationOutcome::Interrupted,
+            }),
+        );
+        interrupted_write.occurred_at = now() + chrono::Duration::milliseconds(2);
+        storage
+            .persist_discovery_transition(&interrupted_write)
+            .expect("interrupt prepared native credential operation");
+
+        let interrupted = storage
+            .get_discovery_session(&fixture.session.id)
+            .expect("load prepared-interrupted credential commit");
+        let restart = apply(
+            &interrupted.session,
+            ProviderDiscoveryAction::RestartInterrupted,
+            '6',
+        );
+        let attempt = storage
+            .get_discovery_commit_attempt(&fixture.attempt_id)
+            .expect("load reusable prepared credential commit attempt");
+        let mut restart_write = write(restart, Some(retry_operation_id.clone()), None);
+        restart_write.prepared_commit = Some(PreparedDiscoveryCommit {
+            plan: attempt.plan,
+            plan_sha256: attempt.plan_sha256,
+            attempt_number: attempt.attempt_number,
+            reuse_existing: true,
+            compensation_steps: Vec::new(),
+        });
+        restart_write.occurred_at = now() + chrono::Duration::milliseconds(3);
+        storage
+            .persist_discovery_transition(&restart_write)
+            .expect("persist prepared-interrupted credential retry");
+        reserve_and_start_test_native_execution(
+            storage,
+            &restart_write.transition.session,
+            &fixture.attempt_id,
+            &fixture.plan_sha256,
+            &retry_operation_id,
+            now() + chrono::Duration::milliseconds(4),
+        );
+
+        RestartedNativeCommitFixture {
+            session: storage
+                .get_discovery_session(&fixture.session.id)
+                .expect("load prepared-interrupted retrying credential commit")
+                .session,
+            operation_id: retry_operation_id,
+            predecessor_action_id,
+        }
+    }
+
+    fn restart_unstarted_prepared_native_commit(
+        storage: &Storage,
+        fixture: &NativeNoEffectFixture,
+        current_session: &ProviderDiscoverySession,
+        current_operation_id: &DiscoveryOperationId,
+        step: UnstartedPreparedNativeRetryStep,
+    ) -> RestartedNativeCommitFixture {
+        let interrupted = apply(
+            current_session,
+            ProviderDiscoveryAction::Interrupt {
+                operation: DiscoveryOperationKind::AtomicCommit,
+                outcome: DiscoveryInterruptionOutcome::ConfirmedNoExternalEffect,
+            },
+            step.interrupt_hash_byte,
+        );
+        let predecessor_action_id = interrupted.receipt.action_id.clone();
+        let mut interrupted_write = write(
+            interrupted,
+            None,
+            Some(DiscoveryCompletedOperationWrite {
+                id: current_operation_id.clone(),
+                outcome: DurableOperationOutcome::Interrupted,
+            }),
+        );
+        interrupted_write.occurred_at =
+            now() + chrono::Duration::milliseconds(step.interrupted_at_millis);
+        storage
+            .persist_discovery_transition(&interrupted_write)
+            .expect("interrupt unstarted prepared native credential operation");
+
+        let interrupted = storage
+            .get_discovery_session(&fixture.session.id)
+            .expect("load unstarted prepared-interrupted credential commit");
+        let restart = apply(
+            &interrupted.session,
+            ProviderDiscoveryAction::RestartInterrupted,
+            step.restart_hash_byte,
+        );
+        let attempt = storage
+            .get_discovery_commit_attempt(&fixture.attempt_id)
+            .expect("load reusable unstarted prepared credential commit attempt");
+        let mut restart_write = write(restart, Some(step.next_operation_id.clone()), None);
+        restart_write.prepared_commit = Some(PreparedDiscoveryCommit {
+            plan: attempt.plan,
+            plan_sha256: attempt.plan_sha256,
+            attempt_number: attempt.attempt_number,
+            reuse_existing: true,
+            compensation_steps: Vec::new(),
+        });
+        restart_write.occurred_at =
+            now() + chrono::Duration::milliseconds(step.restarted_at_millis);
+        storage
+            .persist_discovery_transition(&restart_write)
+            .expect("persist unstarted prepared-interrupted credential retry");
+
+        RestartedNativeCommitFixture {
+            session: storage
+                .get_discovery_session(&fixture.session.id)
+                .expect("load unstarted prepared retrying credential commit")
+                .session,
+            operation_id: step.next_operation_id,
+            predecessor_action_id,
+        }
+    }
+
+    fn restart_attested_native_retry(
+        storage: &Storage,
+        fixture: &NativeNoEffectFixture,
+        current_retry: &RestartedNativeCommitFixture,
+        next_operation_id: DiscoveryOperationId,
+    ) -> RestartedNativeCommitFixture {
+        let interrupted = apply(
+            &current_retry.session,
+            ProviderDiscoveryAction::Interrupt {
+                operation: DiscoveryOperationKind::AtomicCommit,
+                outcome: DiscoveryInterruptionOutcome::ConfirmedNoExternalEffect,
+            },
+            '8',
+        );
+        let predecessor_action_id = interrupted.receipt.action_id.clone();
+        let mut interrupted_write = write(
+            interrupted,
+            None,
+            Some(DiscoveryCompletedOperationWrite {
+                id: current_retry.operation_id.clone(),
+                outcome: DurableOperationOutcome::AttestedNoExternalEffect,
+            }),
+        );
+        interrupted_write.occurred_at = now() + chrono::Duration::milliseconds(5);
+        let attestation = DiscoveryNativeNoEffectAttestationWrite::credential_slot_missing(
+            current_retry.operation_id.clone(),
+            test_native_physical_authority_id(storage, &current_retry.operation_id),
+            fixture.session.id.clone(),
+            fixture.attempt_id.clone(),
+            fixture.plan_sha256.clone(),
+            fixture.session.input.connection_id.clone(),
+        )
+        .expect("first retry native no-effect attestation");
+        storage
+            .persist_native_no_effect_discovery_transition(&interrupted_write, &attestation)
+            .expect("interrupt first retry with exact native attestation");
+
+        let interrupted = storage
+            .get_discovery_session(&fixture.session.id)
+            .expect("load twice-interrupted credential commit");
+        let restart = apply(
+            &interrupted.session,
+            ProviderDiscoveryAction::RestartInterrupted,
+            '9',
+        );
+        let attempt = storage
+            .get_discovery_commit_attempt(&fixture.attempt_id)
+            .expect("load reusable twice-interrupted commit attempt");
+        let mut restart_write = write(restart, Some(next_operation_id.clone()), None);
+        restart_write.prepared_commit = Some(PreparedDiscoveryCommit {
+            plan: attempt.plan,
+            plan_sha256: attempt.plan_sha256,
+            attempt_number: attempt.attempt_number,
+            reuse_existing: true,
+            compensation_steps: Vec::new(),
+        });
+        restart_write.occurred_at = now() + chrono::Duration::milliseconds(6);
+        storage
+            .persist_discovery_transition(&restart_write)
+            .expect("persist second credential retry");
+        reserve_and_start_test_native_execution(
+            storage,
+            &restart_write.transition.session,
+            &fixture.attempt_id,
+            &fixture.plan_sha256,
+            &next_operation_id,
+            now() + chrono::Duration::milliseconds(7),
+        );
+
+        RestartedNativeCommitFixture {
+            session: storage
+                .get_discovery_session(&fixture.session.id)
+                .expect("load second retrying credential commit")
+                .session,
+            operation_id: next_operation_id,
+            predecessor_action_id,
+        }
+    }
+
+    fn restart_unknown_native_credential_commit(
+        storage: &Storage,
+        fixture: &NativeNoEffectFixture,
+        retry_operation_id: DiscoveryOperationId,
+    ) -> RestartedNativeCommitFixture {
+        let unknown = apply(
+            &fixture.session,
+            ProviderDiscoveryAction::ExternalOutcomeBecameUnknown,
+            '5',
+        );
+        let mut unknown_write = write(
+            unknown,
+            None,
+            Some(DiscoveryCompletedOperationWrite {
+                id: fixture.operation_id.clone(),
+                outcome: DurableOperationOutcome::OutcomeUnknown,
+            }),
+        );
+        unknown_write.occurred_at = now() + chrono::Duration::milliseconds(2);
+        storage
+            .persist_discovery_transition(&unknown_write)
+            .expect("persist unknown native credential outcome");
+
+        let unknown = storage
+            .get_discovery_session(&fixture.session.id)
+            .expect("load unknown credential commit");
+        let approval_id = DiscoveryApprovalId::parse(format!(
+            "approval-native-retry-resolution-{}",
+            fixture.session.id.as_str()
+        ))
+        .expect("resolution approval id");
+        let resolution_at = now() + chrono::Duration::milliseconds(3);
+        let resolution = apply(
+            &unknown.session,
+            ProviderDiscoveryAction::ResolveUnknownOutcome {
+                approval_id: approval_id.clone(),
+                resolution: DiscoveryUnknownOutcomeResolution::ConfirmedNoEffect,
+            },
+            '6',
+        );
+        let predecessor_action_id = resolution.receipt.action_id.clone();
+        let mut resolution_write = write(resolution, None, None);
+        resolution_write.approval = Some(DiscoveryApprovalRecord {
+            id: approval_id,
+            session_id: fixture.session.id.clone(),
+            session_revision: unknown.session.revision,
+            decision: DiscoveryApprovalDecision::Approved,
+            grant: DiscoveryApprovalGrant::UnknownOutcomeResolution {
+                operation: DiscoveryOperationKind::AtomicCommit,
+                resolution: DiscoveryUnknownOutcomeResolution::ConfirmedNoEffect,
+            },
+            created_at: resolution_at,
+        });
+        resolution_write.occurred_at = resolution_at;
+        storage
+            .persist_discovery_transition(&resolution_write)
+            .expect("persist approved no-effect resolution");
+
+        let interrupted = storage
+            .get_discovery_session(&fixture.session.id)
+            .expect("load reconciled interrupted credential commit");
+        let restart = apply(
+            &interrupted.session,
+            ProviderDiscoveryAction::RestartInterrupted,
+            '7',
+        );
+        let attempt = storage
+            .get_discovery_commit_attempt(&fixture.attempt_id)
+            .expect("load reusable reconciled commit attempt");
+        let mut restart_write = write(restart, Some(retry_operation_id.clone()), None);
+        restart_write.prepared_commit = Some(PreparedDiscoveryCommit {
+            plan: attempt.plan,
+            plan_sha256: attempt.plan_sha256,
+            attempt_number: attempt.attempt_number,
+            reuse_existing: true,
+            compensation_steps: Vec::new(),
+        });
+        restart_write.occurred_at = now() + chrono::Duration::milliseconds(4);
+        storage
+            .persist_discovery_transition(&restart_write)
+            .expect("persist reconciled credential retry");
+        reserve_and_start_test_native_execution(
+            storage,
+            &restart_write.transition.session,
+            &fixture.attempt_id,
+            &fixture.plan_sha256,
+            &retry_operation_id,
+            now() + chrono::Duration::milliseconds(5),
+        );
+
+        RestartedNativeCommitFixture {
+            session: storage
+                .get_discovery_session(&fixture.session.id)
+                .expect("load reconciled retrying credential commit")
+                .session,
+            operation_id: retry_operation_id,
+            predecessor_action_id,
+        }
+    }
+
+    fn operation_status(storage: &Storage, operation_id: &DiscoveryOperationId) -> String {
+        storage
+            .connection()
+            .expect("database connection")
+            .query_row(
+                "SELECT status FROM provider_discovery_operations WHERE id = ?1",
+                [operation_id.as_str()],
+                |row| row.get(0),
+            )
+            .expect("operation status")
+    }
+
+    fn assert_unstarted_prepared_retry_predecessors(
+        storage: &Storage,
+        fixture: &NativeNoEffectFixture,
+        first_retry: &RestartedNativeCommitFixture,
+    ) {
+        let database = storage.connection().expect("prepared retry database");
+        let prepared_interruptions = database
+            .query_row(
+                "SELECT COUNT(*)
+                 FROM provider_discovery_operations
+                 WHERE id IN (?1, ?2)
+                   AND status = 'interrupted'
+                   AND started_at = finished_at",
+                rusqlite::params![
+                    fixture.operation_id.as_str(),
+                    first_retry.operation_id.as_str(),
+                ],
+                |row| row.get::<_, u64>(0),
+            )
+            .expect("count canonical prepared interruptions");
+        assert_eq!(prepared_interruptions, 2);
+        let start_audits = database
+            .query_row(
+                "SELECT COUNT(*)
+                 FROM provider_discovery_audit_log
+                 WHERE audit_kind = 'operation_started'
+                   AND subject_id IN (?1, ?2)",
+                rusqlite::params![
+                    fixture.operation_id.as_str(),
+                    first_retry.operation_id.as_str(),
+                ],
+                |row| row.get::<_, u64>(0),
+            )
+            .expect("count prepared interruption start audits");
+        assert_eq!(start_audits, 0);
+        let predecessor_attestations = database
+            .query_row(
+                "SELECT COUNT(*)
+                 FROM provider_discovery_native_no_effect_attestations
+                 WHERE operation_id IN (?1, ?2)",
+                rusqlite::params![
+                    fixture.operation_id.as_str(),
+                    first_retry.operation_id.as_str(),
+                ],
+                |row| row.get::<_, u64>(0),
+            )
+            .expect("count prepared interruption attestations");
+        assert_eq!(predecessor_attestations, 0);
+    }
+
+    fn rewrite_discovery_receipt_event_sequence(
+        database: &rusqlite::Connection,
+        action_id: &DiscoveryActionId,
+        event_id: &str,
+        event_sequence: u64,
+        next_event_sequence: u64,
+    ) {
+        assert_eq!(
+            database
+                .execute(
+                    "UPDATE provider_discovery_action_receipts
+                     SET event_sequence = ?2,
+                         response_json = json_set(
+                             response_json,
+                             '$.receipt.event_sequence', ?2,
+                             '$.event.sequence', ?2,
+                             '$.session.next_event_sequence', ?3
+                         )
+                     WHERE action_id = ?1",
+                    rusqlite::params![action_id.as_str(), event_sequence, next_event_sequence,],
+                )
+                .expect("rewrite corrupted discovery receipt sequence"),
+            1
+        );
+        assert_eq!(
+            database
+                .execute(
+                    "UPDATE provider_discovery_event_outbox
+                     SET sequence = ?2,
+                         event_json = json_set(event_json, '$.sequence', ?2)
+                     WHERE id = ?1",
+                    rusqlite::params![event_id, event_sequence],
+                )
+                .expect("rewrite corrupted discovery event sequence"),
+            1
+        );
+    }
+
+    fn corrupt_retry_start_terminal_event_sequence(
+        storage: &Storage,
+        fixture: &NativeNoEffectFixture,
+        retry: &RestartedNativeCommitFixture,
+    ) -> ProviderDiscoverySession {
+        let restart_action_id = storage
+            .get_current_discovery_operation(&fixture.session.id)
+            .expect("load detached sequence retry operation")
+            .expect("active detached sequence retry operation")
+            .action_id;
+        let database = storage.connection().expect("detached sequence database");
+        let (terminal_event_id, terminal_sequence) = database
+            .query_row(
+                "SELECT event_id, event_sequence
+                 FROM provider_discovery_action_receipts
+                 WHERE action_id = ?1",
+                [retry.predecessor_action_id.as_str()],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, u64>(1)?)),
+            )
+            .expect("load terminal receipt event identity");
+        let (restart_event_id, restart_sequence) = database
+            .query_row(
+                "SELECT event_id, event_sequence
+                 FROM provider_discovery_action_receipts
+                 WHERE action_id = ?1",
+                [restart_action_id.as_str()],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, u64>(1)?)),
+            )
+            .expect("load restart receipt event identity");
+        assert_eq!(restart_sequence, terminal_sequence + 1);
+
+        let immutable_error = database
+            .execute(
+                "UPDATE provider_discovery_action_receipts
+                 SET event_sequence = event_sequence + 100
+                 WHERE action_id = ?1",
+                [retry.predecessor_action_id.as_str()],
+            )
+            .expect_err("immutable receipt trigger must preserve terminal event sequence");
+        assert!(
+            immutable_error.to_string().contains("immutable"),
+            "unexpected receipt mutation rejection: {immutable_error}"
+        );
+        database
+            .execute_batch(
+                "DROP TRIGGER provider_discovery_receipt_no_update;
+                 DROP TRIGGER provider_discovery_event_identity_no_update;
+                 DROP TRIGGER provider_discovery_session_revision_guard;",
+            )
+            .expect("drop immutable event guards only for corruption fixture");
+
+        let shifted_terminal_sequence = terminal_sequence + 100;
+        let shifted_restart_sequence = shifted_terminal_sequence + 1;
+        rewrite_discovery_receipt_event_sequence(
+            &database,
+            &retry.predecessor_action_id,
+            &terminal_event_id,
+            shifted_terminal_sequence,
+            shifted_restart_sequence,
+        );
+        rewrite_discovery_receipt_event_sequence(
+            &database,
+            &restart_action_id,
+            &restart_event_id,
+            shifted_restart_sequence,
+            shifted_restart_sequence + 1,
+        );
+        database
+            .execute(
+                "UPDATE provider_discovery_sessions
+                 SET next_event_sequence = ?2
+                 WHERE id = ?1",
+                rusqlite::params![fixture.session.id.as_str(), shifted_restart_sequence + 1,],
+            )
+            .expect("preserve active session cursor after corruption");
+        drop(database);
+
+        storage
+            .get_discovery_session(&fixture.session.id)
+            .expect("load active retry after event-sequence corruption")
+            .session
+    }
+
+    #[test]
+    fn session_scoped_outbox_poll_bypasses_a_full_foreign_session_page() {
+        const SESSION_COUNT: usize = 101;
+        const GLOBAL_PAGE_SIZE: u32 = 100;
+
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        for index in 0..SESSION_COUNT {
+            let id = format!("session-outbox-starvation-{index:04}");
+            let draft = draft_session(&id);
+            let begin = apply(&draft, ProviderDiscoveryAction::Begin, 'a');
+            let operation_id =
+                DiscoveryOperationId::parse(format!("operation-{id}")).expect("operation id");
+            storage
+                .begin_discovery_session(&draft, &write(begin, Some(operation_id), None))
+                .expect("persist discovery begin event");
+        }
+
+        let selected_session = DiscoverySessionId::from("session-outbox-starvation-0100");
+        let selected_snapshot = storage
+            .get_discovery_session(&selected_session)
+            .expect("load selected discovery session");
+        let cancel = apply(
+            &selected_snapshot.session,
+            ProviderDiscoveryAction::Cancel,
+            'b',
+        );
+        storage
+            .persist_discovery_transition(&write(cancel, None, None))
+            .expect("persist the selected session's next event");
+
+        let first_global = storage
+            .poll_discovery_events(GLOBAL_PAGE_SIZE, now())
+            .expect("poll first global page");
+        assert_eq!(first_global.len(), GLOBAL_PAGE_SIZE as usize);
+        assert!(
+            first_global
+                .iter()
+                .all(|event| event.event.session_id != selected_session),
+            "the selected session is beyond the bounded global page"
+        );
+
+        let repeated_global = storage
+            .poll_discovery_events(GLOBAL_PAGE_SIZE, now())
+            .expect("repeat global page without acknowledgements");
+        assert_eq!(
+            repeated_global
+                .iter()
+                .map(|event| &event.event.id)
+                .collect::<Vec<_>>(),
+            first_global
+                .iter()
+                .map(|event| &event.event.id)
+                .collect::<Vec<_>>(),
+            "unacknowledged foreign sessions keep occupying the same global page"
+        );
+        assert!(
+            repeated_global
+                .iter()
+                .all(|event| event.delivery_attempts == 2)
+        );
+
+        let selected_events = storage
+            .poll_discovery_events_for_session(&selected_session, GLOBAL_PAGE_SIZE, now())
+            .expect("poll the selected session independently of the global backlog");
+        assert_eq!(selected_events.len(), 1);
+        assert_eq!(selected_events[0].event.session_id, selected_session);
+        assert_eq!(selected_events[0].delivery_attempts, 1);
+
+        assert!(
+            storage
+                .ack_discovery_event(&selected_events[0].event.id, now())
+                .expect("ack selected event")
+        );
+
+        let next_selected_events = storage
+            .poll_discovery_events_for_session(&selected_session, GLOBAL_PAGE_SIZE, now())
+            .expect("poll selected session after acknowledging its first event");
+        assert_eq!(next_selected_events.len(), 1);
+        assert_eq!(next_selected_events[0].event.session_id, selected_session);
+        assert_eq!(next_selected_events[0].event.sequence, 2);
+        assert!(
+            storage
+                .ack_discovery_event(&next_selected_events[0].event.id, now())
+                .expect("ack selected session's next event")
+        );
+        assert!(
+            storage
+                .poll_discovery_events_for_session(&selected_session, GLOBAL_PAGE_SIZE, now())
+                .expect("poll selected session after acknowledgement")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn native_no_effect_attestation_and_transition_roll_back_together() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let fixture = seed_started_native_credential_commit(&storage, "native-atomic-rollback");
+
+        let mut stale_session = fixture.session.clone();
+        stale_session.revision = 0;
+        stale_session.next_event_sequence = 1;
+        stale_session
+            .validate()
+            .expect("valid stale session snapshot");
+        let (stale_write, attestation) =
+            native_no_effect_completion(&storage, &fixture, &stale_session);
+        storage
+            .persist_native_no_effect_discovery_transition(&stale_write, &attestation)
+            .expect_err("stale session revision must roll back the whole transaction");
+        assert_eq!(operation_status(&storage, &fixture.operation_id), "started");
+        assert!(
+            storage
+                .get_discovery_native_no_effect_attestation(&fixture.operation_id)
+                .expect("load rolled-back attestation")
+                .is_none()
+        );
+
+        let (write, _) = native_no_effect_completion(&storage, &fixture, &fixture.session);
+        let error = storage
+            .persist_discovery_transition(&write)
+            .expect_err("ordinary completion API cannot forge a native attestation");
+        assert_eq!(error.code, CoreErrorCode::InvalidInput);
+        assert_eq!(operation_status(&storage, &fixture.operation_id), "started");
+    }
+
+    #[test]
+    fn discovery_operation_timestamps_must_follow_creation_and_start() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let draft = draft_session("operation-start-chronology");
+        let begin = apply(&draft, ProviderDiscoveryAction::Begin, '8');
+        let operation_id =
+            DiscoveryOperationId::parse("operation-start-chronology").expect("operation id");
+        let mut begin_write = write(begin, Some(operation_id.clone()), None);
+        begin_write.occurred_at = now() + chrono::Duration::seconds(2);
+        storage
+            .begin_discovery_session(&draft, &begin_write)
+            .expect("persist future-created discovery operation");
+        let start_error = storage
+            .mark_discovery_operation_started(&operation_id, now() + chrono::Duration::seconds(1))
+            .expect_err("operation cannot start before creation");
+        assert_eq!(start_error.code, CoreErrorCode::InvalidInput);
+        assert_eq!(operation_status(&storage, &operation_id), "prepared");
+
+        let native = seed_started_native_credential_commit(&storage, "native-finish-chronology");
+        let (mut finish_write, attestation) =
+            native_no_effect_completion(&storage, &native, &native.session);
+        let started_at = storage
+            .get_current_discovery_operation(&native.session.id)
+            .expect("load started native operation")
+            .expect("active native operation")
+            .started_at
+            .expect("native operation start timestamp");
+        finish_write.occurred_at = started_at - chrono::Duration::milliseconds(1);
+        let finish_error = storage
+            .persist_native_no_effect_discovery_transition(&finish_write, &attestation)
+            .expect_err("native operation cannot finish before its start");
+        assert_eq!(finish_error.code, CoreErrorCode::InvalidInput);
+        assert_eq!(operation_status(&storage, &native.operation_id), "started");
+        assert!(
+            storage
+                .get_discovery_native_no_effect_attestation(&native.operation_id)
+                .expect("load rejected reverse-time attestation")
+                .is_none()
+        );
+    }
+
+    fn insert_test_native_no_effect_execution_binding(
+        storage: &Storage,
+        fixture: &NativeNoEffectFixture,
+        write: &DiscoveryTransitionWrite,
+        attestation: &DiscoveryNativeNoEffectAttestationWrite,
+    ) {
+        let execution = storage
+            .get_discovery_native_credential_execution(&fixture.operation_id)
+            .expect("load native execution for typed binding")
+            .expect("started native execution");
+        let execution_binding_sha256 = super::native_no_effect_execution_binding_sha256(
+            attestation,
+            &execution.connection_binding_sha256,
+            write.occurred_at,
+        )
+        .expect("derive exact native execution binding");
+        let connection = storage.connection().expect("database connection");
+        connection
+            .execute(
+                "INSERT INTO provider_discovery_native_no_effect_execution_bindings (
+                     operation_id, physical_authority_id, session_id,
+                     commit_attempt_id, commit_plan_sha256, connection_id,
+                     connection_binding_sha256, attestation_evidence_sha256,
+                     execution_binding_sha256, attested_at,
+                     schema_version, redaction_version
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 1, 1)",
+                rusqlite::params![
+                    attestation.operation_id.as_str(),
+                    attestation.physical_authority_id,
+                    attestation.session_id.as_str(),
+                    attestation.commit_attempt_id.as_str(),
+                    attestation.commit_plan_sha256,
+                    attestation.connection_id.as_str(),
+                    execution.connection_binding_sha256,
+                    attestation.evidence_sha256,
+                    execution_binding_sha256,
+                    write.occurred_at.to_rfc3339(),
+                ],
+            )
+            .expect("insert exact physical execution companion");
+    }
+
+    #[test]
+    fn native_no_effect_attestation_trigger_requires_exact_typed_binding() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let fixture = seed_started_native_credential_commit(&storage, "native-trigger-binding");
+        let (write, attestation) =
+            native_no_effect_completion(&storage, &fixture, &fixture.session);
+        let attested_at = write.occurred_at.to_rfc3339();
+        insert_test_native_no_effect_execution_binding(&storage, &fixture, &write, &attestation);
+        let connection = storage.connection().expect("database connection");
+
+        assert!(
+            connection
+                .execute(
+                    "UPDATE provider_discovery_operations
+                     SET status = 'interrupted', finished_at = ?2, updated_at = ?2
+                     WHERE id = ?1",
+                    rusqlite::params![fixture.operation_id.as_str(), now().to_rfc3339()],
+                )
+                .is_err(),
+            "a persistent started operation cannot be interrupted without an attestation"
+        );
+        let insert = |connection_id: &str, owner: &str, evidence_sha256: &str| {
+            connection.execute(
+                "INSERT INTO provider_discovery_native_no_effect_attestations (
+                     operation_id, session_id, commit_attempt_id, commit_plan_sha256,
+                     connection_id, attestation_kind, evidence_sha256, recovery_owner,
+                     schema_version, redaction_version, attested_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, 'credential_slot_missing', ?6, ?7, 1, 1, ?8)",
+                rusqlite::params![
+                    attestation.operation_id.as_str(),
+                    attestation.session_id.as_str(),
+                    attestation.commit_attempt_id.as_str(),
+                    attestation.commit_plan_sha256,
+                    connection_id,
+                    evidence_sha256,
+                    owner,
+                    attested_at,
+                ],
+            )
+        };
+        assert!(
+            insert(
+                attestation.connection_id.as_str(),
+                "core",
+                &attestation.evidence_sha256,
+            )
+            .is_err(),
+            "only the typed native recovery owner is accepted"
+        );
+        assert!(
+            insert(
+                "wrong-native-slot",
+                "native_platform",
+                &attestation.evidence_sha256,
+            )
+            .is_err(),
+            "the attestation must bind the credential slot in the commit plan"
+        );
+        assert!(
+            insert(
+                attestation.connection_id.as_str(),
+                "native_platform",
+                &"0".repeat(64),
+            )
+            .is_err(),
+            "the attestation evidence digest must be recomputed from its exact binding"
+        );
+        insert(
+            attestation.connection_id.as_str(),
+            "native_platform",
+            &attestation.evidence_sha256,
+        )
+        .expect("insert exact native attestation binding");
+        connection
+            .execute(
+                "UPDATE provider_discovery_sessions
+                 SET revision = revision + 1,
+                     next_event_sequence = next_event_sequence + 1,
+                     commit_plan_sha256 = ?2
+                 WHERE id = ?1",
+                rusqlite::params![fixture.session.id.as_str(), "8".repeat(64)],
+            )
+            .expect("simulate a detached session binding");
+        assert!(
+            connection
+                .execute(
+                    "UPDATE provider_discovery_operations
+                     SET status = 'interrupted', finished_at = ?2, updated_at = ?2
+                     WHERE id = ?1",
+                    rusqlite::params![fixture.operation_id.as_str(), attested_at],
+                )
+                .is_err(),
+            "the transition trigger must re-check the exact current commit binding"
+        );
+        drop(connection);
+        assert_eq!(operation_status(&storage, &fixture.operation_id), "started");
+        drop(storage);
+        let Err(error) = Storage::open(root.path()) else {
+            panic!("detached native attestation unexpectedly reopened");
+        };
+        assert_eq!(error.code, CoreErrorCode::StorageCorrupted);
+    }
+
+    #[test]
+    fn reopened_storage_registers_discovery_integrity_functions() {
+        let root = tempdir().expect("temp directory");
+        drop(Storage::open(root.path()).expect("create current-schema storage"));
+        let reopened = Storage::open(root.path()).expect("reopen current-schema storage");
+        let attestation = DiscoveryNativeNoEffectAttestationWrite::credential_slot_missing(
+            DiscoveryOperationId::parse("operation-reopened-integrity-udf").expect("operation id"),
+            format!("discovery-native-{}", uuid::Uuid::new_v4()),
+            DiscoverySessionId::from("session-reopened-integrity-udf"),
+            DiscoveryCommitAttemptId::parse("attempt-reopened-integrity-udf").expect("attempt id"),
+            "1".repeat(64),
+            ProviderConnectionId::from("connection-reopened-integrity-udf"),
+        )
+        .expect("native evidence binding");
+        let mut plan_session = draft_session("reopened-integrity-plan-udf");
+        plan_session.input.credential_ref = Some(CredentialRef(
+            plan_session.input.connection_id.as_str().to_owned(),
+        ));
+        let plan = native_credential_commit_plan(
+            &plan_session,
+            "reopened-integrity-plan-udf",
+            DiscoveryCommitAttemptId::parse("attempt-reopened-integrity-plan-udf")
+                .expect("plan attempt id"),
+            DiscoveryApprovalId::parse("approval-reopened-integrity-plan-udf")
+                .expect("plan approval id"),
+        );
+        let plan_json = encode_commit_plan_json(&plan).expect("canonical commit plan JSON");
+        let database = reopened.connection().expect("reopened database connection");
+        let (
+            native_evidence_sha256,
+            ordinary_sha256,
+            canonical_origin,
+            canonical_header,
+            upper_header,
+            invalid_header,
+            invalid_origin,
+            canonical_plan_sha256,
+            noncanonical_plan_sha256,
+            invalid_plan_sha256,
+        ) = database
+            .query_row(
+                "SELECT lorepia_native_no_effect_evidence_sha256(
+                            1, ?1, ?2, ?3, ?4, ?5, ?6, ?7
+                        ),
+                        lorepia_sha256_hex('abc'),
+                        lorepia_canonical_origin('https://provider.example/'),
+                        lorepia_header_name('x-api-key'),
+                        lorepia_header_name('X-API-Key'),
+                        lorepia_header_name('bad header'),
+                        lorepia_canonical_origin('https://provider.example/path'),
+                        lorepia_discovery_commit_plan_sha256(?8),
+                        lorepia_discovery_commit_plan_sha256(?8 || ' '),
+                        lorepia_discovery_commit_plan_sha256(
+                            json_set(?8, '$.forged_unknown_field', 1)
+                        )",
+                rusqlite::params![
+                    attestation.kind.as_str(),
+                    attestation.recovery_owner.as_str(),
+                    attestation.operation_id.as_str(),
+                    attestation.session_id.as_str(),
+                    attestation.commit_attempt_id.as_str(),
+                    attestation.commit_plan_sha256,
+                    attestation.connection_id.as_str(),
+                    plan_json,
+                ],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                        row.get::<_, Option<String>>(5)?,
+                        row.get::<_, Option<String>>(6)?,
+                        row.get::<_, String>(7)?,
+                        row.get::<_, Option<String>>(8)?,
+                        row.get::<_, Option<String>>(9)?,
+                    ))
+                },
+            )
+            .expect("execute integrity functions on reopened connection");
+        assert_eq!(native_evidence_sha256, attestation.evidence_sha256);
+        assert_eq!(ordinary_sha256, sha256_hex(b"abc"));
+        assert_eq!(
+            canonical_origin,
+            CanonicalOrigin::parse("https://provider.example/")
+                .expect("canonical origin")
+                .to_string()
+        );
+        assert_eq!(canonical_header, "x-api-key");
+        assert_eq!(upper_header.as_deref(), Some("x-api-key"));
+        assert!(invalid_header.is_none());
+        assert!(invalid_origin.is_none());
+        assert_eq!(canonical_plan_sha256, sha256_hex(plan_json.as_bytes()));
+        assert!(noncanonical_plan_sha256.is_none());
+        assert!(invalid_plan_sha256.is_none());
+    }
+
+    #[test]
+    fn recovery_authority_accepts_exact_cancelled_prepared_reservation() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let fixture =
+            seed_prepared_native_credential_commit(&storage, "cancelled-prepared-reservation");
+        let reserved = storage
+            .reserve_discovery_credential_install_execution(
+                &super::DiscoveryNativeCredentialExecutionReservation {
+                    operation_id: fixture.operation_id.clone(),
+                    session_id: fixture.session.id.clone(),
+                    commit_attempt_id: fixture.attempt_id.clone(),
+                    commit_plan_sha256: fixture.plan_sha256.clone(),
+                    connection_id: fixture.session.input.connection_id.clone(),
+                    connection_binding_sha256: "b".repeat(64),
+                    reserved_at: now() + chrono::Duration::milliseconds(1),
+                },
+            )
+            .expect("reserve prepared native execution");
+        let cancel = apply(&fixture.session, ProviderDiscoveryAction::Cancel, 'c');
+        storage
+            .persist_discovery_transition(&write(cancel, None, None))
+            .expect("persist cancellation before settling prepared operation");
+
+        let strict_error = storage
+            .validate_discovery_credential_install_operation_authority(
+                &fixture.session.id,
+                &fixture.attempt_id,
+                &fixture.plan_sha256,
+                &fixture.operation_id,
+            )
+            .expect_err("normal install authority must reject cancelled Prepared state");
+        assert_eq!(strict_error.code, CoreErrorCode::StorageCorrupted);
+        storage
+            .validate_discovery_credential_install_recovery_authority(
+                &fixture.session.id,
+                &fixture.attempt_id,
+                &fixture.plan_sha256,
+                &fixture.operation_id,
+            )
+            .expect("recovery accepts exact cancelled Prepared reservation");
+        let execution = storage
+            .get_discovery_native_credential_execution(&fixture.operation_id)
+            .expect("load cancelled reservation")
+            .expect("cancelled reservation remains durable");
+        assert_eq!(
+            execution.physical_authority_id,
+            reserved.physical_authority_id
+        );
+        assert!(execution.store_started_at.is_none());
+        drop(storage);
+
+        let reopened = Storage::open_with_deferred_discovery_recovery(root.path())
+            .expect("reopen cancelled reservation before recovery");
+        reopened
+            .validate_discovery_credential_install_recovery_authority(
+                &fixture.session.id,
+                &fixture.attempt_id,
+                &fixture.plan_sha256,
+                &fixture.operation_id,
+            )
+            .expect("reopened recovery preserves exact cancelled Prepared authority");
+        assert_eq!(
+            reopened
+                .get_discovery_native_credential_execution(&fixture.operation_id)
+                .expect("load reopened cancelled reservation")
+                .expect("reopened reservation exists")
+                .physical_authority_id,
+            reserved.physical_authority_id
+        );
+    }
+
+    #[test]
+    fn recovery_authority_accepts_exact_cancelled_started_execution() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let fixture =
+            seed_started_native_credential_commit(&storage, "cancelled-started-execution");
+        let execution = storage
+            .get_discovery_native_credential_execution(&fixture.operation_id)
+            .expect("load started native execution")
+            .expect("started execution exists");
+        let cancel = apply(&fixture.session, ProviderDiscoveryAction::Cancel, 'd');
+        storage
+            .persist_discovery_transition(&write(cancel, None, None))
+            .expect("persist cancellation while native execution is Started");
+
+        storage
+            .validate_discovery_credential_install_recovery_authority(
+                &fixture.session.id,
+                &fixture.attempt_id,
+                &fixture.plan_sha256,
+                &fixture.operation_id,
+            )
+            .expect("recovery accepts exact cancelled Started execution");
+        drop(storage);
+
+        let reopened = Storage::open_with_deferred_discovery_recovery(root.path())
+            .expect("reopen cancelled execution before recovery");
+        reopened
+            .validate_discovery_credential_install_recovery_authority(
+                &fixture.session.id,
+                &fixture.attempt_id,
+                &fixture.plan_sha256,
+                &fixture.operation_id,
+            )
+            .expect("reopened recovery preserves exact cancelled Started authority");
+        assert_eq!(
+            reopened
+                .get_discovery_native_credential_execution(&fixture.operation_id)
+                .expect("load reopened cancelled execution")
+                .expect("reopened started execution exists"),
+            execution
+        );
+    }
+
+    #[test]
+    fn native_execution_reservation_guards_and_runtime_validation_fail_closed() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let fixture = seed_started_native_credential_commit(&storage, "execution-table-guards");
+        let database = storage.connection().expect("execution database");
+        assert_native_execution_table_is_append_only(
+            &database,
+            "provider_discovery_native_credential_executions",
+            &fixture.operation_id,
+        );
+        bypass_native_execution_table_version_guard(
+            &database,
+            "provider_discovery_native_credential_executions",
+            "provider_discovery_native_credential_execution_no_update",
+            &fixture.operation_id,
+        );
+        drop(database);
+        let error = storage
+            .get_discovery_native_credential_execution(&fixture.operation_id)
+            .expect_err("unsupported execution version must fail runtime validation");
+        assert_eq!(error.code, CoreErrorCode::StorageCorrupted);
+    }
+
+    #[test]
+    fn native_store_attempt_guards_and_runtime_validation_fail_closed() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let fixture = seed_started_native_credential_commit(&storage, "store-attempt-table-guards");
+        let database = storage.connection().expect("store-attempt database");
+        assert_native_execution_table_is_append_only(
+            &database,
+            "provider_discovery_native_credential_store_attempts",
+            &fixture.operation_id,
+        );
+        bypass_native_execution_table_version_guard(
+            &database,
+            "provider_discovery_native_credential_store_attempts",
+            "provider_discovery_native_credential_store_attempt_no_update",
+            &fixture.operation_id,
+        );
+        drop(database);
+        let error = storage
+            .get_discovery_native_credential_execution(&fixture.operation_id)
+            .expect_err("unsupported store-attempt version must fail runtime validation");
+        assert_eq!(error.code, CoreErrorCode::StorageCorrupted);
+    }
+
+    #[test]
+    fn native_abandonment_guards_and_runtime_validation_fail_closed() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let fixture = seed_prepared_native_credential_commit(&storage, "abandonment-table-guards");
+        storage
+            .reserve_discovery_credential_install_execution(
+                &super::DiscoveryNativeCredentialExecutionReservation {
+                    operation_id: fixture.operation_id.clone(),
+                    session_id: fixture.session.id.clone(),
+                    commit_attempt_id: fixture.attempt_id.clone(),
+                    commit_plan_sha256: fixture.plan_sha256.clone(),
+                    connection_id: fixture.session.input.connection_id.clone(),
+                    connection_binding_sha256: "b".repeat(64),
+                    reserved_at: now() + chrono::Duration::milliseconds(1),
+                },
+            )
+            .expect("reserve execution before abandonment");
+        let interrupted = apply(
+            &fixture.session,
+            ProviderDiscoveryAction::Interrupt {
+                operation: DiscoveryOperationKind::AtomicCommit,
+                outcome: DiscoveryInterruptionOutcome::ConfirmedNoExternalEffect,
+            },
+            'e',
+        );
+        let mut interrupted_write = write(
+            interrupted,
+            None,
+            Some(DiscoveryCompletedOperationWrite {
+                id: fixture.operation_id.clone(),
+                outcome: DurableOperationOutcome::Interrupted,
+            }),
+        );
+        interrupted_write.occurred_at = now() + chrono::Duration::milliseconds(2);
+        storage
+            .persist_discovery_transition(&interrupted_write)
+            .expect("capture exact abandoned reservation");
+
+        let database = storage.connection().expect("abandonment database");
+        assert_native_execution_table_is_append_only(
+            &database,
+            "provider_discovery_native_credential_abandoned_reservations",
+            &fixture.operation_id,
+        );
+        bypass_native_execution_table_version_guard(
+            &database,
+            "provider_discovery_native_credential_abandoned_reservations",
+            "provider_discovery_native_credential_abandonment_no_update",
+            &fixture.operation_id,
+        );
+        drop(database);
+        let error = storage
+            .get_discovery_native_credential_execution(&fixture.operation_id)
+            .expect_err("unsupported abandonment version must fail runtime validation");
+        assert_eq!(error.code, CoreErrorCode::StorageCorrupted);
+    }
+
+    #[test]
+    fn native_no_effect_binding_guards_and_runtime_validation_fail_closed() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let fixture = seed_started_native_credential_commit(&storage, "binding-table-guards");
+        let (write, attestation) =
+            native_no_effect_completion(&storage, &fixture, &fixture.session);
+        storage
+            .persist_native_no_effect_discovery_transition(&write, &attestation)
+            .expect("persist exact no-effect execution binding");
+        let database = storage.connection().expect("binding database");
+        assert_native_execution_table_is_append_only(
+            &database,
+            "provider_discovery_native_no_effect_execution_bindings",
+            &fixture.operation_id,
+        );
+        bypass_native_execution_table_version_guard(
+            &database,
+            "provider_discovery_native_no_effect_execution_bindings",
+            "provider_discovery_native_no_effect_execution_binding_no_update",
+            &fixture.operation_id,
+        );
+        drop(database);
+        let error = storage
+            .get_discovery_native_no_effect_attestation(&fixture.operation_id)
+            .expect_err("unsupported no-effect execution binding must fail runtime validation");
+        assert_eq!(error.code, CoreErrorCode::StorageCorrupted);
+    }
+
+    #[test]
+    fn native_store_attempt_and_started_transition_roll_back_together() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let fixture = seed_prepared_native_credential_commit(&storage, "store-attempt-rollback");
+        let reserved = storage
+            .reserve_discovery_credential_install_execution(
+                &super::DiscoveryNativeCredentialExecutionReservation {
+                    operation_id: fixture.operation_id.clone(),
+                    session_id: fixture.session.id.clone(),
+                    commit_attempt_id: fixture.attempt_id.clone(),
+                    commit_plan_sha256: fixture.plan_sha256.clone(),
+                    connection_id: fixture.session.input.connection_id.clone(),
+                    connection_binding_sha256: "b".repeat(64),
+                    reserved_at: now() + chrono::Duration::milliseconds(1),
+                },
+            )
+            .expect("reserve native execution before rollback test");
+        let database = storage.connection().expect("rollback database");
+        database
+            .execute_batch(&format!(
+                "CREATE TRIGGER synthetic_native_started_transition_abort
+                 BEFORE UPDATE OF status ON provider_discovery_operations
+                 WHEN NEW.id = '{}' AND NEW.status = 'started'
+                 BEGIN
+                     SELECT RAISE(ABORT, 'synthetic Started transition failure');
+                 END;",
+                fixture.operation_id.as_str(),
+            ))
+            .expect("install synthetic post-store-insert failure");
+        drop(database);
+
+        storage
+            .start_reserved_discovery_credential_install_execution(
+                &super::DiscoveryNativeCredentialStoreAttemptStart {
+                    operation_id: fixture.operation_id.clone(),
+                    physical_authority_id: reserved.physical_authority_id.clone(),
+                    started_at: now() + chrono::Duration::milliseconds(2),
+                },
+            )
+            .expect_err("operation transition failure must roll back store attempt");
+        let database = storage.connection().expect("verify rollback database");
+        let store_attempts = database
+            .query_row(
+                "SELECT COUNT(*)
+                 FROM provider_discovery_native_credential_store_attempts
+                 WHERE operation_id = ?1",
+                [fixture.operation_id.as_str()],
+                |row| row.get::<_, u64>(0),
+            )
+            .expect("count rolled-back store attempts");
+        assert_eq!(store_attempts, 0);
+        database
+            .execute_batch("DROP TRIGGER synthetic_native_started_transition_abort;")
+            .expect("remove synthetic transition failure");
+        drop(database);
+        assert_eq!(
+            operation_status(&storage, &fixture.operation_id),
+            "prepared"
+        );
+        let execution = storage
+            .get_discovery_native_credential_execution(&fixture.operation_id)
+            .expect("load reservation after rollback")
+            .expect("reservation survives rollback");
+        assert_eq!(
+            execution.physical_authority_id,
+            reserved.physical_authority_id
+        );
+        assert!(execution.store_started_at.is_none());
+    }
+
+    #[test]
+    fn native_no_effect_attestation_is_immutable_and_restart_durable() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let fixture = seed_started_native_credential_commit(&storage, "native-restart-durable");
+        let (write, attestation) =
+            native_no_effect_completion(&storage, &fixture, &fixture.session);
+
+        storage
+            .persist_native_no_effect_discovery_transition(&write, &attestation)
+            .expect("persist exact native attestation and interrupt");
+        storage
+            .persist_native_no_effect_discovery_transition(&write, &attestation)
+            .expect("exact replay remains idempotent");
+        assert_eq!(
+            operation_status(&storage, &fixture.operation_id),
+            "interrupted"
+        );
+        let record = storage
+            .get_discovery_native_no_effect_attestation(&fixture.operation_id)
+            .expect("load native attestation")
+            .expect("native attestation record");
+        assert_eq!(record.evidence_sha256, attestation.evidence_sha256);
+        let connection = storage.connection().expect("database connection");
+        assert!(
+            connection
+                .execute(
+                    "UPDATE provider_discovery_native_no_effect_attestations
+                     SET evidence_sha256 = ?2 WHERE operation_id = ?1",
+                    rusqlite::params![fixture.operation_id.as_str(), "6".repeat(64)],
+                )
+                .is_err()
+        );
+        assert!(
+            connection
+                .execute(
+                    "DELETE FROM provider_discovery_native_no_effect_attestations
+                     WHERE operation_id = ?1",
+                    [fixture.operation_id.as_str()],
+                )
+                .is_err()
+        );
+        drop(connection);
+        drop(storage);
+
+        let reopened = Storage::open(root.path()).expect("reopen storage");
+        let reopened_record = reopened
+            .get_discovery_native_no_effect_attestation(&fixture.operation_id)
+            .expect("load attestation after restart")
+            .expect("durable native attestation");
+        assert_eq!(reopened_record, record);
+        assert_eq!(
+            reopened
+                .get_discovery_session(&fixture.session.id)
+                .expect("load interrupted session after restart")
+                .session
+                .state,
+            DiscoveryState::Interrupted
+        );
+    }
+
+    #[test]
+    fn native_no_effect_attestation_no_replace_guard_preserves_original_row() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let fixture = seed_started_native_credential_commit(&storage, "native-no-replace-guard");
+        let (write, attestation) =
+            native_no_effect_completion(&storage, &fixture, &fixture.session);
+        storage
+            .persist_native_no_effect_discovery_transition(&write, &attestation)
+            .expect("persist exact native attestation and physical execution binding");
+        let database = storage.connection().expect("database connection");
+        let binding_guard = suspend_test_trigger(
+            &database,
+            "provider_discovery_native_no_effect_attestation_binding",
+        );
+        let companion_guard = suspend_test_trigger(
+            &database,
+            "provider_discovery_native_no_effect_schema37_companion_required",
+        );
+        let replace_error = database
+            .execute(
+                "INSERT OR REPLACE INTO provider_discovery_native_no_effect_attestations
+                 SELECT * FROM provider_discovery_native_no_effect_attestations
+                 WHERE operation_id = ?1",
+                [fixture.operation_id.as_str()],
+            )
+            .expect_err("native attestation REPLACE must be rejected");
+        assert!(
+            replace_error.to_string().contains("cannot replace history"),
+            "unexpected native attestation REPLACE rejection: {replace_error}"
+        );
+        restore_test_trigger(&database, &binding_guard);
+        restore_test_trigger(&database, &companion_guard);
+        let stored_hash = database
+            .query_row(
+                "SELECT evidence_sha256
+                 FROM provider_discovery_native_no_effect_attestations
+                 WHERE operation_id = ?1",
+                [fixture.operation_id.as_str()],
+                |row| row.get::<_, String>(0),
+            )
+            .expect("load preserved native attestation row");
+        assert_eq!(stored_hash, attestation.evidence_sha256);
+    }
+
+    #[test]
+    fn replaced_native_no_effect_attestation_fails_runtime_validation() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let fixture = seed_started_native_credential_commit(&storage, "native-replace-runtime");
+        let (write, attestation) =
+            native_no_effect_completion(&storage, &fixture, &fixture.session);
+        storage
+            .persist_native_no_effect_discovery_transition(&write, &attestation)
+            .expect("persist exact native attestation");
+        let original = storage
+            .get_discovery_native_no_effect_attestation(&fixture.operation_id)
+            .expect("load original native attestation")
+            .expect("original native attestation");
+        let database = storage.connection().expect("database connection");
+        database
+            .execute_batch(
+                "DROP TRIGGER provider_discovery_native_no_effect_attestation_no_replace;
+                 DROP TRIGGER provider_discovery_native_no_effect_attestation_binding;
+                 DROP TRIGGER provider_discovery_native_no_effect_schema37_companion_required;",
+            )
+            .expect("drop insert guards only for native attestation corruption fixture");
+        database
+            .execute(
+                "INSERT OR REPLACE INTO provider_discovery_native_no_effect_attestations (
+                     operation_id, session_id, commit_attempt_id, commit_plan_sha256,
+                     connection_id, attestation_kind, evidence_sha256, recovery_owner,
+                     schema_version, redaction_version, attested_at
+                 )
+                 SELECT operation_id, session_id, commit_attempt_id, commit_plan_sha256,
+                        connection_id, attestation_kind, ?2, recovery_owner,
+                        schema_version, redaction_version, attested_at
+                 FROM provider_discovery_native_no_effect_attestations
+                 WHERE operation_id = ?1",
+                rusqlite::params![fixture.operation_id.as_str(), "f".repeat(64)],
+            )
+            .expect("inject replaced native attestation after dropping insert guards");
+        drop(database);
+        let error = storage
+            .get_discovery_native_no_effect_attestation(&fixture.operation_id)
+            .expect_err("replaced native attestation must fail runtime validation");
+        assert_eq!(error.code, CoreErrorCode::StorageCorrupted);
+        assert!(
+            error.message.contains("evidence hash")
+                || error.message.contains("execution binding differs"),
+            "unexpected replaced-attestation rejection: {error}"
+        );
+        assert_ne!(original.evidence_sha256, "f".repeat(64));
+    }
+
+    #[test]
+    fn restarted_atomic_commit_accepts_exact_native_no_effect_attestation() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let fixture = seed_started_native_credential_commit(&storage, "native-retry-attestation");
+        let retry_operation_id =
+            DiscoveryOperationId::parse("operation-native-retry-attestation-retry")
+                .expect("retry operation id");
+        let retrying =
+            restart_started_native_credential_commit(&storage, &fixture, retry_operation_id);
+        let retry_interrupted = apply(
+            &retrying.session,
+            ProviderDiscoveryAction::Interrupt {
+                operation: DiscoveryOperationKind::AtomicCommit,
+                outcome: DiscoveryInterruptionOutcome::ConfirmedNoExternalEffect,
+            },
+            '7',
+        );
+        let mut retry_write = write(
+            retry_interrupted,
+            None,
+            Some(DiscoveryCompletedOperationWrite {
+                id: retrying.operation_id.clone(),
+                outcome: DurableOperationOutcome::AttestedNoExternalEffect,
+            }),
+        );
+        retry_write.occurred_at = now() + chrono::Duration::milliseconds(5);
+        let retry_attestation = DiscoveryNativeNoEffectAttestationWrite::credential_slot_missing(
+            retrying.operation_id.clone(),
+            test_native_physical_authority_id(&storage, &retrying.operation_id),
+            fixture.session.id.clone(),
+            fixture.attempt_id.clone(),
+            fixture.plan_sha256.clone(),
+            fixture.session.input.connection_id.clone(),
+        )
+        .expect("retry native no-effect attestation");
+        storage
+            .persist_native_no_effect_discovery_transition(&retry_write, &retry_attestation)
+            .expect("persist retry operation native no-effect attestation");
+
+        let stored = storage
+            .get_discovery_native_no_effect_attestation(&retrying.operation_id)
+            .expect("load retry native attestation")
+            .expect("durable retry native attestation");
+        assert_eq!(stored.evidence_sha256, retry_attestation.evidence_sha256);
+        assert_eq!(
+            operation_status(&storage, &retrying.operation_id),
+            "interrupted"
+        );
+        drop(storage);
+
+        let reopened = Storage::open(root.path()).expect("reopen retry attestation storage");
+        assert_eq!(
+            reopened
+                .get_discovery_native_no_effect_attestation(&retrying.operation_id)
+                .expect("validate retry attestation after reopen")
+                .expect("reopened retry attestation"),
+            stored
+        );
+        assert_eq!(
+            reopened
+                .get_discovery_session(&fixture.session.id)
+                .expect("load reopened interrupted retry")
+                .session
+                .state,
+            DiscoveryState::Interrupted
+        );
+    }
+
+    #[test]
+    fn reconciled_unknown_commit_accepts_exact_retry_native_no_effect_attestation() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let fixture =
+            seed_started_native_credential_commit(&storage, "native-reconciled-retry-attestation");
+        let retry = restart_unknown_native_credential_commit(
+            &storage,
+            &fixture,
+            DiscoveryOperationId::parse("operation-native-reconciled-retry-attestation-retry")
+                .expect("retry operation id"),
+        );
+        storage
+            .validate_discovery_credential_install_operation_authority(
+                &fixture.session.id,
+                &fixture.attempt_id,
+                &fixture.plan_sha256,
+                &retry.operation_id,
+            )
+            .expect("approved no-effect reconciliation grants retry install authority");
+
+        let retry_interrupted = apply(
+            &retry.session,
+            ProviderDiscoveryAction::Interrupt {
+                operation: DiscoveryOperationKind::AtomicCommit,
+                outcome: DiscoveryInterruptionOutcome::ConfirmedNoExternalEffect,
+            },
+            '8',
+        );
+        let mut retry_write = write(
+            retry_interrupted,
+            None,
+            Some(DiscoveryCompletedOperationWrite {
+                id: retry.operation_id.clone(),
+                outcome: DurableOperationOutcome::AttestedNoExternalEffect,
+            }),
+        );
+        retry_write.occurred_at = now() + chrono::Duration::milliseconds(6);
+        let retry_attestation = DiscoveryNativeNoEffectAttestationWrite::credential_slot_missing(
+            retry.operation_id.clone(),
+            test_native_physical_authority_id(&storage, &retry.operation_id),
+            fixture.session.id.clone(),
+            fixture.attempt_id.clone(),
+            fixture.plan_sha256.clone(),
+            fixture.session.input.connection_id.clone(),
+        )
+        .expect("reconciled retry native no-effect attestation");
+        storage
+            .persist_native_no_effect_discovery_transition(&retry_write, &retry_attestation)
+            .expect("persist reconciled retry native no-effect attestation");
+        let stored = storage
+            .get_discovery_native_no_effect_attestation(&retry.operation_id)
+            .expect("load reconciled retry native attestation")
+            .expect("durable reconciled retry native attestation");
+        drop(storage);
+
+        let reopened = Storage::open(root.path()).expect("reopen reconciled retry storage");
+        assert_eq!(
+            reopened
+                .get_discovery_native_no_effect_attestation(&retry.operation_id)
+                .expect("validate reconciled retry attestation after reopen")
+                .expect("reopened reconciled retry attestation"),
+            stored
+        );
+    }
+
+    #[test]
+    fn twice_restarted_commit_accepts_recursive_native_authority() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let fixture =
+            seed_started_native_credential_commit(&storage, "native-recursive-retry-authority");
+        let first_retry = restart_started_native_credential_commit(
+            &storage,
+            &fixture,
+            DiscoveryOperationId::parse("operation-native-recursive-retry-authority-first")
+                .expect("first retry operation id"),
+        );
+        let second_retry = restart_attested_native_retry(
+            &storage,
+            &fixture,
+            &first_retry,
+            DiscoveryOperationId::parse("operation-native-recursive-retry-authority-second")
+                .expect("second retry operation id"),
+        );
+        storage
+            .validate_discovery_credential_install_operation_authority(
+                &fixture.session.id,
+                &fixture.attempt_id,
+                &fixture.plan_sha256,
+                &second_retry.operation_id,
+            )
+            .expect("recursive retry chain grants exact install authority");
+
+        let interrupted = apply(
+            &second_retry.session,
+            ProviderDiscoveryAction::Interrupt {
+                operation: DiscoveryOperationKind::AtomicCommit,
+                outcome: DiscoveryInterruptionOutcome::ConfirmedNoExternalEffect,
+            },
+            'a',
+        );
+        let mut write = write(
+            interrupted,
+            None,
+            Some(DiscoveryCompletedOperationWrite {
+                id: second_retry.operation_id.clone(),
+                outcome: DurableOperationOutcome::AttestedNoExternalEffect,
+            }),
+        );
+        write.occurred_at = now() + chrono::Duration::milliseconds(8);
+        let attestation = DiscoveryNativeNoEffectAttestationWrite::credential_slot_missing(
+            second_retry.operation_id.clone(),
+            test_native_physical_authority_id(&storage, &second_retry.operation_id),
+            fixture.session.id.clone(),
+            fixture.attempt_id.clone(),
+            fixture.plan_sha256.clone(),
+            fixture.session.input.connection_id.clone(),
+        )
+        .expect("second retry native attestation");
+        storage
+            .persist_native_no_effect_discovery_transition(&write, &attestation)
+            .expect("persist recursively authorized native attestation");
+        drop(storage);
+
+        let reopened = Storage::open(root.path()).expect("reopen recursive retry storage");
+        assert!(
+            reopened
+                .get_discovery_native_no_effect_attestation(&second_retry.operation_id)
+                .expect("validate recursive attestation after reopen")
+                .is_some()
+        );
+    }
+
+    fn persist_recursive_prepared_retry_attestation(
+        storage: &Storage,
+        fixture: &NativeNoEffectFixture,
+        retry: &RestartedNativeCommitFixture,
+    ) -> super::DiscoveryNativeNoEffectAttestationRecord {
+        let interrupted = apply(
+            &retry.session,
+            ProviderDiscoveryAction::Interrupt {
+                operation: DiscoveryOperationKind::AtomicCommit,
+                outcome: DiscoveryInterruptionOutcome::ConfirmedNoExternalEffect,
+            },
+            '9',
+        );
+        let mut write = write(
+            interrupted,
+            None,
+            Some(DiscoveryCompletedOperationWrite {
+                id: retry.operation_id.clone(),
+                outcome: DurableOperationOutcome::AttestedNoExternalEffect,
+            }),
+        );
+        write.occurred_at = now() + chrono::Duration::milliseconds(7);
+        let attestation = DiscoveryNativeNoEffectAttestationWrite::credential_slot_missing(
+            retry.operation_id.clone(),
+            test_native_physical_authority_id(storage, &retry.operation_id),
+            fixture.session.id.clone(),
+            fixture.attempt_id.clone(),
+            fixture.plan_sha256.clone(),
+            fixture.session.input.connection_id.clone(),
+        )
+        .expect("final prepared retry native attestation");
+        storage
+            .persist_native_no_effect_discovery_transition(&write, &attestation)
+            .expect("persist final attestation across two prepared retry edges");
+        storage
+            .get_discovery_native_no_effect_attestation(&retry.operation_id)
+            .expect("load final prepared retry attestation")
+            .expect("durable final prepared retry attestation")
+    }
+
+    #[test]
+    fn twice_restarted_unstarted_prepared_commit_accepts_recursive_native_authority() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let fixture = seed_prepared_native_credential_commit(
+            &storage,
+            "native-recursive-prepared-retry-authority",
+        );
+        let first_retry = restart_unstarted_prepared_native_commit(
+            &storage,
+            &fixture,
+            &fixture.session,
+            &fixture.operation_id,
+            UnstartedPreparedNativeRetryStep {
+                next_operation_id: DiscoveryOperationId::parse(
+                    "operation-native-recursive-prepared-retry-authority-first",
+                )
+                .expect("first prepared retry operation id"),
+                interrupt_hash_byte: '5',
+                restart_hash_byte: '6',
+                interrupted_at_millis: 2,
+                restarted_at_millis: 3,
+            },
+        );
+        let second_retry = restart_unstarted_prepared_native_commit(
+            &storage,
+            &fixture,
+            &first_retry.session,
+            &first_retry.operation_id,
+            UnstartedPreparedNativeRetryStep {
+                next_operation_id: DiscoveryOperationId::parse(
+                    "operation-native-recursive-prepared-retry-authority-second",
+                )
+                .expect("second prepared retry operation id"),
+                interrupt_hash_byte: '7',
+                restart_hash_byte: '8',
+                interrupted_at_millis: 4,
+                restarted_at_millis: 5,
+            },
+        );
+
+        assert_unstarted_prepared_retry_predecessors(&storage, &fixture, &first_retry);
+
+        storage
+            .validate_discovery_credential_install_operation_authority(
+                &fixture.session.id,
+                &fixture.attempt_id,
+                &fixture.plan_sha256,
+                &second_retry.operation_id,
+            )
+            .expect("two prepared retry edges grant exact install authority");
+        assert_eq!(
+            operation_status(&storage, &second_retry.operation_id),
+            "prepared"
+        );
+        reserve_and_start_test_native_execution(
+            &storage,
+            &second_retry.session,
+            &fixture.attempt_id,
+            &fixture.plan_sha256,
+            &second_retry.operation_id,
+            now() + chrono::Duration::milliseconds(6),
+        );
+
+        let stored =
+            persist_recursive_prepared_retry_attestation(&storage, &fixture, &second_retry);
+        drop(storage);
+
+        let reopened = Storage::open(root.path()).expect("reopen recursive prepared retry storage");
+        assert_eq!(
+            reopened
+                .get_discovery_native_no_effect_attestation(&second_retry.operation_id)
+                .expect("validate recursive prepared retry attestation after reopen")
+                .expect("reopened recursive prepared retry attestation"),
+            stored
+        );
+    }
+
+    #[test]
+    fn second_retry_rejects_detached_first_restart_receipt() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let fixture = seed_started_native_credential_commit(
+            &storage,
+            "native-recursive-retry-detached-start",
+        );
+        let first_retry = restart_started_native_credential_commit(
+            &storage,
+            &fixture,
+            DiscoveryOperationId::parse("operation-native-recursive-detached-first")
+                .expect("first retry operation id"),
+        );
+        let first_restart_action_id = storage
+            .get_current_discovery_operation(&fixture.session.id)
+            .expect("load first retry operation")
+            .expect("first retry operation")
+            .action_id;
+        let second_retry = restart_attested_native_retry(
+            &storage,
+            &fixture,
+            &first_retry,
+            DiscoveryOperationId::parse("operation-native-recursive-detached-second")
+                .expect("second retry operation id"),
+        );
+        storage
+            .validate_discovery_credential_install_operation_authority(
+                &fixture.session.id,
+                &fixture.attempt_id,
+                &fixture.plan_sha256,
+                &second_retry.operation_id,
+            )
+            .expect("intact recursive retry chain is authorized");
+
+        let (write, attestation) = remove_retry_history_and_assert_schema_rejection(
+            &storage,
+            &fixture,
+            &second_retry,
+            &first_restart_action_id,
+        );
+        let persist_error = storage
+            .persist_native_no_effect_discovery_transition(&write, &attestation)
+            .expect_err("public writer must reject detached recursive retry root");
+        assert_eq!(persist_error.code, CoreErrorCode::StorageCorrupted);
+        let error = storage
+            .validate_discovery_credential_install_operation_authority(
+                &fixture.session.id,
+                &fixture.attempt_id,
+                &fixture.plan_sha256,
+                &second_retry.operation_id,
+            )
+            .expect_err("detached recursive retry root must fail closed");
+        assert_eq!(error.code, CoreErrorCode::StorageCorrupted);
+    }
+
+    #[test]
+    fn retry_rejects_broken_start_terminal_event_sequence_adjacency() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let fixture = seed_started_native_credential_commit(
+            &storage,
+            "native-retry-detached-start-terminal-sequence",
+        );
+        let retry = restart_started_native_credential_commit(
+            &storage,
+            &fixture,
+            DiscoveryOperationId::parse(
+                "operation-native-retry-detached-start-terminal-sequence-retry",
+            )
+            .expect("detached sequence retry operation id"),
+        );
+        storage
+            .validate_discovery_credential_install_operation_authority(
+                &fixture.session.id,
+                &fixture.attempt_id,
+                &fixture.plan_sha256,
+                &retry.operation_id,
+            )
+            .expect("intact start-to-terminal event adjacency grants retry authority");
+
+        let active = corrupt_retry_start_terminal_event_sequence(&storage, &fixture, &retry);
+        let interrupted = apply(
+            &active,
+            ProviderDiscoveryAction::Interrupt {
+                operation: DiscoveryOperationKind::AtomicCommit,
+                outcome: DiscoveryInterruptionOutcome::ConfirmedNoExternalEffect,
+            },
+            '7',
+        );
+        let attested_at = now() + chrono::Duration::milliseconds(5);
+        let mut write = write(
+            interrupted,
+            None,
+            Some(DiscoveryCompletedOperationWrite {
+                id: retry.operation_id.clone(),
+                outcome: DurableOperationOutcome::AttestedNoExternalEffect,
+            }),
+        );
+        write.occurred_at = attested_at;
+        let attestation = DiscoveryNativeNoEffectAttestationWrite::credential_slot_missing(
+            retry.operation_id.clone(),
+            raw_test_native_physical_authority_id(&storage, &retry.operation_id),
+            fixture.session.id.clone(),
+            fixture.attempt_id.clone(),
+            fixture.plan_sha256.clone(),
+            fixture.session.input.connection_id.clone(),
+        )
+        .expect("detached sequence retry attestation");
+
+        let database = storage.connection().expect("schema rejection database");
+        assert_native_attestation_and_terminal_schema_rejected(
+            &database,
+            &attestation,
+            attested_at,
+        );
+        drop(database);
+
+        let persist_error = storage
+            .persist_native_no_effect_discovery_transition(&write, &attestation)
+            .expect_err("public writer must reject a detached start-to-terminal sequence");
+        assert_eq!(persist_error.code, CoreErrorCode::StorageCorrupted);
+        assert!(
+            persist_error.message.contains("detached event sequence")
+                || persist_error
+                    .message
+                    .contains("execution is detached from its immutable discovery commit"),
+            "unexpected detached-sequence rejection: {persist_error}"
+        );
+        let authority_error = storage
+            .validate_discovery_credential_install_operation_authority(
+                &fixture.session.id,
+                &fixture.attempt_id,
+                &fixture.plan_sha256,
+                &retry.operation_id,
+            )
+            .expect_err("Rust authority must reject a detached start-to-terminal sequence");
+        assert_eq!(authority_error.code, CoreErrorCode::StorageCorrupted);
+        assert!(authority_error.message.contains("detached event sequence"));
+    }
+
+    fn assert_native_attestation_and_terminal_schema_rejected(
+        database: &rusqlite::Connection,
+        attestation: &DiscoveryNativeNoEffectAttestationWrite,
+        attested_at: chrono::DateTime<Utc>,
+    ) {
+        let insert_error = database
+            .execute(
+                "INSERT INTO provider_discovery_native_no_effect_attestations (
+                     operation_id, session_id, commit_attempt_id, commit_plan_sha256,
+                     connection_id, attestation_kind, evidence_sha256, recovery_owner,
+                     schema_version, redaction_version, attested_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1, 1, ?9)",
+                rusqlite::params![
+                    attestation.operation_id.as_str(),
+                    attestation.session_id.as_str(),
+                    attestation.commit_attempt_id.as_str(),
+                    attestation.commit_plan_sha256,
+                    attestation.connection_id.as_str(),
+                    attestation.kind.as_str(),
+                    attestation.evidence_sha256,
+                    attestation.recovery_owner.as_str(),
+                    attested_at.to_rfc3339(),
+                ],
+            )
+            .expect_err("schema authority view must reject detached native authority");
+        let insert_error = insert_error.to_string();
+        assert!(
+            insert_error.contains("detached")
+                || insert_error.contains("requires physical execution authority"),
+            "unexpected native attestation rejection: {insert_error}"
+        );
+        let transition_error = database
+            .execute(
+                "UPDATE provider_discovery_operations
+                 SET status = 'interrupted', finished_at = ?2, updated_at = ?2
+                 WHERE id = ?1",
+                rusqlite::params![attestation.operation_id.as_str(), attested_at.to_rfc3339()],
+            )
+            .expect_err("schema must reject a detached native terminal transition");
+        assert!(
+            transition_error
+                .to_string()
+                .contains("illegal discovery operation status transition"),
+            "unexpected native terminal rejection: {transition_error}"
+        );
+    }
+
+    fn remove_retry_history_and_assert_schema_rejection(
+        storage: &Storage,
+        fixture: &NativeNoEffectFixture,
+        retry: &RestartedNativeCommitFixture,
+        deleted_action_id: &DiscoveryActionId,
+    ) -> (
+        DiscoveryTransitionWrite,
+        DiscoveryNativeNoEffectAttestationWrite,
+    ) {
+        let attested_at = storage
+            .get_current_discovery_operation(&fixture.session.id)
+            .expect("load active retry operation")
+            .expect("active retry operation")
+            .started_at
+            .expect("started retry operation")
+            + chrono::Duration::milliseconds(1);
+        let physical_authority_id = test_native_physical_authority_id(storage, &retry.operation_id);
+        let database = storage.connection().expect("database connection");
+        let delete_predecessor = || {
+            database.execute(
+                "DELETE FROM provider_discovery_action_receipts
+                 WHERE action_id = ?1",
+                [deleted_action_id.as_str()],
+            )
+        };
+        let trigger_error = delete_predecessor()
+            .expect_err("immutable receipt trigger must preserve the retry predecessor");
+        assert!(
+            trigger_error.to_string().contains("immutable"),
+            "unexpected predecessor deletion rejection: {trigger_error}"
+        );
+        database
+            .execute_batch("DROP TRIGGER provider_discovery_receipt_no_delete;")
+            .expect("drop receipt deletion guard only for corruption fixture");
+        delete_predecessor().expect("remove retry predecessor after bypassing its history guard");
+        let retry_interrupted = apply(
+            &retry.session,
+            ProviderDiscoveryAction::Interrupt {
+                operation: DiscoveryOperationKind::AtomicCommit,
+                outcome: DiscoveryInterruptionOutcome::ConfirmedNoExternalEffect,
+            },
+            '7',
+        );
+        let mut retry_write = write(
+            retry_interrupted,
+            None,
+            Some(DiscoveryCompletedOperationWrite {
+                id: retry.operation_id.clone(),
+                outcome: DurableOperationOutcome::AttestedNoExternalEffect,
+            }),
+        );
+        retry_write.occurred_at = attested_at;
+        let retry_attestation = DiscoveryNativeNoEffectAttestationWrite::credential_slot_missing(
+            retry.operation_id.clone(),
+            physical_authority_id,
+            fixture.session.id.clone(),
+            fixture.attempt_id.clone(),
+            fixture.plan_sha256.clone(),
+            fixture.session.input.connection_id.clone(),
+        )
+        .expect("retry native no-effect attestation");
+        assert_native_attestation_and_terminal_schema_rejected(
+            &database,
+            &retry_attestation,
+            attested_at,
+        );
+        drop(database);
+        (retry_write, retry_attestation)
+    }
+
+    #[test]
+    fn restarted_native_commit_requires_immutable_interrupted_predecessor() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let fixture =
+            seed_started_native_credential_commit(&storage, "native-retry-predecessor-authority");
+        let retry = restart_started_native_credential_commit(
+            &storage,
+            &fixture,
+            DiscoveryOperationId::parse("operation-native-retry-predecessor-authority-retry")
+                .expect("retry operation id"),
+        );
+        storage
+            .validate_discovery_credential_install_operation_authority(
+                &fixture.session.id,
+                &fixture.attempt_id,
+                &fixture.plan_sha256,
+                &retry.operation_id,
+            )
+            .expect("exact retry predecessor grants install authority");
+
+        let (retry_write, retry_attestation) = remove_retry_history_and_assert_schema_rejection(
+            &storage,
+            &fixture,
+            &retry,
+            &retry.predecessor_action_id,
+        );
+
+        let persist_error = storage
+            .persist_native_no_effect_discovery_transition(&retry_write, &retry_attestation)
+            .expect_err("public writer must reject a retry without its predecessor");
+        assert_eq!(persist_error.code, CoreErrorCode::StorageCorrupted);
+
+        let error = storage
+            .validate_discovery_credential_install_operation_authority(
+                &fixture.session.id,
+                &fixture.attempt_id,
+                &fixture.plan_sha256,
+                &retry.operation_id,
+            )
+            .expect_err("retry without its interrupted predecessor must fail closed");
+        assert_eq!(error.code, CoreErrorCode::StorageCorrupted);
+    }
+
+    #[test]
+    fn retry_rejects_tampered_native_no_effect_predecessor_hash() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let fixture = seed_started_native_credential_commit(
+            &storage,
+            "native-retry-predecessor-attestation-digest",
+        );
+        let retry = restart_started_native_credential_commit(
+            &storage,
+            &fixture,
+            DiscoveryOperationId::parse(
+                "operation-native-retry-predecessor-attestation-digest-retry",
+            )
+            .expect("retry operation id"),
+        );
+        storage
+            .validate_discovery_credential_install_operation_authority(
+                &fixture.session.id,
+                &fixture.attempt_id,
+                &fixture.plan_sha256,
+                &retry.operation_id,
+            )
+            .expect("exact predecessor attestation grants retry authority");
+
+        let interrupted = apply(
+            &retry.session,
+            ProviderDiscoveryAction::Interrupt {
+                operation: DiscoveryOperationKind::AtomicCommit,
+                outcome: DiscoveryInterruptionOutcome::ConfirmedNoExternalEffect,
+            },
+            '7',
+        );
+        let attested_at = now() + chrono::Duration::milliseconds(5);
+        let mut write = write(
+            interrupted,
+            None,
+            Some(DiscoveryCompletedOperationWrite {
+                id: retry.operation_id.clone(),
+                outcome: DurableOperationOutcome::AttestedNoExternalEffect,
+            }),
+        );
+        write.occurred_at = attested_at;
+        let attestation = DiscoveryNativeNoEffectAttestationWrite::credential_slot_missing(
+            retry.operation_id.clone(),
+            test_native_physical_authority_id(&storage, &retry.operation_id),
+            fixture.session.id.clone(),
+            fixture.attempt_id.clone(),
+            fixture.plan_sha256.clone(),
+            fixture.session.input.connection_id.clone(),
+        )
+        .expect("retry native no-effect attestation");
+
+        let database = storage.connection().expect("database connection");
+        let mutate_hash = || {
+            database.execute(
+                "UPDATE provider_discovery_native_no_effect_attestations
+                 SET evidence_sha256 = ?2 WHERE operation_id = ?1",
+                rusqlite::params![fixture.operation_id.as_str(), "7".repeat(64)],
+            )
+        };
+        let immutable_error = mutate_hash()
+            .expect_err("immutable attestation trigger must preserve predecessor evidence");
+        assert!(immutable_error.to_string().contains("immutable"));
+        database
+            .execute_batch(
+                "DROP TRIGGER provider_discovery_native_no_effect_attestation_no_update;",
+            )
+            .expect("drop attestation update guard only for corruption fixture");
+        mutate_hash().expect("inject mismatched predecessor attestation digest");
+        assert_native_attestation_and_terminal_schema_rejected(
+            &database,
+            &attestation,
+            attested_at,
+        );
+        drop(database);
+
+        let persist_error = storage
+            .persist_native_no_effect_discovery_transition(&write, &attestation)
+            .expect_err("public writer must reject a corrupted predecessor attestation");
+        assert_eq!(persist_error.code, CoreErrorCode::StorageCorrupted);
+        let authority_error = storage
+            .validate_discovery_credential_install_operation_authority(
+                &fixture.session.id,
+                &fixture.attempt_id,
+                &fixture.plan_sha256,
+                &retry.operation_id,
+            )
+            .expect_err("runtime authority must reject a corrupted predecessor attestation");
+        assert_eq!(authority_error.code, CoreErrorCode::StorageCorrupted);
+    }
+
+    #[test]
+    fn prepared_retry_requires_its_canonical_commit_start_receipt() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let fixture = seed_prepared_native_credential_commit(
+            &storage,
+            "native-prepared-retry-start-authority",
+        );
+        let start_action_id = storage
+            .get_discovery_commit_attempt(&fixture.attempt_id)
+            .expect("load initial prepared attempt")
+            .action_id;
+        let retry = restart_prepared_native_credential_commit(
+            &storage,
+            &fixture,
+            DiscoveryOperationId::parse("operation-native-prepared-retry-start-authority-retry")
+                .expect("retry operation id"),
+        );
+        storage
+            .validate_discovery_credential_install_operation_authority(
+                &fixture.session.id,
+                &fixture.attempt_id,
+                &fixture.plan_sha256,
+                &retry.operation_id,
+            )
+            .expect("exact prepared-interrupt history grants retry authority");
+
+        let (retry_write, retry_attestation) = remove_retry_history_and_assert_schema_rejection(
+            &storage,
+            &fixture,
+            &retry,
+            &start_action_id,
+        );
+        let persist_error = storage
+            .persist_native_no_effect_discovery_transition(&retry_write, &retry_attestation)
+            .expect_err("public writer must reject retry with detached commit start");
+        assert_eq!(persist_error.code, CoreErrorCode::StorageCorrupted);
+        let error = storage
+            .validate_discovery_credential_install_operation_authority(
+                &fixture.session.id,
+                &fixture.attempt_id,
+                &fixture.plan_sha256,
+                &retry.operation_id,
+            )
+            .expect_err("retry with detached commit start must fail closed");
+        assert_eq!(error.code, CoreErrorCode::StorageCorrupted);
+    }
+
+    #[test]
+    fn native_commit_start_requires_immutable_credential_approval() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let fixture =
+            seed_started_native_credential_commit(&storage, "native-start-approval-authority");
+        let credential_approval_id = storage
+            .get_discovery_commit_attempt(&fixture.attempt_id)
+            .expect("load credential commit attempt")
+            .plan
+            .credential_approval_id
+            .expect("credential approval id");
+        storage
+            .validate_discovery_credential_install_operation_authority(
+                &fixture.session.id,
+                &fixture.attempt_id,
+                &fixture.plan_sha256,
+                &fixture.operation_id,
+            )
+            .expect("exact credential approvals grant native install authority");
+        let (write, attestation) =
+            native_no_effect_completion(&storage, &fixture, &fixture.session);
+
+        let database = storage.connection().expect("database connection");
+        let delete_approval = || {
+            database.execute(
+                "DELETE FROM provider_discovery_approvals WHERE id = ?1",
+                [credential_approval_id.as_str()],
+            )
+        };
+        let trigger_error = delete_approval()
+            .expect_err("immutable approval trigger must preserve native authority");
+        assert!(
+            trigger_error.to_string().contains("immutable"),
+            "unexpected approval deletion rejection: {trigger_error}"
+        );
+        database
+            .execute_batch("DROP TRIGGER provider_discovery_approval_no_delete;")
+            .expect("drop approval deletion guard only for corruption fixture");
+        delete_approval().expect("remove credential approval after bypassing history guard");
+        assert_native_attestation_and_terminal_schema_rejected(
+            &database,
+            &attestation,
+            write.occurred_at,
+        );
+        drop(database);
+
+        let persist_error = storage
+            .persist_native_no_effect_discovery_transition(&write, &attestation)
+            .expect_err("public writer must reject detached credential approval");
+        assert_eq!(persist_error.code, CoreErrorCode::StorageCorrupted);
+        let error = storage
+            .validate_discovery_credential_install_operation_authority(
+                &fixture.session.id,
+                &fixture.attempt_id,
+                &fixture.plan_sha256,
+                &fixture.operation_id,
+            )
+            .expect_err("detached credential approval must fail closed");
+        assert_eq!(error.code, CoreErrorCode::StorageCorrupted);
+    }
+
+    fn malformed_credential_grant_json(original: &str, corruption: &str) -> String {
+        if corruption == "credential_origin" {
+            let grant_value =
+                serde_json::from_str::<Value>(original).expect("decode canonical credential grant");
+            let original_origin = grant_value["origin"]
+                .as_str()
+                .expect("credential grant origin");
+            let forged_origin = format!("{}/path", original_origin.trim_end_matches('/'));
+            original.replacen(
+                &format!("\"origin\":\"{original_origin}\""),
+                &format!("\"origin\":\"{forged_origin}\""),
+                1,
+            )
+        } else {
+            original.replacen(
+                "\"auth_binding\":{\"kind\":\"bearer_header\"}",
+                "\"auth_binding\":{\"kind\":\"header_api_key\",\"header_name\":\"X-API-Key\"}",
+                1,
+            )
+        }
+    }
+
+    fn corrupt_native_root_approval(
+        database: &rusqlite::Connection,
+        fixture: &NativeNoEffectFixture,
+        credential_approval_id: &DiscoveryApprovalId,
+        corruption: &str,
+    ) {
+        let approval_id = if corruption == "review_grant_digest" {
+            let raw = database
+                .query_row(
+                    "SELECT id FROM provider_discovery_approvals
+                     WHERE session_id = ?1 AND approval_kind = 'review'",
+                    [fixture.session.id.as_str()],
+                    |row| row.get::<_, String>(0),
+                )
+                .expect("load review approval id");
+            DiscoveryApprovalId::parse(raw).expect("review approval id")
+        } else {
+            credential_approval_id.clone()
+        };
+        let original_grant_json = database
+            .query_row(
+                "SELECT grant_json FROM provider_discovery_approvals WHERE id = ?1",
+                [approval_id.as_str()],
+                |row| row.get::<_, String>(0),
+            )
+            .expect("load canonical approval grant");
+        let immutable_error = database
+            .execute(
+                "UPDATE provider_discovery_approvals
+                 SET grant_sha256 = ?2 WHERE id = ?1",
+                rusqlite::params![approval_id.as_str(), "0".repeat(64)],
+            )
+            .expect_err("immutable approval trigger must preserve the root grant");
+        assert!(immutable_error.to_string().contains("immutable"));
+        database
+            .execute_batch("DROP TRIGGER provider_discovery_approval_no_update;")
+            .expect("drop approval update guard only for corruption fixture");
+        if matches!(
+            corruption,
+            "credential_grant_digest" | "review_grant_digest"
+        ) {
+            database
+                .execute(
+                    "UPDATE provider_discovery_approvals
+                     SET grant_sha256 = ?2 WHERE id = ?1",
+                    rusqlite::params![approval_id.as_str(), "0".repeat(64)],
+                )
+                .expect("inject mismatched approval grant digest");
+        } else {
+            let forged_grant_json =
+                malformed_credential_grant_json(&original_grant_json, corruption);
+            assert_ne!(forged_grant_json, original_grant_json);
+            database
+                .execute(
+                    "UPDATE provider_discovery_approvals
+                     SET grant_json = ?2, grant_sha256 = ?3 WHERE id = ?1",
+                    rusqlite::params![
+                        approval_id.as_str(),
+                        forged_grant_json,
+                        sha256_hex(forged_grant_json.as_bytes()),
+                    ],
+                )
+                .expect("inject canonical-hash malformed credential approval");
+        }
+    }
+
+    fn corrupt_native_root_plan_digest(
+        database: &rusqlite::Connection,
+        fixture: &NativeNoEffectFixture,
+    ) {
+        let immutable_error = database
+            .execute(
+                "UPDATE provider_discovery_commit_attempts
+                 SET plan_json = plan_json || ' ' WHERE id = ?1",
+                [fixture.attempt_id.as_str()],
+            )
+            .expect_err("immutable attempt trigger must preserve the root plan");
+        assert!(immutable_error.to_string().contains("immutable"));
+        database
+            .execute_batch("DROP TRIGGER provider_discovery_commit_identity_no_update;")
+            .expect("drop attempt update guard only for corruption fixture");
+        database
+            .execute(
+                "UPDATE provider_discovery_commit_attempts
+                 SET plan_json = plan_json || ' ' WHERE id = ?1",
+                [fixture.attempt_id.as_str()],
+            )
+            .expect("inject plan bytes that no longer match the stored digest");
+    }
+
+    fn malformed_commit_plan_json(original: &str, corruption: &str) -> String {
+        let malformed = match corruption {
+            "unknown_field" => format!(
+                "{},\"forged_unknown_field\":true}}",
+                original.strip_suffix('}').expect("commit plan object")
+            ),
+            "template_version_zero" => {
+                original.replacen("\"template_version\":1", "\"template_version\":0", 1)
+            }
+            "noncanonical" => format!("{original}\n"),
+            _ => panic!("unknown malformed plan case: {corruption}"),
+        };
+        assert_ne!(malformed, original);
+        malformed
+    }
+
+    fn corrupt_native_root_with_self_consistent_plan(
+        database: &rusqlite::Connection,
+        fixture: &NativeNoEffectFixture,
+        corruption: &str,
+    ) -> String {
+        let (action_id, original_plan_json) = database
+            .query_row(
+                "SELECT action_id, plan_json
+                 FROM provider_discovery_commit_attempts WHERE id = ?1",
+                [fixture.attempt_id.as_str()],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .expect("load canonical commit start plan");
+        let malformed_plan_json = malformed_commit_plan_json(&original_plan_json, corruption);
+        let malformed_plan_sha256 = sha256_hex(malformed_plan_json.as_bytes());
+        database
+            .execute_batch(
+                "DROP TRIGGER provider_discovery_commit_identity_no_update;
+                 DROP TRIGGER provider_discovery_session_revision_guard;
+                 DROP TRIGGER provider_discovery_receipt_no_update;",
+            )
+            .expect("drop immutable plan bindings only for corruption fixture");
+        database
+            .execute(
+                "UPDATE provider_discovery_commit_attempts
+                 SET plan_json = ?2, plan_sha256 = ?3 WHERE id = ?1",
+                rusqlite::params![
+                    fixture.attempt_id.as_str(),
+                    malformed_plan_json,
+                    malformed_plan_sha256,
+                ],
+            )
+            .expect("inject self-consistent malformed commit plan");
+        database
+            .execute(
+                "UPDATE provider_discovery_sessions
+                 SET commit_plan_sha256 = ?2 WHERE id = ?1",
+                rusqlite::params![fixture.session.id.as_str(), malformed_plan_sha256],
+            )
+            .expect("rebind active session to malformed commit plan");
+        database
+            .execute(
+                "UPDATE provider_discovery_action_receipts
+                 SET response_json = replace(response_json, ?2, ?3)
+                 WHERE action_id = ?1",
+                rusqlite::params![action_id, fixture.plan_sha256, malformed_plan_sha256,],
+            )
+            .expect("rebind commit start receipt to malformed commit plan");
+        malformed_plan_sha256
+    }
+
+    fn assert_self_consistent_malformed_native_plan_rejected(corruption: &str) {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let fixture = seed_started_native_credential_commit(
+            &storage,
+            &format!("native-self-consistent-malformed-plan-{corruption}"),
+        );
+        let database = storage.connection().expect("database connection");
+        let malformed_plan_sha256 =
+            corrupt_native_root_with_self_consistent_plan(&database, &fixture, corruption);
+        drop(database);
+
+        let mut active_session = fixture.session.clone();
+        active_session.commit_plan_sha256 = Some(malformed_plan_sha256.clone());
+        active_session
+            .validate()
+            .expect("malformed-plan session binding remains structurally valid");
+        let interrupted = apply(
+            &active_session,
+            ProviderDiscoveryAction::Interrupt {
+                operation: DiscoveryOperationKind::AtomicCommit,
+                outcome: DiscoveryInterruptionOutcome::ConfirmedNoExternalEffect,
+            },
+            '7',
+        );
+        let mut write = write(
+            interrupted,
+            None,
+            Some(DiscoveryCompletedOperationWrite {
+                id: fixture.operation_id.clone(),
+                outcome: DurableOperationOutcome::AttestedNoExternalEffect,
+            }),
+        );
+        write.occurred_at = now() + chrono::Duration::milliseconds(2);
+        let attestation = DiscoveryNativeNoEffectAttestationWrite::credential_slot_missing(
+            fixture.operation_id.clone(),
+            raw_test_native_physical_authority_id(&storage, &fixture.operation_id),
+            fixture.session.id.clone(),
+            fixture.attempt_id.clone(),
+            malformed_plan_sha256.clone(),
+            fixture.session.input.connection_id.clone(),
+        )
+        .expect("malformed-plan native attestation");
+        let database = storage.connection().expect("schema rejection database");
+        assert_native_attestation_and_terminal_schema_rejected(
+            &database,
+            &attestation,
+            write.occurred_at,
+        );
+        drop(database);
+
+        let persist_error = storage
+            .persist_native_no_effect_discovery_transition(&write, &attestation)
+            .expect_err("public writer must reject a malformed typed commit plan");
+        assert_eq!(persist_error.code, CoreErrorCode::StorageCorrupted);
+        let authority_error = storage
+            .validate_discovery_credential_install_operation_authority(
+                &fixture.session.id,
+                &fixture.attempt_id,
+                &malformed_plan_sha256,
+                &fixture.operation_id,
+            )
+            .expect_err("runtime authority must reject a malformed typed commit plan");
+        assert_eq!(authority_error.code, CoreErrorCode::StorageCorrupted);
+    }
+
+    fn assert_malformed_native_commit_root_rejected(corruption: &str) {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let fixture = seed_started_native_credential_commit(
+            &storage,
+            &format!("native-malformed-approval-{corruption}"),
+        );
+        let credential_approval_id = storage
+            .get_discovery_commit_attempt(&fixture.attempt_id)
+            .expect("load credential commit attempt")
+            .plan
+            .credential_approval_id
+            .expect("credential approval id");
+        storage
+            .validate_discovery_credential_install_operation_authority(
+                &fixture.session.id,
+                &fixture.attempt_id,
+                &fixture.plan_sha256,
+                &fixture.operation_id,
+            )
+            .expect("intact credential approval root grants native authority");
+        let (write, attestation) =
+            native_no_effect_completion(&storage, &fixture, &fixture.session);
+        let database = storage.connection().expect("database connection");
+        if corruption == "plan_digest" {
+            corrupt_native_root_plan_digest(&database, &fixture);
+        } else {
+            corrupt_native_root_approval(&database, &fixture, &credential_approval_id, corruption);
+        }
+        assert_native_attestation_and_terminal_schema_rejected(
+            &database,
+            &attestation,
+            write.occurred_at,
+        );
+        drop(database);
+
+        let persist_error = storage
+            .persist_native_no_effect_discovery_transition(&write, &attestation)
+            .expect_err("public writer must reject a malformed approval root");
+        assert_eq!(persist_error.code, CoreErrorCode::StorageCorrupted);
+        let authority_error = storage
+            .validate_discovery_credential_install_operation_authority(
+                &fixture.session.id,
+                &fixture.attempt_id,
+                &fixture.plan_sha256,
+                &fixture.operation_id,
+            )
+            .expect_err("runtime authority must reject a malformed approval root");
+        assert_eq!(authority_error.code, CoreErrorCode::StorageCorrupted);
+    }
+
+    #[test]
+    fn native_commit_start_rejects_malformed_credential_approval_root() {
+        for corruption in [
+            "credential_grant_digest",
+            "credential_origin",
+            "credential_header",
+            "review_grant_digest",
+            "plan_digest",
+        ] {
+            assert_malformed_native_commit_root_rejected(corruption);
+        }
+    }
+
+    #[test]
+    fn native_commit_start_rejects_self_consistent_malformed_plan() {
+        for corruption in ["unknown_field", "template_version_zero", "noncanonical"] {
+            assert_self_consistent_malformed_native_plan_rejected(corruption);
+        }
+    }
+
+    #[test]
+    fn reconciled_retry_requires_immutable_no_effect_approval() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let fixture =
+            seed_started_native_credential_commit(&storage, "native-retry-resolution-authority");
+        let retry = restart_unknown_native_credential_commit(
+            &storage,
+            &fixture,
+            DiscoveryOperationId::parse("operation-native-retry-resolution-authority-retry")
+                .expect("retry operation id"),
+        );
+        storage
+            .validate_discovery_credential_install_operation_authority(
+                &fixture.session.id,
+                &fixture.attempt_id,
+                &fixture.plan_sha256,
+                &retry.operation_id,
+            )
+            .expect("exact no-effect approval grants retry authority");
+        let approval_id = storage
+            .connection()
+            .expect("database connection")
+            .query_row(
+                "SELECT id FROM provider_discovery_approvals
+                 WHERE session_id = ?1 AND approval_kind = 'unknown_outcome_resolution'",
+                [fixture.session.id.as_str()],
+                |row| row.get::<_, String>(0),
+            )
+            .expect("load no-effect approval id");
+        let interrupted = apply(
+            &retry.session,
+            ProviderDiscoveryAction::Interrupt {
+                operation: DiscoveryOperationKind::AtomicCommit,
+                outcome: DiscoveryInterruptionOutcome::ConfirmedNoExternalEffect,
+            },
+            '8',
+        );
+        let attested_at = now() + chrono::Duration::milliseconds(6);
+        let mut write = write(
+            interrupted,
+            None,
+            Some(DiscoveryCompletedOperationWrite {
+                id: retry.operation_id.clone(),
+                outcome: DurableOperationOutcome::AttestedNoExternalEffect,
+            }),
+        );
+        write.occurred_at = attested_at;
+        let attestation = DiscoveryNativeNoEffectAttestationWrite::credential_slot_missing(
+            retry.operation_id.clone(),
+            test_native_physical_authority_id(&storage, &retry.operation_id),
+            fixture.session.id.clone(),
+            fixture.attempt_id.clone(),
+            fixture.plan_sha256.clone(),
+            fixture.session.input.connection_id.clone(),
+        )
+        .expect("retry native attestation");
+
+        let database = storage.connection().expect("database connection");
+        database
+            .execute_batch("DROP TRIGGER provider_discovery_approval_no_delete;")
+            .expect("drop approval deletion guard only for corruption fixture");
+        database
+            .execute(
+                "DELETE FROM provider_discovery_approvals WHERE id = ?1",
+                [approval_id],
+            )
+            .expect("remove no-effect approval after bypassing history guard");
+        assert_native_attestation_and_terminal_schema_rejected(
+            &database,
+            &attestation,
+            attested_at,
+        );
+        drop(database);
+
+        let persist_error = storage
+            .persist_native_no_effect_discovery_transition(&write, &attestation)
+            .expect_err("public writer must reject detached no-effect approval");
+        assert_eq!(persist_error.code, CoreErrorCode::StorageCorrupted);
+        let error = storage
+            .validate_discovery_credential_install_operation_authority(
+                &fixture.session.id,
+                &fixture.attempt_id,
+                &fixture.plan_sha256,
+                &retry.operation_id,
+            )
+            .expect_err("detached no-effect approval must fail closed");
+        assert_eq!(error.code, CoreErrorCode::StorageCorrupted);
+    }
+
+    #[test]
+    fn native_no_effect_attestation_hash_tampering_fails_closed_after_restart() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let fixture = seed_started_native_credential_commit(&storage, "native-hash-tamper");
+        let (write, attestation) =
+            native_no_effect_completion(&storage, &fixture, &fixture.session);
+        storage
+            .persist_native_no_effect_discovery_transition(&write, &attestation)
+            .expect("persist native attestation");
+        let database_path = storage
+            .connection()
+            .expect("active database connection")
+            .path()
+            .expect("active database path")
+            .to_owned();
+        drop(storage);
+
+        let connection = rusqlite::Connection::open(database_path).expect("open tamper connection");
+        connection
+            .execute_batch(
+                "DROP TRIGGER provider_discovery_native_no_effect_attestation_no_update;
+                 UPDATE provider_discovery_native_no_effect_attestations
+                 SET evidence_sha256 = '7777777777777777777777777777777777777777777777777777777777777777';",
+            )
+            .expect("simulate direct database tampering");
+        drop(connection);
+
+        let Err(error) = Storage::open(root.path()) else {
+            panic!("tampered native attestation unexpectedly reopened");
+        };
+        assert_eq!(error.code, CoreErrorCode::StorageCorrupted);
+        assert!(
+            error.message.contains("evidence hash")
+                || error.message.contains("execution binding differs"),
+            "unexpected tamper rejection: {error}"
+        );
+    }
+
+    #[test]
+    fn cancel_reopen_automatically_interrupts_and_finishes_cancellation() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let draft = draft_session("session-cancel-reopen");
+        let begin = apply(&draft, ProviderDiscoveryAction::Begin, 'a');
+        let operation_id = DiscoveryOperationId::parse("operation-resolve").expect("operation id");
+        storage
+            .begin_discovery_session(&draft, &write(begin, Some(operation_id.clone()), None))
+            .expect("persist begin");
+        assert!(
+            storage
+                .mark_discovery_operation_started(&operation_id, now())
+                .expect("mark operation started")
+        );
+
+        let resolving = storage
+            .get_discovery_session(&draft.id)
+            .expect("load resolving session");
+        let cancel = apply(&resolving.session, ProviderDiscoveryAction::Cancel, 'b');
+        storage
+            .persist_discovery_transition(&write(cancel, None, None))
+            .expect("persist cancellation request");
+        drop(storage);
+
+        let reopened = Storage::open(root.path()).expect("reopen storage");
+        let terminal = reopened
+            .get_discovery_session(&draft.id)
+            .expect("hydrate automatically recovered session");
+        assert_eq!(
+            terminal.session.state,
+            lorepia_domain::discovery::DiscoveryState::Cancelled
+        );
+        assert!(!terminal.session.cancellation_pending);
+        assert!(terminal.active_operation_id.is_none());
+        assert!(
+            reopened
+                .get_current_discovery_operation(&draft.id)
+                .expect("query current operation")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn prepared_credential_archive_blocks_new_discovery_session() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let draft = draft_session("session-prepared-archive-guard");
+        let connection_id = draft.input.connection_id.clone();
+        storage
+            .save_provider_profile(&ProviderProfile {
+                id: connection_id.as_str().to_owned(),
+                display_name: "Prepared archive guard".to_owned(),
+                base_url: "https://provider.example/v1".to_owned(),
+                model: "synthetic".to_owned(),
+                timeout_seconds: 30,
+            })
+            .expect("save provider");
+        let archive = storage
+            .prepare_provider_credential_operation(
+                &connection_id,
+                ProviderCredentialOperationKind::RemoveForArchive,
+                ProviderCredentialObservedStatus::Missing,
+            )
+            .expect("prepare credential archive before discovery");
+        let begin = apply(&draft, ProviderDiscoveryAction::Begin, 'f');
+        let operation_id =
+            DiscoveryOperationId::parse("operation-prepared-archive-guard").expect("operation id");
+
+        let error = storage
+            .begin_discovery_session(&draft, &write(begin, Some(operation_id), None))
+            .expect_err("prepared credential archive must reserve the connection");
+        assert_eq!(error.code, CoreErrorCode::InvalidInput);
+        assert!(error.recoverable);
+        assert_eq!(
+            error.message,
+            "provider connection cannot begin discovery while its credential operation is unresolved"
+        );
+        assert_eq!(
+            storage
+                .get_discovery_session(&draft.id)
+                .expect_err("rejected begin must not leave a discovery session")
+                .code,
+            CoreErrorCode::NotFound
+        );
+        assert_eq!(
+            storage
+                .list_unresolved_provider_credential_operations()
+                .expect("list unresolved credential operations")
+                .iter()
+                .map(|operation| operation.plan.operation_id.as_str())
+                .collect::<Vec<_>>(),
+            vec![archive.plan.operation_id.as_str()]
+        );
+    }
+
+    #[test]
+    fn prepared_credential_removal_blocks_new_discovery_session() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let draft = draft_session("session-prepared-removal-guard");
+        let connection_id = draft.input.connection_id.clone();
+        storage
+            .save_provider_profile(&ProviderProfile {
+                id: connection_id.as_str().to_owned(),
+                display_name: "Prepared credential removal guard".to_owned(),
+                base_url: "https://provider.example/v1".to_owned(),
+                model: "synthetic".to_owned(),
+                timeout_seconds: 30,
+            })
+            .expect("save provider");
+        let removal = storage
+            .prepare_provider_credential_operation(
+                &connection_id,
+                ProviderCredentialOperationKind::RemoveCredential,
+                ProviderCredentialObservedStatus::Missing,
+            )
+            .expect("prepare credential removal before discovery");
+        let begin = apply(&draft, ProviderDiscoveryAction::Begin, 'd');
+        let operation_id =
+            DiscoveryOperationId::parse("operation-prepared-removal-guard").expect("operation id");
+
+        let error = storage
+            .begin_discovery_session(&draft, &write(begin, Some(operation_id), None))
+            .expect_err("prepared credential removal must reserve the connection");
+        assert_eq!(error.code, CoreErrorCode::InvalidInput);
+        assert!(error.recoverable);
+        assert_eq!(
+            storage
+                .get_discovery_session(&draft.id)
+                .expect_err("rejected begin must not leave a discovery session")
+                .code,
+            CoreErrorCode::NotFound
+        );
+        assert_eq!(
+            storage
+                .list_unresolved_provider_credential_operations()
+                .expect("list unresolved credential operations")
+                .iter()
+                .map(|operation| operation.plan.operation_id.as_str())
+                .collect::<Vec<_>>(),
+            vec![removal.plan.operation_id.as_str()]
+        );
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn terminal_credential_removal_invalidates_cached_discovery_start_authority() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let draft = draft_session("session-stale-credential-authority");
+        let connection_id = draft.input.connection_id.clone();
+        storage
+            .save_provider_profile(&ProviderProfile {
+                id: connection_id.as_str().to_owned(),
+                display_name: "Stale discovery credential authority".to_owned(),
+                base_url: "https://provider.example/v1".to_owned(),
+                model: "synthetic".to_owned(),
+                timeout_seconds: 30,
+            })
+            .expect("save credential-bound provider");
+
+        let install_authority = storage
+            .propose_provider_credential_install_authority(&connection_id)
+            .expect("propose credential install authority");
+        let install = storage
+            .prepare_provider_credential_operation_with_install_authority(
+                &connection_id,
+                ProviderCredentialOperationKind::Install,
+                ProviderCredentialObservedStatus::Missing,
+                Some(&install_authority),
+            )
+            .expect("prepare credential install");
+        storage
+            .start_provider_credential_operation(&install.plan.operation_id, &install.plan_sha256)
+            .expect("start credential install");
+        storage
+            .finish_provider_credential_operation(
+                &install.plan.operation_id,
+                &install.plan_sha256,
+                ProviderCredentialObservedStatus::Available,
+            )
+            .expect("finish credential install");
+        let cached_authority = storage
+            .ensure_provider_credential_access_settled(&connection_id)
+            .expect("read installed credential authority");
+
+        let removal = storage
+            .prepare_provider_credential_operation(
+                &connection_id,
+                ProviderCredentialOperationKind::RemoveCredential,
+                ProviderCredentialObservedStatus::Available,
+            )
+            .expect("prepare ordinary credential removal");
+        storage
+            .start_provider_credential_operation(&removal.plan.operation_id, &removal.plan_sha256)
+            .expect("start ordinary credential removal");
+        storage
+            .finish_provider_credential_operation(
+                &removal.plan.operation_id,
+                &removal.plan_sha256,
+                ProviderCredentialObservedStatus::Missing,
+            )
+            .expect("terminalize ordinary credential removal");
+
+        let begin = apply(&draft, ProviderDiscoveryAction::Begin, 'a');
+        let operation_id =
+            DiscoveryOperationId::parse("operation-stale-discovery-credential-authority")
+                .expect("operation id");
+        let error = storage
+            .begin_discovery_session_with_credential_authority(
+                &draft,
+                &write(begin, Some(operation_id), None),
+                Some(&cached_authority),
+            )
+            .expect_err("removed credential authority must not begin discovery");
+        assert_eq!(error.code, CoreErrorCode::InvalidInput, "{error:?}");
+        assert!(error.recoverable);
+        assert_eq!(
+            storage
+                .get_discovery_session(&draft.id)
+                .expect_err("rejected start must not persist a discovery session")
+                .code,
+            CoreErrorCode::NotFound
+        );
+        assert!(
+            storage
+                .poll_discovery_events(10, now())
+                .expect("poll empty discovery outbox")
+                .is_empty(),
+            "rejected start must publish no discovery work"
+        );
+    }
+
+    #[test]
+    fn authority_checked_begin_allows_new_credentialless_discovery() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let draft = draft_session("session-new-credentialless-authority-check");
+        let begin = apply(&draft, ProviderDiscoveryAction::Begin, 'b');
+        let operation_id =
+            DiscoveryOperationId::parse("operation-new-credentialless-authority-check")
+                .expect("operation id");
+
+        storage
+            .begin_discovery_session_with_credential_authority(
+                &draft,
+                &write(begin, Some(operation_id), None),
+                None,
+            )
+            .expect("new credentialless discovery needs no prior authority");
+        assert_eq!(
+            storage
+                .get_discovery_session(&draft.id)
+                .expect("load begun discovery")
+                .session
+                .state,
+            DiscoveryState::ResolvingKnownProvider
+        );
+    }
+
+    #[test]
+    fn authority_checked_begin_allows_existing_credentialless_connection() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let draft = draft_session("session-existing-credentialless-authority-check");
+        storage
+            .save_provider_profile(&ProviderProfile {
+                id: "credentialless-template-seed".to_owned(),
+                display_name: "Credentialless template seed".to_owned(),
+                base_url: "https://provider.example/v1".to_owned(),
+                model: "synthetic".to_owned(),
+                timeout_seconds: 30,
+            })
+            .expect("seed a valid provider template");
+        let mut credentialless = storage
+            .get_provider_connection(&ProviderConnectionId::from("credentialless-template-seed"))
+            .expect("load template seed connection");
+        credentialless.id = draft.input.connection_id.clone();
+        credentialless.display_name = "Existing credentialless provider".to_owned();
+        credentialless.credential_ref = None;
+        credentialless.credential_scope = None;
+        storage
+            .insert_provider_connection(&credentialless)
+            .expect("insert existing credentialless connection");
+
+        let begin = apply(&draft, ProviderDiscoveryAction::Begin, 'e');
+        let operation_id =
+            DiscoveryOperationId::parse("operation-existing-credentialless-authority-check")
+                .expect("operation id");
+        storage
+            .begin_discovery_session_with_credential_authority(
+                &draft,
+                &write(begin, Some(operation_id), None),
+                None,
+            )
+            .expect("existing credentialless connection needs no authority");
+        assert_eq!(
+            storage
+                .get_discovery_session(&draft.id)
+                .expect("load begun discovery")
+                .session
+                .state,
+            DiscoveryState::ResolvingKnownProvider
+        );
+    }
+
+    #[test]
+    fn begun_discovery_session_blocks_credential_archive_prepare() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let draft = draft_session("session-before-archive-guard");
+        let connection_id = draft.input.connection_id.clone();
+        storage
+            .save_provider_profile(&ProviderProfile {
+                id: connection_id.as_str().to_owned(),
+                display_name: "Begun discovery guard".to_owned(),
+                base_url: "https://provider.example/v1".to_owned(),
+                model: "synthetic".to_owned(),
+                timeout_seconds: 30,
+            })
+            .expect("save provider");
+        let begin = apply(&draft, ProviderDiscoveryAction::Begin, 'e');
+        let operation_id =
+            DiscoveryOperationId::parse("operation-before-archive-guard").expect("operation id");
+        storage
+            .begin_discovery_session(&draft, &write(begin, Some(operation_id), None))
+            .expect("begin discovery before credential archive");
+
+        let error = storage
+            .prepare_provider_credential_operation(
+                &connection_id,
+                ProviderCredentialOperationKind::RemoveForArchive,
+                ProviderCredentialObservedStatus::Missing,
+            )
+            .expect_err("begun discovery must block credential archive prepare");
+        assert_eq!(error.code, CoreErrorCode::InvalidInput);
+        assert!(error.recoverable);
+        assert_eq!(
+            error.message,
+            "provider connection cannot be archived while provider discovery is unfinished"
+        );
+        assert!(
+            storage
+                .list_unresolved_provider_credential_operations()
+                .expect("list unresolved credential operations")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn begun_discovery_session_blocks_credential_removal_prepare() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let draft = draft_session("session-before-removal-guard");
+        let connection_id = draft.input.connection_id.clone();
+        storage
+            .save_provider_profile(&ProviderProfile {
+                id: connection_id.as_str().to_owned(),
+                display_name: "Begun discovery removal guard".to_owned(),
+                base_url: "https://provider.example/v1".to_owned(),
+                model: "synthetic".to_owned(),
+                timeout_seconds: 30,
+            })
+            .expect("save provider");
+        let begin = apply(&draft, ProviderDiscoveryAction::Begin, 'c');
+        let operation_id =
+            DiscoveryOperationId::parse("operation-before-removal-guard").expect("operation id");
+        storage
+            .begin_discovery_session(&draft, &write(begin, Some(operation_id), None))
+            .expect("begin discovery before credential removal");
+
+        let error = storage
+            .prepare_provider_credential_operation(
+                &connection_id,
+                ProviderCredentialOperationKind::RemoveCredential,
+                ProviderCredentialObservedStatus::Missing,
+            )
+            .expect_err("begun discovery must block credential removal prepare");
+        assert_eq!(error.code, CoreErrorCode::InvalidInput);
+        assert!(error.recoverable);
+        assert_eq!(
+            storage
+                .get_discovery_session(&draft.id)
+                .expect("discovery remains durable after rejected removal")
+                .session
+                .state,
+            DiscoveryState::ResolvingKnownProvider
+        );
+        assert!(
+            storage
+                .list_unresolved_provider_credential_operations()
+                .expect("list unresolved credential operations")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn unfinished_discovery_blocks_provider_archive_until_cancelled() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let draft = draft_session("session-archive-guard");
+        let connection_id = draft.input.connection_id.clone();
+        let profile = ProviderProfile {
+            id: connection_id.as_str().to_owned(),
+            display_name: "Discovery archive guard".to_owned(),
+            base_url: "https://provider.example/v1".to_owned(),
+            model: "synthetic".to_owned(),
+            timeout_seconds: 30,
+        };
+        storage
+            .save_provider_profile(&profile)
+            .expect("save provider");
+        let begin = apply(&draft, ProviderDiscoveryAction::Begin, 'f');
+        let operation_id =
+            DiscoveryOperationId::parse("operation-archive-guard").expect("operation id");
+        storage
+            .begin_discovery_session(&draft, &write(begin, Some(operation_id), None))
+            .expect("persist begin");
+
+        let error = storage
+            .delete_provider_profile(&profile.id)
+            .expect_err("unfinished discovery must block provider archive");
+        assert_eq!(error.code, CoreErrorCode::InvalidInput);
+        assert!(error.recoverable);
+        assert_eq!(
+            error.message,
+            "provider connection cannot be archived while provider discovery is unfinished"
+        );
+        assert_eq!(
+            storage
+                .get_provider_profile(&profile.id)
+                .expect("provider remains active after rejected archive"),
+            profile
+        );
+
+        let resolving = storage
+            .get_discovery_session(&draft.id)
+            .expect("load resolving session");
+        let cancel = apply(&resolving.session, ProviderDiscoveryAction::Cancel, '0');
+        storage
+            .persist_discovery_transition(&write(cancel, None, None))
+            .expect("persist cancellation request");
+        drop(storage);
+
+        let reopened = Storage::open(root.path()).expect("reopen storage");
+        assert_eq!(
+            reopened
+                .get_discovery_session(&draft.id)
+                .expect("load cancelled discovery")
+                .session
+                .state,
+            DiscoveryState::Cancelled
+        );
+        reopened
+            .delete_provider_profile(&profile.id)
+            .expect("terminal discovery permits provider archive");
+        assert_eq!(
+            reopened
+                .get_provider_connection(&connection_id)
+                .expect_err("archived provider is hidden")
+                .code,
+            CoreErrorCode::NotFound
+        );
+        assert_eq!(
+            reopened
+                .get_discovery_session(&draft.id)
+                .expect("terminal discovery history remains readable")
+                .session
+                .state,
+            DiscoveryState::Cancelled
+        );
+    }
+
+    #[test]
+    fn nonterminal_discovery_committed_reference_blocks_provider_archive() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let connection_id = ProviderConnectionId::from("committed-archive-guard");
+        storage
+            .save_provider_profile(&ProviderProfile {
+                id: connection_id.as_str().to_owned(),
+                display_name: "Committed discovery archive guard".to_owned(),
+                base_url: "https://provider.example/v1".to_owned(),
+                model: "synthetic".to_owned(),
+                timeout_seconds: 30,
+            })
+            .expect("save provider");
+        let unrelated = draft_session("session-committed-reference");
+        let input_json =
+            serde_json::to_string(&unrelated.input).expect("encode sanitized discovery input");
+        let connection = storage.connection().expect("database connection");
+        let guard = suspend_test_trigger(
+            &connection,
+            "provider_discovery_session_initial_state_guard",
+        );
+        connection
+            .execute(
+                "INSERT INTO provider_discovery_sessions (
+                     id, state, sanitized_input_json, unknown_operation,
+                     committed_connection_id, created_at, updated_at
+                 ) VALUES (
+                     ?1, 'unknown_outcome', ?2, 'atomic_commit', ?3, ?4, ?4
+                 )",
+                rusqlite::params![
+                    unrelated.id.as_str(),
+                    input_json,
+                    connection_id.as_str(),
+                    now().to_rfc3339(),
+                ],
+            )
+            .expect("seed nonterminal committed discovery reference");
+        restore_test_trigger(&connection, &guard);
+        drop(connection);
+        let snapshot = storage
+            .get_discovery_session(&unrelated.id)
+            .expect("hydrate nonterminal committed discovery");
+        assert_eq!(snapshot.session.state, DiscoveryState::UnknownOutcome);
+        assert_eq!(
+            snapshot.session.committed_connection_id.as_ref(),
+            Some(&connection_id)
+        );
+        assert_ne!(snapshot.session.input.connection_id, connection_id);
+
+        let error = storage
+            .prepare_provider_credential_operation(
+                &connection_id,
+                ProviderCredentialOperationKind::RemoveForArchive,
+                ProviderCredentialObservedStatus::Missing,
+            )
+            .expect_err("committed nonterminal discovery must block provider archive");
+        assert_eq!(error.code, CoreErrorCode::InvalidInput);
+        assert!(error.recoverable);
+        assert_eq!(
+            error.message,
+            "provider connection cannot be archived while provider discovery is unfinished"
+        );
+        assert!(
+            storage.get_provider_connection(&connection_id).is_ok(),
+            "provider remains active after rejected archive"
+        );
+    }
+
+    fn seed_synthetic_discovery_session_state(
+        storage: &Storage,
+        draft: &ProviderDiscoverySession,
+        state: DiscoveryState,
+        state_label: &str,
+    ) {
+        let input_json =
+            serde_json::to_string(&draft.input).expect("encode sanitized discovery input");
+        let requires_commit_plan = matches!(
+            state,
+            DiscoveryState::Committing | DiscoveryState::Compensating
+        );
+        let recovery_json = (state == DiscoveryState::Interrupted).then_some("{}");
+        let unknown_operation =
+            (state == DiscoveryState::UnknownOutcome).then_some("atomic_commit");
+        let commit_plan_sha256 = requires_commit_plan.then(|| "0".repeat(64));
+        let commit_attempt_id = requires_commit_plan.then(|| format!("attempt-{state_label}"));
+        let committed_connection_id =
+            (state == DiscoveryState::Ready).then_some(draft.input.connection_id.as_str());
+        let failure_json = (state == DiscoveryState::Failed).then(|| {
+            serde_json::json!({
+                "code": "synthetic_failure",
+                "message_key": "discovery.failed",
+                "recoverable": true,
+            })
+            .to_string()
+        });
+        let connection = storage.connection().expect("database connection");
+        let guard = suspend_test_trigger(
+            &connection,
+            "provider_discovery_session_initial_state_guard",
+        );
+        connection
+            .execute(
+                "INSERT INTO provider_discovery_sessions (
+                         id, state, sanitized_input_json, error_json, recovery_json,
+                         unknown_operation, commit_plan_sha256, commit_attempt_id,
+                         committed_connection_id, created_at, updated_at
+                     ) VALUES (
+                         ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10
+                     )",
+                rusqlite::params![
+                    draft.id.as_str(),
+                    state_label,
+                    input_json,
+                    failure_json,
+                    recovery_json,
+                    unknown_operation,
+                    commit_plan_sha256,
+                    commit_attempt_id,
+                    committed_connection_id,
+                    now().to_rfc3339(),
+                ],
+            )
+            .expect("seed exact discovery state");
+        restore_test_trigger(&connection, &guard);
+        drop(connection);
+    }
+
+    #[test]
+    fn every_current_discovery_state_obeys_archive_terminal_boundary() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let mut nonterminal_count = 0;
+
+        for state in DiscoveryState::ALL {
+            let serialized_state = serde_json::to_value(state).expect("serialize discovery state");
+            let state_label = serialized_state
+                .as_str()
+                .expect("discovery state serializes as text");
+            let session_id = format!("archive-discovery-{state_label}");
+            let draft = draft_session(&session_id);
+            let connection_id = draft.input.connection_id.clone();
+            storage
+                .save_provider_profile(&ProviderProfile {
+                    id: connection_id.as_str().to_owned(),
+                    display_name: format!("Archive boundary {state_label}"),
+                    base_url: "https://provider.example/v1".to_owned(),
+                    model: "boundary-model".to_owned(),
+                    timeout_seconds: 30,
+                })
+                .expect("seed provider");
+            seed_synthetic_discovery_session_state(&storage, &draft, state, state_label);
+
+            if state.is_terminal() {
+                archive_credential_bound_connection(&storage, &connection_id);
+                assert_eq!(
+                    storage
+                        .get_provider_connection(&connection_id)
+                        .expect_err("terminal state permits hidden archive")
+                        .code,
+                    CoreErrorCode::NotFound
+                );
+            } else {
+                nonterminal_count += 1;
+                let error = storage
+                    .prepare_provider_credential_operation(
+                        &connection_id,
+                        ProviderCredentialOperationKind::RemoveForArchive,
+                        ProviderCredentialObservedStatus::Missing,
+                    )
+                    .expect_err("nonterminal discovery must block archive");
+                assert_eq!(error.code, CoreErrorCode::InvalidInput);
+                assert!(error.recoverable);
+                assert_eq!(
+                    error.message,
+                    "provider connection cannot be archived while provider discovery is unfinished"
+                );
+                assert!(
+                    storage.get_provider_connection(&connection_id).is_ok(),
+                    "rejected archive keeps provider active for {state_label}"
+                );
+            }
+        }
+
+        assert_eq!(
+            nonterminal_count, 19,
+            "the test fixture must cover every current nonterminal discovery state"
+        );
+    }
+
+    #[test]
+    fn startup_recovery_records_interruption_without_replaying_effect() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let draft = draft_session("session-recovery");
+        let begin = apply(&draft, ProviderDiscoveryAction::Begin, 'd');
+        let operation_id = DiscoveryOperationId::parse("operation-recovery").expect("operation id");
+        storage
+            .begin_discovery_session(&draft, &write(begin, Some(operation_id.clone()), None))
+            .expect("persist begin");
+        assert!(
+            storage
+                .mark_discovery_operation_started(&operation_id, now())
+                .expect("mark operation started")
+        );
+
+        drop(storage);
+        let reopened = Storage::open(root.path()).expect("reopen and recover storage");
+        let recovered = reopened
+            .get_discovery_session(&draft.id)
+            .expect("load recovered discovery session");
+        assert_eq!(
+            recovered.session.state,
+            lorepia_domain::discovery::DiscoveryState::Interrupted
+        );
+        assert!(
+            reopened
+                .get_current_discovery_operation(&draft.id)
+                .expect("query active operation")
+                .is_none()
+        );
+        let operation_status = reopened
+            .connection()
+            .expect("database connection")
+            .query_row(
+                "SELECT status FROM provider_discovery_operations WHERE id = ?1",
+                [operation_id.as_str()],
+                |row| row.get::<_, String>(0),
+            )
+            .expect("recovered operation status");
+        assert_eq!(operation_status, "interrupted");
+    }
+
+    #[test]
+    fn deferred_open_leaves_recovery_untouched_until_core_classification() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let draft = draft_session("session-deferred-recovery");
+        let begin = apply(&draft, ProviderDiscoveryAction::Begin, 'e');
+        let operation_id =
+            DiscoveryOperationId::parse("operation-deferred-recovery").expect("operation id");
+        storage
+            .begin_discovery_session(&draft, &write(begin, Some(operation_id.clone()), None))
+            .expect("persist begin");
+        assert!(
+            storage
+                .mark_discovery_operation_started(&operation_id, now())
+                .expect("mark operation started")
+        );
+        drop(storage);
+
+        let deferred = Storage::open_with_deferred_discovery_recovery(root.path())
+            .expect("open storage with deferred discovery recovery");
+        let untouched = deferred
+            .get_discovery_session(&draft.id)
+            .expect("load unrecovered session");
+        assert_eq!(
+            untouched.session.state,
+            lorepia_domain::discovery::DiscoveryState::ResolvingKnownProvider
+        );
+        assert_eq!(untouched.active_operation_id.as_ref(), Some(&operation_id));
+        assert_eq!(
+            deferred
+                .get_current_discovery_operation(&draft.id)
+                .expect("load unrecovered operation")
+                .expect("active operation")
+                .status,
+            super::DiscoveryOperationStatus::Started
+        );
+
+        let recovered = deferred
+            .recover_unfinished_discovery_operations(now())
+            .expect("apply explicit conservative recovery");
+        assert_eq!(recovered.len(), 1);
+        assert_eq!(recovered[0].operation_id, operation_id);
+        assert_eq!(
+            deferred
+                .get_discovery_session(&draft.id)
+                .expect("load explicitly recovered session")
+                .session
+                .state,
+            lorepia_domain::discovery::DiscoveryState::Interrupted
+        );
+    }
+
+    #[test]
+    fn unfinished_recovery_scan_is_not_bounded_by_latest_history() {
+        const SESSION_COUNT: usize = 1_001;
+
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        for index in 0..SESSION_COUNT {
+            let session_id = format!("session-recovery-boundary-{index:04}");
+            let draft = draft_session(&session_id);
+            let begin = apply(&draft, ProviderDiscoveryAction::Begin, 'b');
+            let operation_id =
+                DiscoveryOperationId::parse(format!("operation-recovery-boundary-{index:04}"))
+                    .expect("operation id");
+            let mut transition_write = write(begin, Some(operation_id), None);
+            transition_write.occurred_at =
+                now() + chrono::Duration::seconds(i64::try_from(index).expect("bounded index"));
+            storage
+                .begin_discovery_session(&draft, &transition_write)
+                .expect("persist unfinished discovery");
+        }
+
+        let latest = storage
+            .list_discovery_sessions(1_000)
+            .expect("list bounded discovery history");
+        assert_eq!(latest.len(), 1_000);
+        assert!(
+            latest
+                .iter()
+                .all(|snapshot| snapshot.session.id.as_str() != "session-recovery-boundary-0000")
+        );
+
+        let recovery = storage
+            .list_unfinished_discovery_sessions_for_recovery()
+            .expect("scan every unfinished discovery");
+        assert_eq!(recovery.len(), SESSION_COUNT);
+        assert_eq!(
+            recovery
+                .first()
+                .expect("oldest unfinished discovery")
+                .session
+                .id
+                .as_str(),
+            "session-recovery-boundary-0000"
+        );
+    }
+
+    #[test]
+    fn recovery_exception_rejects_a_non_assistant_operation_id() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let draft = draft_session("session-invalid-recovery-exception");
+        let begin = apply(&draft, ProviderDiscoveryAction::Begin, 'd');
+        let operation_id =
+            DiscoveryOperationId::parse("operation-not-assistant").expect("operation id");
+        storage
+            .begin_discovery_session(&draft, &write(begin, Some(operation_id.clone()), None))
+            .expect("persist begin");
+        let error = storage
+            .recover_unfinished_discovery_operations_except(
+                now(),
+                &std::collections::BTreeSet::from([operation_id.clone()]),
+            )
+            .expect_err("a read-only operation must not bypass recovery");
+        assert_eq!(error.code, CoreErrorCode::StorageCorrupted);
+        let unchanged = storage
+            .get_discovery_session(&draft.id)
+            .expect("load unchanged discovery");
+        assert_eq!(
+            unchanged.session.state,
+            lorepia_domain::discovery::DiscoveryState::ResolvingKnownProvider
+        );
+        assert_eq!(unchanged.active_operation_id.as_ref(), Some(&operation_id));
+    }
+
+    #[test]
+    fn assistant_evidence_boundary_actions_complete_the_billable_operation() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let draft = draft_session("session-assistant-more-evidence");
+        storage
+            .create_discovery_session(&draft, now())
+            .expect("create draft");
+        let operation_id =
+            DiscoveryOperationId::parse("operation-assistant-more-evidence").expect("operation id");
+        let mut connection = storage.connection().expect("database connection");
+        let operation_guard = suspend_test_trigger(
+            &connection,
+            "provider_discovery_operation_initial_state_guard",
+        );
+        let transaction = connection.transaction().expect("transaction");
+        transaction
+            .execute(
+                "INSERT INTO provider_discovery_operations (
+                     id, session_id, operation_kind, side_effect_class, status,
+                     action_id, expected_revision, request_sha256, approval_id,
+                     approval_grant_sha256, started_at, finished_at, created_at, updated_at
+                 ) VALUES (
+                     ?1, ?2, 'build_assistant_manifest_draft', 'billable_external', 'started',
+                     'action-assistant-more-evidence', 0, ?3, NULL, NULL,
+                     ?4, NULL, ?4, ?4
+                 )",
+                rusqlite::params![
+                    operation_id.as_str(),
+                    draft.id.as_str(),
+                    "d".repeat(64),
+                    now().to_rfc3339(),
+                ],
+            )
+            .expect("insert started assistant operation");
+        restore_test_trigger(&transaction, &operation_guard);
+        transaction
+            .execute(
+                "UPDATE provider_discovery_sessions
+                 SET state = 'building_assistant_manifest_draft',
+                     revision = 1,
+                     next_event_sequence = 2,
+                     active_operation_id = ?2,
+                     updated_at = ?3
+                 WHERE id = ?1",
+                rusqlite::params![draft.id.as_str(), operation_id.as_str(), now().to_rfc3339(),],
+            )
+            .expect("activate assistant operation");
+
+        let mut completion = write(
+            apply(&draft, ProviderDiscoveryAction::Begin, 'd'),
+            None,
+            Some(DiscoveryCompletedOperationWrite {
+                id: operation_id,
+                outcome: super::DurableOperationOutcome::Succeeded,
+            }),
+        );
+        completion.transition.receipt.action_kind = "assistant_requested_more_evidence".to_owned();
+        super::validate_completed_operation_binding(&transaction, &completion)
+            .expect("more-evidence action must complete the billable operation");
+
+        completion.transition.receipt.action_kind = "assistant_resumed_with_evidence".to_owned();
+        super::validate_completed_operation_binding(&transaction, &completion)
+            .expect("resumed-with-evidence action must complete the billable operation");
+    }
+
+    #[test]
+    fn evidence_rejects_known_credential_markers_without_blocking_model_ids() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let draft = draft_session("session-evidence");
+        storage
+            .create_discovery_session(&draft, now())
+            .expect("create draft");
+        let query_url = DiscoveryEvidenceRecord {
+            id: "evidence-query".into(),
+            session_id: draft.id.clone(),
+            kind: DiscoveryEvidenceKind::JsonDocument,
+            source_url: HttpUrl::parse("https://provider.example/docs?token=secret")
+                .expect("URL parser permits query"),
+            content_sha256: "a".repeat(64),
+            extracted_json: json!({"endpoint": "/v1/models"}),
+            fetched_at: now(),
+        };
+        assert!(storage.save_discovery_evidence(&query_url).is_err());
+
+        let sensitive = DiscoveryEvidenceRecord {
+            id: "evidence-sensitive".into(),
+            source_url: HttpUrl::parse("https://provider.example/docs").expect("source URL"),
+            extracted_json: json!({"example_value": "sk-proj-must-not-persist"}),
+            ..query_url
+        };
+        assert!(storage.save_discovery_evidence(&sensitive).is_err());
+        let legitimate_model_id = "Qwen/Qwen2.5-Coder-32B-Instruct";
+        let model_evidence = DiscoveryEvidenceRecord {
+            id: "evidence-model-identifier".into(),
+            extracted_json: json!({"model_id": legitimate_model_id}),
+            ..sensitive.clone()
+        };
+        storage
+            .save_discovery_evidence(&model_evidence)
+            .expect("ordinary mixed-case model identifiers must remain persistable");
+        assert!(!super::looks_like_secret(legitimate_model_id));
+        assert!(!super::looks_like_secret("provider.parameter.temperature"));
+
+        let known_secret = "sk-proj-must-not-persist-in-path";
+        let secret_path = DiscoveryEvidenceRecord {
+            id: "evidence-secret-path".into(),
+            source_url: HttpUrl::parse(&format!("https://provider.example/docs/{known_secret}"))
+                .expect("URL parser permits path material"),
+            extracted_json: json!({"endpoint": "/v1/models"}),
+            ..sensitive
+        };
+        assert!(storage.save_discovery_evidence(&secret_path).is_err());
+        let mut unsafe_label = draft_session("session-secret-label");
+        unsafe_label.input.display_name = known_secret.to_owned();
+        assert!(
+            storage
+                .create_discovery_session(&unsafe_label, now())
+                .is_err()
+        );
+        let mut unsafe_connection_id = draft_session("session-secret-connection-id");
+        unsafe_connection_id.input.connection_id = ProviderConnectionId::from(known_secret);
+        assert!(
+            storage
+                .create_discovery_session(&unsafe_connection_id, now())
+                .is_err()
+        );
+
+        let mut unsafe_draft = draft_session("session-secret-ref");
+        unsafe_draft.input.connection_id = ProviderConnectionId::from(known_secret);
+        unsafe_draft.input.credential_ref = Some(CredentialRef(known_secret.to_owned()));
+        assert!(
+            storage
+                .create_discovery_session(&unsafe_draft, now())
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn begin_and_action_receipt_are_idempotently_replayable() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let draft = draft_session("session-replay");
+        let begin = apply(&draft, ProviderDiscoveryAction::Begin, 'e');
+        let operation_id = DiscoveryOperationId::parse("operation-replay").expect("operation id");
+        let mut begin_write = write(begin.clone(), Some(operation_id), None);
+        begin_write.draft =
+            DiscoveryJsonUpdate::Replace(initial_working_draft(json!({"kind": "site"})));
+        begin_write.review = DiscoveryJsonUpdate::Clear;
+        assert!(matches!(
+            storage
+                .begin_discovery_session(&draft, &begin_write)
+                .expect("persist begin"),
+            PersistDiscoveryTransition::Applied { .. }
+        ));
+        let replay = storage
+            .find_discovery_action_replay(
+                &draft.id,
+                &begin.receipt.action_id,
+                &begin.receipt.request_sha256,
+                &begin.receipt.action_kind,
+            )
+            .expect("find replay")
+            .expect("stored replay");
+        assert_eq!(replay.transition, begin);
+        assert_eq!(
+            storage
+                .get_discovery_session(&draft.id)
+                .expect("load begun session")
+                .draft_json,
+            match &begin_write.draft {
+                DiscoveryJsonUpdate::Replace(value) => Some(value.clone()),
+                _ => None,
+            }
+        );
+        assert!(matches!(
+            storage
+                .begin_discovery_session(&draft, &begin_write)
+                .expect("replay begin"),
+            PersistDiscoveryTransition::Replayed { .. }
+        ));
+        assert!(
+            storage
+                .find_discovery_action_replay(
+                    &draft.id,
+                    &begin_write.transition.receipt.action_id,
+                    &"f".repeat(64),
+                    &begin_write.transition.receipt.action_kind,
+                )
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn begin_rejects_forged_commit_metadata_on_initial_or_resulting_session() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+
+        let mut forged_initial = draft_session("session-forged-initial");
+        forged_initial.commit_attempt_id =
+            Some(DiscoveryCommitAttemptId::parse("foreign-attempt").expect("attempt id"));
+        forged_initial.commit_plan_sha256 = Some("4".repeat(64));
+        let begin = apply(&forged_initial, ProviderDiscoveryAction::Begin, '5');
+        let error = storage
+            .begin_discovery_session(
+                &forged_initial,
+                &write(
+                    begin,
+                    Some(
+                        DiscoveryOperationId::parse("operation-forged-initial")
+                            .expect("operation id"),
+                    ),
+                    None,
+                ),
+            )
+            .expect_err("begin must reject a non-pristine initial session");
+        assert_eq!(error.code, CoreErrorCode::InvalidInput);
+        assert_eq!(
+            storage
+                .get_discovery_session(&forged_initial.id)
+                .expect_err("rejected begin must not create a session")
+                .code,
+            CoreErrorCode::NotFound
+        );
+
+        let pristine = draft_session("session-forged-result");
+        let mut begin = apply(&pristine, ProviderDiscoveryAction::Begin, '6');
+        begin.session.commit_attempt_id =
+            Some(DiscoveryCommitAttemptId::parse("foreign-result-attempt").expect("attempt id"));
+        begin.session.commit_plan_sha256 = Some("7".repeat(64));
+        let error = storage
+            .begin_discovery_session(
+                &pristine,
+                &write(
+                    begin,
+                    Some(
+                        DiscoveryOperationId::parse("operation-forged-result")
+                            .expect("operation id"),
+                    ),
+                    None,
+                ),
+            )
+            .expect_err("begin must reject forged resulting session metadata");
+        assert_eq!(error.code, CoreErrorCode::InvalidInput);
+        assert_eq!(
+            storage
+                .get_discovery_session(&pristine.id)
+                .expect_err("rejected begin must remain atomic")
+                .code,
+            CoreErrorCode::NotFound
+        );
+
+        let raw_curl = draft_session("session-raw-curl-draft");
+        let mut raw_curl_write = write(
+            apply(&raw_curl, ProviderDiscoveryAction::Begin, '8'),
+            Some(DiscoveryOperationId::parse("operation-raw-curl-draft").expect("operation id")),
+            None,
+        );
+        raw_curl_write.draft = DiscoveryJsonUpdate::Replace(initial_working_draft(json!({
+            "kind": "curl",
+            "raw_curl": "curl https://provider.example/v1/models"
+        })));
+        raw_curl_write.review = DiscoveryJsonUpdate::Clear;
+        let error = storage
+            .begin_discovery_session(&raw_curl, &raw_curl_write)
+            .expect_err("raw cURL command text must not enter the durable initial draft");
+        assert_eq!(error.code, CoreErrorCode::InvalidInput);
+        assert_eq!(
+            storage
+                .get_discovery_session(&raw_curl.id)
+                .expect_err("rejected raw cURL begin must remain atomic")
+                .code,
+            CoreErrorCode::NotFound
+        );
+    }
+
+    #[test]
+    fn begin_accepts_only_canonical_sanitized_curl_output() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let draft = draft_session("session-sanitized-curl-draft");
+        let mut working_draft = initial_working_draft(json!({"kind": "curl"}));
+        working_draft["deterministic"] = initial_sanitized_curl_output();
+        let mut begin_write = write(
+            apply(&draft, ProviderDiscoveryAction::Begin, '9'),
+            Some(
+                DiscoveryOperationId::parse("operation-sanitized-curl-draft")
+                    .expect("operation id"),
+            ),
+            None,
+        );
+        begin_write.draft = DiscoveryJsonUpdate::Replace(working_draft);
+        begin_write.review = DiscoveryJsonUpdate::Clear;
+        storage
+            .begin_discovery_session(&draft, &begin_write)
+            .expect("persist canonical sanitized cURL output");
+
+        let forged = draft_session("session-forged-curl-output");
+        let mut forged_output = initial_sanitized_curl_output();
+        forged_output["evidence"][0]["extracted_json"]["raw_curl"] =
+            Value::String("curl https://provider.example/v1/models".to_owned());
+        let mut forged_draft = initial_working_draft(json!({"kind": "curl"}));
+        forged_draft["deterministic"] = forged_output;
+        let mut forged_write = write(
+            apply(&forged, ProviderDiscoveryAction::Begin, 'a'),
+            Some(
+                DiscoveryOperationId::parse("operation-forged-curl-output").expect("operation id"),
+            ),
+            None,
+        );
+        forged_write.draft = DiscoveryJsonUpdate::Replace(forged_draft);
+        forged_write.review = DiscoveryJsonUpdate::Clear;
+        let error = storage
+            .begin_discovery_session(&forged, &forged_write)
+            .expect_err("non-canonical cURL payload must not enter durable state");
+        assert_eq!(error.code, CoreErrorCode::InvalidInput);
+        assert_eq!(
+            storage
+                .get_discovery_session(&forged.id)
+                .expect_err("rejected cURL output must remain atomic")
+                .code,
+            CoreErrorCode::NotFound
+        );
+    }
+
+    #[test]
+    fn commit_succeeded_cannot_publish_ready_without_its_graph() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let draft = draft_session("session-missing-commit-graph");
+        let mut forged = write(
+            apply(&draft, ProviderDiscoveryAction::Begin, 'b'),
+            Some(
+                DiscoveryOperationId::parse("operation-missing-commit-graph")
+                    .expect("operation id"),
+            ),
+            None,
+        );
+        forged.transition.receipt.action_kind = "commit_succeeded".to_owned();
+
+        let error = storage
+            .persist_discovery_transition(&forged)
+            .expect_err("Ready commit bookkeeping without a graph must be rejected");
+        assert_eq!(error.code, CoreErrorCode::InvalidInput);
+        assert_eq!(
+            storage
+                .get_discovery_session(&draft.id)
+                .expect_err("rejected publication must leave no partial session")
+                .code,
+            CoreErrorCode::NotFound
+        );
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn prepared_keyless_commit_cancellation_enters_durable_compensation() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let mut committing = draft_session("session-keyless-commit-cancel");
+        storage
+            .create_discovery_session(&committing, now())
+            .expect("create discovery session");
+
+        let attempt_id =
+            DiscoveryCommitAttemptId::parse("attempt-keyless-commit-cancel").expect("attempt id");
+        let plan = DiscoveryCommitPlan {
+            attempt_id: attempt_id.clone(),
+            session_id: committing.id.clone(),
+            expected_revision: 0,
+            manifest_sha256: "1".repeat(64),
+            graph_sha256: "2".repeat(64),
+            template_id: ProviderTemplateId::from("template-keyless-commit-cancel"),
+            template_version: 1,
+            connection_id: committing.input.connection_id.clone(),
+            model_route_ids: vec![ModelRouteId::from("route-keyless-commit-cancel")],
+            credential_ref: None,
+            credential_approval_id: None,
+            review_sha256: "3".repeat(64),
+            previous_selection: DiscoveryPreviousSelection::None,
+        };
+        plan.validate().expect("valid keyless commit plan");
+        let plan_json = serde_json::to_string(&plan).expect("commit plan JSON");
+        let plan_sha256 = sha256_hex(plan_json.as_bytes());
+        let commit_operation_id =
+            DiscoveryOperationId::parse("operation-keyless-atomic-commit").expect("operation id");
+        let compensation_operation_id =
+            DiscoveryOperationId::parse("operation-keyless-compensation").expect("operation id");
+        let selection_step = DiscoveryCompensationStep {
+            action_id: DiscoveryActionId::parse("action-keyless-restore-selection")
+                .expect("step action id"),
+            ordinal: 0,
+            kind: DiscoveryCompensationKind::RestorePreviousSelection,
+            target: DiscoveryCompensationTarget::RestorePreviousSelection {
+                previous_selection: DiscoveryPreviousSelection::None,
+            },
+            status: DiscoveryCompensationStatus::Pending,
+        };
+        let graph_step = DiscoveryCompensationStep {
+            action_id: DiscoveryActionId::parse("action-keyless-remove-graph")
+                .expect("step action id"),
+            ordinal: 1,
+            kind: DiscoveryCompensationKind::RemoveConnectionGraph,
+            target: DiscoveryCompensationTarget::RemoveConnectionGraph {
+                connection_id: committing.input.connection_id.clone(),
+            },
+            status: DiscoveryCompensationStatus::Pending,
+        };
+        for step in [&selection_step, &graph_step] {
+            step.validate_against(&plan)
+                .expect("valid compensation step");
+        }
+
+        {
+            let mut connection = storage.connection().expect("database connection");
+            let operation_guard = suspend_test_trigger(
+                &connection,
+                "provider_discovery_operation_initial_state_guard",
+            );
+            let transaction = connection.transaction().expect("transaction");
+            transaction
+                .execute(
+                    "INSERT INTO provider_discovery_commit_attempts (
+                         id, session_id, attempt_number, action_id, expected_revision,
+                         plan_sha256, plan_json, phase, redaction_version,
+                         created_at, updated_at, completed_at
+                     ) VALUES (
+                         ?1, ?2, 1, 'action-prepare-keyless-commit', 0,
+                         ?3, ?4, 'prepared', 1, ?5, ?5, NULL
+                     )",
+                    rusqlite::params![
+                        attempt_id.as_str(),
+                        committing.id.as_str(),
+                        plan_sha256,
+                        plan_json,
+                        now().to_rfc3339(),
+                    ],
+                )
+                .expect("insert prepared commit attempt");
+            for (id, step) in [
+                ("step-keyless-restore-selection", &selection_step),
+                ("step-keyless-remove-graph", &graph_step),
+            ] {
+                let kind =
+                    serde_json::to_value(step.kind).expect("compensation kind serialization");
+                transaction
+                    .execute(
+                        "INSERT INTO provider_discovery_compensation_steps (
+                             id, commit_attempt_id, ordinal, action_id, step_kind,
+                             step_json, status, attempt_count, last_failure_json,
+                             redaction_version, created_at, updated_at, completed_at
+                         ) VALUES (
+                             ?1, ?2, ?3, ?4, ?5, ?6, 'pending', 0, NULL, 1, ?7, ?7, NULL
+                         )",
+                        rusqlite::params![
+                            id,
+                            attempt_id.as_str(),
+                            step.ordinal,
+                            step.action_id.as_str(),
+                            kind.as_str().expect("wire compensation kind"),
+                            serde_json::to_string(step).expect("compensation step JSON"),
+                            now().to_rfc3339(),
+                        ],
+                    )
+                    .expect("insert compensation step");
+            }
+            transaction
+                .execute(
+                    "INSERT INTO provider_discovery_operations (
+                         id, session_id, operation_kind, side_effect_class, status,
+                         action_id, expected_revision, request_sha256, approval_id,
+                         approval_grant_sha256, started_at, finished_at, created_at, updated_at
+                     ) VALUES (
+                         ?1, ?2, 'atomic_commit', 'persistent', 'started',
+                         'action-run-keyless-commit', 1, ?3, NULL, NULL,
+                         ?4, NULL, ?4, ?4
+                     )",
+                    rusqlite::params![
+                        commit_operation_id.as_str(),
+                        committing.id.as_str(),
+                        "4".repeat(64),
+                        now().to_rfc3339(),
+                    ],
+                )
+                .expect("insert started atomic commit operation");
+            restore_test_trigger(&transaction, &operation_guard);
+            transaction
+                .execute(
+                    "UPDATE provider_discovery_sessions
+                     SET state = 'committing',
+                         revision = 1,
+                         next_event_sequence = 2,
+                         commit_plan_sha256 = ?2,
+                         commit_attempt_id = ?3,
+                         cancellation_pending = 1,
+                         active_operation_id = ?4,
+                         updated_at = ?5
+                     WHERE id = ?1",
+                    rusqlite::params![
+                        committing.id.as_str(),
+                        plan_sha256,
+                        attempt_id.as_str(),
+                        commit_operation_id.as_str(),
+                        now().to_rfc3339(),
+                    ],
+                )
+                .expect("activate keyless committing session");
+            transaction.commit().expect("commit fixture");
+        }
+
+        committing.state = DiscoveryState::Committing;
+        committing.revision = 1;
+        committing.next_event_sequence = 2;
+        committing.commit_plan_sha256 = Some(plan_sha256);
+        committing.commit_attempt_id = Some(attempt_id.clone());
+        committing.cancellation_pending = true;
+        committing.validate().expect("valid committing session");
+        let transition = apply(
+            &committing,
+            ProviderDiscoveryAction::CompensationRequired,
+            '5',
+        );
+        let cancellation = write(
+            transition,
+            Some(compensation_operation_id.clone()),
+            Some(DiscoveryCompletedOperationWrite {
+                id: commit_operation_id,
+                outcome: super::DurableOperationOutcome::Failed,
+            }),
+        );
+        storage
+            .persist_discovery_transition(&cancellation)
+            .expect("persist explicit keyless compensation transition");
+
+        let compensating = storage
+            .get_discovery_session(&committing.id)
+            .expect("load compensating session");
+        assert_eq!(compensating.session.state, DiscoveryState::Compensating);
+        assert_eq!(
+            storage
+                .get_discovery_commit_attempt(&attempt_id)
+                .expect("load compensated attempt")
+                .phase,
+            super::DiscoveryCommitPhase::CompensationRequired
+        );
+        assert!(
+            storage
+                .mark_discovery_operation_started(&compensation_operation_id, now())
+                .expect("start compensation operation")
+        );
+        assert_eq!(
+            storage
+                .get_discovery_commit_attempt(&attempt_id)
+                .expect("load started compensation attempt")
+                .phase,
+            super::DiscoveryCommitPhase::Compensating
+        );
+        storage
+            .update_discovery_compensation_status(
+                "step-keyless-remove-graph",
+                super::DiscoveryCompensationStatus::Pending,
+                super::DiscoveryCompensationStatus::InProgress,
+                None,
+                now(),
+            )
+            .expect("start graph compensation");
+        storage
+            .compensate_discovered_provider_graph(&attempt_id, now())
+            .expect("complete absent graph compensation");
+        storage
+            .update_discovery_compensation_status(
+                "step-keyless-restore-selection",
+                super::DiscoveryCompensationStatus::Pending,
+                super::DiscoveryCompensationStatus::InProgress,
+                None,
+                now(),
+            )
+            .expect("start selection compensation");
+        storage
+            .restore_discovery_previous_selection(&attempt_id, now())
+            .expect("complete selection compensation");
+        assert!(
+            storage
+                .list_discovery_compensation_steps(&attempt_id)
+                .expect("load durable completed recipe")
+                .iter()
+                .all(|step| step.status == super::DiscoveryCompensationStatus::Completed)
+        );
+
+        // Simulate a crash after the last effect was durably confirmed but
+        // before the aggregate CompensationSucceeded action was recorded.
+        drop(storage);
+        let reopened = Storage::open(root.path()).expect("recover completed compensation");
+        let recovered = reopened
+            .get_discovery_session(&committing.id)
+            .expect("load recovered cancellation");
+        assert_eq!(recovered.session.state, DiscoveryState::Cancelled);
+        assert!(recovered.active_operation_id.is_none());
+        assert_eq!(
+            reopened
+                .get_discovery_commit_attempt(&attempt_id)
+                .expect("load recovered compensation attempt")
+                .phase,
+            super::DiscoveryCommitPhase::Compensated
+        );
+    }
+
+    #[test]
+    fn cross_session_commit_attempt_binding_fails_closed_before_restart_shortcut() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let owner = draft_session("session-attempt-owner");
+        let other = draft_session("session-attempt-other");
+        storage
+            .create_discovery_session(&owner, now())
+            .expect("create attempt owner");
+        storage
+            .create_discovery_session(&other, now())
+            .expect("create other session");
+
+        let attempt_id =
+            DiscoveryCommitAttemptId::parse("attempt-owned-by-first-session").expect("attempt id");
+        let plan = DiscoveryCommitPlan {
+            attempt_id: attempt_id.clone(),
+            session_id: owner.id.clone(),
+            expected_revision: 0,
+            manifest_sha256: "1".repeat(64),
+            graph_sha256: "2".repeat(64),
+            template_id: ProviderTemplateId::from("template-attempt-owner"),
+            template_version: 1,
+            connection_id: owner.input.connection_id.clone(),
+            model_route_ids: vec![ModelRouteId::from("route-attempt-owner")],
+            credential_ref: None,
+            credential_approval_id: None,
+            review_sha256: "3".repeat(64),
+            previous_selection: DiscoveryPreviousSelection::None,
+        };
+        plan.validate().expect("valid commit plan");
+        let plan_json = serde_json::to_string(&plan).expect("commit plan JSON");
+        let plan_sha256 = sha256_hex(plan_json.as_bytes());
+
+        let mut connection = storage.connection().expect("database connection");
+        let attempt_guard = suspend_test_trigger(
+            &connection,
+            "provider_discovery_commit_attempt_initial_state_guard",
+        );
+        let transaction = connection.transaction().expect("transaction");
+        transaction
+            .execute(
+                "INSERT INTO provider_discovery_commit_attempts (
+                     id, session_id, attempt_number, action_id, expected_revision,
+                     plan_sha256, plan_json, phase, redaction_version,
+                     created_at, updated_at, completed_at
+                 ) VALUES (
+                     ?1, ?2, 1, 'action-prepare-owned-attempt', 0,
+                     ?3, ?4, 'compensating', 1, ?5, ?5, NULL
+                 )",
+                rusqlite::params![
+                    attempt_id.as_str(),
+                    owner.id.as_str(),
+                    plan_sha256,
+                    plan_json,
+                    now().to_rfc3339(),
+                ],
+            )
+            .expect("insert owned commit attempt");
+        restore_test_trigger(&transaction, &attempt_guard);
+
+        let mut restart = write(
+            apply(&other, ProviderDiscoveryAction::Begin, '7'),
+            None,
+            None,
+        );
+        restart.transition.session.commit_attempt_id = Some(attempt_id.clone());
+        restart.transition.session.commit_plan_sha256 = Some(plan_sha256.clone());
+        restart.transition.receipt.action_kind = "restart_interrupted".to_owned();
+        let error = super::prepare_compensation_ledger(&transaction, &restart)
+            .expect_err("another session cannot reuse a compensating attempt");
+        assert_eq!(error.code, CoreErrorCode::InvalidInput);
+        let error = super::validate_failed_compensation_ledger(&transaction, &restart)
+            .expect_err("another session cannot validate a foreign compensation ledger");
+        assert_eq!(error.code, CoreErrorCode::InvalidInput);
+
+        transaction
+            .execute(
+                "UPDATE provider_discovery_sessions
+                 SET revision = revision + 1,
+                     next_event_sequence = next_event_sequence + 1,
+                     commit_plan_sha256 = ?2,
+                     commit_attempt_id = ?3,
+                     updated_at = ?4
+                 WHERE id = ?1",
+                rusqlite::params![
+                    other.id.as_str(),
+                    plan_sha256,
+                    attempt_id.as_str(),
+                    now().to_rfc3339(),
+                ],
+            )
+            .expect("seed corrupt cross-session binding");
+        transaction.commit().expect("commit corrupt fixture");
+        drop(connection);
+
+        let error = storage
+            .get_discovery_session(&other.id)
+            .expect_err("cross-session attempt binding must fail during hydration");
+        assert_eq!(error.code, CoreErrorCode::StorageCorrupted);
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn compensation_step_failure_and_session_transition_commit_atomically() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let mut session = draft_session("session-atomic-compensation-failure");
+        storage
+            .create_discovery_session(&session, now())
+            .expect("create session");
+
+        let attempt_id =
+            DiscoveryCommitAttemptId::parse("attempt-atomic-compensation").expect("attempt id");
+        let plan = DiscoveryCommitPlan {
+            attempt_id: attempt_id.clone(),
+            session_id: session.id.clone(),
+            expected_revision: 0,
+            manifest_sha256: "8".repeat(64),
+            graph_sha256: "9".repeat(64),
+            template_id: ProviderTemplateId::from("template-atomic-compensation"),
+            template_version: 1,
+            connection_id: session.input.connection_id.clone(),
+            model_route_ids: vec![ModelRouteId::from("route-atomic-compensation")],
+            credential_ref: None,
+            credential_approval_id: None,
+            review_sha256: "a".repeat(64),
+            previous_selection: DiscoveryPreviousSelection::None,
+        };
+        plan.validate().expect("valid commit plan");
+        let plan_json = serde_json::to_string(&plan).expect("plan JSON");
+        let plan_sha256 = sha256_hex(plan_json.as_bytes());
+        let operation_id =
+            DiscoveryOperationId::parse("operation-atomic-compensation").expect("operation id");
+        let step_id = "step-atomic-compensation";
+        let step = DiscoveryCompensationStep {
+            action_id: DiscoveryActionId::parse("action-step-atomic-compensation")
+                .expect("step action id"),
+            ordinal: 0,
+            kind: DiscoveryCompensationKind::RestorePreviousSelection,
+            target: DiscoveryCompensationTarget::RestorePreviousSelection {
+                previous_selection: DiscoveryPreviousSelection::None,
+            },
+            status: DiscoveryCompensationStatus::Pending,
+        };
+        step.validate_against(&plan)
+            .expect("valid compensation step");
+        let step_json = serde_json::to_string(&step).expect("step JSON");
+        {
+            let mut connection = storage.connection().expect("database connection");
+            let attempt_guard = suspend_test_trigger(
+                &connection,
+                "provider_discovery_commit_attempt_initial_state_guard",
+            );
+            let operation_guard = suspend_test_trigger(
+                &connection,
+                "provider_discovery_operation_initial_state_guard",
+            );
+            let transaction = connection.transaction().expect("transaction");
+            transaction
+                .execute(
+                    "INSERT INTO provider_discovery_commit_attempts (
+                         id, session_id, attempt_number, action_id, expected_revision,
+                         plan_sha256, plan_json, phase, redaction_version,
+                         created_at, updated_at, completed_at
+                     ) VALUES (
+                         ?1, ?2, 1, 'action-prepare-atomic-compensation', 0,
+                         ?3, ?4, 'compensating', 1, ?5, ?5, NULL
+                     )",
+                    rusqlite::params![
+                        attempt_id.as_str(),
+                        session.id.as_str(),
+                        plan_sha256,
+                        plan_json,
+                        now().to_rfc3339(),
+                    ],
+                )
+                .expect("insert commit attempt");
+            transaction
+                .execute(
+                    "INSERT INTO provider_discovery_compensation_steps (
+                         id, commit_attempt_id, ordinal, action_id, step_kind,
+                         step_json, status, attempt_count, last_failure_json,
+                         redaction_version, created_at, updated_at, completed_at
+                     ) VALUES (
+                         ?1, ?2, 0, ?3, 'restore_previous_selection',
+                         ?4, 'in_progress', 1, NULL, 1, ?5, ?5, NULL
+                     )",
+                    rusqlite::params![
+                        step_id,
+                        attempt_id.as_str(),
+                        step.action_id.as_str(),
+                        step_json,
+                        now().to_rfc3339(),
+                    ],
+                )
+                .expect("insert in-progress compensation step");
+            transaction
+                .execute(
+                    "INSERT INTO provider_discovery_operations (
+                         id, session_id, operation_kind, side_effect_class, status,
+                         action_id, expected_revision, request_sha256, approval_id,
+                         approval_grant_sha256, started_at, finished_at, created_at, updated_at
+                     ) VALUES (
+                         ?1, ?2, 'compensation', 'persistent', 'started',
+                         'action-run-atomic-compensation', 0, ?3, NULL, NULL,
+                         ?4, NULL, ?4, ?4
+                     )",
+                    rusqlite::params![
+                        operation_id.as_str(),
+                        session.id.as_str(),
+                        "b".repeat(64),
+                        now().to_rfc3339(),
+                    ],
+                )
+                .expect("insert started compensation operation");
+            restore_test_trigger(&transaction, &attempt_guard);
+            restore_test_trigger(&transaction, &operation_guard);
+            transaction
+                .execute(
+                    "UPDATE provider_discovery_sessions
+                     SET state = 'compensating',
+                         revision = 1,
+                         next_event_sequence = 2,
+                         commit_plan_sha256 = ?2,
+                         commit_attempt_id = ?3,
+                         active_operation_id = ?4,
+                         updated_at = ?5
+                     WHERE id = ?1",
+                    rusqlite::params![
+                        session.id.as_str(),
+                        plan_sha256,
+                        attempt_id.as_str(),
+                        operation_id.as_str(),
+                        now().to_rfc3339(),
+                    ],
+                )
+                .expect("activate compensation fixture");
+            transaction.commit().expect("commit fixture");
+        }
+
+        session.state = DiscoveryState::Compensating;
+        session.revision = 1;
+        session.next_event_sequence = 2;
+        session.commit_plan_sha256 = Some(plan_sha256);
+        session.commit_attempt_id = Some(attempt_id);
+        session.validate().expect("valid compensating session");
+        let failure = DiscoveryFailure {
+            code: "compensation_failed".to_owned(),
+            message_key: "discovery.compensation.failed".to_owned(),
+            recoverable: true,
+        };
+        assert!(
+            storage
+                .update_discovery_compensation_status(
+                    step_id,
+                    super::DiscoveryCompensationStatus::InProgress,
+                    super::DiscoveryCompensationStatus::OutcomeUnknown,
+                    None,
+                    now(),
+                )
+                .is_err(),
+            "an unknown step outcome cannot be split from its session and operation transition"
+        );
+        assert!(
+            storage
+                .update_discovery_compensation_status(
+                    step_id,
+                    super::DiscoveryCompensationStatus::InProgress,
+                    super::DiscoveryCompensationStatus::Failed,
+                    Some(&failure),
+                    now(),
+                )
+                .is_err(),
+            "a step failure cannot be split from its session transition"
+        );
+        assert_eq!(
+            storage
+                .connection()
+                .expect("database connection")
+                .query_row(
+                    "SELECT status FROM provider_discovery_compensation_steps WHERE id = ?1",
+                    [step_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .expect("unchanged compensation step"),
+            "in_progress"
+        );
+        let transition = apply(
+            &session,
+            ProviderDiscoveryAction::CompensationFailed {
+                failure: failure.clone(),
+            },
+            'c',
+        );
+        let failure_write = write(
+            transition,
+            None,
+            Some(DiscoveryCompletedOperationWrite {
+                id: operation_id.clone(),
+                outcome: super::DurableOperationOutcome::Failed,
+            }),
+        );
+        assert!(matches!(
+            storage
+                .fail_discovery_compensation_and_persist_transition(step_id, &failure_write)
+                .expect("atomically fail compensation"),
+            PersistDiscoveryTransition::Applied { .. }
+        ));
+        assert!(matches!(
+            storage
+                .fail_discovery_compensation_and_persist_transition(step_id, &failure_write)
+                .expect("idempotently replay atomic failure"),
+            PersistDiscoveryTransition::Replayed { .. }
+        ));
+
+        let snapshot = storage
+            .get_discovery_session(&session.id)
+            .expect("load failed compensation session");
+        assert_eq!(snapshot.session.failure, Some(failure.clone()));
+        assert!(snapshot.active_operation_id.is_none());
+        let stored = storage
+            .connection()
+            .expect("database connection")
+            .query_row(
+                "SELECT step.status, step.last_failure_json, operation.status
+                 FROM provider_discovery_compensation_steps AS step
+                 JOIN provider_discovery_operations AS operation
+                   ON operation.id = ?2
+                 WHERE step.id = ?1",
+                rusqlite::params![step_id, operation_id.as_str()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .expect("load atomic failure rows");
+        assert_eq!(stored.0, "failed");
+        assert_eq!(
+            serde_json::from_str::<DiscoveryFailure>(&stored.1).expect("stored failure"),
+            failure
+        );
+        assert_eq!(stored.2, "failed");
+    }
+
+    #[test]
+    fn unknown_billable_outcome_rejects_approval_with_missing_references() {
+        let root = tempdir().expect("temp directory");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let draft = draft_session("session-billable-unknown");
+        storage
+            .create_discovery_session(&draft, now())
+            .expect("create draft");
+        let approval_id = DiscoveryApprovalId::parse("approval-assistant").expect("approval id");
+        let grant = DiscoveryApprovalGrant::AssistantConsent {
+            assistant_route_id: ModelRouteId::from("assistant-route"),
+            evidence_ids: vec![EvidenceId::from("evidence-assistant")],
+            allowed_document_origins: vec![
+                CanonicalOrigin::parse("https://provider.example/").expect("origin"),
+            ],
+            max_calls: 2,
+            max_input_tokens: 4_096,
+            max_output_tokens: 2_048,
+            max_tool_calls: 4,
+            max_retries: 1,
+            max_cost_micro_units: 1_000_000,
+        };
+        let grant_json = serde_json::to_string(&grant).expect("grant JSON");
+        let grant_sha256 = sha256_hex(grant_json.as_bytes());
+        let binding = DiscoveryApprovalBinding {
+            approval_id: approval_id.clone(),
+            grant_sha256: grant_sha256.clone(),
+        };
+        let binding_json = serde_json::to_string(&binding).expect("binding JSON");
+        {
+            let mut connection = storage.connection().expect("database connection");
+            let operation_guard = suspend_test_trigger(
+                &connection,
+                "provider_discovery_operation_initial_state_guard",
+            );
+            let transaction = connection.transaction().expect("transaction");
+            transaction
+                .execute(
+                    "INSERT INTO provider_discovery_approvals (
+                         id, session_id, approval_kind, candidate_id, decision,
+                         grant_json, session_revision, grant_sha256, redaction_version, created_at
+                     ) VALUES (?1, ?2, 'assistant_consent', NULL, 'approved',
+                         ?3, 0, ?4, 1, ?5)",
+                    rusqlite::params![
+                        approval_id.as_str(),
+                        draft.id.as_str(),
+                        grant_json,
+                        grant_sha256,
+                        now().to_rfc3339(),
+                    ],
+                )
+                .expect("approval row");
+            transaction
+                .execute(
+                    "INSERT INTO provider_discovery_operations (
+                         id, session_id, operation_kind, side_effect_class, status,
+                         action_id, expected_revision, request_sha256, approval_id,
+                         approval_grant_sha256, started_at, finished_at, created_at, updated_at
+                     ) VALUES (
+                         'operation-assistant', ?1, 'build_assistant_manifest_draft',
+                         'billable_external', 'outcome_unknown', 'action-assistant', 0,
+                         ?2, ?3, ?4, ?5, ?5, ?5, ?5
+                     )",
+                    rusqlite::params![
+                        draft.id.as_str(),
+                        "a".repeat(64),
+                        approval_id.as_str(),
+                        binding.grant_sha256,
+                        now().to_rfc3339(),
+                    ],
+                )
+                .expect("operation row");
+            restore_test_trigger(&transaction, &operation_guard);
+            transaction
+                .execute(
+                    "UPDATE provider_discovery_sessions
+                     SET state = 'unknown_outcome',
+                         revision = 1,
+                         next_event_sequence = 2,
+                         unknown_operation = 'build_assistant_manifest_draft',
+                         active_operation_id = NULL,
+                         active_effect_approval_json = ?2,
+                         updated_at = ?3
+                     WHERE id = ?1",
+                    rusqlite::params![draft.id.as_str(), binding_json, now().to_rfc3339()],
+                )
+                .expect("unknown session state");
+            transaction.commit().expect("commit fixture");
+        }
+        let error = storage
+            .get_discovery_session(&draft.id)
+            .expect_err("missing assistant evidence and route must fail closed");
+        assert_eq!(error.code, CoreErrorCode::StorageCorrupted);
+    }
+}

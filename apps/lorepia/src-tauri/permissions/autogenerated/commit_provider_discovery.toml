@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-commit-provider-discovery"
+description = "Enables the commit_provider_discovery command without any pre-configured scope."
+commands.allow = ["commit_provider_discovery"]
+
+[[permission]]
+identifier = "deny-commit-provider-discovery"
+description = "Denies the commit_provider_discovery command without any pre-configured scope."
+commands.deny = ["commit_provider_discovery"]

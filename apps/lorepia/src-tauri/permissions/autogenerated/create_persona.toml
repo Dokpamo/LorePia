@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-create-persona"
+description = "Enables the create_persona command without any pre-configured scope."
+commands.allow = ["create_persona"]
+
+[[permission]]
+identifier = "deny-create-persona"
+description = "Denies the create_persona command without any pre-configured scope."
+commands.deny = ["create_persona"]

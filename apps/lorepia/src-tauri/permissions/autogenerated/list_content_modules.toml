@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-content-modules"
+description = "Enables the list_content_modules command without any pre-configured scope."
+commands.allow = ["list_content_modules"]
+
+[[permission]]
+identifier = "deny-list-content-modules"
+description = "Denies the list_content_modules command without any pre-configured scope."
+commands.deny = ["list_content_modules"]

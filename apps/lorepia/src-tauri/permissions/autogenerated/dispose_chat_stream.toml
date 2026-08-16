@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-dispose-chat-stream"
+description = "Enables the dispose_chat_stream command without any pre-configured scope."
+commands.allow = ["dispose_chat_stream"]
+
+[[permission]]
+identifier = "deny-dispose-chat-stream"
+description = "Denies the dispose_chat_stream command without any pre-configured scope."
+commands.deny = ["dispose_chat_stream"]

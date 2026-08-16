@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-retry-interrupted-memory-job"
+description = "Enables the retry_interrupted_memory_job command without any pre-configured scope."
+commands.allow = ["retry_interrupted_memory_job"]
+
+[[permission]]
+identifier = "deny-retry-interrupted-memory-job"
+description = "Denies the retry_interrupted_memory_job command without any pre-configured scope."
+commands.deny = ["retry_interrupted_memory_job"]

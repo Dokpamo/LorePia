@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-run-provider-discovery-assistant-turn"
+description = "Enables the run_provider_discovery_assistant_turn command without any pre-configured scope."
+commands.allow = ["run_provider_discovery_assistant_turn"]
+
+[[permission]]
+identifier = "deny-run-provider-discovery-assistant-turn"
+description = "Denies the run_provider_discovery_assistant_turn command without any pre-configured scope."
+commands.deny = ["run_provider_discovery_assistant_turn"]

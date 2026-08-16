@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-completed-content-package-exports"
+description = "Enables the list_completed_content_package_exports command without any pre-configured scope."
+commands.allow = ["list_completed_content_package_exports"]
+
+[[permission]]
+identifier = "deny-list-completed-content-package-exports"
+description = "Denies the list_completed_content_package_exports command without any pre-configured scope."
+commands.deny = ["list_completed_content_package_exports"]

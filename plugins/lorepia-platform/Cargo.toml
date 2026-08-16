@@ -1,0 +1,71 @@
+[package]
+name = "tauri-plugin-lorepia-platform"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+links = "tauri-plugin-lorepia-platform"
+
+[features]
+default = []
+wry = ["tauri/wry"]
+
+[dependencies]
+serde.workspace = true
+sha2.workspace = true
+tauri = { version = "=2.11.5", default-features = false }
+tokio.workspace = true
+uuid.workspace = true
+zeroize.workspace = true
+
+[build-dependencies]
+tauri-plugin = { version = "=2.6.3", features = ["build"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10"
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+  "NSApplication",
+  "NSOpenPanel",
+  "NSPanel",
+  "NSPasteboard",
+  "NSResponder",
+  "NSSavePanel",
+  "NSWindow",
+] }
+objc2-foundation = { version = "0.3", default-features = false, features = [
+  "NSArray",
+  "NSPathUtilities",
+  "NSString",
+  "NSURL",
+] }
+security-framework-sys = { version = "2.17", features = ["OSX_10_15"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+  "ApplicationModel_DataTransfer",
+  "Foundation",
+  "Security_Credentials",
+  "Storage",
+  "Storage_Pickers",
+  "Storage_Streams",
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Security_Cryptography",
+  "Win32_Storage_FileSystem",
+  "Win32_System_Com",
+  "Win32_System_DataExchange",
+  "Win32_System_Threading",
+  "Win32_System_WinRT",
+  "Win32_UI_Shell",
+] }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+tempfile.workspace = true

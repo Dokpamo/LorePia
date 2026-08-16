@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-select-branch"
+description = "Enables the select_branch command without any pre-configured scope."
+commands.allow = ["select_branch"]
+
+[[permission]]
+identifier = "deny-select-branch"
+description = "Denies the select_branch command without any pre-configured scope."
+commands.deny = ["select_branch"]

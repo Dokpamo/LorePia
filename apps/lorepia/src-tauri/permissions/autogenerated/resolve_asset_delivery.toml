@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-resolve-asset-delivery"
+description = "Enables the resolve_asset_delivery command without any pre-configured scope."
+commands.allow = ["resolve_asset_delivery"]
+
+[[permission]]
+identifier = "deny-resolve-asset-delivery"
+description = "Denies the resolve_asset_delivery command without any pre-configured scope."
+commands.deny = ["resolve_asset_delivery"]

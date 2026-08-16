@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-retryable-memory-query-embeddings"
+description = "Enables the list_retryable_memory_query_embeddings command without any pre-configured scope."
+commands.allow = ["list_retryable_memory_query_embeddings"]
+
+[[permission]]
+identifier = "deny-list-retryable-memory-query-embeddings"
+description = "Denies the list_retryable_memory_query_embeddings command without any pre-configured scope."
+commands.deny = ["list_retryable_memory_query_embeddings"]

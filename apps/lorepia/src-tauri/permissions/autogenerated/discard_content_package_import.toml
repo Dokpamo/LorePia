@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-discard-content-package-import"
+description = "Enables the discard_content_package_import command without any pre-configured scope."
+commands.allow = ["discard_content_package_import"]
+
+[[permission]]
+identifier = "deny-discard-content-package-import"
+description = "Denies the discard_content_package_import command without any pre-configured scope."
+commands.deny = ["discard_content_package_import"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-persona-page"
+description = "Enables the list_persona_page command without any pre-configured scope."
+commands.allow = ["list_persona_page"]
+
+[[permission]]
+identifier = "deny-list-persona-page"
+description = "Denies the list_persona_page command without any pre-configured scope."
+commands.deny = ["list_persona_page"]

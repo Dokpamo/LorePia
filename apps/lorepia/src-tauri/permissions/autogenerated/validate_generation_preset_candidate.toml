@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-validate-generation-preset-candidate"
+description = "Enables the validate_generation_preset_candidate command without any pre-configured scope."
+commands.allow = ["validate_generation_preset_candidate"]
+
+[[permission]]
+identifier = "deny-validate-generation-preset-candidate"
+description = "Denies the validate_generation_preset_candidate command without any pre-configured scope."
+commands.deny = ["validate_generation_preset_candidate"]

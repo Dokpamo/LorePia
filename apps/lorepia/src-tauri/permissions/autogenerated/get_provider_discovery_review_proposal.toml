@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-provider-discovery-review-proposal"
+description = "Enables the get_provider_discovery_review_proposal command without any pre-configured scope."
+commands.allow = ["get_provider_discovery_review_proposal"]
+
+[[permission]]
+identifier = "deny-get-provider-discovery-review-proposal"
+description = "Denies the get_provider_discovery_review_proposal command without any pre-configured scope."
+commands.deny = ["get_provider_discovery_review_proposal"]

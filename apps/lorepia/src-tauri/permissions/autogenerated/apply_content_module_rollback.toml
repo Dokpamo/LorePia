@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-apply-content-module-rollback"
+description = "Enables the apply_content_module_rollback command without any pre-configured scope."
+commands.allow = ["apply_content_module_rollback"]
+
+[[permission]]
+identifier = "deny-apply-content-module-rollback"
+description = "Denies the apply_content_module_rollback command without any pre-configured scope."
+commands.deny = ["apply_content_module_rollback"]

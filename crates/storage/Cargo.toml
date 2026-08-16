@@ -1,0 +1,30 @@
+[package]
+name = "lorepia-storage"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+chrono.workspace = true
+hex.workspace = true
+lorepia-domain = { path = "../domain" }
+lorepia-orchestration = { path = "../orchestration" }
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+uuid.workspace = true
+url.workspace = true
+
+[target.'cfg(any(target_os = "android", target_os = "linux", target_vendor = "apple"))'.dependencies]
+rustix.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

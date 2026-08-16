@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-simulate-knowledge-activation"
+description = "Enables the simulate_knowledge_activation command without any pre-configured scope."
+commands.allow = ["simulate_knowledge_activation"]
+
+[[permission]]
+identifier = "deny-simulate-knowledge-activation"
+description = "Denies the simulate_knowledge_activation command without any pre-configured scope."
+commands.deny = ["simulate_knowledge_activation"]

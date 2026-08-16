@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-resolve-content-module-rollback"
+description = "Enables the resolve_content_module_rollback command without any pre-configured scope."
+commands.allow = ["resolve_content_module_rollback"]
+
+[[permission]]
+identifier = "deny-resolve-content-module-rollback"
+description = "Denies the resolve_content_module_rollback command without any pre-configured scope."
+commands.deny = ["resolve_content_module_rollback"]

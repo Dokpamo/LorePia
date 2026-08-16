@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-record-provider-discovery-assistant-failure"
+description = "Enables the record_provider_discovery_assistant_failure command without any pre-configured scope."
+commands.allow = ["record_provider_discovery_assistant_failure"]
+
+[[permission]]
+identifier = "deny-record-provider-discovery-assistant-failure"
+description = "Denies the record_provider_discovery_assistant_failure command without any pre-configured scope."
+commands.deny = ["record_provider_discovery_assistant_failure"]

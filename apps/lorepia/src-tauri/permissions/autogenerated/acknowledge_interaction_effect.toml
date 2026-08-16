@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-acknowledge-interaction-effect"
+description = "Enables the acknowledge_interaction_effect command without any pre-configured scope."
+commands.allow = ["acknowledge_interaction_effect"]
+
+[[permission]]
+identifier = "deny-acknowledge-interaction-effect"
+description = "Denies the acknowledge_interaction_effect command without any pre-configured scope."
+commands.deny = ["acknowledge_interaction_effect"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-explain-prompt-plan"
+description = "Enables the explain_prompt_plan command without any pre-configured scope."
+commands.allow = ["explain_prompt_plan"]
+
+[[permission]]
+identifier = "deny-explain-prompt-plan"
+description = "Denies the explain_prompt_plan command without any pre-configured scope."
+commands.deny = ["explain_prompt_plan"]

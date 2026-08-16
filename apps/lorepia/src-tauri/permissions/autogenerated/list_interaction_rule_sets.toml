@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-interaction-rule-sets"
+description = "Enables the list_interaction_rule_sets command without any pre-configured scope."
+commands.allow = ["list_interaction_rule_sets"]
+
+[[permission]]
+identifier = "deny-list-interaction-rule-sets"
+description = "Denies the list_interaction_rule_sets command without any pre-configured scope."
+commands.deny = ["list_interaction_rule_sets"]

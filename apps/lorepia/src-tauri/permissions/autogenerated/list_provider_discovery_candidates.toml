@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-provider-discovery-candidates"
+description = "Enables the list_provider_discovery_candidates command without any pre-configured scope."
+commands.allow = ["list_provider_discovery_candidates"]
+
+[[permission]]
+identifier = "deny-list-provider-discovery-candidates"
+description = "Denies the list_provider_discovery_candidates command without any pre-configured scope."
+commands.deny = ["list_provider_discovery_candidates"]

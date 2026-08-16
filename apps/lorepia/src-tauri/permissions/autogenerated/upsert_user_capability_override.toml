@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-upsert-user-capability-override"
+description = "Enables the upsert_user_capability_override command without any pre-configured scope."
+commands.allow = ["upsert_user_capability_override"]
+
+[[permission]]
+identifier = "deny-upsert-user-capability-override"
+description = "Denies the upsert_user_capability_override command without any pre-configured scope."
+commands.deny = ["upsert_user_capability_override"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-supply-provider-discovery-curl-evidence"
+description = "Enables the supply_provider_discovery_curl_evidence command without any pre-configured scope."
+commands.allow = ["supply_provider_discovery_curl_evidence"]
+
+[[permission]]
+identifier = "deny-supply-provider-discovery-curl-evidence"
+description = "Denies the supply_provider_discovery_curl_evidence command without any pre-configured scope."
+commands.deny = ["supply_provider_discovery_curl_evidence"]

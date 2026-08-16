@@ -1,0 +1,205 @@
+{
+  "branches": [
+    {
+      "conversation_id": "2faca127-ff70-4acb-b26f-60f1042b8d11",
+      "created_at": "2026-08-11T02:50:25.095647Z",
+      "fork_message_id": null,
+      "head_message_id": "30ef489c-24c5-436e-9e77-5de4e6358e48",
+      "id": "e1a0da4e-ee02-4709-8b0d-f6d3f213f1bf",
+      "title": null,
+      "updated_at": "2026-08-11T02:50:25.113043Z"
+    }
+  ],
+  "character": {
+    "avatar_asset_hash": "aa7bb0431aaeb198a77c26a14fe6dd714a75e4d7db94e3e1238a1fdcbfe1f8d4",
+    "created_at": "2026-08-11T02:50:24.992914Z",
+    "description": "Asset persistence fixture",
+    "id": "3c0ffb8c-e24b-48a0-ad31-d0455665c290",
+    "name": "Synthetic Avatar",
+    "source_hash": "2c528a64fbf36a011e29c1a692cd13568b83f76e764ea03487393c28a2e666de"
+  },
+  "conversation": {
+    "character_id": "3c0ffb8c-e24b-48a0-ad31-d0455665c290",
+    "created_at": "2026-08-11T02:50:25.095639Z",
+    "id": "2faca127-ff70-4acb-b26f-60f1042b8d11",
+    "title": "Synthetic continuity conversation",
+    "updated_at": "2026-08-11T02:50:25.095639Z"
+  },
+  "core_schema_version_after_reopen": 11,
+  "core_schema_version_before": 11,
+  "database_stats": {
+    "characters": 1,
+    "conversations": 1,
+    "messages": 2,
+    "pending_imports": 0
+  },
+  "fixture_format": 1,
+  "generation_id": "b2c74070-4ef3-4645-a530-a15062d3921a",
+  "generation_preset": {
+    "created_at": "2026-08-02T00:00:00Z",
+    "display_name": "Synthetic fixture preset",
+    "id": "fixture-openai-preset",
+    "model_route_id": "fixture-openai-route",
+    "prompt_cache": {
+      "context_reference": null,
+      "mode": "provider_default",
+      "ttl": {
+        "kind": "provider_default"
+      }
+    },
+    "reasoning": {
+      "budget_tokens": null,
+      "effort": null,
+      "mode": "provider_default",
+      "preserve_opaque_state": false,
+      "summary": "provider_default"
+    },
+    "updated_at": "2026-08-02T00:00:00Z",
+    "values": []
+  },
+  "generator": "external seeder linked to frozen lorepia-core",
+  "inspection": {
+    "source_sha256": "2c528a64fbf36a011e29c1a692cd13568b83f76e764ea03487393c28a2e666de",
+    "source_size": 383
+  },
+  "known_gap": "platform credential vault cannot be seeded by Rust Core; the credential was runtime-only and is intentionally absent from the Core root",
+  "loopback_request": {
+    "authenticated_match": true,
+    "raw_credential_retained": false,
+    "request_line": "POST /v1/chat/completions HTTP/1.1"
+  },
+  "messages": [
+    {
+      "content": "Synthetic user message.",
+      "conversation_id": "2faca127-ff70-4acb-b26f-60f1042b8d11",
+      "created_at": "2026-08-11T02:50:25.112587Z",
+      "generation_id": null,
+      "id": "ba449e07-4475-4ade-9a61-1547212b9536",
+      "parent_id": null,
+      "role": "user",
+      "status": "complete"
+    },
+    {
+      "content": "Synthetic assistant reply.",
+      "conversation_id": "2faca127-ff70-4acb-b26f-60f1042b8d11",
+      "created_at": "2026-08-11T02:50:25.112859Z",
+      "generation_id": "b2c74070-4ef3-4645-a530-a15062d3921a",
+      "id": "30ef489c-24c5-436e-9e77-5de4e6358e48",
+      "parent_id": "ba449e07-4475-4ade-9a61-1547212b9536",
+      "role": "assistant",
+      "status": "complete"
+    }
+  ],
+  "model_route": {
+    "api_family": "openai_chat_completions",
+    "connection_id": "fixture-openai-loopback",
+    "display_name": "Synthetic fixture model",
+    "first_seen_at": "2026-08-02T00:00:00Z",
+    "id": "fixture-openai-route",
+    "last_reconciled_sync_job_id": null,
+    "last_seen_at": "2026-08-02T00:00:00Z",
+    "metadata_observed_at": null,
+    "metadata_source": "user_override",
+    "metadata_sync_job_id": null,
+    "miss_count": 0,
+    "model_id": "fixture-model",
+    "raw_metadata": null,
+    "route_config": {
+      "deployment_id": null,
+      "endpoint_path": null,
+      "region": null,
+      "values": []
+    },
+    "status": "available"
+  },
+  "provider_connection": {
+    "api_origin": "http://127.0.0.1:38081",
+    "config": {
+      "api_base_path": "/v1",
+      "local_network_approval": null,
+      "network_mode": "local_loopback",
+      "values": [
+        {
+          "key": "api_base_url",
+          "value": {
+            "type": "text",
+            "value": "http://127.0.0.1:38081/v1"
+          }
+        }
+      ]
+    },
+    "created_at": "2026-08-11T02:50:25.060425Z",
+    "credential_ref": "fixture-openai-loopback",
+    "credential_scope": {
+      "allowed_origins": [
+        "http://127.0.0.1:38081"
+      ],
+      "auth_binding": {
+        "kind": "bearer_header"
+      },
+      "redirect_policy": "deny"
+    },
+    "display_name": "Synthetic loopback fixture",
+    "id": "fixture-openai-loopback",
+    "status": "untested",
+    "template_id": "openai-chat-compatible-v1",
+    "template_version": 2,
+    "timeout_seconds": 5,
+    "updated_at": "2026-08-11T02:50:25.060425Z"
+  },
+  "reopen": {
+    "characters": [
+      {
+        "avatar_asset_hash": "aa7bb0431aaeb198a77c26a14fe6dd714a75e4d7db94e3e1238a1fdcbfe1f8d4",
+        "created_at": "2026-08-11T02:50:24.992914Z",
+        "description": "Asset persistence fixture",
+        "id": "3c0ffb8c-e24b-48a0-ad31-d0455665c290",
+        "name": "Synthetic Avatar",
+        "source_hash": "2c528a64fbf36a011e29c1a692cd13568b83f76e764ea03487393c28a2e666de"
+      }
+    ],
+    "conversations": [
+      {
+        "character_id": "3c0ffb8c-e24b-48a0-ad31-d0455665c290",
+        "created_at": "2026-08-11T02:50:25.095639Z",
+        "id": "2faca127-ff70-4acb-b26f-60f1042b8d11",
+        "title": "Synthetic continuity conversation",
+        "updated_at": "2026-08-11T02:50:25.114899Z"
+      }
+    ],
+    "messages": [
+      {
+        "content": "Synthetic user message.",
+        "conversation_id": "2faca127-ff70-4acb-b26f-60f1042b8d11",
+        "created_at": "2026-08-11T02:50:25.112587Z",
+        "generation_id": null,
+        "id": "ba449e07-4475-4ade-9a61-1547212b9536",
+        "parent_id": null,
+        "role": "user",
+        "status": "complete"
+      },
+      {
+        "content": "Synthetic assistant reply.",
+        "conversation_id": "2faca127-ff70-4acb-b26f-60f1042b8d11",
+        "created_at": "2026-08-11T02:50:25.112859Z",
+        "generation_id": "b2c74070-4ef3-4645-a530-a15062d3921a",
+        "id": "30ef489c-24c5-436e-9e77-5de4e6358e48",
+        "parent_id": "ba449e07-4475-4ade-9a61-1547212b9536",
+        "role": "assistant",
+        "status": "complete"
+      }
+    ],
+    "settings": {
+      "preserve_partial_generations": true,
+      "selected_generation_preset_id": "fixture-openai-preset",
+      "selected_model_route_id": "fixture-openai-route",
+      "selected_provider_profile_id": null
+    }
+  },
+  "settings": {
+    "preserve_partial_generations": true,
+    "selected_generation_preset_id": "fixture-openai-preset",
+    "selected_model_route_id": "fixture-openai-route",
+    "selected_provider_profile_id": null
+  }
+}

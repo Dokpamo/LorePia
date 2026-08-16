@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-preview-transform-rule"
+description = "Enables the preview_transform_rule command without any pre-configured scope."
+commands.allow = ["preview_transform_rule"]
+
+[[permission]]
+identifier = "deny-preview-transform-rule"
+description = "Denies the preview_transform_rule command without any pre-configured scope."
+commands.deny = ["preview_transform_rule"]

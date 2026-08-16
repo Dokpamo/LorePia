@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-diff-content-module-revisions"
+description = "Enables the diff_content_module_revisions command without any pre-configured scope."
+commands.allow = ["diff_content_module_revisions"]
+
+[[permission]]
+identifier = "deny-diff-content-module-revisions"
+description = "Denies the diff_content_module_revisions command without any pre-configured scope."
+commands.deny = ["diff_content_module_revisions"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-deactivate-content-module"
+description = "Enables the deactivate_content_module command without any pre-configured scope."
+commands.allow = ["deactivate_content_module"]
+
+[[permission]]
+identifier = "deny-deactivate-content-module"
+description = "Denies the deactivate_content_module command without any pre-configured scope."
+commands.deny = ["deactivate_content_module"]

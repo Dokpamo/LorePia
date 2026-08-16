@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-subscribe-generation"
+description = "Enables the subscribe_generation command without any pre-configured scope."
+commands.allow = ["subscribe_generation"]
+
+[[permission]]
+identifier = "deny-subscribe-generation"
+description = "Denies the subscribe_generation command without any pre-configured scope."
+commands.deny = ["subscribe_generation"]

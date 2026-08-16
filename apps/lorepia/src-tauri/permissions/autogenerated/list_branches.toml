@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-branches"
+description = "Enables the list_branches command without any pre-configured scope."
+commands.allow = ["list_branches"]
+
+[[permission]]
+identifier = "deny-list-branches"
+description = "Denies the list_branches command without any pre-configured scope."
+commands.deny = ["list_branches"]

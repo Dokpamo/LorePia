@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-validate-prompt-preset"
+description = "Enables the validate_prompt_preset command without any pre-configured scope."
+commands.allow = ["validate_prompt_preset"]
+
+[[permission]]
+identifier = "deny-validate-prompt-preset"
+description = "Denies the validate_prompt_preset command without any pre-configured scope."
+commands.deny = ["validate_prompt_preset"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-request-provider-discovery-assistant-revision"
+description = "Enables the request_provider_discovery_assistant_revision command without any pre-configured scope."
+commands.allow = ["request_provider_discovery_assistant_revision"]
+
+[[permission]]
+identifier = "deny-request-provider-discovery-assistant-revision"
+description = "Denies the request_provider_discovery_assistant_revision command without any pre-configured scope."
+commands.deny = ["request_provider_discovery_assistant_revision"]

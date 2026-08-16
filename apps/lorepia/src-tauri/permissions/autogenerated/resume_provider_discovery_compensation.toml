@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-resume-provider-discovery-compensation"
+description = "Enables the resume_provider_discovery_compensation command without any pre-configured scope."
+commands.allow = ["resume_provider_discovery_compensation"]
+
+[[permission]]
+identifier = "deny-resume-provider-discovery-compensation"
+description = "Denies the resume_provider_discovery_compensation command without any pre-configured scope."
+commands.deny = ["resume_provider_discovery_compensation"]

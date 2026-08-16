@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-delete-knowledge-book"
+description = "Enables the delete_knowledge_book command without any pre-configured scope."
+commands.allow = ["delete_knowledge_book"]
+
+[[permission]]
+identifier = "deny-delete-knowledge-book"
+description = "Denies the delete_knowledge_book command without any pre-configured scope."
+commands.deny = ["delete_knowledge_book"]

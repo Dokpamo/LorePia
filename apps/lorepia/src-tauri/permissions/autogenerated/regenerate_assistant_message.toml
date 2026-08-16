@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-regenerate-assistant-message"
+description = "Enables the regenerate_assistant_message command without any pre-configured scope."
+commands.allow = ["regenerate_assistant_message"]
+
+[[permission]]
+identifier = "deny-regenerate-assistant-message"
+description = "Denies the regenerate_assistant_message command without any pre-configured scope."
+commands.deny = ["regenerate_assistant_message"]

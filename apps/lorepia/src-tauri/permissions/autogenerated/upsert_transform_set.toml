@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-upsert-transform-set"
+description = "Enables the upsert_transform_set command without any pre-configured scope."
+commands.allow = ["upsert_transform_set"]
+
+[[permission]]
+identifier = "deny-upsert-transform-set"
+description = "Denies the upsert_transform_set command without any pre-configured scope."
+commands.deny = ["upsert_transform_set"]

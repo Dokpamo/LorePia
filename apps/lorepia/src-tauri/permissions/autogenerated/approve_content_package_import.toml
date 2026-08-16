@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-approve-content-package-import"
+description = "Enables the approve_content_package_import command without any pre-configured scope."
+commands.allow = ["approve_content_package_import"]
+
+[[permission]]
+identifier = "deny-approve-content-package-import"
+description = "Denies the approve_content_package_import command without any pre-configured scope."
+commands.deny = ["approve_content_package_import"]

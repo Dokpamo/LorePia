@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-prepare-provider-catalog-rollback"
+description = "Enables the prepare_provider_catalog_rollback command without any pre-configured scope."
+commands.allow = ["prepare_provider_catalog_rollback"]
+
+[[permission]]
+identifier = "deny-prepare-provider-catalog-rollback"
+description = "Denies the prepare_provider_catalog_rollback command without any pre-configured scope."
+commands.deny = ["prepare_provider_catalog_rollback"]

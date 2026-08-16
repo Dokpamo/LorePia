@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-reopen-content-package-import"
+description = "Enables the reopen_content_package_import command without any pre-configured scope."
+commands.allow = ["reopen_content_package_import"]
+
+[[permission]]
+identifier = "deny-reopen-content-package-import"
+description = "Denies the reopen_content_package_import command without any pre-configured scope."
+commands.deny = ["reopen_content_package_import"]

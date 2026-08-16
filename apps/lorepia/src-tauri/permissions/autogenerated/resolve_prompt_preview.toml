@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-resolve-prompt-preview"
+description = "Enables the resolve_prompt_preview command without any pre-configured scope."
+commands.allow = ["resolve_prompt_preview"]
+
+[[permission]]
+identifier = "deny-resolve-prompt-preview"
+description = "Denies the resolve_prompt_preview command without any pre-configured scope."
+commands.deny = ["resolve_prompt_preview"]

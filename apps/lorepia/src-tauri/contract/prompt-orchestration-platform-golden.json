@@ -1,0 +1,48 @@
+{
+  "schema_version": 2,
+  "projection_owner": "lorepia-shell-api",
+  "resolved_prompt_plan_golden_sha256": "7c32c1146ffdecbc5bdf6a927eb8eae80408baa8084b8e25430883561092149b",
+  "commands": [
+    {
+      "name": "resolve_prompt_preview",
+      "request_type": "ResolvePromptPreviewInput",
+      "response_type": "ExpertPromptPreviewDto",
+      "execution": "async",
+      "native_context": "AppHandle+State<AppState>"
+    },
+    {
+      "name": "send_reviewed_prompt",
+      "request_type": "ReviewedPromptSendInput",
+      "response_type": "GenerationStartedDto",
+      "execution": "async",
+      "native_context": "AppHandle+State<AppState>"
+    },
+    {
+      "name": "explain_prompt_plan",
+      "request_type": "ExplainPromptPlanInput",
+      "response_type": "PromptResolutionTraceDto",
+      "execution": "sync",
+      "native_context": "State<AppState>"
+    }
+  ],
+  "shared_config": "tauri.conf.json",
+  "release_config": "tauri.release.conf.json",
+  "platforms": [
+    {
+      "platform": "android",
+      "target_config": "tauri.android.conf.json"
+    },
+    {
+      "platform": "ios",
+      "target_config": "tauri.ios.conf.json"
+    },
+    {
+      "platform": "macos",
+      "target_config": "tauri.macos.conf.json"
+    },
+    {
+      "platform": "windows",
+      "target_config": "tauri.windows.conf.json"
+    }
+  ]
+}

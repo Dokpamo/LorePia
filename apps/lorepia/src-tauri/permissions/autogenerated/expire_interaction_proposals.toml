@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-expire-interaction-proposals"
+description = "Enables the expire_interaction_proposals command without any pre-configured scope."
+commands.allow = ["expire_interaction_proposals"]
+
+[[permission]]
+identifier = "deny-expire-interaction-proposals"
+description = "Denies the expire_interaction_proposals command without any pre-configured scope."
+commands.deny = ["expire_interaction_proposals"]

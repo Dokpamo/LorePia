@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-upsert-task-profile"
+description = "Enables the upsert_task_profile command without any pre-configured scope."
+commands.allow = ["upsert_task_profile"]
+
+[[permission]]
+identifier = "deny-upsert-task-profile"
+description = "Denies the upsert_task_profile command without any pre-configured scope."
+commands.deny = ["upsert_task_profile"]

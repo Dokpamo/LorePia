@@ -1,0 +1,8 @@
+{
+  "spec": "chara_card_v3",
+  "spec_version": "3.0",
+  "data": {
+    "name": "Synthetic Guide",
+    "description": "Project-owned test character."
+  }
+}

@@ -1,0 +1,81 @@
+{
+  "format_version": 1,
+  "source_repository": "https://github.com/Dokpamo/lorepia-native-reference",
+  "annotated_tag": "native-baseline-before-tauri-2026-08-02",
+  "annotated_tag_object": "9a4a3d5ee08c3457fed9842ccf4184272805e0d0",
+  "peeled_commit": "66e398fa6256f17b04c82569e6764a9e5332265c",
+  "tag_signature": "unsigned_annotated_tag",
+  "checkout": {
+    "location": "ephemeral_external_checkout_outside_workspace",
+    "head_mode": "detached_exact_commit",
+    "workspace_product_source_copied": false
+  },
+  "generator": {
+    "kind": "committed_adapter_path_linked_to_exact_frozen_lorepia_core",
+    "adapter_source": "testdata/tauri-upgrade/native-schema-11/harness/src/main.rs",
+    "adapter_source_sha256": "c86ab90f678241f7a9bb8fbdd7e56017c2b3f508075c8eb2d9d0f913f68a7257",
+    "manifest_template": "testdata/tauri-upgrade/native-schema-11/harness/Cargo.toml.in",
+    "manifest_template_sha256": "b88caef975074282e5d032b4fffe7c7afd6192b2aed48296c50b2623d2bd6bcb",
+    "lockfile": "testdata/tauri-upgrade/native-schema-11/harness/Cargo.lock",
+    "lockfile_sha256": "846c2665e4aa1f14a8341ca4f6697d5986c9fe052685bde3c4bd19e25db2e395",
+    "compatible_adapter_source": "testdata/tauri-upgrade/native-schema-11/compatible-harness/src/main.rs",
+    "compatible_adapter_source_sha256": "3a36d747e0a4a283316895563b509f17c48dfb2d1dbafd6965c6cfed5a475c13",
+    "compatible_manifest_template": "testdata/tauri-upgrade/native-schema-11/compatible-harness/Cargo.toml.in",
+    "compatible_manifest_template_sha256": "9975e95bfa159d196b7fd63654cdcd1d8f26bf3b8141828ef639992a8e85725e",
+    "compatible_lockfile": "testdata/tauri-upgrade/native-schema-11/compatible-harness/Cargo.lock",
+    "compatible_lockfile_sha256": "99d8bfd5b39ffdb8d5df917092e2bdbf5255b582fbc75db1392bc584e995b674",
+    "command": "./scripts/test-native-schema11-runtime.sh",
+    "reproducibility": "The adapter recreates the frozen semantic scenario. Frozen Core-generated UUIDs and timestamps mean a rerun is not claimed to reproduce byte-identical SQL; committed artifact hashes remain authoritative."
+  },
+  "seed": {
+    "relative_path": "testdata/packages/with-avatar.charx",
+    "sha256": "2c528a64fbf36a011e29c1a692cd13568b83f76e764ea03487393c28a2e666de",
+    "synthetic_only": true
+  },
+  "schema": {
+    "application_registry_versions": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+    "pragma_user_version": 0,
+    "foreign_key_check": "pass",
+    "integrity_check": "ok",
+    "clean_checkpoint": {
+      "busy": 0,
+      "log_frames": 0,
+      "checkpointed_frames": 0
+    }
+  },
+  "artifacts": {
+    "schema-11.sql": "e39beb6dab0bc79770928a06d0b9f0e408dca0c53f898fa01b4957c03f2c9297",
+    "semantic-manifest.json": "b2aecb9267136db9d49a87583be521107aa2499dfe53cc624579cad00e743e86",
+    "schema-inventory.json": "92b5db08d3aa307b4ef56734f0738fc6f6d8c41ba3d8d474a1a08c028b17cee6",
+    "frozen-core-run.json": "4c3120a6f962b8f5436a62631212615c7addb59b3f6747fcf506775a087cc1f8",
+    "assets/avatar.png": "aa7bb0431aaeb198a77c26a14fe6dd714a75e4d7db94e3e1238a1fdcbfe1f8d4",
+    "harness/Cargo.toml.in": "b88caef975074282e5d032b4fffe7c7afd6192b2aed48296c50b2623d2bd6bcb",
+    "harness/Cargo.lock": "846c2665e4aa1f14a8341ca4f6697d5986c9fe052685bde3c4bd19e25db2e395",
+    "harness/src/main.rs": "c86ab90f678241f7a9bb8fbdd7e56017c2b3f508075c8eb2d9d0f913f68a7257",
+    "compatible-harness/Cargo.toml.in": "9975e95bfa159d196b7fd63654cdcd1d8f26bf3b8141828ef639992a8e85725e",
+    "compatible-harness/Cargo.lock": "99d8bfd5b39ffdb8d5df917092e2bdbf5255b582fbc75db1392bc584e995b674",
+    "compatible-harness/src/main.rs": "3a36d747e0a4a283316895563b509f17c48dfb2d1dbafd6965c6cfed5a475c13"
+  },
+  "generation_evidence": {
+    "temporary_clean_database_sha256": "e6eee4ba440834dd761e75b8cabb2a72a510a588caeeaa76b353d03fcb3a74a8",
+    "committed_artifact": false,
+    "purpose": "One-time clean-checkpoint export evidence only; the SQL dump and semantic artifacts are the committed fixture."
+  },
+  "runtime_verification": {
+    "script": "scripts/test-native-schema11-runtime.sh",
+    "script_sha256": "b6ebf7b06f82504cf899059677a0a42152a9fd2111dc621635afd80cfb6671d3",
+    "private_reference_authentication": "approved local checkout or read-only token; when configured, CI token use is limited to trusted post-merge main pushes",
+    "exact_frozen_core": "seeds and later inspects the preserved canonical schema-11 snapshot",
+    "tauri_app_state_shell_api": "keeps Shell unpublished before test bootstrap, writes A through the production Shell API boundary, and reopens A/B after the standalone recovery client exits",
+    "source_compatible_recovery_client": "a separately prebuilt Shell API client reopens the selected committed database generation, reads write A, persists write B, and is followed by a Tauri AppState/Shell A/B readback; its executable SHA-256 is bound into ephemeral runtime evidence",
+    "source_compatible_scope": "host-neutral source/database and command-equivalent Shell-boundary compatibility only; no AppHandle, platform plugin, installer, signature, platform vault, or platform update mechanism is exercised",
+    "ci_secret_absent_result": "NOT_RUN; no exact-runtime pass is claimed",
+    "signed_platform_compatible_recovery_scope": "NOT_RUN; remains a release gate"
+  },
+  "credential_evidence": {
+    "loopback_authenticated_match": true,
+    "raw_credential_persisted": false,
+    "platform_vault_seeded": false,
+    "limitation": "Signed per-platform install/update/forward-versioned compatible recovery, including post-Tauri A/B data and credential-vault continuity, is NOT_RUN and remains a release gate."
+  }
+}

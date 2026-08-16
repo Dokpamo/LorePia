@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-inspect-import"
+description = "Enables the inspect_import command without any pre-configured scope."
+commands.allow = ["inspect_import"]
+
+[[permission]]
+identifier = "deny-inspect-import"
+description = "Denies the inspect_import command without any pre-configured scope."
+commands.deny = ["inspect_import"]

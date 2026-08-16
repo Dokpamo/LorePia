@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-delete-interaction-rule-set"
+description = "Enables the delete_interaction_rule_set command without any pre-configured scope."
+commands.allow = ["delete_interaction_rule_set"]
+
+[[permission]]
+identifier = "deny-delete-interaction-rule-set"
+description = "Denies the delete_interaction_rule_set command without any pre-configured scope."
+commands.deny = ["delete_interaction_rule_set"]

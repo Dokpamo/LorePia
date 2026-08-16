@@ -1,0 +1,71 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Tauri / Svelte
+/apps/lorepia/node_modules/
+/apps/lorepia/dist/
+/apps/lorepia/coverage/
+/apps/lorepia/.svelte-kit/
+/apps/lorepia/src-tauri/gen/schemas/
+/apps/lorepia/src-tauri/gen/android/local.properties
+/apps/lorepia/src-tauri/gen/android/keystore.properties
+
+# Android / Gradle
+**/.gradle/
+**/.kotlin/
+**/build/
+*.apk
+*.aab
+
+# Apple / Xcode
+**/DerivedData/
+*.xcframework
+*.framework/
+*.xcarchive/
+*.ipa
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcuserstate
+
+# Windows
+*.dll
+*.lib
+*.pdb
+*.exe
+*.appx
+*.msix
+
+# Generated native binaries
+*.so
+*.a
+*.dylib
+
+# Local app data
+/lorepia-data/
+*.sqlite
+*.sqlite3
+/staging/
+/recovery/
+
+# Credentials and environment
+.env
+.env.*
+!.env.example
+*.p12
+*.pfx
+*.p8
+*.pem
+*.key
+*.jks
+*.keystore
+*.mobileprovision
+
+# Editor and OS files
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Local and CI smoke logs
+*.log

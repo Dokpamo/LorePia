@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-preview-provider-request"
+description = "Enables the preview_provider_request command without any pre-configured scope."
+commands.allow = ["preview_provider_request"]
+
+[[permission]]
+identifier = "deny-preview-provider-request"
+description = "Denies the preview_provider_request command without any pre-configured scope."
+commands.deny = ["preview_provider_request"]

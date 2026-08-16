@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-recover-provider-discovery"
+description = "Enables the recover_provider_discovery command without any pre-configured scope."
+commands.allow = ["recover_provider_discovery"]
+
+[[permission]]
+identifier = "deny-recover-provider-discovery"
+description = "Denies the recover_provider_discovery command without any pre-configured scope."
+commands.deny = ["recover_provider_discovery"]

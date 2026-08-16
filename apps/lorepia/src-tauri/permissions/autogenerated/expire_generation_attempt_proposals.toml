@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-expire-generation-attempt-proposals"
+description = "Enables the expire_generation_attempt_proposals command without any pre-configured scope."
+commands.allow = ["expire_generation_attempt_proposals"]
+
+[[permission]]
+identifier = "deny-expire-generation-attempt-proposals"
+description = "Denies the expire_generation_attempt_proposals command without any pre-configured scope."
+commands.deny = ["expire_generation_attempt_proposals"]

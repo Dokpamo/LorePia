@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-effective-capability"
+description = "Enables the effective_capability command without any pre-configured scope."
+commands.allow = ["effective_capability"]
+
+[[permission]]
+identifier = "deny-effective-capability"
+description = "Denies the effective_capability command without any pre-configured scope."
+commands.deny = ["effective_capability"]

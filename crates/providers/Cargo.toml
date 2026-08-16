@@ -1,0 +1,26 @@
+[package]
+name = "lorepia-providers"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+base64.workspace = true
+chrono.workspace = true
+futures-util.workspace = true
+lorepia-domain = { path = "../domain" }
+lorepia-orchestration = { path = "../orchestration" }
+psl.workspace = true
+reqwest.workspace = true
+ring.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+url.workspace = true
+zeroize.workspace = true
+
+[lints]
+workspace = true

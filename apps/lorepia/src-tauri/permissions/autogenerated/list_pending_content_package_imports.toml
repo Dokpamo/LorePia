@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-pending-content-package-imports"
+description = "Enables the list_pending_content_package_imports command without any pre-configured scope."
+commands.allow = ["list_pending_content_package_imports"]
+
+[[permission]]
+identifier = "deny-list-pending-content-package-imports"
+description = "Denies the list_pending_content_package_imports command without any pre-configured scope."
+commands.deny = ["list_pending_content_package_imports"]

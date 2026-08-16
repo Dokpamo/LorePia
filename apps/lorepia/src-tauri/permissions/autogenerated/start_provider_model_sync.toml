@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-start-provider-model-sync"
+description = "Enables the start_provider_model_sync command without any pre-configured scope."
+commands.allow = ["start_provider_model_sync"]
+
+[[permission]]
+identifier = "deny-start-provider-model-sync"
+description = "Denies the start_provider_model_sync command without any pre-configured scope."
+commands.deny = ["start_provider_model_sync"]

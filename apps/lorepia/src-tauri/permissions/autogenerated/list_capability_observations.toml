@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-capability-observations"
+description = "Enables the list_capability_observations command without any pre-configured scope."
+commands.allow = ["list_capability_observations"]
+
+[[permission]]
+identifier = "deny-list-capability-observations"
+description = "Denies the list_capability_observations command without any pre-configured scope."
+commands.deny = ["list_capability_observations"]

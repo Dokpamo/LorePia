@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-upsert-knowledge-book"
+description = "Enables the upsert_knowledge_book command without any pre-configured scope."
+commands.allow = ["upsert_knowledge_book"]
+
+[[permission]]
+identifier = "deny-upsert-knowledge-book"
+description = "Denies the upsert_knowledge_book command without any pre-configured scope."
+commands.deny = ["upsert_knowledge_book"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-patch-memory-record"
+description = "Enables the patch_memory_record command without any pre-configured scope."
+commands.allow = ["patch_memory_record"]
+
+[[permission]]
+identifier = "deny-patch-memory-record"
+description = "Denies the patch_memory_record command without any pre-configured scope."
+commands.deny = ["patch_memory_record"]

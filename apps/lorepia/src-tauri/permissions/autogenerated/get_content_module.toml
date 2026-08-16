@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-content-module"
+description = "Enables the get_content_module command without any pre-configured scope."
+commands.allow = ["get_content_module"]
+
+[[permission]]
+identifier = "deny-get-content-module"
+description = "Denies the get_content_module command without any pre-configured scope."
+commands.deny = ["get_content_module"]

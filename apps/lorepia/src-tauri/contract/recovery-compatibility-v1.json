@@ -1,0 +1,293 @@
+{
+  "schema_version": 1,
+  "artifact_kind": "tauri-compatible-recovery",
+  "product_name": "LorePia",
+  "build_number": {
+    "minimum": 3,
+    "maximum": 65535,
+    "encoding": "canonical-decimal"
+  },
+  "compatibility": {
+    "storage_schema_version": 37,
+    "canonical_native_schema_version": 11,
+    "cutover_manifest": {
+      "read_versions": [2, 3],
+      "write_version": 3
+    },
+    "provider_credential_journal": {
+      "schema_version": 1,
+      "redaction_version": 1
+    },
+    "bound_credential": {
+      "physical_reference_prefix": "lpc2-",
+      "physical_reference_version": 2,
+      "physical_reference_domain": "dev.lorepia.provider-credential.physical-slot.v2",
+      "envelope_version": 1
+    },
+    "windows_bound_credential": {
+      "backend": "password-vault-v1",
+      "current_write": false,
+      "read_delete_only": true,
+      "locator_directory": "credential-locators-v1",
+      "record_maximum_bytes": 640,
+      "path": {
+        "hash": "sha256",
+        "hash_domain": "dev.lorepia.windows-bound-credential-locator.path.v1",
+        "domain_terminator": "nul",
+        "reference_length_encoding": "u64be-utf8-bytes",
+        "filename_suffix": ".record"
+      },
+      "staging": {
+        "filename_prefix": "lpcw-stage-v1-",
+        "filename_suffix": ".tmp",
+        "uuid_version": 4
+      },
+      "locator": {
+        "version": 1,
+        "filename_prefix": "lpcw-locator-v1",
+        "magic": "lorepia-windows-bound-credential-locator\nv1\n",
+        "checksum_domain": "dev.lorepia.windows-bound-credential-locator.record.v1"
+      },
+      "delete_intent": {
+        "version": 1,
+        "filename_prefix": "lpcw-delete-intent-v1",
+        "magic": "lorepia-windows-bound-credential-delete-intent\nv1\n",
+        "checksum_domain": "dev.lorepia.windows-bound-credential-delete-intent.record.v1"
+      },
+      "delete_completion": {
+        "version": 1,
+        "filename_prefix": "lpcw-delete-complete-v1",
+        "magic": "lorepia-windows-bound-credential-delete-complete\nv1\n",
+        "checksum_domain": "dev.lorepia.windows-bound-credential-delete-complete.record.v1"
+      },
+      "delete_target": {
+        "kinds": [
+          "claimed",
+          "legacy"
+        ],
+        "legacy_username_marker": "-",
+        "legacy_generation_marker": "-"
+      },
+      "random_slot": {
+        "claim_fields": [
+          "username",
+          "generation"
+        ],
+        "sampling": "independent",
+        "username_prefix": "lpcw1-",
+        "generation_prefix": "lpcg1-",
+        "uuid_version": 4,
+        "uuid_format": "lowercase-hyphenated",
+        "value_version": 1,
+        "value_magic": "lorepia-windows-bound-value\nv1\n",
+        "value_length_encoding": "canonical-decimal-utf8-bytes"
+      },
+      "mutex": {
+        "version": 1,
+        "scope": "global",
+        "name_prefix": "Global\\LorePia.ProviderCredential.Lock.v1.",
+        "hash": "sha256",
+        "hash_domain": "dev.lorepia.windows-bound-credential.operation-lock.v1",
+        "domain_terminator": "nul",
+        "root_encoding": "canonical-absolute-utf16le",
+        "root_length_encoding": "u64be-utf16-code-units",
+        "reference_length_encoding": "u64be-utf8-bytes",
+        "wait_timeout_milliseconds": 30000
+      }
+    },
+    "windows_dpapi_credential_file": {
+      "backend": "dpapi-current-user-file-v1",
+      "current_write": true,
+      "locator_directory": "credential-locators-v1",
+      "claim": {
+        "fields": ["slot", "generation"],
+        "sampling": "independent",
+        "slot_prefix": "lpcf1-",
+        "generation_prefix": "lpcg1-",
+        "uuid_version": 4,
+        "uuid_format": "lowercase-hyphenated"
+      },
+      "raw_reference_reservation": {
+        "prefix": "lpc2-",
+        "suffix": "64-lowercase-hex",
+        "generic_operations": "reject-before-native-access",
+        "legacy_bound_fallback": "internal-read-delete-only"
+      },
+      "lifecycle": {
+        "locator": {
+          "version": 2,
+          "filename_prefix": "lpcw-locator-v1",
+          "magic": "lorepia-windows-bound-credential-locator\nv2\n",
+          "checksum_domain": "dev.lorepia.windows-bound-credential-locator.record.v2",
+          "fields": ["physical_reference", "backend", "slot", "generation", "file_record_sha256"]
+        },
+        "delete_intent": {
+          "version": 2,
+          "filename_prefix": "lpcw-delete-intent-v1",
+          "magic": "lorepia-windows-bound-credential-delete-intent\nv2\n",
+          "checksum_domain": "dev.lorepia.windows-bound-credential-delete-intent.record.v2",
+          "fields": ["physical_reference", "backend", "slot", "generation", "file_record_sha256"]
+        },
+        "delete_completion": {
+          "version": 2,
+          "filename_prefix": "lpcw-delete-complete-v1",
+          "magic": "lorepia-windows-bound-credential-delete-complete\nv2\n",
+          "checksum_domain": "dev.lorepia.windows-bound-credential-delete-complete.record.v2",
+          "fields": ["physical_reference", "backend", "slot", "generation", "file_record_sha256"]
+        }
+      },
+      "path": {
+        "hash": "sha256",
+        "hash_domain": "dev.lorepia.windows-bound-credential.file.path.v2",
+        "domain_terminator": "nul",
+        "components": ["physical_reference", "slot", "generation"],
+        "framing": "u64be-byte-length-and-bytes",
+        "filename_prefix": "lpcw-credential-v2-",
+        "filename_suffix": ".blob"
+      },
+      "staging": {
+        "create": "create-new",
+        "write_through": true,
+        "filename_prefix": "lpcw-credential-stage-v2-",
+        "filename_suffix": ".tmp",
+        "publish": "atomic-no-replace-write-through",
+        "cleanup": {
+          "minimum_age_hours": 24,
+          "maximum_entries_scanned": 256,
+          "maximum_entries_deleted": 32,
+          "candidate_name": "exact-prefix+lowercase-hyphenated-uuid-v4+suffix",
+          "file_validation": ["exclusive-no-follow-open", "regular-file", "non-reparse", "delete-same-verified-handle"],
+          "candidate_validation": ["decode-complete-record", "current-user-dpapi-unprotect", "context-bound-plaintext"],
+          "triggers": ["bound-store", "bound-read-or-status", "bound-delete"],
+          "outcome_effect": "best-effort-never-changes-request-result",
+          "preserves": ["authoritative-final", "young", "in-use", "unknown-name", "symlink-or-reparse"]
+        }
+      },
+      "plaintext": {
+        "version": 2,
+        "magic": "lorepia-windows-bound-file-plaintext\nv2\n",
+        "components": ["credential_resource", "physical_reference", "slot", "generation", "authority_bound_envelope"],
+        "framing": "u64be-byte-length-and-bytes"
+      },
+      "protection": {
+        "api": ["CryptProtectData", "CryptUnprotectData"],
+        "scope": "current-user",
+        "flags": ["CRYPTPROTECT_UI_FORBIDDEN"],
+        "forbidden_flags": ["CRYPTPROTECT_LOCAL_MACHINE"],
+        "ciphertext_stability": "nondeterministic-user-machine-bound",
+        "entropy": {
+          "hash": "sha256",
+          "hash_domain": "dev.lorepia.windows-bound-credential.dpapi-entropy.v2",
+          "domain_terminator": "nul",
+          "components": ["canonical_data_root", "credential_resource", "physical_reference", "slot", "generation"],
+          "root_framing": "u64be-utf16-code-units-and-utf16le",
+          "string_framing": "u64be-byte-length-and-utf8"
+        }
+      },
+      "record": {
+        "version": 2,
+        "magic": "lorepia-windows-bound-credential-file\nv2\n",
+        "maximum_bytes": 65536,
+        "components": ["physical_reference", "slot", "generation", "ciphertext"],
+        "framing": "u64be-byte-length-and-bytes",
+        "digest": "sha256",
+        "digest_domain": "dev.lorepia.windows-bound-credential.file.record.v2",
+        "digest_domain_terminator": "nul",
+        "digest_framing": "u64be-record-byte-length-and-record-bytes"
+      }
+    },
+    "known_vectors": {
+      "path": "testdata/tauri-upgrade/recovery-compatibility-v1-vectors.json",
+      "sha256": "6ac79521f61a1e051ea613caf1b3605a69fcb89644af81a4f742e201136b3194"
+    }
+  },
+  "release": {
+    "config": "apps/lorepia/src-tauri/tauri.release.conf.json",
+    "bundle_active": true,
+    "create_updater_artifacts": false
+  },
+  "platforms": {
+    "android": {
+      "config": "apps/lorepia/src-tauri/tauri.android.conf.json",
+      "identifier": "dev.lorepia.app",
+      "credential_directory": "provider-credentials",
+      "credential_key_alias": "dev.lorepia.provider-credentials.v1",
+      "base_build_number": 2,
+      "version_field": "bundle.android.versionCode"
+    },
+    "ios": {
+      "config": "apps/lorepia/src-tauri/tauri.ios.conf.json",
+      "identifier": "dev.lorepia.ios",
+      "credential_service": "dev.lorepia.provider-credentials",
+      "base_build_number": 2,
+      "version_field": "bundle.iOS.bundleVersion"
+    },
+    "macos": {
+      "config": "apps/lorepia/src-tauri/tauri.macos.conf.json",
+      "identifier": "dev.lorepia.mac",
+      "credential_service": "dev.lorepia.provider-credentials",
+      "base_build_number": 2,
+      "version_field": "bundle.macOS.bundleVersion"
+    },
+    "windows": {
+      "config": "apps/lorepia/src-tauri/tauri.windows.conf.json",
+      "identifier": "dev.lorepia.windows",
+      "credential_resource": "LorePia.ProviderCredential",
+      "base_build_number": 2,
+      "version_field": "bundle.windows.wix.version",
+      "version_prefix": "0.1.",
+      "installer": {
+        "targets": ["msi"],
+        "allow_downgrades": false,
+        "base_wix_version": "0.1.2",
+        "wix_upgrade_code": "1d306e7f-9b28-552c-ae87-32153f694083"
+      }
+    }
+  },
+  "toolchain": {
+    "tauri_cli_version": "2.11.4"
+  },
+  "provenance": {
+    "schema_version": 1,
+    "hashed_inputs": [
+      "apps/lorepia/src-tauri/contract/recovery-compatibility-v1.json",
+      "testdata/tauri-upgrade/recovery-compatibility-v1-vectors.json",
+      "Cargo.lock",
+      "apps/lorepia/package-lock.json"
+    ],
+    "default_evidence_class": "unsigned-source-preparation",
+    "claim_scope": {
+      "proves": [
+        "clean-source-commit",
+        "reviewed-config-merge",
+        "locked-input-digests"
+      ],
+      "does_not_prove": [
+        "hosted-execution",
+        "artifact-build",
+        "artifact-install",
+        "application-update",
+        "compatible-recovery",
+        "signature-lineage",
+        "platform-vault-continuity"
+      ]
+    },
+    "hosted_evidence_requirements": [
+      "workflow-run-url",
+      "source-commit",
+      "artifact-sha256",
+      "platform",
+      "build-number",
+      "result-ledger"
+    ],
+    "external_release_gates": [
+      "signer-lineage",
+      "signed-seed-artifact",
+      "signed-update-artifact",
+      "signed-forward-compatible-recovery-artifact",
+      "post-update-and-recovery-a-b-readback",
+      "platform-vault-continuity",
+      "target-power-loss-durability"
+    ]
+  }
+}

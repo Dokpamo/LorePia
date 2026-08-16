@@ -1,0 +1,145 @@
+{
+  "schema_version": 1,
+  "cutover_manifest": {
+    "manifest_filename": "generation-manifest.json",
+    "commit_filename": "generation-committed.json",
+    "manifests": [
+      {
+        "format_version": 2,
+        "activation_sequence": 1,
+        "cutover_id": "11111111-1111-4111-8111-111111111111",
+        "parent_cutover_id": null,
+        "active_database_relative_path": "db/schema-cutover/11111111-1111-4111-8111-111111111111/lorepia.sqlite3",
+        "active_schema_version": 37,
+        "source_database_relative_path": "db/lorepia.sqlite3",
+        "baseline_schema_version": 11,
+        "source_database_size_bytes": 4096,
+        "source_database_fingerprint_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "rollback_cas_pin_count": 0,
+        "checksum_sha256": "a20a0ce1c9ecde34be32304c932f4fcf4f3be6544cf1b6accb487d7ec631e060"
+      },
+      {
+        "format_version": 3,
+        "activation_sequence": 2,
+        "cutover_id": "22222222-2222-4222-8222-222222222222",
+        "parent_cutover_id": "11111111-1111-4111-8111-111111111111",
+        "active_database_relative_path": "db/schema-cutover/22222222-2222-4222-8222-222222222222/lorepia.sqlite3",
+        "active_schema_version": 37,
+        "source_database_relative_path": "db/schema-cutover/11111111-1111-4111-8111-111111111111/lorepia.sqlite3",
+        "baseline_schema_version": 37,
+        "source_database_size_bytes": 8192,
+        "source_database_fingerprint_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "rollback_cas_pin_count": 2,
+        "checksum_sha256": "0ab8d1f46423761d024c89f3d4b1a95281ed2c104953a4842f1893751bfa9f54"
+      }
+    ],
+    "commits": [
+      {
+        "format_version": 2,
+        "cutover_id": "11111111-1111-4111-8111-111111111111",
+        "manifest_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "checksum_sha256": "6fa0aee6cf579867a9405dfab5656d1733dcf7b0e6d667e3bffacc5eb4a3534c"
+      },
+      {
+        "format_version": 3,
+        "cutover_id": "22222222-2222-4222-8222-222222222222",
+        "manifest_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "checksum_sha256": "c4af60de1c1165d91a97bd0a98436789d32e403d03ec840800520f22cdad6660"
+      }
+    ]
+  },
+  "bound_credential": {
+    "logical_reference": "connection-a",
+    "authority_id": "install-a",
+    "binding_sha256": "abababababababababababababababababababababababababababababababab",
+    "synthetic_secret": "synthetic-recovery-vector-secret",
+    "physical_reference": "lpc2-5c3607fcc99a0026c030c0ed2507c5535f509f5e16fa8db97cf02b08aca5447b",
+    "encoded_envelope": "lorepia-provider-credential\nv1\ninstall-a\nabababababababababababababababababababababababababababababababab\nsynthetic-recovery-vector-secret"
+  },
+  "windows_bound_credential": {
+    "physical_reference": "lpc2-5c3607fcc99a0026c030c0ed2507c5535f509f5e16fa8db97cf02b08aca5447b",
+    "reference_digest_sha256": "55b1d9b6e15cd62da9692f537d43f587af3ba6ae921b6e8809c6d78aa7cb3bab",
+    "username": "lpcw1-11111111-1111-4111-8111-111111111111",
+    "generation": "lpcg1-22222222-2222-4222-8222-222222222222",
+    "locator": {
+      "relative_path": "credential-locators-v1/lpcw-locator-v1-55b1d9b6e15cd62da9692f537d43f587af3ba6ae921b6e8809c6d78aa7cb3bab.record",
+      "checksum_sha256": "99f42eb7c99b7712e2fa872946bb4ad09b02fcf6cc512575c33de815a3898e92",
+      "record": "lorepia-windows-bound-credential-locator\nv1\nlpc2-5c3607fcc99a0026c030c0ed2507c5535f509f5e16fa8db97cf02b08aca5447b\nlpcw1-11111111-1111-4111-8111-111111111111\nlpcg1-22222222-2222-4222-8222-222222222222\n99f42eb7c99b7712e2fa872946bb4ad09b02fcf6cc512575c33de815a3898e92\n"
+    },
+    "delete_intent": {
+      "target_kind": "claimed",
+      "relative_path": "credential-locators-v1/lpcw-delete-intent-v1-55b1d9b6e15cd62da9692f537d43f587af3ba6ae921b6e8809c6d78aa7cb3bab.record",
+      "checksum_sha256": "08b297e4d1b9fa15952a96fe263914dd6da0154f3a600a51f055731900708106",
+      "record": "lorepia-windows-bound-credential-delete-intent\nv1\nlpc2-5c3607fcc99a0026c030c0ed2507c5535f509f5e16fa8db97cf02b08aca5447b\nclaimed\nlpcw1-11111111-1111-4111-8111-111111111111\nlpcg1-22222222-2222-4222-8222-222222222222\n08b297e4d1b9fa15952a96fe263914dd6da0154f3a600a51f055731900708106\n",
+      "legacy_checksum_sha256": "acea0e2dfcc85b24edc3736c9a70be2be3478bb06e9b3b4c6b1409dac7da19a1",
+      "legacy_record": "lorepia-windows-bound-credential-delete-intent\nv1\nlpc2-5c3607fcc99a0026c030c0ed2507c5535f509f5e16fa8db97cf02b08aca5447b\nlegacy\n-\n-\nacea0e2dfcc85b24edc3736c9a70be2be3478bb06e9b3b4c6b1409dac7da19a1\n"
+    },
+    "delete_completion": {
+      "target_kind": "claimed",
+      "relative_path": "credential-locators-v1/lpcw-delete-complete-v1-55b1d9b6e15cd62da9692f537d43f587af3ba6ae921b6e8809c6d78aa7cb3bab.record",
+      "checksum_sha256": "720378bb7b7268aa0731b8773a89844677ffef034dbd001e36a863f463754269",
+      "record": "lorepia-windows-bound-credential-delete-complete\nv1\nlpc2-5c3607fcc99a0026c030c0ed2507c5535f509f5e16fa8db97cf02b08aca5447b\nclaimed\nlpcw1-11111111-1111-4111-8111-111111111111\nlpcg1-22222222-2222-4222-8222-222222222222\n720378bb7b7268aa0731b8773a89844677ffef034dbd001e36a863f463754269\n",
+      "legacy_checksum_sha256": "5ffe6a47a60290047ff69b1697315f160288fdc625aa5aaf0a0c216acb3211a0",
+      "legacy_record": "lorepia-windows-bound-credential-delete-complete\nv1\nlpc2-5c3607fcc99a0026c030c0ed2507c5535f509f5e16fa8db97cf02b08aca5447b\nlegacy\n-\n-\n5ffe6a47a60290047ff69b1697315f160288fdc625aa5aaf0a0c216acb3211a0\n"
+    },
+    "random_slot_value": {
+      "inner_envelope_utf8_bytes": 138,
+      "encoded_value": "lorepia-windows-bound-value\nv1\nlpcg1-22222222-2222-4222-8222-222222222222\n138\nlorepia-provider-credential\nv1\ninstall-a\nabababababababababababababababababababababababababababababababab\nsynthetic-recovery-vector-secret"
+    },
+    "mutex": {
+      "canonical_windows_data_root": "C:\\LorePiaSynthetic\\데이터🔐",
+      "digest_sha256": "e27a0367894a463711672f758a10b9843e2c3595bd3dccb4c64141233a5d3e18",
+      "name": "Global\\LorePia.ProviderCredential.Lock.v1.e27a0367894a463711672f758a10b9843e2c3595bd3dccb4c64141233a5d3e18"
+    }
+  },
+  "windows_dpapi_credential_file": {
+    "physical_reference": "lpc2-5c3607fcc99a0026c030c0ed2507c5535f509f5e16fa8db97cf02b08aca5447b",
+    "credential_resource": "LorePia.ProviderCredential",
+    "slot": "lpcf1-11111111-1111-4111-8111-111111111111",
+    "generation": "lpcg1-22222222-2222-4222-8222-222222222222",
+    "canonical_windows_data_root": "C:\\LorePiaSynthetic\\데이터🔐",
+    "path": {
+      "input_bytes": 227,
+      "input_hex": "6465762e6c6f72657069612e77696e646f77732d626f756e642d63726564656e7469616c2e66696c652e706174682e76320000000000000000456c7063322d35633336303766636339396130303236633033306330656432353037633535333566353039663565313666613864623937636630326230386163613534343762000000000000002a6c706366312d31313131313131312d313131312d343131312d383131312d313131313131313131313131000000000000002a6c706367312d32323232323232322d323232322d343232322d383232322d323232323232323232323232",
+      "digest_sha256": "24d3dc86e062f42d5037e0a0a0a8dfb7b92ff31f0a01c266d489497709417e34",
+      "relative_path": "credential-locators-v1/lpcw-credential-v2-24d3dc86e062f42d5037e0a0a0a8dfb7b92ff31f0a01c266d489497709417e34.blob"
+    },
+    "entropy": {
+      "encoded_bytes": 323,
+      "encoded_hex": "6465762e6c6f72657069612e77696e646f77732d626f756e642d63726564656e7469616c2e64706170692d656e74726f70792e763200000000000000001943003a005c004c006f0072006500500069006100530079006e007400680065007400690063005c0070b374c730d13dd810dd000000000000001a4c6f72655069612e50726f766964657243726564656e7469616c00000000000000456c7063322d35633336303766636339396130303236633033306330656432353037633535333566353039663565313666613864623937636630326230386163613534343762000000000000002a6c706366312d31313131313131312d313131312d343131312d383131312d313131313131313131313131000000000000002a6c706367312d32323232323232322d323232322d343232322d383232322d323232323232323232323232",
+      "sha256": "7b8d034e158e9baa7e4b676e3cef742baae7fcab1263696a3a2605490e721f48"
+    },
+    "plaintext": {
+      "encoded_bytes": 397,
+      "encoded_hex": "6c6f72657069612d77696e646f77732d626f756e642d66696c652d706c61696e746578740a76320a000000000000001a4c6f72655069612e50726f766964657243726564656e7469616c00000000000000456c7063322d35633336303766636339396130303236633033306330656432353037633535333566353039663565313666613864623937636630326230386163613534343762000000000000002a6c706366312d31313131313131312d313131312d343131312d383131312d313131313131313131313131000000000000002a6c706367312d32323232323232322d323232322d343232322d383232322d323232323232323232323232000000000000008a6c6f72657069612d70726f76696465722d63726564656e7469616c0a76310a696e7374616c6c2d610a616261626162616261626162616261626162616261626162616261626162616261626162616261626162616261626162616261626162616261626162616261620a73796e7468657469632d7265636f766572792d766563746f722d736563726574",
+      "sha256": "c4372a6b7ba5daeae5c7c3e4c914fddac744629d92d718cd11d69f8ddc879f31"
+    },
+    "synthetic_ciphertext": {
+      "encoded_bytes": 16,
+      "encoded_hex": "000102030405060708090a0b0c0d0e0f",
+      "sha256": "be45cb2605bf36bebde684841a28f0fd43c69850a3dce5fedba69928ee3a8991"
+    },
+    "record": {
+      "encoded_bytes": 242,
+      "encoded_hex": "6c6f72657069612d77696e646f77732d626f756e642d63726564656e7469616c2d66696c650a76320a00000000000000456c7063322d35633336303766636339396130303236633033306330656432353037633535333566353039663565313666613864623937636630326230386163613534343762000000000000002a6c706366312d31313131313131312d313131312d343131312d383131312d313131313131313131313131000000000000002a6c706367312d32323232323232322d323232322d343232322d383232322d3232323232323232323232320000000000000010000102030405060708090a0b0c0d0e0f",
+      "raw_sha256": "9ad49c9358b219a904cdfb95ddef38eb6933c1ee6f862d98ce6e879076584593",
+      "digest_input_bytes": 302,
+      "digest_sha256": "e59bce9acfd0992f759b2938ff4cac7df66f21fe546df048f0a482d79d07f521"
+    },
+    "locator": {
+      "relative_path": "credential-locators-v1/lpcw-locator-v1-55b1d9b6e15cd62da9692f537d43f587af3ba6ae921b6e8809c6d78aa7cb3bab.record",
+      "checksum_sha256": "95f3f2f38c9a08619a875ca487e0264468134a77455a2156d5e7029d0947b49f",
+      "record": "lorepia-windows-bound-credential-locator\nv2\nlpc2-5c3607fcc99a0026c030c0ed2507c5535f509f5e16fa8db97cf02b08aca5447b\ndpapi-current-user-file-v1\nlpcf1-11111111-1111-4111-8111-111111111111\nlpcg1-22222222-2222-4222-8222-222222222222\ne59bce9acfd0992f759b2938ff4cac7df66f21fe546df048f0a482d79d07f521\n95f3f2f38c9a08619a875ca487e0264468134a77455a2156d5e7029d0947b49f\n"
+    },
+    "delete_intent": {
+      "relative_path": "credential-locators-v1/lpcw-delete-intent-v1-55b1d9b6e15cd62da9692f537d43f587af3ba6ae921b6e8809c6d78aa7cb3bab.record",
+      "checksum_sha256": "07503e601669537be7aea66ec36ab5cdb7ab05991fe945bdce39e91f6a216b27",
+      "record": "lorepia-windows-bound-credential-delete-intent\nv2\nlpc2-5c3607fcc99a0026c030c0ed2507c5535f509f5e16fa8db97cf02b08aca5447b\ndpapi-current-user-file-v1\nlpcf1-11111111-1111-4111-8111-111111111111\nlpcg1-22222222-2222-4222-8222-222222222222\ne59bce9acfd0992f759b2938ff4cac7df66f21fe546df048f0a482d79d07f521\n07503e601669537be7aea66ec36ab5cdb7ab05991fe945bdce39e91f6a216b27\n"
+    },
+    "delete_completion": {
+      "relative_path": "credential-locators-v1/lpcw-delete-complete-v1-55b1d9b6e15cd62da9692f537d43f587af3ba6ae921b6e8809c6d78aa7cb3bab.record",
+      "checksum_sha256": "968afd4b8a05c87242926aa90cbcb28bd3be3f47d5fb49f1d32921d7af6444d5",
+      "record": "lorepia-windows-bound-credential-delete-complete\nv2\nlpc2-5c3607fcc99a0026c030c0ed2507c5535f509f5e16fa8db97cf02b08aca5447b\ndpapi-current-user-file-v1\nlpcf1-11111111-1111-4111-8111-111111111111\nlpcg1-22222222-2222-4222-8222-222222222222\ne59bce9acfd0992f759b2938ff4cac7df66f21fe546df048f0a482d79d07f521\n968afd4b8a05c87242926aa90cbcb28bd3be3f47d5fb49f1d32921d7af6444d5\n"
+    }
+  }
+}

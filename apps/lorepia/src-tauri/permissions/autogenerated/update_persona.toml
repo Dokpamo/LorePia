@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-update-persona"
+description = "Enables the update_persona command without any pre-configured scope."
+commands.allow = ["update_persona"]
+
+[[permission]]
+identifier = "deny-update-persona"
+description = "Denies the update_persona command without any pre-configured scope."
+commands.deny = ["update_persona"]

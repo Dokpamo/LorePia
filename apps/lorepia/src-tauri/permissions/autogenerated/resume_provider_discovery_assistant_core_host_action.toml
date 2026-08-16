@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-resume-provider-discovery-assistant-core-host-action"
+description = "Enables the resume_provider_discovery_assistant_core_host_action command without any pre-configured scope."
+commands.allow = ["resume_provider_discovery_assistant_core_host_action"]
+
+[[permission]]
+identifier = "deny-resume-provider-discovery-assistant-core-host-action"
+description = "Denies the resume_provider_discovery_assistant_core_host_action command without any pre-configured scope."
+commands.deny = ["resume_provider_discovery_assistant_core_host_action"]

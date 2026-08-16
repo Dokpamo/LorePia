@@ -1,0 +1,36 @@
+[package]
+name = "lorepia-shell-api"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[features]
+test-support = [
+  "lorepia-core/test-support",
+  "dep:lorepia-storage",
+  "dep:rusqlite",
+  "dep:tempfile",
+]
+
+[dependencies]
+chrono.workspace = true
+lorepia-core = { path = "../core" }
+lorepia-storage = { path = "../storage", optional = true }
+rusqlite = { workspace = true, optional = true }
+serde.workspace = true
+serde_json.workspace = true
+tempfile = { workspace = true, optional = true }
+tokio.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+lorepia-core = { path = "../core", features = ["test-support"] }
+lorepia-storage = { path = "../storage" }
+rusqlite.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
+zip.workspace = true
+
+[lints]
+workspace = true

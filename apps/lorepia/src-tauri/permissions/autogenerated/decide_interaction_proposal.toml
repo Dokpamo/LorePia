@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-decide-interaction-proposal"
+description = "Enables the decide_interaction_proposal command without any pre-configured scope."
+commands.allow = ["decide_interaction_proposal"]
+
+[[permission]]
+identifier = "deny-decide-interaction-proposal"
+description = "Denies the decide_interaction_proposal command without any pre-configured scope."
+commands.deny = ["decide_interaction_proposal"]

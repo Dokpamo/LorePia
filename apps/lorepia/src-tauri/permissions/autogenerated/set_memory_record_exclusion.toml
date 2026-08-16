@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-memory-record-exclusion"
+description = "Enables the set_memory_record_exclusion command without any pre-configured scope."
+commands.allow = ["set_memory_record_exclusion"]
+
+[[permission]]
+identifier = "deny-set-memory-record-exclusion"
+description = "Denies the set_memory_record_exclusion command without any pre-configured scope."
+commands.deny = ["set_memory_record_exclusion"]

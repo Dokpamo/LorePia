@@ -1,0 +1,1709 @@
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { tick } from 'svelte';
+import { get } from 'svelte/store';
+import { afterEach, describe, expect, it, vi, type MockInstance } from 'vitest';
+
+import type {
+    ChatEventKindDto,
+    ChatStreamItemDto,
+    LorepiaClient,
+    MessageDto,
+} from '../../lib/ipc/contracts';
+import {
+    INITIAL_APP_STATE,
+    LorepiaAppController,
+    type LorepiaAppState,
+} from '../../app/app-controller';
+import ChatPane from './ChatPane.svelte';
+
+class ControlledResizeObserver implements ResizeObserver {
+    static instances: ControlledResizeObserver[] = [];
+
+    readonly observed = new Set<Element>();
+
+    constructor(private readonly callback: ResizeObserverCallback) {
+        ControlledResizeObserver.instances.push(this);
+    }
+
+    static reset(): void {
+        ControlledResizeObserver.instances = [];
+    }
+
+    static observing(target: Element): ControlledResizeObserver | undefined {
+        return ControlledResizeObserver.instances.find((observer) => observer.observed.has(target));
+    }
+
+    observe(target: Element): void {
+        this.observed.add(target);
+    }
+
+    unobserve(target: Element): void {
+        this.observed.delete(target);
+    }
+
+    disconnect(): void {
+        this.observed.clear();
+    }
+
+    emit(target: Element, width: number, height: number): void {
+        const contentRect = {
+            x: 0,
+            y: 0,
+            width,
+            height,
+            top: 0,
+            right: width,
+            bottom: height,
+            left: 0,
+            toJSON: () => ({}),
+        };
+        this.callback(
+            [
+                {
+                    target,
+                    contentRect,
+                    borderBoxSize: [{ inlineSize: width, blockSize: height }],
+                    contentBoxSize: [{ inlineSize: width, blockSize: height }],
+                    devicePixelContentBoxSize: [],
+                },
+            ],
+            this,
+        );
+    }
+}
+
+afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    ControlledResizeObserver.reset();
+});
+
+function chatReadyState(): LorepiaAppState {
+    return {
+        ...structuredClone(INITIAL_APP_STATE),
+        selected_character: {
+            id: 'character-1',
+            name: '라온',
+            description: '',
+            source_hash: 'synthetic',
+            avatar_asset_id: null,
+            created_at: '2026-08-02T00:00:00Z',
+        },
+        selected_conversation: {
+            id: 'conversation-1',
+            character_id: 'character-1',
+            title: '첫 대화',
+            created_at: '2026-08-02T00:00:00Z',
+            updated_at: '2026-08-02T00:00:00Z',
+        },
+        conversation_state: {
+            conversation_id: 'conversation-1',
+            active_branch_id: 'branch-1',
+            selected_mode: 'chat',
+            updated_at: '2026-08-02T00:00:00Z',
+        },
+        messages: { phase: 'ready', error: null, items: [] },
+    };
+}
+
+interface RenderedChat {
+    controller: LorepiaAppController;
+    sendMessage: MockInstance<LorepiaAppController['sendMessage']>;
+}
+
+function renderChat(appState = chatReadyState(), client?: LorepiaClient): RenderedChat {
+    const controller = new LorepiaAppController({} as LorepiaClient);
+    const sendMessage = vi.spyOn(controller, 'sendMessage').mockResolvedValue(true);
+    render(ChatPane, { appState, controller, client });
+    return { controller, sendMessage };
+}
+
+describe('ChatPane live response', () => {
+    it('suppresses only the live pending checkpoint and keeps an empty snapshot visibly active', async () => {
+        const appState = chatReadyState();
+        appState.messages.items = [
+            {
+                id: 'pending-assistant',
+                conversation_id: 'conversation-1',
+                parent_id: null,
+                role: 'assistant',
+                content: '저장된 체크포인트',
+                status: 'pending',
+                generation_id: 'generation-1',
+                created_at: '2026-08-02T00:00:00Z',
+            },
+        ];
+        const controller = new LorepiaAppController({} as LorepiaClient);
+        const rendered = render(ChatPane, { appState, controller });
+
+        expect(screen.getByText('저장된 체크포인트')).toBeInTheDocument();
+        await rendered.rerender({
+            appState: {
+                ...appState,
+                chat: {
+                    ...appState.chat,
+                    active_generation_id: 'generation-1',
+                    live_assistant_message_id: 'pending-assistant',
+                    streaming_text: '권위 있는 전체 응답',
+                },
+            },
+            controller,
+        });
+
+        expect(screen.queryByText('저장된 체크포인트')).not.toBeInTheDocument();
+        expect(screen.getAllByText('권위 있는 전체 응답')).toHaveLength(1);
+        await rendered.rerender({
+            appState: {
+                ...appState,
+                chat: {
+                    ...appState.chat,
+                    active_generation_id: 'generation-1',
+                    live_assistant_message_id: 'pending-assistant',
+                    streaming_text: '',
+                    reasoning_text: '',
+                },
+            },
+            controller,
+        });
+
+        expect(screen.getByLabelText('생성 중인 응답')).toBeInTheDocument();
+        expect(screen.queryByText('저장된 체크포인트')).not.toBeInTheDocument();
+        controller.destroy();
+    });
+
+    it('routes reasoning and answer deltas through the controller into separate labeled UI', async () => {
+        const initialState = chatReadyState();
+        const selectedConversation = initialState.selected_conversation;
+        const conversationState = initialState.conversation_state;
+        if (selectedConversation === null || conversationState === null) {
+            throw new Error('synthetic chat fixture is incomplete');
+        }
+        const branch = {
+            id: conversationState.active_branch_id,
+            conversation_id: selectedConversation.id,
+            title: null,
+            fork_message_id: null,
+            head_message_id: null,
+            created_at: '2026-08-02T00:00:00Z',
+            updated_at: '2026-08-02T00:00:00Z',
+        };
+        let onItem: ((item: ChatStreamItemDto) => void) | null = null;
+        const client = {
+            disposeChatStream: vi.fn().mockResolvedValue(false),
+            openExistingConversation: vi.fn().mockResolvedValue(selectedConversation),
+            getConversationState: vi.fn().mockResolvedValue(conversationState),
+            listBranches: vi.fn().mockResolvedValue([branch]),
+            listBranchMessages: vi.fn().mockResolvedValue([]),
+            listRetryableMemoryQueryEmbeddings: vi.fn().mockResolvedValue([]),
+            sendMessage: vi.fn(
+                (
+                    _input: unknown,
+                    _streamId: string,
+                    listener: (item: ChatStreamItemDto) => void,
+                ) => {
+                    onItem = listener;
+                    return Promise.resolve({ generation_id: 'generation-1' });
+                },
+            ),
+        } as unknown as LorepiaClient;
+        const controller = new LorepiaAppController(client);
+        expect(await controller.selectConversation(selectedConversation)).toBe(true);
+        controller.setRoomGenerationTarget(selectedConversation.id, branch.id, {
+            model_route_id: 'route-1',
+            generation_preset_id: 'preset-1',
+        });
+        const rendered = render(ChatPane, { appState: get(controller.state), controller });
+
+        expect(await controller.sendMessage('안녕')).toBe(true);
+        const listener = onItem as unknown as (item: ChatStreamItemDto) => void;
+        const event = (sequence: number, kind: ChatEventKindDto): ChatStreamItemDto => ({
+            type: 'event',
+            payload: {
+                event_version: 4,
+                generation_id: 'generation-1',
+                conversation_id: selectedConversation.id,
+                branch_id: branch.id,
+                assistant_message_id: 'message-1',
+                sequence,
+                emitted_at: '2026-08-02T00:00:00Z',
+                kind,
+            },
+        });
+
+        listener(
+            event(1, {
+                type: 'reasoning_delta',
+                payload: '먼저 등장인물의 상황을 확인합니다.',
+            }),
+        );
+        await vi.waitFor(() =>
+            expect(get(controller.state).chat).toMatchObject({
+                reasoning_text: '먼저 등장인물의 상황을 확인합니다.',
+                streaming_text: '',
+            }),
+        );
+        await rendered.rerender({ appState: get(controller.state) });
+
+        const reasoningRegion = screen.getByText('추론 과정').closest('details');
+        expect(reasoningRegion).toHaveAttribute('open');
+        expect(reasoningRegion).toHaveTextContent('먼저 등장인물의 상황을 확인합니다.');
+        expect(screen.queryByRole('region', { name: '생성 중인 답변' })).not.toBeInTheDocument();
+
+        listener(
+            event(2, {
+                type: 'text_delta',
+                payload: '라온은 조심스럽게 문을 열었다.',
+            }),
+        );
+        await vi.waitFor(() =>
+            expect(get(controller.state).chat).toMatchObject({
+                reasoning_text: '먼저 등장인물의 상황을 확인합니다.',
+                streaming_text: '라온은 조심스럽게 문을 열었다.',
+            }),
+        );
+        await rendered.rerender({ appState: get(controller.state) });
+
+        const answerRegion = screen.getByRole('region', { name: '생성 중인 답변' });
+        expect(reasoningRegion).not.toHaveTextContent('라온은 조심스럽게 문을 열었다.');
+        expect(answerRegion).toHaveTextContent('라온은 조심스럽게 문을 열었다.');
+        expect(answerRegion).not.toHaveTextContent('먼저 등장인물의 상황을 확인합니다.');
+        controller.destroy();
+    });
+
+    it('renders a labeled, collapsible reasoning-only stream instead of the empty state', () => {
+        const appState = chatReadyState();
+        appState.chat.reasoning_text = '응답의 근거를 정리하는 중입니다.';
+
+        const { controller } = renderChat(appState);
+
+        expect(screen.queryByText('새로운 이야기의 첫 문장을 보내보세요.')).not.toBeInTheDocument();
+        const reasoningLabel = screen.getByText('추론 과정');
+        const reasoningRegion = reasoningLabel.closest('details');
+        expect(reasoningRegion).toHaveAttribute('open');
+        expect(reasoningRegion).toHaveTextContent('응답의 근거를 정리하는 중입니다.');
+        controller.destroy();
+    });
+
+    it('keeps reasoning separate from the streamed answer', () => {
+        const appState = chatReadyState();
+        appState.chat.reasoning_text = '먼저 등장인물의 상황을 확인합니다.';
+        appState.chat.streaming_text = '라온은 조심스럽게 문을 열었다.';
+
+        const { controller } = renderChat(appState);
+
+        const reasoningRegion = screen.getByText('추론 과정').closest('details');
+        const answerRegion = screen.getByRole('region', { name: '생성 중인 답변' });
+        expect(reasoningRegion).toHaveTextContent('먼저 등장인물의 상황을 확인합니다.');
+        expect(reasoningRegion).not.toContainElement(answerRegion);
+        expect(answerRegion).toHaveTextContent('라온은 조심스럽게 문을 열었다.');
+        controller.destroy();
+    });
+
+    it('announces bounded reasoning and answer phases without replaying generated content', async () => {
+        const appState = chatReadyState();
+        appState.chat = {
+            ...appState.chat,
+            active_generation_id: 'generation-1',
+            live_assistant_message_id: 'pending-assistant',
+            reasoning_text: '응답을 작성하기 전에 내부 추론을 정리합니다.',
+        };
+        appState.messages.items = [
+            {
+                id: 'pending-assistant',
+                conversation_id: 'conversation-1',
+                parent_id: null,
+                role: 'assistant',
+                content: '',
+                status: 'pending',
+                generation_id: 'generation-1',
+                created_at: '2026-08-02T00:00:00Z',
+            },
+        ];
+        const controller = new LorepiaAppController({} as LorepiaClient);
+        const rendered = render(ChatPane, { appState, controller });
+
+        const responseStatus = await screen.findByLabelText('응답 생성 상태');
+        expect(responseStatus).toHaveAttribute('aria-live', 'polite');
+        expect(responseStatus).toHaveAttribute('aria-atomic', 'true');
+        expect(responseStatus).toHaveTextContent('응답의 추론을 생성하고 있습니다.');
+        expect(responseStatus).not.toHaveTextContent(appState.chat.reasoning_text);
+
+        const answer = '라온은 조심스럽게 문을 열었다.';
+        await rendered.rerender({
+            appState: {
+                ...appState,
+                chat: { ...appState.chat, streaming_text: answer },
+            },
+            controller,
+        });
+
+        await waitFor(() =>
+            expect(responseStatus).toHaveTextContent('응답 본문 생성을 시작했습니다.'),
+        );
+        expect(responseStatus).not.toHaveTextContent(answer);
+        controller.destroy();
+    });
+
+    it('announces a terminal durable assistant replacement exactly once', async () => {
+        const appState = chatReadyState();
+        appState.chat = {
+            ...appState.chat,
+            active_generation_id: 'generation-1',
+            live_assistant_message_id: 'pending-assistant',
+            streaming_text: '내린 비를 바라봅니다.',
+            reasoning_text: '날씨를 확인합니다.',
+        };
+        const pendingMessage: MessageDto = {
+            id: 'pending-assistant',
+            conversation_id: 'conversation-1',
+            parent_id: null,
+            role: 'assistant',
+            content: '내린 비를 바라봅니다.',
+            status: 'pending',
+            generation_id: 'generation-1',
+            created_at: '2026-08-02T00:00:00Z',
+        };
+        appState.messages.items = [pendingMessage];
+        const controller = new LorepiaAppController({} as LorepiaClient);
+        const rendered = render(ChatPane, { appState, controller });
+        const responseStatus = await screen.findByLabelText('응답 생성 상태');
+        await waitFor(() =>
+            expect(responseStatus).toHaveTextContent('응답 본문 생성을 시작했습니다.'),
+        );
+
+        const completedMessage: MessageDto = {
+            ...pendingMessage,
+            content: '내린 비를 바봅니다.',
+            status: 'complete',
+        };
+        await rendered.rerender({
+            appState: {
+                ...appState,
+                messages: { phase: 'ready', error: null, items: [completedMessage] },
+                chat: {
+                    ...appState.chat,
+                    phase: 'idle',
+                    active_generation_id: null,
+                    live_assistant_message_id: null,
+                    streaming_text: '',
+                    reasoning_text: '',
+                },
+            },
+            controller,
+        });
+
+        await waitFor(() => expect(responseStatus).toHaveTextContent('응답 생성이 완료됐습니다.'));
+        expect(screen.getAllByText('응답 생성이 완료됐습니다.')).toHaveLength(1);
+        expect(responseStatus).not.toHaveTextContent(completedMessage.content);
+        controller.destroy();
+    });
+
+    it('places a live response after the persisted virtual tail spacer', () => {
+        const appState = chatReadyState();
+        appState.messages.items = Array.from({ length: 160 }, (_, index) => ({
+            id: `message-${String(index)}`,
+            conversation_id: 'conversation-1',
+            parent_id: index === 0 ? null : `message-${String(index - 1)}`,
+            role: index % 2 === 0 ? ('user' as const) : ('assistant' as const),
+            content: `synthetic-${String(index)}`,
+            status: 'complete' as const,
+            generation_id: null,
+            created_at: '2026-08-02T00:00:00Z',
+        }));
+        appState.chat.streaming_text = '진행 중인 응답';
+
+        const { controller } = renderChat(appState);
+        const list = screen.getByRole('list', { name: '대화 메시지' });
+        const live = screen.getByLabelText('생성 중인 응답').closest('li');
+
+        expect(list).toHaveStyle({ paddingBottom: '22px' });
+        expect(live).toHaveStyle({ marginTop: '15660px' });
+        controller.destroy();
+    });
+});
+
+describe('ChatPane composer', () => {
+    it.each(['안녕', 'こんにちは', '你好'])(
+        'does not submit %s when Enter confirms an IME composition',
+        async (draft) => {
+            const { controller, sendMessage } = renderChat();
+            const composer = screen.getByRole('textbox', { name: '메시지' });
+
+            await fireEvent.input(composer, { target: { value: draft } });
+            await fireEvent.compositionStart(composer);
+            await fireEvent.keyDown(composer, {
+                key: 'Enter',
+                code: 'Enter',
+                isComposing: true,
+            });
+
+            expect(sendMessage).not.toHaveBeenCalled();
+            expect(composer).toHaveValue(draft);
+            controller.destroy();
+        },
+    );
+
+    it('submits plain Enter after composition ends and keeps Shift+Enter as a newline', async () => {
+        const { controller, sendMessage } = renderChat();
+        const composer = screen.getByRole('textbox', { name: '메시지' });
+
+        await fireEvent.input(composer, { target: { value: '계속 이야기해 줘' } });
+        await fireEvent.keyDown(composer, { key: 'Enter', code: 'Enter', shiftKey: true });
+        expect(sendMessage).not.toHaveBeenCalled();
+
+        await fireEvent.compositionStart(composer);
+        await fireEvent.compositionEnd(composer);
+        await fireEvent.keyDown(composer, {
+            key: 'Enter',
+            code: 'Enter',
+            isComposing: false,
+        });
+
+        await waitFor(() => {
+            expect(sendMessage).toHaveBeenCalledOnce();
+        });
+        expect(sendMessage).toHaveBeenCalledWith('계속 이야기해 줘');
+        await waitFor(() => {
+            expect(composer).toHaveValue('');
+        });
+        controller.destroy();
+    });
+
+    it('retains a blocked draft, refreshes attempt approvals, and retries only from a user click', async () => {
+        const pending = {
+            conversation_id: 'conversation-1',
+            source_branch_id: 'branch-1',
+            proposed_branch_id: 'branch-proposed',
+            generation_id: 'generation-attempt-1',
+            aggregate_revision: '1',
+            interaction_state_revision: '1',
+            pending_proposal_count: 1,
+            proposal_revision: '1',
+            proposal: {
+                id: 'attempt-proposal-1',
+                title: '도구 동작 승인',
+                body: '검토한 동작만 반영합니다.',
+                status: 'pending' as const,
+                source_interaction_state_revision: '0',
+                requested_at_epoch_seconds: 1,
+                expires_at_epoch_seconds: null,
+                decided_at_epoch_seconds: null,
+            },
+        };
+        const listGenerationAttemptProposals = vi
+            .fn()
+            .mockResolvedValueOnce([])
+            .mockResolvedValueOnce([pending])
+            .mockResolvedValue([]);
+        const decideGenerationAttemptProposal = vi.fn().mockResolvedValue({
+            ...pending,
+            aggregate_revision: '2',
+            pending_proposal_count: 0,
+            proposal_revision: '2',
+            proposal: {
+                ...pending.proposal,
+                status: 'approved',
+                decided_at_epoch_seconds: 2,
+            },
+            approval_evidence_sha256: 'a'.repeat(64),
+            exact_replay: false,
+        });
+        const client = {
+            listInteractionEffects: vi.fn().mockResolvedValue([]),
+            subscribeInteractionEffects: vi.fn().mockResolvedValue(vi.fn()),
+            acknowledgeInteractionEffect: vi.fn().mockResolvedValue(undefined),
+            retryInteractionEffect: vi.fn().mockResolvedValue(undefined),
+            expireInteractionProposals: vi.fn().mockResolvedValue({
+                conversation_id: 'conversation-1',
+                branch_id: 'branch-1',
+                current_state_revision: 0,
+                expired_proposals: [],
+                has_more_expired: false,
+            }),
+            listInteractionProposals: vi.fn().mockResolvedValue([]),
+            listReopenInteractionEffects: vi.fn().mockResolvedValue({
+                current_state_revision: 0,
+                items: [],
+                older_cursor: null,
+            }),
+            submitInteractionChoice: vi.fn(),
+            decideInteractionProposal: vi.fn(),
+            expireGenerationAttemptProposals: vi.fn().mockResolvedValue({
+                conversation_id: 'conversation-1',
+                source_branch_id: 'branch-1',
+                decisions: [],
+                has_more_due: false,
+            }),
+            listRetryableGenerationAttempts: vi.fn().mockResolvedValue([]),
+            listGenerationAttemptProposals,
+            decideGenerationAttemptProposal,
+        } as unknown as LorepiaClient;
+        const { controller, sendMessage } = renderChat(chatReadyState(), client);
+        const beginNewGenerationOperation = vi.spyOn(controller, 'beginNewGenerationOperation');
+        const stageGenerationAttemptRetry = vi.spyOn(controller, 'stageGenerationAttemptRetry');
+        sendMessage.mockResolvedValue(false);
+        await waitFor(() => expect(listGenerationAttemptProposals).toHaveBeenCalledOnce());
+
+        const composer = screen.getByRole('textbox', { name: '메시지' });
+        await fireEvent.input(composer, { target: { value: '승인 뒤에도 유지할 메시지' } });
+        await fireEvent.click(screen.getByRole('button', { name: '메시지 보내기' }));
+
+        expect(await screen.findByText('도구 동작 승인')).toBeInTheDocument();
+        expect(composer).toHaveValue('승인 뒤에도 유지할 메시지');
+        expect(sendMessage).toHaveBeenCalledOnce();
+
+        await fireEvent.click(screen.getByRole('button', { name: '제안 1 승인' }));
+        const retry = await screen.findByRole('button', {
+            name: '원래 전송·수정·재생성 확인: 생성 시도 generation-attempt-1',
+        });
+        expect(sendMessage).toHaveBeenCalledOnce();
+        await fireEvent.click(retry);
+        expect(composer).not.toHaveFocus();
+        expect(composer).toHaveValue('승인 뒤에도 유지할 메시지');
+        expect(sendMessage).toHaveBeenCalledOnce();
+        expect(beginNewGenerationOperation).not.toHaveBeenCalled();
+        expect(stageGenerationAttemptRetry).toHaveBeenCalledOnce();
+        expect(stageGenerationAttemptRetry).toHaveBeenCalledWith('generation-attempt-1');
+        expect(
+            screen.getByText(
+                '승인된 생성 시도를 준비했습니다. 원래 전송·수정·재생성 작업을 직접 반복하세요.',
+            ),
+        ).toBeInTheDocument();
+
+        await fireEvent.click(screen.getByRole('button', { name: '새 생성 작업' }));
+        expect(beginNewGenerationOperation).toHaveBeenCalledOnce();
+        expect(composer).toHaveFocus();
+        expect(composer).toHaveValue('승인 뒤에도 유지할 메시지');
+        expect(sendMessage).toHaveBeenCalledOnce();
+        expect(
+            screen.getByText(
+                '새 생성 작업으로 전환했습니다. 같은 입력도 새로운 요청으로 처리됩니다.',
+            ),
+        ).toBeInTheDocument();
+
+        sendMessage.mockResolvedValue(true);
+        await fireEvent.click(screen.getByRole('button', { name: '메시지 보내기' }));
+        await waitFor(() => expect(listGenerationAttemptProposals).toHaveBeenCalledTimes(3));
+        expect(composer).toHaveValue('');
+        expect(sendMessage).toHaveBeenCalledTimes(2);
+        controller.destroy();
+    });
+
+    it('keeps the visible DOM bounded for 10,000 persisted messages', () => {
+        const appState = chatReadyState();
+        appState.messages.items = Array.from({ length: 10_000 }, (_, index) => ({
+            id: `message-${String(index)}`,
+            conversation_id: 'conversation-1',
+            parent_id: index === 0 ? null : `message-${String(index - 1)}`,
+            role: index % 2 === 0 ? ('user' as const) : ('assistant' as const),
+            content: `synthetic-${String(index)}`,
+            status: 'complete' as const,
+            generation_id: null,
+            created_at: '2026-08-02T00:00:00Z',
+        }));
+
+        const { controller } = renderChat(appState);
+        const renderedMessages = document.querySelectorAll('[data-message-id]');
+
+        expect(renderedMessages.length).toBeGreaterThan(0);
+        expect(renderedMessages.length).toBeLessThanOrEqual(80);
+        controller.destroy();
+    });
+
+    it('uses instant scroll behavior for exact virtual anchor corrections', () => {
+        const { controller } = renderChat();
+
+        expect(screen.getByLabelText('메시지 기록').style.scrollBehavior).toBe('auto');
+        controller.destroy();
+    });
+
+    it('does not rebuild the full message index for an unrelated streaming update', async () => {
+        const appState = chatReadyState();
+        let idReadCount = 0;
+        const items = Array.from({ length: 10_000 }, (_, index) => {
+            const message: MessageDto = {
+                id: '',
+                conversation_id: 'conversation-1',
+                parent_id: index === 0 ? null : `message-${String(index - 1)}`,
+                role: index % 2 === 0 ? 'user' : 'assistant',
+                content: `synthetic-${String(index)}`,
+                status: 'complete',
+                generation_id: null,
+                created_at: '2026-08-02T00:00:00Z',
+            };
+            Object.defineProperty(message, 'id', {
+                configurable: true,
+                enumerable: true,
+                get: () => {
+                    idReadCount += 1;
+                    return `message-${String(index)}`;
+                },
+            });
+            return message;
+        });
+        appState.messages.items = items;
+        const controller = new LorepiaAppController({} as LorepiaClient);
+        const rendered = render(ChatPane, { appState, controller });
+        await tick();
+        await Promise.resolve();
+        idReadCount = 0;
+
+        await rendered.rerender({
+            appState: {
+                ...appState,
+                chat: { ...appState.chat, streaming_text: '새 스트림 델타' },
+            },
+            controller,
+        });
+        await tick();
+
+        expect(idReadCount).toBeLessThan(1_000);
+        controller.destroy();
+    });
+
+    it('preserves a deep anchor relative to the viewport when width changes row heights', async () => {
+        vi.stubGlobal('ResizeObserver', ControlledResizeObserver);
+        let messageHeight = 500;
+        vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+            this: HTMLElement,
+        ) {
+            if (this.dataset.messageId === undefined) {
+                return DOMRect.fromRect();
+            }
+            const list = this.parentElement;
+            const scroller = this.closest<HTMLElement>('.message-scroll');
+            if (list === null || scroller === null) {
+                return DOMRect.fromRect();
+            }
+            const rendered = Array.from(list.querySelectorAll<HTMLElement>('[data-message-id]'));
+            const localIndex = rendered.indexOf(this);
+            const top =
+                (Number.parseFloat(list.style.paddingTop) || 0) +
+                localIndex * (messageHeight + 12) -
+                scroller.scrollTop;
+            return {
+                x: 0,
+                y: top,
+                top,
+                bottom: top + messageHeight,
+                left: 0,
+                right: 900,
+                width: 900,
+                height: messageHeight,
+                toJSON: () => ({}),
+            };
+        });
+        const appState = chatReadyState();
+        appState.messages.items = Array.from({ length: 300 }, (_, index) => ({
+            id: `message-${String(index)}`,
+            conversation_id: 'conversation-1',
+            parent_id: index === 0 ? null : `message-${String(index - 1)}`,
+            role: index % 2 === 0 ? ('user' as const) : ('assistant' as const),
+            content: `synthetic-${String(index)}`,
+            status: 'complete' as const,
+            generation_id: null,
+            created_at: '2026-08-02T00:00:00Z',
+        }));
+        const { controller } = renderChat(appState);
+        const scroller = screen.getByLabelText('메시지 기록');
+        Object.defineProperties(scroller, {
+            clientHeight: { configurable: true, value: 720 },
+            scrollHeight: { configurable: true, value: 100_000 },
+            getBoundingClientRect: {
+                configurable: true,
+                value: () => ({
+                    top: 0,
+                    bottom: 720,
+                    left: 0,
+                    right: 900,
+                    width: 900,
+                    height: 720,
+                }),
+            },
+        });
+
+        await waitFor(() => {
+            expect(ControlledResizeObserver.observing(scroller)).toBeDefined();
+        });
+        const scrollerObserver = ControlledResizeObserver.observing(scroller);
+        expect(scrollerObserver).toBeDefined();
+        scrollerObserver?.emit(scroller, 900, 100_000);
+        await waitFor(() => {
+            expect(document.querySelectorAll('[data-message-id]')).toHaveLength(80);
+        });
+
+        scroller.scrollTop = 1;
+        await fireEvent.scroll(scroller);
+        for (const message of document.querySelectorAll<HTMLElement>('[data-message-id]')) {
+            ControlledResizeObserver.observing(message)?.emit(message, 900, 500);
+        }
+        await Promise.resolve();
+        await tick();
+        await tick();
+
+        scrollerObserver?.emit(scroller, 900, 720);
+        scroller.scrollTop = 30_720;
+        await fireEvent.scroll(scroller);
+        let stableAnchor: HTMLElement | undefined;
+        await waitFor(() => {
+            const rendered = Array.from(
+                document.querySelectorAll<HTMLElement>('[data-message-id]'),
+            );
+            expect(rendered.length).toBeGreaterThan(8);
+            stableAnchor = rendered.find((message) => message.getBoundingClientRect().bottom > 0);
+            expect(stableAnchor?.dataset.messageId).toBeDefined();
+        });
+        const stableAnchorId = stableAnchor?.dataset.messageId ?? '';
+        const relativeTopBefore = stableAnchor?.getBoundingClientRect().top ?? Number.NaN;
+
+        messageHeight = 700;
+        scrollerObserver?.emit(scroller, 520, 720);
+        await Promise.resolve();
+        await tick();
+        await tick();
+        for (let pass = 0; pass < 5; pass += 1) {
+            for (const message of document.querySelectorAll<HTMLElement>('[data-message-id]')) {
+                ControlledResizeObserver.observing(message)?.emit(message, 520, messageHeight);
+            }
+            await Promise.resolve();
+            await tick();
+            await tick();
+        }
+
+        await waitFor(() => {
+            const anchored = document.querySelector<HTMLElement>(
+                `[data-message-id="${stableAnchorId}"]`,
+            );
+            expect(anchored).toBeInTheDocument();
+            expect(anchored?.getBoundingClientRect().top).toBeCloseTo(relativeTopBefore, 5);
+        });
+        controller.destroy();
+    });
+
+    it('keeps the pre-delete retained predecessor anchored through deletion and row resize', async () => {
+        vi.stubGlobal('ResizeObserver', ControlledResizeObserver);
+        const measuredHeights = new Map<string, number>();
+        vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+            this: HTMLElement,
+        ) {
+            if (this.dataset.messageId === undefined) {
+                return DOMRect.fromRect();
+            }
+            const list = this.parentElement;
+            const scroller = this.closest<HTMLElement>('.message-scroll');
+            if (list === null || scroller === null) {
+                return DOMRect.fromRect();
+            }
+            const rendered = Array.from(list.querySelectorAll<HTMLElement>('[data-message-id]'));
+            const localIndex = rendered.indexOf(this);
+            const messageHeight = measuredHeights.get(this.dataset.messageId) ?? 500;
+            const top =
+                (Number.parseFloat(list.style.paddingTop) || 0) +
+                rendered
+                    .slice(0, localIndex)
+                    .reduce(
+                        (height, message) =>
+                            height +
+                            (measuredHeights.get(message.dataset.messageId ?? '') ?? 500) +
+                            12,
+                        0,
+                    ) -
+                scroller.scrollTop;
+            return {
+                x: 0,
+                y: top,
+                top,
+                bottom: top + messageHeight,
+                left: 0,
+                right: 900,
+                width: 900,
+                height: messageHeight,
+                toJSON: () => ({}),
+            };
+        });
+        const appState = chatReadyState();
+        appState.messages.items = Array.from({ length: 300 }, (_, index) => ({
+            id: `message-${String(index)}`,
+            conversation_id: 'conversation-1',
+            parent_id: index === 0 ? null : `message-${String(index - 1)}`,
+            role: index % 2 === 0 ? ('user' as const) : ('assistant' as const),
+            content: `synthetic-${String(index)}`,
+            status: 'complete' as const,
+            generation_id: null,
+            created_at: '2026-08-02T00:00:00Z',
+        }));
+        const controller = new LorepiaAppController({} as LorepiaClient);
+        const rendered = render(ChatPane, { appState, controller });
+        const scroller = screen.getByLabelText('메시지 기록');
+        Object.defineProperties(scroller, {
+            clientHeight: { configurable: true, value: 720 },
+            scrollHeight: { configurable: true, value: 100_000 },
+            getBoundingClientRect: {
+                configurable: true,
+                value: () => ({
+                    top: 0,
+                    bottom: 720,
+                    left: 0,
+                    right: 900,
+                    width: 900,
+                    height: 720,
+                }),
+            },
+        });
+        await waitFor(() => {
+            expect(ControlledResizeObserver.observing(scroller)).toBeDefined();
+        });
+        const scrollerObserver = ControlledResizeObserver.observing(scroller);
+        scrollerObserver?.emit(scroller, 900, 100_000);
+        await waitFor(() => {
+            expect(document.querySelectorAll('[data-message-id]')).toHaveLength(80);
+        });
+        scroller.scrollTop = 1;
+        await fireEvent.scroll(scroller);
+        for (const message of document.querySelectorAll<HTMLElement>('[data-message-id]')) {
+            ControlledResizeObserver.observing(message)?.emit(message, 900, 500);
+        }
+        await Promise.resolve();
+        await tick();
+        await tick();
+
+        scrollerObserver?.emit(scroller, 900, 720);
+        scroller.scrollTop = 30_720;
+        await fireEvent.scroll(scroller);
+        await tick();
+        for (const message of document.querySelectorAll<HTMLElement>('[data-message-id]')) {
+            ControlledResizeObserver.observing(message)?.emit(message, 900, 500);
+        }
+        await Promise.resolve();
+        await tick();
+        await tick();
+        await fireEvent.scroll(scroller);
+        await tick();
+
+        const storedAnchor = Array.from(
+            document.querySelectorAll<HTMLElement>('[data-message-id]'),
+        ).find((message) => message.getBoundingClientRect().bottom > 0);
+        const storedAnchorId = storedAnchor?.dataset.messageId;
+        expect(storedAnchorId).toBeDefined();
+        const storedAnchorIndex = appState.messages.items.findIndex(
+            (message) => message.id === storedAnchorId,
+        );
+        const predecessor = appState.messages.items[storedAnchorIndex - 1];
+        if (predecessor === undefined) throw new Error('retained predecessor missing');
+        const predecessorBefore = document.querySelector<HTMLElement>(
+            `[data-message-id="${predecessor.id}"]`,
+        );
+        expect(predecessorBefore).toBeInTheDocument();
+        const predecessorRelativeTopBefore =
+            predecessorBefore?.getBoundingClientRect().top ?? Number.NaN;
+        const retainedItems = appState.messages.items.filter(
+            (message, index) => index >= 8 && message.id !== storedAnchorId,
+        );
+        await rendered.rerender({
+            appState: {
+                ...appState,
+                messages: { ...appState.messages, items: retainedItems },
+            },
+            controller,
+        });
+        await Promise.resolve();
+        await tick();
+        await tick();
+
+        const anchoredPredecessor = document.querySelector<HTMLElement>(
+            `[data-message-id="${predecessor.id}"]`,
+        );
+        expect(anchoredPredecessor).toBeInTheDocument();
+        expect(anchoredPredecessor?.getBoundingClientRect().top).toBeCloseTo(
+            predecessorRelativeTopBefore,
+            5,
+        );
+
+        const predecessorIndex = retainedItems.findIndex(
+            (message) => message.id === predecessor.id,
+        );
+        const rowAbove = retainedItems[predecessorIndex - 1];
+        if (rowAbove === undefined) throw new Error('row above retained predecessor missing');
+        const rowAboveElement = document.querySelector<HTMLElement>(
+            `[data-message-id="${rowAbove.id}"]`,
+        );
+        if (rowAboveElement === null) throw new Error('measured row above predecessor missing');
+        measuredHeights.set(rowAbove.id, 700);
+        ControlledResizeObserver.observing(rowAboveElement)?.emit(rowAboveElement, 900, 700);
+        await Promise.resolve();
+        await tick();
+        await tick();
+
+        const anchoredAfterResize = document.querySelector<HTMLElement>(
+            `[data-message-id="${predecessor.id}"]`,
+        );
+        expect(anchoredAfterResize).toBeInTheDocument();
+        expect(anchoredAfterResize?.getBoundingClientRect().top).toBeCloseTo(
+            predecessorRelativeTopBefore,
+            5,
+        );
+        controller.destroy();
+    });
+
+    it('recomputes bottom proximity when the viewport height changes', async () => {
+        vi.stubGlobal('ResizeObserver', ControlledResizeObserver);
+        const appState = chatReadyState();
+        appState.messages.items = Array.from({ length: 160 }, (_, index) => ({
+            id: `message-${String(index)}`,
+            conversation_id: 'conversation-1',
+            parent_id: index === 0 ? null : `message-${String(index - 1)}`,
+            role: index % 2 === 0 ? ('user' as const) : ('assistant' as const),
+            content: `synthetic-${String(index)}`,
+            status: 'complete' as const,
+            generation_id: null,
+            created_at: '2026-08-02T00:00:00Z',
+        }));
+        const controller = new LorepiaAppController({} as LorepiaClient);
+        const rendered = render(ChatPane, { appState, controller });
+        const scroller = screen.getByLabelText('메시지 기록');
+        let rawScrollTop = 0;
+        let clientHeight = 100;
+        Object.defineProperties(scroller, {
+            scrollTop: {
+                configurable: true,
+                get: () => rawScrollTop,
+                set: (value: number) => {
+                    rawScrollTop = value;
+                },
+            },
+            clientHeight: { configurable: true, get: () => clientHeight },
+            scrollHeight: { configurable: true, get: () => 10_000 },
+        });
+        await waitFor(() => {
+            expect(ControlledResizeObserver.observing(scroller)).toBeDefined();
+        });
+        const scrollerObserver = ControlledResizeObserver.observing(scroller);
+        scrollerObserver?.emit(scroller, 900, clientHeight);
+        await tick();
+        await Promise.resolve();
+        await tick();
+        rawScrollTop = 9_000;
+        await fireEvent.scroll(scroller);
+
+        clientHeight = 950;
+        scrollerObserver?.emit(scroller, 900, clientHeight);
+        await rendered.rerender({
+            appState: {
+                ...appState,
+                messages: {
+                    ...appState.messages,
+                    items: [
+                        ...appState.messages.items,
+                        {
+                            id: 'message-new',
+                            conversation_id: 'conversation-1',
+                            parent_id: 'message-159',
+                            role: 'assistant',
+                            content: '새 메시지',
+                            status: 'complete',
+                            generation_id: null,
+                            created_at: '2026-08-02T00:00:01Z',
+                        },
+                    ],
+                },
+            },
+            controller,
+        });
+
+        await waitFor(() => expect(rawScrollTop).toBe(10_000));
+        controller.destroy();
+    });
+
+    it('recomputes bottom proximity after an exact measurement anchor correction', async () => {
+        vi.stubGlobal('ResizeObserver', ControlledResizeObserver);
+        let expandedMessageId: string | null = null;
+        vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+            this: HTMLElement,
+        ) {
+            if (this.dataset.messageId === undefined) return DOMRect.fromRect();
+            const list = this.parentElement;
+            const scroller = this.closest<HTMLElement>('.message-scroll');
+            if (list === null || scroller === null) return DOMRect.fromRect();
+            const rendered = Array.from(list.querySelectorAll<HTMLElement>('[data-message-id]'));
+            const localIndex = rendered.indexOf(this);
+            const heightFor = (message: HTMLElement): number =>
+                message.dataset.messageId === expandedMessageId ? 900 : 96;
+            const height = heightFor(this);
+            const top =
+                (Number.parseFloat(list.style.paddingTop) || 0) +
+                rendered
+                    .slice(0, localIndex)
+                    .reduce((total, message) => total + heightFor(message) + 12, 0) -
+                scroller.scrollTop;
+            return {
+                x: 0,
+                y: top,
+                top,
+                bottom: top + height,
+                left: 0,
+                right: 900,
+                width: 900,
+                height,
+                toJSON: () => ({}),
+            };
+        });
+        const appState = chatReadyState();
+        appState.messages.items = Array.from({ length: 100 }, (_, index) => ({
+            id: `message-${String(index)}`,
+            conversation_id: 'conversation-1',
+            parent_id: index === 0 ? null : `message-${String(index - 1)}`,
+            role: index % 2 === 0 ? ('user' as const) : ('assistant' as const),
+            content: `synthetic-${String(index)}`,
+            status: 'complete' as const,
+            generation_id: null,
+            created_at: '2026-08-02T00:00:00Z',
+        }));
+        const controller = new LorepiaAppController({} as LorepiaClient);
+        const rendered = render(ChatPane, { appState, controller });
+        const scroller = screen.getByLabelText('메시지 기록');
+        let rawScrollTop = 0;
+        Object.defineProperties(scroller, {
+            scrollTop: {
+                configurable: true,
+                get: () => rawScrollTop,
+                set: (value: number) => {
+                    rawScrollTop = value;
+                },
+            },
+            clientHeight: { configurable: true, value: 720 },
+            scrollHeight: { configurable: true, value: 2_000 },
+            getBoundingClientRect: {
+                configurable: true,
+                value: () => ({
+                    top: 0,
+                    bottom: 720,
+                    left: 0,
+                    right: 900,
+                    width: 900,
+                    height: 720,
+                }),
+            },
+        });
+        await waitFor(() => {
+            expect(ControlledResizeObserver.observing(scroller)).toBeDefined();
+        });
+        ControlledResizeObserver.observing(scroller)?.emit(scroller, 900, 720);
+        await tick();
+        await Promise.resolve();
+        rawScrollTop = 500;
+        await fireEvent.scroll(scroller);
+        await tick();
+        const visibleAnchor = Array.from(
+            document.querySelectorAll<HTMLElement>('[data-message-id]'),
+        ).find((message) => message.getBoundingClientRect().bottom > 0);
+        if (visibleAnchor === undefined) throw new Error('visible anchor missing');
+        const renderedRows = Array.from(
+            document.querySelectorAll<HTMLElement>('[data-message-id]'),
+        );
+        const anchorIndex = renderedRows.indexOf(visibleAnchor);
+        const rowAbove = renderedRows[anchorIndex - 1];
+        if (rowAbove === undefined) throw new Error('row above anchor missing');
+
+        expandedMessageId = rowAbove.dataset.messageId ?? null;
+        ControlledResizeObserver.observing(rowAbove)?.emit(rowAbove, 900, 900);
+        await Promise.resolve();
+        await tick();
+        await tick();
+        expect(rawScrollTop).toBeGreaterThan(1_160);
+        expect(rawScrollTop).toBeLessThan(2_000);
+
+        await rendered.rerender({
+            appState: {
+                ...appState,
+                messages: {
+                    ...appState.messages,
+                    items: [
+                        ...appState.messages.items,
+                        {
+                            id: 'message-new',
+                            conversation_id: 'conversation-1',
+                            parent_id: 'message-99',
+                            role: 'assistant',
+                            content: '새 메시지',
+                            status: 'complete',
+                            generation_id: null,
+                            created_at: '2026-08-02T00:00:01Z',
+                        },
+                    ],
+                },
+            },
+            controller,
+        });
+
+        await waitFor(() => expect(rawScrollTop).toBe(2_000));
+        controller.destroy();
+    });
+
+    it('hands focus to the scroll region before a focused message row is virtualized away', async () => {
+        const appState = chatReadyState();
+        appState.messages.items = Array.from({ length: 300 }, (_, index) => ({
+            id: `message-${String(index)}`,
+            conversation_id: 'conversation-1',
+            parent_id: index === 0 ? null : `message-${String(index - 1)}`,
+            role: index % 2 === 0 ? ('user' as const) : ('assistant' as const),
+            content: `synthetic-${String(index)}`,
+            status: 'complete' as const,
+            generation_id: null,
+            created_at: '2026-08-02T00:00:00Z',
+        }));
+        const { controller } = renderChat(appState);
+        const scroller = screen.getByLabelText('메시지 기록');
+        Object.defineProperties(scroller, {
+            clientHeight: { configurable: true, value: 720 },
+            scrollHeight: { configurable: true, value: 100_000 },
+        });
+        const focusedRow = document.querySelector<HTMLElement>('[data-message-id="message-0"]');
+        if (focusedRow === null) throw new Error('focused message fixture missing');
+        focusedRow.focus();
+        expect(document.activeElement).toBe(focusedRow);
+
+        scroller.scrollTop = 30_720;
+        await fireEvent.scroll(scroller);
+        await tick();
+
+        expect(document.querySelector('[data-message-id="message-0"]')).not.toBeInTheDocument();
+        expect(document.activeElement).toBe(scroller);
+        controller.destroy();
+    });
+
+    it('focuses a memory source message through the bounded virtual window', async () => {
+        const appState = chatReadyState();
+        appState.messages.items = Array.from({ length: 160 }, (_, index) => ({
+            id: `message-${String(index)}`,
+            conversation_id: 'conversation-1',
+            parent_id: index === 0 ? null : `message-${String(index - 1)}`,
+            role: index % 2 === 0 ? ('user' as const) : ('assistant' as const),
+            content: `synthetic-${String(index)}`,
+            status: 'complete' as const,
+            generation_id: null,
+            created_at: '2026-08-02T00:00:00Z',
+        }));
+        const controller = new LorepiaAppController({} as LorepiaClient);
+        const scrollIntoView = vi.fn();
+        Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+            configurable: true,
+            value: scrollIntoView,
+        });
+
+        render(ChatPane, {
+            appState,
+            controller,
+            messageFocusRequest: {
+                conversation_id: 'conversation-1',
+                branch_id: 'branch-1',
+                start_message_id: 'message-120',
+                end_message_id: 'message-125',
+                request_id: 1,
+            },
+        });
+
+        await waitFor(() => {
+            expect(document.querySelector('[data-message-id="message-120"]')).toBeInTheDocument();
+        });
+        const focused = document.querySelector<HTMLElement>('[data-message-id="message-120"]');
+        expect(focused).toHaveClass('memory-source-boundary');
+        expect(document.querySelector('[data-message-id="message-125"]')).toHaveClass(
+            'memory-source-boundary',
+        );
+        await waitFor(() => {
+            expect(document.activeElement).toBe(focused);
+            expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center' });
+        });
+        expect(
+            screen.getByText('장기기억 출처 범위의 첫 메시지로 이동했습니다.'),
+        ).toBeInTheDocument();
+        controller.destroy();
+    });
+
+    it('surfaces a blocked generation reattachment and keeps new sends unavailable', () => {
+        const appState = chatReadyState();
+        appState.chat = {
+            ...appState.chat,
+            phase: 'error',
+            error: '진행 중이던 응답 스트림에 다시 연결할 수 없습니다.',
+            active_generation_id: 'generation-1',
+        };
+
+        const { controller } = renderChat(appState);
+
+        expect(screen.getByRole('alert')).toHaveTextContent(
+            '진행 중이던 응답 스트림에 다시 연결할 수 없습니다.',
+        );
+        expect(screen.getByRole('textbox', { name: '메시지' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: '응답 생성 취소' })).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: '메시지 보내기' })).not.toBeInTheDocument();
+        controller.destroy();
+    });
+
+    it('requires a distinct acknowledgement before retrying an unknown embedding outcome', async () => {
+        const appState = chatReadyState();
+        const candidate = {
+            id: 'query-embedding-1',
+            status: 'interrupted' as const,
+            revision: 4,
+            conversation_id: 'conversation-1',
+            branch_id: 'branch-1',
+            error_code: 'provider_unavailable',
+            requires_unknown_outcome_acknowledgement: true,
+        };
+        appState.memory_query_retries = {
+            phase: 'ready',
+            error: null,
+            candidates: [candidate],
+            busy_id: null,
+            notice: null,
+        };
+        const { controller } = renderChat(appState);
+        const retry = vi.spyOn(controller, 'retryMemoryQueryEmbedding').mockResolvedValue(true);
+
+        await fireEvent.click(screen.getByRole('button', { name: '재시도 검토' }));
+        expect(retry).not.toHaveBeenCalled();
+        expect(
+            screen.getByText(/같은 임베딩 요청이 중복 처리될 수 있음을 확인하세요/),
+        ).toBeInTheDocument();
+
+        await fireEvent.click(screen.getByRole('button', { name: '위험을 확인하고 재시도' }));
+        expect(retry).toHaveBeenCalledWith(candidate, true);
+        controller.destroy();
+    });
+
+    it('retries failed and cancelled embedding preparation without unknown-outcome acknowledgement', async () => {
+        const appState = chatReadyState();
+        appState.memory_query_retries = {
+            phase: 'ready',
+            error: null,
+            candidates: [
+                {
+                    id: 'query-embedding-failed',
+                    status: 'failed',
+                    revision: 2,
+                    conversation_id: 'conversation-1',
+                    branch_id: 'branch-1',
+                    error_code: 'provider_unavailable',
+                    requires_unknown_outcome_acknowledgement: false,
+                },
+                {
+                    id: 'query-embedding-cancelled',
+                    status: 'cancelled',
+                    revision: 3,
+                    conversation_id: 'conversation-1',
+                    branch_id: 'branch-1',
+                    error_code: null,
+                    requires_unknown_outcome_acknowledgement: false,
+                },
+            ],
+            busy_id: null,
+            notice: null,
+        };
+        const { controller } = renderChat(appState);
+        const retry = vi.spyOn(controller, 'retryMemoryQueryEmbedding').mockResolvedValue(true);
+
+        const retryButtons = screen.getAllByRole('button', { name: '준비 작업 재시도' });
+        await fireEvent.click(retryButtons[0] as HTMLButtonElement);
+        await fireEvent.click(retryButtons[1] as HTMLButtonElement);
+
+        expect(retry).toHaveBeenNthCalledWith(
+            1,
+            appState.memory_query_retries.candidates[0],
+            false,
+        );
+        expect(retry).toHaveBeenNthCalledWith(
+            2,
+            appState.memory_query_retries.candidates[1],
+            false,
+        );
+        controller.destroy();
+    });
+
+    it('keeps the no-result resubmission instruction visible after a retry receipt', () => {
+        const appState = chatReadyState();
+        appState.memory_query_retries.notice =
+            '임베딩 준비만 다시 대기열에 넣었습니다. 미리보기나 메시지 결과는 만들지 않았습니다. 원래 계획 미리보기 또는 메시지 전송·편집·재생성을 다시 실행하세요.';
+
+        const { controller } = renderChat(appState);
+
+        expect(screen.getByRole('status')).toHaveTextContent(
+            '미리보기나 메시지 결과는 만들지 않았습니다',
+        );
+        expect(screen.getByRole('status')).toHaveTextContent(
+            '계획 미리보기 또는 메시지 전송·편집·재생성',
+        );
+        controller.destroy();
+    });
+
+    it('renders restored room choices and submits them with the current interaction revision', async () => {
+        const submitInteractionChoice = vi.fn().mockResolvedValue({
+            choice_effect: {
+                effect_id: 'effect-choice-1',
+                conversation_id: 'conversation-1',
+                branch_id: 'branch-1',
+                resulting_state_revision: 8,
+                sequence: 3,
+                event_created_at: '2026-08-03T00:00:01Z',
+                replay_on_reopen: true,
+                choice_status: 'consumed',
+                selected_choice_id: 'choice-b',
+                choice_decided_at_epoch_seconds: 2,
+                effect: {
+                    kind: 'present_choices',
+                    choices: [
+                        { id: 'choice-a', label: '왼쪽' },
+                        { id: 'choice-b', label: '오른쪽' },
+                    ],
+                },
+            },
+            resulting_state_revision: 8,
+        });
+        const interactionClient = {
+            listInteractionEffects: vi.fn().mockResolvedValue([]),
+            subscribeInteractionEffects: vi.fn().mockResolvedValue(vi.fn()),
+            acknowledgeInteractionEffect: vi.fn().mockResolvedValue(undefined),
+            retryInteractionEffect: vi.fn().mockResolvedValue(undefined),
+            expireInteractionProposals: vi.fn().mockResolvedValue({
+                conversation_id: 'conversation-1',
+                branch_id: 'branch-1',
+                current_state_revision: 7,
+                expired_proposals: [],
+                has_more_expired: false,
+            }),
+            listInteractionProposals: vi.fn().mockResolvedValue([
+                {
+                    conversation_id: 'conversation-1',
+                    branch_id: 'branch-1',
+                    state_revision: 7,
+                    proposal_revision: 1,
+                    proposal: {
+                        id: 'proposal-redacted',
+                        title: 'Stored proposal unavailable',
+                        body: 'The original proposal text cannot be displayed safely.',
+                        projection_rejection_reason: 'unsafe_native_text',
+                        status: 'pending',
+                        source_interaction_state_revision: 7,
+                        requested_at_epoch_seconds: 1,
+                        expires_at_epoch_seconds: null,
+                        decided_at_epoch_seconds: null,
+                    },
+                },
+            ]),
+            listReopenInteractionEffects: vi.fn().mockResolvedValue({
+                current_state_revision: 7,
+                items: [
+                    {
+                        effect_id: 'effect-rejected-1',
+                        conversation_id: 'conversation-1',
+                        branch_id: 'branch-1',
+                        resulting_state_revision: 6,
+                        sequence: 1,
+                        event_created_at: '2026-08-02T23:59:59Z',
+                        replay_on_reopen: true,
+                        choice_status: null,
+                        selected_choice_id: null,
+                        choice_decided_at_epoch_seconds: null,
+                        effect: {
+                            kind: 'projection_rejected',
+                            reason: 'unsafe_native_text',
+                        },
+                    },
+                    {
+                        effect_id: 'effect-choice-1',
+                        conversation_id: 'conversation-1',
+                        branch_id: 'branch-1',
+                        resulting_state_revision: 7,
+                        sequence: 2,
+                        event_created_at: '2026-08-03T00:00:00Z',
+                        replay_on_reopen: true,
+                        choice_status: 'pending',
+                        selected_choice_id: null,
+                        choice_decided_at_epoch_seconds: null,
+                        effect: {
+                            kind: 'present_choices',
+                            choices: [
+                                { id: 'choice-a', label: '왼쪽' },
+                                { id: 'choice-b', label: '오른쪽' },
+                            ],
+                        },
+                    },
+                ],
+                older_cursor: null,
+            }),
+            submitInteractionChoice,
+            decideInteractionProposal: vi.fn(),
+        } as unknown as LorepiaClient;
+        const { controller } = renderChat(chatReadyState(), interactionClient);
+
+        const choice = await screen.findByRole('button', { name: '오른쪽' });
+        expect(screen.getByText('안전한 표시 범위를 벗어난 저장 효과를 숨겼습니다.')).toBeVisible();
+        expect(screen.getByText('저장 제안 내용을 표시할 수 없음')).toBeVisible();
+        expect(screen.getByRole('button', { name: '승인' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: '거절' })).toBeEnabled();
+        await fireEvent.click(choice);
+
+        await waitFor(() => {
+            expect(submitInteractionChoice).toHaveBeenCalledWith({
+                conversation_id: 'conversation-1',
+                branch_id: 'branch-1',
+                effect_id: 'effect-choice-1',
+                choice_id: 'choice-b',
+                expected_state_revision: 7,
+            });
+        });
+        await waitFor(() => {
+            expect(screen.getByText(/선택 반영됨/)).toBeInTheDocument();
+        });
+        controller.destroy();
+    });
+
+    it('reports explicit ordinary-proposal expiry without presenting a false approval', async () => {
+        const decideInteractionProposal = vi.fn();
+        const interactionClient = {
+            listInteractionEffects: vi.fn().mockResolvedValue([]),
+            subscribeInteractionEffects: vi.fn().mockResolvedValue(vi.fn()),
+            acknowledgeInteractionEffect: vi.fn().mockResolvedValue(undefined),
+            retryInteractionEffect: vi.fn().mockResolvedValue(undefined),
+            expireInteractionProposals: vi.fn().mockResolvedValue({
+                conversation_id: 'conversation-1',
+                branch_id: 'branch-1',
+                current_state_revision: 8,
+                expired_proposals: [
+                    {
+                        conversation_id: 'conversation-1',
+                        branch_id: 'branch-1',
+                        state_revision: 8,
+                        proposal_revision: 4,
+                        proposal: {
+                            id: 'proposal-expired',
+                            title: '만료된 제안',
+                            body: '합성 제안',
+                            status: 'expired',
+                            source_interaction_state_revision: 7,
+                            requested_at_epoch_seconds: 1,
+                            expires_at_epoch_seconds: 2,
+                            decided_at_epoch_seconds: 2,
+                        },
+                    },
+                ],
+                has_more_expired: false,
+            }),
+            listInteractionProposals: vi.fn().mockResolvedValue([]),
+            listReopenInteractionEffects: vi.fn().mockResolvedValue({
+                current_state_revision: 8,
+                items: [],
+                older_cursor: null,
+            }),
+            submitInteractionChoice: vi.fn(),
+            decideInteractionProposal,
+        } as unknown as LorepiaClient;
+        const { controller } = renderChat(chatReadyState(), interactionClient);
+
+        expect(
+            await screen.findByText(
+                '만료된 승인 제안을 정리했습니다. 생성을 다시 시도할 수 있습니다.',
+            ),
+        ).toHaveAttribute('role', 'status');
+        expect(screen.queryByText('제안을 승인했습니다.')).not.toBeInTheDocument();
+        expect(decideInteractionProposal).not.toHaveBeenCalled();
+        controller.destroy();
+    });
+
+    it('renders and decides an ordinary room proposal through both reviewed CAS revisions', async () => {
+        const pending = {
+            conversation_id: 'conversation-1',
+            branch_id: 'branch-1',
+            state_revision: 7,
+            proposal_revision: 3,
+            proposal: {
+                id: 'proposal-room-1',
+                title: '문을 열기',
+                body: '현재 방 상태를 변경합니다.',
+                status: 'pending' as const,
+                source_interaction_state_revision: 7,
+                requested_at_epoch_seconds: 1,
+                expires_at_epoch_seconds: null,
+                decided_at_epoch_seconds: null,
+            },
+        };
+        const decideInteractionProposal = vi.fn().mockResolvedValue({
+            proposal: {
+                ...pending.proposal,
+                status: 'approved',
+                decided_at_epoch_seconds: 2,
+            },
+            state_revision: 8,
+            effects: [],
+        });
+        const interactionClient = {
+            listInteractionEffects: vi.fn().mockResolvedValue([]),
+            subscribeInteractionEffects: vi.fn().mockResolvedValue(vi.fn()),
+            acknowledgeInteractionEffect: vi.fn().mockResolvedValue(undefined),
+            retryInteractionEffect: vi.fn().mockResolvedValue(undefined),
+            expireInteractionProposals: vi.fn().mockResolvedValue({
+                conversation_id: 'conversation-1',
+                branch_id: 'branch-1',
+                current_state_revision: 7,
+                expired_proposals: [],
+                has_more_expired: false,
+            }),
+            listInteractionProposals: vi.fn().mockResolvedValue([pending]),
+            listReopenInteractionEffects: vi.fn().mockResolvedValue({
+                current_state_revision: 7,
+                items: [],
+                older_cursor: null,
+            }),
+            submitInteractionChoice: vi.fn(),
+            decideInteractionProposal,
+        } as unknown as LorepiaClient;
+        const { controller } = renderChat(chatReadyState(), interactionClient);
+
+        expect(await screen.findByText('문을 열기')).toBeInTheDocument();
+        await fireEvent.click(screen.getByRole('button', { name: '승인' }));
+        await waitFor(() => {
+            expect(decideInteractionProposal).toHaveBeenCalledWith({
+                conversation_id: 'conversation-1',
+                branch_id: 'branch-1',
+                proposal_record_id: 'proposal-room-1',
+                expected_state_revision: 7,
+                expected_proposal_revision: 3,
+                decision: 'approve',
+            });
+        });
+        await waitFor(() => expect(screen.queryByText('문을 열기')).not.toBeInTheDocument());
+        expect(screen.getByRole('status')).toHaveTextContent('제안을 승인했습니다');
+        controller.destroy();
+    });
+
+    it('requires explicit bounded expiry draining before ordinary proposal approval', async () => {
+        const pending = {
+            conversation_id: 'conversation-1',
+            branch_id: 'branch-1',
+            state_revision: 7,
+            proposal_revision: 3,
+            proposal: {
+                id: 'proposal-pending',
+                title: '상태 변경 승인',
+                body: '합성 상태만 변경합니다.',
+                status: 'pending' as const,
+                source_interaction_state_revision: 7,
+                requested_at_epoch_seconds: 1,
+                expires_at_epoch_seconds: null,
+                decided_at_epoch_seconds: null,
+            },
+        };
+        const expireInteractionProposals = vi
+            .fn()
+            .mockResolvedValueOnce({
+                conversation_id: 'conversation-1',
+                branch_id: 'branch-1',
+                current_state_revision: 7,
+                expired_proposals: [],
+                has_more_expired: true,
+            })
+            .mockResolvedValueOnce({
+                conversation_id: 'conversation-1',
+                branch_id: 'branch-1',
+                current_state_revision: 7,
+                expired_proposals: [],
+                has_more_expired: false,
+            });
+        const decideInteractionProposal = vi.fn();
+        const interactionClient = {
+            listInteractionEffects: vi.fn().mockResolvedValue([]),
+            subscribeInteractionEffects: vi.fn().mockResolvedValue(vi.fn()),
+            acknowledgeInteractionEffect: vi.fn().mockResolvedValue(undefined),
+            retryInteractionEffect: vi.fn().mockResolvedValue(undefined),
+            expireInteractionProposals,
+            listInteractionProposals: vi.fn().mockResolvedValue([pending]),
+            listReopenInteractionEffects: vi.fn().mockResolvedValue({
+                current_state_revision: 7,
+                items: [],
+                older_cursor: null,
+            }),
+            submitInteractionChoice: vi.fn(),
+            decideInteractionProposal,
+        } as unknown as LorepiaClient;
+        const { controller } = renderChat(chatReadyState(), interactionClient);
+
+        expect(await screen.findByText('상태 변경 승인')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: '승인' })).toBeDisabled();
+        expect(screen.getByRole('alert')).toHaveTextContent(
+            '최신 상태를 모두 정리하기 전에는 다른 제안을 결정할 수 없습니다',
+        );
+        await fireEvent.click(screen.getByRole('button', { name: '만료 제안 계속 정리' }));
+        await waitFor(() => expect(expireInteractionProposals).toHaveBeenCalledTimes(2));
+        await waitFor(() => expect(screen.getByRole('button', { name: '승인' })).toBeEnabled());
+        expect(decideInteractionProposal).not.toHaveBeenCalled();
+        controller.destroy();
+    });
+
+    it('exposes explicit edit, regenerate, branch, remove and clipboard actions', async () => {
+        const appState = chatReadyState();
+        appState.messages.items = [
+            {
+                id: 'user-1',
+                conversation_id: 'conversation-1',
+                parent_id: null,
+                role: 'user',
+                content: '원래 문장',
+                status: 'complete',
+                generation_id: null,
+                created_at: '2026-08-02T00:00:00Z',
+            },
+            {
+                id: 'assistant-1',
+                conversation_id: 'conversation-1',
+                parent_id: 'user-1',
+                role: 'assistant',
+                content: '원래 응답',
+                status: 'complete',
+                generation_id: 'generation-old',
+                created_at: '2026-08-02T00:00:01Z',
+            },
+        ];
+        const { controller } = renderChat(appState);
+        const edit = vi.spyOn(controller, 'editUserMessage').mockResolvedValue(true);
+        const regenerate = vi
+            .spyOn(controller, 'regenerateAssistantMessage')
+            .mockResolvedValue(true);
+        const createBranch = vi.spyOn(controller, 'createBranch').mockResolvedValue();
+        const remove = vi.spyOn(controller, 'removeMessage').mockResolvedValue();
+        const writeText = vi.fn().mockResolvedValue(undefined);
+        Object.defineProperty(navigator, 'clipboard', {
+            configurable: true,
+            value: { writeText },
+        });
+
+        expect(writeText).not.toHaveBeenCalled();
+        const firstCopyButton = screen.getAllByRole('button', { name: '복사' }).at(0);
+        if (firstCopyButton === undefined) throw new Error('copy action missing');
+        await fireEvent.click(firstCopyButton);
+        expect(writeText).toHaveBeenCalledWith('원래 문장');
+
+        await fireEvent.click(screen.getByRole('button', { name: '편집' }));
+        const editor = screen.getByRole('textbox', { name: '편집할 메시지' });
+        await fireEvent.input(editor, { target: { value: '고친 문장' } });
+        await fireEvent.click(screen.getByRole('button', { name: '새 분기로 저장' }));
+        await waitFor(() => {
+            expect(edit).toHaveBeenCalledWith('user-1', '고친 문장');
+        });
+
+        await fireEvent.click(screen.getByRole('button', { name: '재생성' }));
+        expect(regenerate).toHaveBeenCalledWith('assistant-1');
+
+        const firstBranchButton = screen.getAllByRole('button', { name: '여기서 분기' }).at(0);
+        if (firstBranchButton === undefined) throw new Error('branch action missing');
+        await fireEvent.click(firstBranchButton);
+        expect(createBranch).toHaveBeenCalledWith('user-1');
+
+        const firstRemoveButton = screen.getAllByRole('button', { name: '여기부터 제거' }).at(0);
+        if (firstRemoveButton === undefined) throw new Error('remove action missing');
+        await fireEvent.click(firstRemoveButton);
+        await fireEvent.click(screen.getByRole('button', { name: '제거 확인' }));
+        expect(remove).toHaveBeenCalledWith('user-1');
+        controller.destroy();
+    });
+});

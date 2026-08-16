@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-generation-presets"
+description = "Enables the list_generation_presets command without any pre-configured scope."
+commands.allow = ["list_generation_presets"]
+
+[[permission]]
+identifier = "deny-list-generation-presets"
+description = "Denies the list_generation_presets command without any pre-configured scope."
+commands.deny = ["list_generation_presets"]

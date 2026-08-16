@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-upsert-generation-preset"
+description = "Enables the upsert_generation_preset command without any pre-configured scope."
+commands.allow = ["upsert_generation_preset"]
+
+[[permission]]
+identifier = "deny-upsert-generation-preset"
+description = "Denies the upsert_generation_preset command without any pre-configured scope."
+commands.deny = ["upsert_generation_preset"]

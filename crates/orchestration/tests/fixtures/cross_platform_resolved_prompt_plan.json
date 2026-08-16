@@ -1,0 +1,1026 @@
+{
+  "schema_version": 1,
+  "preset_id": "cross-platform.synthetic.v1",
+  "generation_preset_id": "generation.provider-defaults.v1",
+  "effective_messages": [
+    {
+      "sequence": 0,
+      "block_id": "zone-01-application",
+      "block_kind": "static_instruction",
+      "requested_role": "system",
+      "effective_role": "system",
+      "authority": "application",
+      "content": "Fixed application policy.",
+      "estimated_tokens": 11,
+      "source_message_ids": [],
+      "provenance": {
+        "source_kind": "application_built_in",
+        "source_id": "zone-01-application",
+        "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "author": "Synthetic Fixture",
+        "license": "MIT",
+        "imported_at": null
+      }
+    },
+    {
+      "sequence": 1,
+      "block_id": "zone-02-preset-b",
+      "block_kind": "static_instruction",
+      "requested_role": "developer",
+      "effective_role": "system",
+      "authority": "creator",
+      "content": "Developer instruction maps to system.",
+      "estimated_tokens": 14,
+      "source_message_ids": [],
+      "provenance": {
+        "source_kind": "application_built_in",
+        "source_id": "zone-02-preset-b",
+        "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "author": "Synthetic Fixture",
+        "license": "MIT",
+        "imported_at": null
+      }
+    },
+    {
+      "sequence": 2,
+      "block_id": "zone-02-preset-a",
+      "block_kind": "static_instruction",
+      "requested_role": "provider_default",
+      "effective_role": "user",
+      "authority": "creator",
+      "content": "Provider-default instruction.",
+      "estimated_tokens": 12,
+      "source_message_ids": [],
+      "provenance": {
+        "source_kind": "application_built_in",
+        "source_id": "zone-02-preset-a",
+        "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "author": "Synthetic Fixture",
+        "license": "MIT",
+        "imported_at": null
+      }
+    },
+    {
+      "sequence": 3,
+      "block_id": "zone-03-character",
+      "block_kind": "character_description",
+      "requested_role": "system",
+      "effective_role": "system",
+      "authority": "creator",
+      "content": "Character context shared by every platform.",
+      "estimated_tokens": 15,
+      "source_message_ids": [],
+      "provenance": {
+        "source_kind": "user_created",
+        "source_id": "zone-03-character",
+        "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "author": "Synthetic Fixture",
+        "license": "MIT",
+        "imported_at": null
+      }
+    },
+    {
+      "sequence": 4,
+      "block_id": "zone-04-knowledge",
+      "block_kind": "world_knowledge",
+      "requested_role": "developer",
+      "effective_role": "system",
+      "authority": "creator",
+      "content": "Tie A selected fact.",
+      "estimated_tokens": 9,
+      "source_message_ids": [],
+      "provenance": {
+        "source_kind": "user_created",
+        "source_id": "knowledge-tie-a",
+        "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "author": "Synthetic Fixture",
+        "license": "MIT",
+        "imported_at": null
+      }
+    },
+    {
+      "sequence": 5,
+      "block_id": "zone-04-memory",
+      "block_kind": "retrieved_memory",
+      "requested_role": "system",
+      "effective_role": "system",
+      "authority": "creator",
+      "content": "Memory B remains after reduction.",
+      "estimated_tokens": 13,
+      "source_message_ids": [],
+      "provenance": {
+        "source_kind": "generated",
+        "source_id": "memory-tie-b",
+        "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "author": "Synthetic Fixture",
+        "license": "MIT",
+        "imported_at": null
+      }
+    },
+    {
+      "sequence": 6,
+      "block_id": "zone-05-older-history",
+      "block_kind": "history_slice",
+      "requested_role": "assistant",
+      "effective_role": "assistant",
+      "authority": "creator",
+      "content": "Old assistant turn.",
+      "estimated_tokens": 9,
+      "source_message_ids": [
+        "message-turn-1-assistant"
+      ],
+      "provenance": {
+        "source_kind": "user_created",
+        "source_id": "zone-05-older-history",
+        "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "author": "Synthetic Fixture",
+        "license": "MIT",
+        "imported_at": null
+      }
+    },
+    {
+      "sequence": 7,
+      "block_id": "zone-05-older-history",
+      "block_kind": "history_slice",
+      "requested_role": "user",
+      "effective_role": "user",
+      "authority": "creator",
+      "content": "Old user turn.",
+      "estimated_tokens": 8,
+      "source_message_ids": [
+        "message-turn-1-user"
+      ],
+      "provenance": {
+        "source_kind": "user_created",
+        "source_id": "zone-05-older-history",
+        "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "author": "Synthetic Fixture",
+        "license": "MIT",
+        "imported_at": null
+      }
+    },
+    {
+      "sequence": 8,
+      "block_id": "zone-06-recent-enhancement",
+      "block_kind": "author_note",
+      "requested_role": "developer",
+      "effective_role": "system",
+      "authority": "creator",
+      "content": "Optional author-note material that is in",
+      "estimated_tokens": 14,
+      "source_message_ids": [],
+      "provenance": {
+        "source_kind": "user_created",
+        "source_id": "zone-06-recent-enhancement",
+        "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "author": "Synthetic Fixture",
+        "license": "MIT",
+        "imported_at": null
+      }
+    },
+    {
+      "sequence": 9,
+      "block_id": "zone-07-recent-history",
+      "block_kind": "history_slice",
+      "requested_role": "assistant",
+      "effective_role": "assistant",
+      "authority": "creator",
+      "content": "Recent assistant turn.",
+      "estimated_tokens": 10,
+      "source_message_ids": [
+        "message-turn-2-assistant"
+      ],
+      "provenance": {
+        "source_kind": "user_created",
+        "source_id": "zone-07-recent-history",
+        "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "author": "Synthetic Fixture",
+        "license": "MIT",
+        "imported_at": null
+      }
+    },
+    {
+      "sequence": 10,
+      "block_id": "zone-07-recent-history",
+      "block_kind": "history_slice",
+      "requested_role": "user",
+      "effective_role": "user",
+      "authority": "creator",
+      "content": "Recent user turn.",
+      "estimated_tokens": 9,
+      "source_message_ids": [
+        "message-turn-2-user"
+      ],
+      "provenance": {
+        "source_kind": "user_created",
+        "source_id": "zone-07-recent-history",
+        "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "author": "Synthetic Fixture",
+        "license": "MIT",
+        "imported_at": null
+      }
+    },
+    {
+      "sequence": 11,
+      "block_id": "zone-08-post-history",
+      "block_kind": "post_history_instruction",
+      "requested_role": "developer",
+      "effective_role": "system",
+      "authority": "creator",
+      "content": "Fixed post-history instruction.",
+      "estimated_tokens": 12,
+      "source_message_ids": [],
+      "provenance": {
+        "source_kind": "user_created",
+        "source_id": "zone-08-post-history",
+        "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "author": "Synthetic Fixture",
+        "license": "MIT",
+        "imported_at": null
+      }
+    },
+    {
+      "sequence": 12,
+      "block_id": "zone-09-latest-user",
+      "block_kind": "latest_user_turn",
+      "requested_role": "user",
+      "effective_role": "user",
+      "authority": "user",
+      "content": "Fixed latest user turn.",
+      "estimated_tokens": 10,
+      "source_message_ids": [
+        "message-latest-user-fixed"
+      ],
+      "provenance": {
+        "source_kind": "user_created",
+        "source_id": "zone-09-latest-user",
+        "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "author": "Synthetic Fixture",
+        "license": "MIT",
+        "imported_at": null
+      }
+    },
+    {
+      "sequence": 13,
+      "block_id": "zone-10-assistant-prefill",
+      "block_kind": "assistant_prefill",
+      "requested_role": "assistant",
+      "effective_role": "assistant",
+      "authority": "creator",
+      "content": "Fixed prefill",
+      "estimated_tokens": 8,
+      "source_message_ids": [],
+      "provenance": {
+        "source_kind": "application_built_in",
+        "source_id": "zone-10-assistant-prefill",
+        "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "author": "Synthetic Fixture",
+        "license": "MIT",
+        "imported_at": null
+      }
+    }
+  ],
+  "cache_directives": [
+    {
+      "boundary_id": "cache-applied-automatic",
+      "after_block_id": "zone-01-application",
+      "after_message_sequence": 0,
+      "role_filter": {
+        "kind": "system_like"
+      },
+      "ttl": "provider_default",
+      "mode": "automatic",
+      "status": "applied",
+      "explanation": "provider automatic cache policy retained"
+    },
+    {
+      "boundary_id": "cache-unsupported-explicit",
+      "after_block_id": "zone-02-preset-b",
+      "after_message_sequence": 1,
+      "role_filter": {
+        "kind": "exact_role",
+        "role": "developer"
+      },
+      "ttl": "long",
+      "mode": "explicit",
+      "status": "ignored_unsupported",
+      "explanation": "cache boundary `cache-unsupported-explicit` ignored because the provider lacks explicit caching"
+    }
+  ],
+  "trace": {
+    "estimator_id": "utf8_bytes_div_4_v1",
+    "session_seed": 1592642302,
+    "max_context_tokens": 2048,
+    "reserved_output_tokens": 256,
+    "available_input_tokens": 1792,
+    "estimated_input_tokens": 154,
+    "blocks": [
+      {
+        "block_id": "zone-01-application",
+        "block_kind": "static_instruction",
+        "source": {
+          "authority": "application",
+          "source_kind": "application_built_in",
+          "source_id": "zone-01-application",
+          "source_revision": null,
+          "source_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "status": "included",
+        "original_estimated_tokens": 11,
+        "final_estimated_tokens": 11,
+        "produced_message_count": 1,
+        "explanation": "block included",
+        "knowledge_evidence": [],
+        "memory_record_ids": [],
+        "memory_evidence": []
+      },
+      {
+        "block_id": "zone-02-preset-b",
+        "block_kind": "static_instruction",
+        "source": {
+          "authority": "creator",
+          "source_kind": "application_built_in",
+          "source_id": "zone-02-preset-b",
+          "source_revision": null,
+          "source_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "status": "included",
+        "original_estimated_tokens": 14,
+        "final_estimated_tokens": 14,
+        "produced_message_count": 1,
+        "explanation": "block included",
+        "knowledge_evidence": [],
+        "memory_record_ids": [],
+        "memory_evidence": []
+      },
+      {
+        "block_id": "zone-02-preset-a",
+        "block_kind": "static_instruction",
+        "source": {
+          "authority": "creator",
+          "source_kind": "application_built_in",
+          "source_id": "zone-02-preset-a",
+          "source_revision": null,
+          "source_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "status": "included",
+        "original_estimated_tokens": 12,
+        "final_estimated_tokens": 12,
+        "produced_message_count": 1,
+        "explanation": "block included",
+        "knowledge_evidence": [],
+        "memory_record_ids": [],
+        "memory_evidence": []
+      },
+      {
+        "block_id": "zone-03-character",
+        "block_kind": "character_description",
+        "source": {
+          "authority": "creator",
+          "source_kind": "user_created",
+          "source_id": "zone-03-character",
+          "source_revision": null,
+          "source_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "status": "included",
+        "original_estimated_tokens": 15,
+        "final_estimated_tokens": 15,
+        "produced_message_count": 1,
+        "explanation": "block included",
+        "knowledge_evidence": [],
+        "memory_record_ids": [],
+        "memory_evidence": []
+      },
+      {
+        "block_id": "zone-04-knowledge",
+        "block_kind": "world_knowledge",
+        "source": {
+          "authority": "creator",
+          "source_kind": "user_created",
+          "source_id": "zone-04-knowledge",
+          "source_revision": null,
+          "source_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "status": "reduced_items",
+        "original_estimated_tokens": 32,
+        "final_estimated_tokens": 9,
+        "produced_message_count": 1,
+        "explanation": "lower-ranked knowledge entries removed",
+        "knowledge_evidence": [
+          {
+            "entry_id": "knowledge-tie-a",
+            "selected": true,
+            "reasons": [
+              {
+                "kind": "keyword",
+                "matched": "selected"
+              }
+            ],
+            "estimated_tokens": 5,
+            "exclusion_reason": null
+          },
+          {
+            "entry_id": "knowledge-tie-b",
+            "selected": false,
+            "reasons": [
+              {
+                "kind": "always"
+              }
+            ],
+            "estimated_tokens": 5,
+            "exclusion_reason": "removed by the prompt token budget"
+          },
+          {
+            "entry_id": "knowledge-excluded-by-budget",
+            "selected": false,
+            "reasons": [
+              {
+                "kind": "manual"
+              }
+            ],
+            "estimated_tokens": 10,
+            "exclusion_reason": "removed by the prompt token budget"
+          }
+        ],
+        "memory_record_ids": [],
+        "memory_evidence": []
+      },
+      {
+        "block_id": "zone-04-memory",
+        "block_kind": "retrieved_memory",
+        "source": {
+          "authority": "creator",
+          "source_kind": "user_created",
+          "source_id": "zone-04-memory",
+          "source_revision": null,
+          "source_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "status": "reduced_items",
+        "original_estimated_tokens": 26,
+        "final_estimated_tokens": 13,
+        "produced_message_count": 1,
+        "explanation": "oldest history items removed for token budget",
+        "knowledge_evidence": [],
+        "memory_record_ids": [
+          "memory-tie-b"
+        ],
+        "memory_evidence": [
+          {
+            "record_id": "memory-tie-a",
+            "selected": false,
+            "lane": null,
+            "rank_millionths": 800000,
+            "estimated_tokens": 9,
+            "reasons": [],
+            "exclusion_reason": "removed by the prompt token budget"
+          },
+          {
+            "record_id": "memory-tie-b",
+            "selected": true,
+            "lane": "episodic",
+            "rank_millionths": 800000,
+            "estimated_tokens": 9,
+            "reasons": [],
+            "exclusion_reason": null
+          }
+        ]
+      },
+      {
+        "block_id": "zone-05-older-history",
+        "block_kind": "history_slice",
+        "source": {
+          "authority": "creator",
+          "source_kind": "user_created",
+          "source_id": "zone-05-older-history",
+          "source_revision": null,
+          "source_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "status": "included",
+        "original_estimated_tokens": 17,
+        "final_estimated_tokens": 17,
+        "produced_message_count": 2,
+        "explanation": "block included",
+        "knowledge_evidence": [],
+        "memory_record_ids": [],
+        "memory_evidence": []
+      },
+      {
+        "block_id": "zone-06-recent-enhancement",
+        "block_kind": "author_note",
+        "source": {
+          "authority": "creator",
+          "source_kind": "user_created",
+          "source_id": "zone-06-recent-enhancement",
+          "source_revision": null,
+          "source_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "status": "trimmed_tail",
+        "original_estimated_tokens": 19,
+        "final_estimated_tokens": 14,
+        "produced_message_count": 1,
+        "explanation": "trailing text trimmed for token budget",
+        "knowledge_evidence": [],
+        "memory_record_ids": [],
+        "memory_evidence": []
+      },
+      {
+        "block_id": "zone-07-recent-history",
+        "block_kind": "history_slice",
+        "source": {
+          "authority": "creator",
+          "source_kind": "user_created",
+          "source_id": "zone-07-recent-history",
+          "source_revision": null,
+          "source_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "status": "included",
+        "original_estimated_tokens": 19,
+        "final_estimated_tokens": 19,
+        "produced_message_count": 2,
+        "explanation": "block included",
+        "knowledge_evidence": [],
+        "memory_record_ids": [],
+        "memory_evidence": []
+      },
+      {
+        "block_id": "zone-08-post-history",
+        "block_kind": "post_history_instruction",
+        "source": {
+          "authority": "creator",
+          "source_kind": "user_created",
+          "source_id": "zone-08-post-history",
+          "source_revision": null,
+          "source_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "status": "included",
+        "original_estimated_tokens": 12,
+        "final_estimated_tokens": 12,
+        "produced_message_count": 1,
+        "explanation": "block included",
+        "knowledge_evidence": [],
+        "memory_record_ids": [],
+        "memory_evidence": []
+      },
+      {
+        "block_id": "zone-09-latest-user",
+        "block_kind": "latest_user_turn",
+        "source": {
+          "authority": "user",
+          "source_kind": "user_created",
+          "source_id": "zone-09-latest-user",
+          "source_revision": null,
+          "source_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "status": "included",
+        "original_estimated_tokens": 10,
+        "final_estimated_tokens": 10,
+        "produced_message_count": 1,
+        "explanation": "block included",
+        "knowledge_evidence": [],
+        "memory_record_ids": [],
+        "memory_evidence": []
+      },
+      {
+        "block_id": "zone-10-assistant-prefill",
+        "block_kind": "assistant_prefill",
+        "source": {
+          "authority": "creator",
+          "source_kind": "application_built_in",
+          "source_id": "zone-10-assistant-prefill",
+          "source_revision": null,
+          "source_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "status": "included",
+        "original_estimated_tokens": 8,
+        "final_estimated_tokens": 8,
+        "produced_message_count": 1,
+        "explanation": "block included",
+        "knowledge_evidence": [],
+        "memory_record_ids": [],
+        "memory_evidence": []
+      }
+    ],
+    "role_mappings": [
+      {
+        "block_id": "zone-01-application",
+        "requested_role": "system",
+        "effective_role": "system",
+        "explanation": "requested role is supported"
+      },
+      {
+        "block_id": "zone-02-preset-b",
+        "requested_role": "developer",
+        "effective_role": "system",
+        "explanation": "developer role mapped to system because the provider lacks developer"
+      },
+      {
+        "block_id": "zone-02-preset-a",
+        "requested_role": "provider_default",
+        "effective_role": "user",
+        "explanation": "provider-default role selected"
+      },
+      {
+        "block_id": "zone-03-character",
+        "requested_role": "system",
+        "effective_role": "system",
+        "explanation": "requested role is supported"
+      },
+      {
+        "block_id": "zone-04-knowledge",
+        "requested_role": "developer",
+        "effective_role": "system",
+        "explanation": "developer role mapped to system because the provider lacks developer"
+      },
+      {
+        "block_id": "zone-04-memory",
+        "requested_role": "system",
+        "effective_role": "system",
+        "explanation": "requested role is supported"
+      },
+      {
+        "block_id": "zone-05-older-history",
+        "requested_role": "assistant",
+        "effective_role": "assistant",
+        "explanation": "requested role is supported"
+      },
+      {
+        "block_id": "zone-05-older-history",
+        "requested_role": "user",
+        "effective_role": "user",
+        "explanation": "requested role is supported"
+      },
+      {
+        "block_id": "zone-06-recent-enhancement",
+        "requested_role": "developer",
+        "effective_role": "system",
+        "explanation": "developer role mapped to system because the provider lacks developer"
+      },
+      {
+        "block_id": "zone-07-recent-history",
+        "requested_role": "assistant",
+        "effective_role": "assistant",
+        "explanation": "requested role is supported"
+      },
+      {
+        "block_id": "zone-07-recent-history",
+        "requested_role": "user",
+        "effective_role": "user",
+        "explanation": "requested role is supported"
+      },
+      {
+        "block_id": "zone-08-post-history",
+        "requested_role": "developer",
+        "effective_role": "system",
+        "explanation": "developer role mapped to system because the provider lacks developer"
+      },
+      {
+        "block_id": "zone-09-latest-user",
+        "requested_role": "user",
+        "effective_role": "user",
+        "explanation": "requested role is supported"
+      },
+      {
+        "block_id": "zone-10-assistant-prefill",
+        "requested_role": "assistant",
+        "effective_role": "assistant",
+        "explanation": "requested role is supported"
+      }
+    ],
+    "overflow": [
+      {
+        "block_id": "zone-04-knowledge",
+        "policy": "reduce_knowledge_entries",
+        "tokens_before": 32,
+        "tokens_after": 9,
+        "explanation": "applied the block maximum"
+      },
+      {
+        "block_id": "zone-04-memory",
+        "policy": "keep_latest_items",
+        "tokens_before": 26,
+        "tokens_after": 13,
+        "explanation": "applied the block maximum"
+      },
+      {
+        "block_id": "zone-06-recent-enhancement",
+        "policy": "trim_tail",
+        "tokens_before": 19,
+        "tokens_after": 14,
+        "explanation": "applied the block maximum"
+      }
+    ],
+    "warnings": [
+      "cache boundary `cache-unsupported-explicit` ignored because the provider lacks explicit caching"
+    ]
+  },
+  "preview": {
+    "effective_messages": [
+      {
+        "sequence": 0,
+        "block_id": "zone-01-application",
+        "block_kind": "static_instruction",
+        "requested_role": "system",
+        "effective_role": "system",
+        "authority": "application",
+        "content": "Fixed application policy.",
+        "estimated_tokens": 11,
+        "source_message_ids": [],
+        "provenance": {
+          "source_kind": "application_built_in",
+          "source_id": "zone-01-application",
+          "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+          "author": "Synthetic Fixture",
+          "license": "MIT",
+          "imported_at": null
+        }
+      },
+      {
+        "sequence": 1,
+        "block_id": "zone-02-preset-b",
+        "block_kind": "static_instruction",
+        "requested_role": "developer",
+        "effective_role": "system",
+        "authority": "creator",
+        "content": "Developer instruction maps to system.",
+        "estimated_tokens": 14,
+        "source_message_ids": [],
+        "provenance": {
+          "source_kind": "application_built_in",
+          "source_id": "zone-02-preset-b",
+          "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+          "author": "Synthetic Fixture",
+          "license": "MIT",
+          "imported_at": null
+        }
+      },
+      {
+        "sequence": 2,
+        "block_id": "zone-02-preset-a",
+        "block_kind": "static_instruction",
+        "requested_role": "provider_default",
+        "effective_role": "user",
+        "authority": "creator",
+        "content": "Provider-default instruction.",
+        "estimated_tokens": 12,
+        "source_message_ids": [],
+        "provenance": {
+          "source_kind": "application_built_in",
+          "source_id": "zone-02-preset-a",
+          "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+          "author": "Synthetic Fixture",
+          "license": "MIT",
+          "imported_at": null
+        }
+      },
+      {
+        "sequence": 3,
+        "block_id": "zone-03-character",
+        "block_kind": "character_description",
+        "requested_role": "system",
+        "effective_role": "system",
+        "authority": "creator",
+        "content": "Character context shared by every platform.",
+        "estimated_tokens": 15,
+        "source_message_ids": [],
+        "provenance": {
+          "source_kind": "user_created",
+          "source_id": "zone-03-character",
+          "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+          "author": "Synthetic Fixture",
+          "license": "MIT",
+          "imported_at": null
+        }
+      },
+      {
+        "sequence": 4,
+        "block_id": "zone-04-knowledge",
+        "block_kind": "world_knowledge",
+        "requested_role": "developer",
+        "effective_role": "system",
+        "authority": "creator",
+        "content": "Tie A selected fact.",
+        "estimated_tokens": 9,
+        "source_message_ids": [],
+        "provenance": {
+          "source_kind": "user_created",
+          "source_id": "knowledge-tie-a",
+          "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+          "author": "Synthetic Fixture",
+          "license": "MIT",
+          "imported_at": null
+        }
+      },
+      {
+        "sequence": 5,
+        "block_id": "zone-04-memory",
+        "block_kind": "retrieved_memory",
+        "requested_role": "system",
+        "effective_role": "system",
+        "authority": "creator",
+        "content": "Memory B remains after reduction.",
+        "estimated_tokens": 13,
+        "source_message_ids": [],
+        "provenance": {
+          "source_kind": "generated",
+          "source_id": "memory-tie-b",
+          "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+          "author": "Synthetic Fixture",
+          "license": "MIT",
+          "imported_at": null
+        }
+      },
+      {
+        "sequence": 6,
+        "block_id": "zone-05-older-history",
+        "block_kind": "history_slice",
+        "requested_role": "assistant",
+        "effective_role": "assistant",
+        "authority": "creator",
+        "content": "Old assistant turn.",
+        "estimated_tokens": 9,
+        "source_message_ids": [
+          "message-turn-1-assistant"
+        ],
+        "provenance": {
+          "source_kind": "user_created",
+          "source_id": "zone-05-older-history",
+          "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+          "author": "Synthetic Fixture",
+          "license": "MIT",
+          "imported_at": null
+        }
+      },
+      {
+        "sequence": 7,
+        "block_id": "zone-05-older-history",
+        "block_kind": "history_slice",
+        "requested_role": "user",
+        "effective_role": "user",
+        "authority": "creator",
+        "content": "Old user turn.",
+        "estimated_tokens": 8,
+        "source_message_ids": [
+          "message-turn-1-user"
+        ],
+        "provenance": {
+          "source_kind": "user_created",
+          "source_id": "zone-05-older-history",
+          "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+          "author": "Synthetic Fixture",
+          "license": "MIT",
+          "imported_at": null
+        }
+      },
+      {
+        "sequence": 8,
+        "block_id": "zone-06-recent-enhancement",
+        "block_kind": "author_note",
+        "requested_role": "developer",
+        "effective_role": "system",
+        "authority": "creator",
+        "content": "Optional author-note material that is in",
+        "estimated_tokens": 14,
+        "source_message_ids": [],
+        "provenance": {
+          "source_kind": "user_created",
+          "source_id": "zone-06-recent-enhancement",
+          "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+          "author": "Synthetic Fixture",
+          "license": "MIT",
+          "imported_at": null
+        }
+      },
+      {
+        "sequence": 9,
+        "block_id": "zone-07-recent-history",
+        "block_kind": "history_slice",
+        "requested_role": "assistant",
+        "effective_role": "assistant",
+        "authority": "creator",
+        "content": "Recent assistant turn.",
+        "estimated_tokens": 10,
+        "source_message_ids": [
+          "message-turn-2-assistant"
+        ],
+        "provenance": {
+          "source_kind": "user_created",
+          "source_id": "zone-07-recent-history",
+          "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+          "author": "Synthetic Fixture",
+          "license": "MIT",
+          "imported_at": null
+        }
+      },
+      {
+        "sequence": 10,
+        "block_id": "zone-07-recent-history",
+        "block_kind": "history_slice",
+        "requested_role": "user",
+        "effective_role": "user",
+        "authority": "creator",
+        "content": "Recent user turn.",
+        "estimated_tokens": 9,
+        "source_message_ids": [
+          "message-turn-2-user"
+        ],
+        "provenance": {
+          "source_kind": "user_created",
+          "source_id": "zone-07-recent-history",
+          "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+          "author": "Synthetic Fixture",
+          "license": "MIT",
+          "imported_at": null
+        }
+      },
+      {
+        "sequence": 11,
+        "block_id": "zone-08-post-history",
+        "block_kind": "post_history_instruction",
+        "requested_role": "developer",
+        "effective_role": "system",
+        "authority": "creator",
+        "content": "Fixed post-history instruction.",
+        "estimated_tokens": 12,
+        "source_message_ids": [],
+        "provenance": {
+          "source_kind": "user_created",
+          "source_id": "zone-08-post-history",
+          "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+          "author": "Synthetic Fixture",
+          "license": "MIT",
+          "imported_at": null
+        }
+      },
+      {
+        "sequence": 12,
+        "block_id": "zone-09-latest-user",
+        "block_kind": "latest_user_turn",
+        "requested_role": "user",
+        "effective_role": "user",
+        "authority": "user",
+        "content": "Fixed latest user turn.",
+        "estimated_tokens": 10,
+        "source_message_ids": [
+          "message-latest-user-fixed"
+        ],
+        "provenance": {
+          "source_kind": "user_created",
+          "source_id": "zone-09-latest-user",
+          "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+          "author": "Synthetic Fixture",
+          "license": "MIT",
+          "imported_at": null
+        }
+      },
+      {
+        "sequence": 13,
+        "block_id": "zone-10-assistant-prefill",
+        "block_kind": "assistant_prefill",
+        "requested_role": "assistant",
+        "effective_role": "assistant",
+        "authority": "creator",
+        "content": "Fixed prefill",
+        "estimated_tokens": 8,
+        "source_message_ids": [],
+        "provenance": {
+          "source_kind": "application_built_in",
+          "source_id": "zone-10-assistant-prefill",
+          "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+          "author": "Synthetic Fixture",
+          "license": "MIT",
+          "imported_at": null
+        }
+      }
+    ],
+    "cache_directives": [
+      {
+        "boundary_id": "cache-applied-automatic",
+        "after_block_id": "zone-01-application",
+        "after_message_sequence": 0,
+        "role_filter": {
+          "kind": "system_like"
+        },
+        "ttl": "provider_default",
+        "mode": "automatic",
+        "status": "applied",
+        "explanation": "provider automatic cache policy retained"
+      },
+      {
+        "boundary_id": "cache-unsupported-explicit",
+        "after_block_id": "zone-02-preset-b",
+        "after_message_sequence": 1,
+        "role_filter": {
+          "kind": "exact_role",
+          "role": "developer"
+        },
+        "ttl": "long",
+        "mode": "explicit",
+        "status": "ignored_unsupported",
+        "explanation": "cache boundary `cache-unsupported-explicit` ignored because the provider lacks explicit caching"
+      }
+    ],
+    "estimated_input_tokens": 154,
+    "available_input_tokens": 1792
+  },
+  "plan_hash": "7c32c1146ffdecbc5bdf6a927eb8eae80408baa8084b8e25430883561092149b"
+}
