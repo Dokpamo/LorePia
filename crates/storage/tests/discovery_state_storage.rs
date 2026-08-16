@@ -104,6 +104,7 @@ fn typed_plan_json(
         credential_approval_id: credential_ref
             .map(|_| DiscoveryApprovalId::parse("credential-approval").unwrap()),
         review_sha256: HASH_A.to_owned(),
+        catalog_authority: None,
         previous_selection,
     })
     .unwrap()

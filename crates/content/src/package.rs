@@ -20,7 +20,10 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use zip::{ZipArchive, read::ZipFile};
 
-use crate::{path::validate_archive_path, sha256_file, validated_source_metadata};
+use crate::{
+    archive::preflight_zip_archive, path::validate_archive_path, sha256_file,
+    validated_source_metadata,
+};
 
 const PACKAGE_FORMAT: &str = "lorepia_content_package";
 const PACKAGE_FORMAT_VERSION: u32 = 1;
@@ -725,11 +728,12 @@ pub fn stage_selected_content_package_assets(
         ));
     }
 
-    let file = File::open(path).map_err(storage_error)?;
+    let mut file = File::open(path).map_err(storage_error)?;
+    let raw_entries = preflight_zip_archive(&mut file, limits)?;
     let mut archive = ZipArchive::new(file).map_err(|error| unsafe_package(error.to_string()))?;
-    if archive.len() > limits.max_entries {
+    if archive.len() != raw_entries {
         return Err(unsafe_package(
-            "archive entry count changed before asset staging",
+            "archive central directory contains duplicate file names",
         ));
     }
 
@@ -993,10 +997,11 @@ fn read_selected_json_entries(
             "content package changed before selected documents were prepared",
         ));
     }
+    let raw_entries = preflight_zip_archive(&mut file, limits)?;
     let mut archive = ZipArchive::new(file).map_err(|error| unsafe_package(error.to_string()))?;
-    if archive.len() > limits.max_entries {
+    if archive.len() != raw_entries {
         return Err(unsafe_package(
-            "archive entry count changed before preparation",
+            "archive central directory contains duplicate file names",
         ));
     }
     let mut found = BTreeMap::new();
@@ -1191,6 +1196,7 @@ fn decode_prepared_documents(
                 preset.metadata.provenance = package_provenance.clone();
                 for block in &mut preset.blocks {
                     block.provenance = package_provenance.clone();
+                    block.authority = InstructionAuthority::ImportedContent;
                 }
                 component_documents.push(PreparedContentDocument::PromptPreset(Box::new(preset)));
             }
@@ -1201,12 +1207,18 @@ fn decode_prepared_documents(
                 for entry in &mut book.entries {
                     entry.provenance = package_provenance.clone();
                 }
+                book.validate().map_err(|error| {
+                    unsupported(format!("invalid imported knowledge book: {error}"))
+                })?;
                 component_documents.push(PreparedContentDocument::KnowledgeBook(Box::new(book)));
             }
         }
         ContentPackageComponentKind::Memory => {
             for mut profile in decode_document_list::<MemoryProfile>(bytes, &["profiles"])? {
                 profile.provenance = package_provenance.clone();
+                profile.validate().map_err(|error| {
+                    unsupported(format!("invalid imported memory profile: {error}"))
+                })?;
                 component_documents.push(PreparedContentDocument::MemoryProfile(Box::new(profile)));
             }
         }
@@ -1689,14 +1701,13 @@ fn package_asset_role(media_type: &str) -> AssetRole {
 }
 
 fn scan_package_archive(path: &Path, limits: ImportLimits) -> CoreResult<(Vec<ScannedEntry>, u64)> {
-    let file = File::open(path).map_err(storage_error)?;
+    let mut file = File::open(path).map_err(storage_error)?;
+    let raw_entries = preflight_zip_archive(&mut file, limits)?;
     let mut archive = ZipArchive::new(file).map_err(|error| unsafe_package(error.to_string()))?;
-    if archive.len() > limits.max_entries {
-        return Err(unsafe_package(format!(
-            "archive has {} entries; maximum is {}",
-            archive.len(),
-            limits.max_entries
-        )));
+    if archive.len() != raw_entries {
+        return Err(unsafe_package(
+            "archive central directory contains duplicate file names",
+        ));
     }
 
     let mut seen_paths = HashMap::new();

@@ -26,16 +26,16 @@ use lorepia_domain::{
     PromptSummarySourceEvidence, ProviderMessageRole, ResolvedCacheDirective, ResolvedPromptPlan,
     RoleHint, RoleMappingTrace, SelectedKnowledge, SelectedMemory, SemanticKnowledgeScore,
     SourceKind, SummaryBoundary, TaskProfile, TaskProfileId, TemplateSlot, TransformRuleId,
-    TransformSet, TransformSetId, VariableMap, VariableType, VariableValue, VersionedJson,
-    prompt_context_snapshot_sha256, prompt_local_user_id_sha256,
+    TransformSet, TransformSetId, ValidateOrchestration, VariableMap, VariableType, VariableValue,
+    VersionedJson, prompt_context_snapshot_sha256, prompt_local_user_id_sha256,
 };
 use lorepia_orchestration::{
     AppliedModuleRuntimePlan, KnowledgeEngine, KnowledgeSelection, KnowledgeSelectionContext,
-    MemoryEngine, MemorySelection, MemorySelectionContext, MemorySelectionLane,
-    MemorySelectionReason, MemorySemanticScore, ModuleResolutionContext, TransformApplyOptions,
-    TransformCompileOptions, TransformContext, TransformLimits, TransformPipeline, TransformResult,
-    preview_transform_rule, reseal_prompt_resolution_evidence, reseal_resolved_prompt_plan,
-    resolve_prompt_plan as resolve_prompt_plan_engine,
+    KnowledgeWorkBudget, MemoryEngine, MemorySelection, MemorySelectionContext,
+    MemorySelectionLane, MemorySelectionReason, MemorySemanticScore, ModuleResolutionContext,
+    TransformApplyOptions, TransformCompileOptions, TransformContext, TransformLimits,
+    TransformPipeline, TransformResult, preview_transform_rule, reseal_prompt_resolution_evidence,
+    reseal_resolved_prompt_plan, resolve_prompt_plan as resolve_prompt_plan_engine,
     validate_prompt_preset as validate_prompt_preset_document, verify_resolved_prompt_plan,
 };
 use lorepia_providers::parameter_mapping::PromptCacheWireDialect;
@@ -46,13 +46,13 @@ use lorepia_providers::{
 };
 use lorepia_storage::{
     ContentModuleRevisionDiff, GenerationPromptPlanRecord, GenerationPromptQuickSettingsAuthority,
-    GenerationPromptSelectionAuthority, GenerationProviderTargetAuthority, KnowledgeActivationLog,
-    KnowledgeEmbeddingMatch, KnowledgeEmbeddingQuery, MemoryInvalidationResult,
-    ModuleRevisionComponentSnapshot, ObjectRevision, PromptPresetBinding, PromptPresetRevisionDiff,
-    PromptPresetRollbackApproval, PromptPresetRollbackCommit, PromptPresetRollbackReview,
-    PromptResponseLength, ProviderRequestSnapshotRecord, StoredInteractionState, StoredRevision,
-    built_in_prompt_presets, generation_prompt_selection_authority_sha256,
-    prompt_preset_rollback_approval_sha256,
+    GenerationPromptSelectionAuthority, GenerationProviderTargetAuthority,
+    InteractionKnowledgeBinding, KnowledgeActivationLog, KnowledgeEmbeddingMatch,
+    KnowledgeEmbeddingQuery, MemoryInvalidationResult, ModuleRevisionComponentSnapshot,
+    ObjectRevision, PromptPresetBinding, PromptPresetRevisionDiff, PromptPresetRollbackApproval,
+    PromptPresetRollbackCommit, PromptPresetRollbackReview, PromptResponseLength,
+    ProviderRequestSnapshotRecord, StoredInteractionState, StoredRevision, built_in_prompt_presets,
+    generation_prompt_selection_authority_sha256, prompt_preset_rollback_approval_sha256,
 };
 use sha2::{Digest, Sha256};
 
@@ -1022,7 +1022,8 @@ impl Core {
         &self,
         input: GenerationPlanInput<'_>,
     ) -> CoreResult<PreparedGenerationPlan> {
-        self.prepare_generation_plan_with_memory(input, None)
+        let mut knowledge_work_budget = KnowledgeWorkBudget::default();
+        self.prepare_generation_plan_with_memory(input, None, &mut knowledge_work_budget)
     }
 
     /// Provider-aware prepare path shared by preview and every generation
@@ -1035,10 +1036,20 @@ impl Core {
         credential_broker: &dyn TaskCredentialBroker,
         cancelled: tokio::sync::watch::Receiver<bool>,
     ) -> CoreResult<PreparedGenerationPlan> {
+        let mut knowledge_work_budget = KnowledgeWorkBudget::default();
         let semantic_query = self
-            .prepare_generation_memory_semantic_query(&input, credential_broker, cancelled)
+            .prepare_generation_memory_semantic_query(
+                &input,
+                credential_broker,
+                cancelled,
+                &mut knowledge_work_budget,
+            )
             .await?;
-        self.prepare_generation_plan_with_memory(input, semantic_query.as_ref())
+        self.prepare_generation_plan_with_memory(
+            input,
+            semantic_query.as_ref(),
+            &mut knowledge_work_budget,
+        )
     }
 
     #[allow(clippy::too_many_lines)]
@@ -1047,6 +1058,7 @@ impl Core {
         input: &GenerationPlanInput<'_>,
         credential_broker: &dyn TaskCredentialBroker,
         cancelled: tokio::sync::watch::Receiver<bool>,
+        knowledge_work_budget: &mut KnowledgeWorkBudget,
     ) -> CoreResult<Option<ResolvedMemorySemanticQuery>> {
         let latest = input
             .history
@@ -1169,6 +1181,7 @@ impl Core {
                     &[],
                     credential_broker,
                     cancelled,
+                    knowledge_work_budget,
                 )
                 .await
                 .map(Some);
@@ -1184,6 +1197,7 @@ impl Core {
             &semantic_requirements,
             credential_broker,
             cancelled,
+            knowledge_work_budget,
         )
         .await
         .map(Some)
@@ -1299,6 +1313,7 @@ impl Core {
         &self,
         input: GenerationPlanInput<'_>,
         resolved_memory_semantics: Option<&ResolvedMemorySemanticQuery>,
+        knowledge_work_budget: &mut KnowledgeWorkBudget,
     ) -> CoreResult<PreparedGenerationPlan> {
         let activation_seed = input.session_seed.ok_or_else(|| {
             CoreError::internal("generation prompt resolution is missing its attempt-owned seed")
@@ -1322,6 +1337,7 @@ impl Core {
             resolved_memory_semantics,
             latest,
             activation_seed,
+            knowledge_work_budget,
         )?;
         let mut assembly = self.assemble_prompt_plan(&input, latest, sources)?;
         let resolved =
@@ -1340,6 +1356,7 @@ impl Core {
         resolved_memory_semantics: Option<&ResolvedMemorySemanticQuery>,
         latest: &Message,
         activation_seed: u64,
+        knowledge_work_budget: &mut KnowledgeWorkBudget,
     ) -> CoreResult<PromptPlanSources> {
         let mut preset = self.prepare_prompt_preset_sources(input)?;
         let binding = preset.binding.as_ref().map(|stored| &stored.value);
@@ -1362,31 +1379,34 @@ impl Core {
         )?;
         let conversation =
             self.prepare_prompt_conversation(input, latest, &transforms.transformed_latest)?;
-        let selection = self.prepare_prompt_selections(PromptSelectionInput {
-            preset: &preset.preset,
-            character_content: &conversation.character_content,
-            prompt_knowledge_books: &preset.prompt_knowledge_books,
-            module_knowledge_books: &preset.module_overlay.knowledge_books,
-            exact_character_knowledge_book: input
-                .prompt_selection_authority
-                .and_then(|authority| authority.character_knowledge_book.as_ref()),
-            memory_profile: preset.prompt_memory_profile.as_ref(),
-            conversation_id: input.conversation_id,
-            branch_id: input.branch_id,
-            memory_lineage_branch_id: input.memory_lineage_branch_id,
-            memory_context_head_message_id: input.context_head_message_id,
-            generation_attempt_id: input.generation_attempt_id,
-            prompt_messages: &conversation.prompt_messages,
-            scan_texts: &conversation.scan_texts,
-            manually_active_knowledge: &variables.manually_active_knowledge,
-            variables: &variables.variables,
-            supported_capabilities: &transforms.supported_capabilities,
-            resolved_memory_semantics,
-            activation_seed,
-            resolution_time: input.resolution_time,
-            knowledge_enabled: quick_settings.knowledge_enabled,
-            memory_enabled: quick_settings.memory_enabled,
-        })?;
+        let selection = self.prepare_prompt_selections(
+            PromptSelectionInput {
+                preset: &preset.preset,
+                character_content: &conversation.character_content,
+                prompt_knowledge_books: &preset.prompt_knowledge_books,
+                module_knowledge_books: &preset.module_overlay.knowledge_books,
+                exact_character_knowledge_book: input
+                    .prompt_selection_authority
+                    .and_then(|authority| authority.character_knowledge_book.as_ref()),
+                memory_profile: preset.prompt_memory_profile.as_ref(),
+                conversation_id: input.conversation_id,
+                branch_id: input.branch_id,
+                memory_lineage_branch_id: input.memory_lineage_branch_id,
+                memory_context_head_message_id: input.context_head_message_id,
+                generation_attempt_id: input.generation_attempt_id,
+                prompt_messages: &conversation.prompt_messages,
+                scan_texts: &conversation.scan_texts,
+                manually_active_knowledge: &variables.manually_active_knowledge,
+                variables: &variables.variables,
+                supported_capabilities: &transforms.supported_capabilities,
+                resolved_memory_semantics,
+                activation_seed,
+                resolution_time: input.resolution_time,
+                knowledge_enabled: quick_settings.knowledge_enabled,
+                memory_enabled: quick_settings.memory_enabled,
+            },
+            knowledge_work_budget,
+        )?;
         preset.warnings.extend(selection.warnings.iter().cloned());
         Ok(PromptPlanSources {
             preset,
@@ -1829,6 +1849,7 @@ impl Core {
     fn prepare_prompt_selections(
         &self,
         input: PromptSelectionInput<'_>,
+        knowledge_work_budget: &mut KnowledgeWorkBudget,
     ) -> CoreResult<PromptSelectionPreparation> {
         let mut warnings = Vec::new();
         let (selected_knowledge, knowledge_logs, knowledge_semantic_evidence) =
@@ -1848,6 +1869,7 @@ impl Core {
                     input.resolved_memory_semantics,
                     input.activation_seed,
                     input.resolution_time,
+                    knowledge_work_budget,
                 )?
             } else {
                 warnings.push("knowledge retrieval was disabled by quick settings".to_owned());
@@ -1882,6 +1904,8 @@ impl Core {
         }
         merge_variable_map(&mut variables, &module_overlay.variables);
         let state_branch = input.interaction_state_branch_id.unwrap_or(input.branch_id);
+        let current_module_knowledge =
+            prompt_module_knowledge_revisions(&module_overlay.knowledge_books)?;
         let manually_active_knowledge = if let Some(snapshot) = input.interaction_state_override {
             if snapshot.key.conversation_id != *input.conversation_id
                 || snapshot.key.branch_id != *state_branch
@@ -1891,12 +1915,11 @@ impl Core {
                 ));
             }
             merge_variable_map(&mut variables, &snapshot.state.variables);
-            snapshot
-                .state
-                .manually_active_knowledge
-                .iter()
-                .cloned()
-                .collect()
+            exact_prompt_manual_knowledge(
+                &snapshot.state.manually_active_knowledge,
+                &snapshot.knowledge,
+                &current_module_knowledge,
+            )?
         } else {
             match self
                 .storage()
@@ -1904,11 +1927,11 @@ impl Core {
             {
                 Ok(snapshot) => {
                     merge_variable_map(&mut variables, &snapshot.state.variables);
-                    snapshot
-                        .state
-                        .manually_active_knowledge
-                        .into_iter()
-                        .collect()
+                    exact_prompt_manual_knowledge(
+                        &snapshot.state.manually_active_knowledge,
+                        &snapshot.knowledge,
+                        &current_module_knowledge,
+                    )?
                 }
                 Err(error) if error.code == lorepia_domain::CoreErrorCode::NotFound => {
                     BTreeSet::new()
@@ -2959,6 +2982,7 @@ impl Core {
         profile: &MemoryProfile,
         expected_revision: Option<u64>,
     ) -> CoreResult<StoredRevision<MemoryProfile>> {
+        profile.validate().map_err(orchestration_validation_error)?;
         self.storage()
             .save_memory_profile(profile, expected_revision)
     }
@@ -2985,18 +3009,28 @@ impl Core {
 
     pub fn get_memory_record(
         &self,
+        conversation_id: &ConversationId,
+        branch_id: &ConversationBranchId,
         id: &MemoryRecordId,
     ) -> CoreResult<StoredRevision<MemoryRecord>> {
-        self.storage().get_memory_record(id)
+        self.storage()
+            .get_memory_record(conversation_id, branch_id, id)
     }
 
     pub fn delete_memory_record(
         &self,
+        conversation_id: &ConversationId,
+        branch_id: &ConversationBranchId,
         id: &MemoryRecordId,
         expected_revision: u64,
     ) -> CoreResult<StoredRevision<MemoryRecord>> {
-        self.storage()
-            .delete_memory_record_tombstone(id, expected_revision, Utc::now())
+        self.storage().delete_memory_record_tombstone(
+            conversation_id,
+            branch_id,
+            id,
+            expected_revision,
+            Utc::now(),
+        )
     }
 
     pub fn list_memory_records(
@@ -3085,6 +3119,7 @@ impl Core {
         book: &KnowledgeBook,
         expected_revision: Option<u64>,
     ) -> CoreResult<StoredRevision<KnowledgeBook>> {
+        book.validate().map_err(orchestration_validation_error)?;
         self.storage().save_knowledge_book(book, expected_revision)
     }
 
@@ -3799,6 +3834,7 @@ impl Core {
         resolved_semantics: Option<&ResolvedMemorySemanticQuery>,
         activation_seed: u64,
         selected_at: DateTime<Utc>,
+        knowledge_work_budget: &mut KnowledgeWorkBudget,
     ) -> CoreResult<(
         Vec<SelectedKnowledge>,
         Vec<KnowledgeActivationLog>,
@@ -3871,6 +3907,7 @@ impl Core {
                     &book_revision_id,
                     scan_texts,
                     resolved_semantics,
+                    knowledge_work_budget,
                 )?
             } else {
                 (Vec::new(), None)
@@ -3886,10 +3923,12 @@ impl Core {
                     scores_sha256: knowledge_semantic_scores_sha256(
                         &book_revision_id,
                         &semantic_scores,
+                        book.id.as_str(),
+                        knowledge_work_budget,
                     )?,
                 });
             }
-            let selection = KnowledgeEngine::select(
+            let selection = KnowledgeEngine::select_with_budget(
                 &book,
                 &KnowledgeSelectionContext {
                     scan_texts,
@@ -3900,6 +3939,7 @@ impl Core {
                     token_estimates: &token_estimates,
                     activation_seed,
                 },
+                knowledge_work_budget,
             )
             .map_err(orchestration_validation_error)?;
             for selected in selection.selected {
@@ -3949,12 +3989,14 @@ impl Core {
         Ok((selected_all, logs, semantic_evidence))
     }
 
+    #[allow(clippy::too_many_lines)]
     fn resolve_prompt_knowledge_semantic_scores(
         &self,
         book: &KnowledgeBook,
         book_revision_id: &str,
         scan_texts: &[String],
         resolved_semantics: Option<&ResolvedMemorySemanticQuery>,
+        work_budget: &mut KnowledgeWorkBudget,
     ) -> CoreResult<(
         Vec<SemanticKnowledgeScore>,
         Option<KnowledgeSemanticScoreSourceEvidence>,
@@ -3997,30 +4039,58 @@ impl Core {
                     false,
                 ));
             };
-            let matches =
-                self.storage()
-                    .query_knowledge_embeddings_cosine(&KnowledgeEmbeddingQuery {
+            let required_clone_work = book
+                .entries
+                .iter()
+                .filter(|entry| entry.enabled && activation_rule_uses_semantic(&entry.activation))
+                .fold(0_usize, |total, entry| {
+                    total.saturating_add(entry.id.as_str().len())
+                });
+            charge_provider_knowledge_work(book.id.as_str(), work_budget, required_clone_work)?;
+            let required_entry_ids = book
+                .entries
+                .iter()
+                .filter(|entry| entry.enabled && activation_rule_uses_semantic(&entry.activation))
+                .map(|entry| entry.id.clone())
+                .collect::<Vec<_>>();
+            let query_clone_work = values
+                .len()
+                .checked_mul(std::mem::size_of::<f32>())
+                .and_then(|value| value.checked_add(book_revision_id.len()))
+                .and_then(|value| value.checked_add(task_profile_revision_id.len()))
+                .and_then(|value| value.checked_add(model_route_id.as_str().len()))
+                .and_then(|value| value.checked_add(vector_space_sha256.len()))
+                .ok_or_else(|| CoreError::invalid("knowledge embedding query work overflowed"))?;
+            charge_provider_knowledge_work(book.id.as_str(), work_budget, query_clone_work)?;
+            let query_result = self
+                .storage()
+                .query_required_knowledge_embeddings_cosine_bounded(
+                    &KnowledgeEmbeddingQuery {
                         book_revision_id: book_revision_id.to_owned(),
                         task_profile_revision_id: task_profile_revision_id.clone(),
                         model_route_id: model_route_id.clone(),
                         dimensions: *dimensions,
                         vector_space_sha256: vector_space_sha256.clone(),
                         values: values.clone(),
-                    })?;
-            let required = book
-                .entries
-                .iter()
-                .filter(|entry| entry.enabled && activation_rule_uses_semantic(&entry.activation))
-                .map(|entry| entry.id.clone())
-                .collect::<BTreeSet<_>>();
-            let matched_entry_ids = matches
-                .iter()
-                .map(|candidate| candidate.entry_id.clone())
-                .collect::<BTreeSet<_>>();
-            if required.is_subset(&matched_entry_ids) {
+                    },
+                    &required_entry_ids,
+                    work_budget.remaining_work_bytes(),
+                )?;
+            charge_provider_knowledge_work(book.id.as_str(), work_budget, query_result.work_bytes)?;
+            let matches = query_result.matches;
+            if matches.len() == required_entry_ids.len() {
+                let score_projection_work = matches.iter().fold(0_usize, |total, candidate| {
+                    total
+                        .saturating_add(candidate.entry_id.as_str().len())
+                        .saturating_add(std::mem::size_of::<SemanticKnowledgeScore>())
+                });
+                charge_provider_knowledge_work(
+                    book.id.as_str(),
+                    work_budget,
+                    score_projection_work,
+                )?;
                 let mut scores = matches
                     .iter()
-                    .filter(|candidate| required.contains(&candidate.entry_id))
                     .map(|candidate| {
                         Ok(SemanticKnowledgeScore {
                             entry_id: candidate.entry_id.clone(),
@@ -4044,17 +4114,19 @@ impl Core {
                         matches_sha256: knowledge_embedding_matches_sha256(
                             book_revision_id,
                             &matches,
+                            book.id.as_str(),
+                            work_budget,
                         )?,
                     }),
                 ));
             }
         }
 
+        let scores = lexical_knowledge_semantic_scores_with_budget(book, scan_texts, work_budget)?;
+        let query_sha256 = knowledge_semantic_query_sha256(book, scan_texts, work_budget)?;
         Ok((
-            lexical_knowledge_semantic_scores(book, scan_texts)?,
-            Some(KnowledgeSemanticScoreSourceEvidence::LexicalV1 {
-                query_sha256: knowledge_semantic_query_sha256(book, scan_texts)?,
-            }),
+            scores,
+            Some(KnowledgeSemanticScoreSourceEvidence::LexicalV1 { query_sha256 }),
         ))
     }
 
@@ -4827,6 +4899,59 @@ fn merge_variable_map(target: &mut VariableMap, source: &VariableMap) {
     }
 }
 
+fn prompt_module_knowledge_revisions(
+    books: &[ObjectRevision<KnowledgeBook>],
+) -> CoreResult<BTreeMap<KnowledgeEntryId, String>> {
+    let mut revisions = BTreeMap::new();
+    for book in books {
+        for entry in &book.value.entries {
+            if revisions
+                .insert(entry.id.clone(), book.revision_id.clone())
+                .is_some()
+            {
+                return Err(CoreError::invalid(
+                    "approved module knowledge entry IDs are ambiguous",
+                ));
+            }
+        }
+    }
+    Ok(revisions)
+}
+
+fn exact_prompt_manual_knowledge(
+    manually_active: &[KnowledgeEntryId],
+    bindings: &[InteractionKnowledgeBinding],
+    current_revisions: &BTreeMap<KnowledgeEntryId, String>,
+) -> CoreResult<BTreeSet<KnowledgeEntryId>> {
+    let mut bindings_by_entry = BTreeMap::new();
+    for binding in bindings {
+        if bindings_by_entry
+            .insert(binding.entry_id.clone(), binding)
+            .is_some()
+        {
+            return Err(CoreError::invalid(
+                "manual knowledge activation has duplicate revision bindings",
+            ));
+        }
+    }
+    let mut exact = BTreeSet::new();
+    for entry_id in manually_active {
+        let binding = bindings_by_entry.get(entry_id).ok_or_else(|| {
+            CoreError::invalid(format!(
+                "manual knowledge entry {} has no revision binding",
+                entry_id.as_str()
+            ))
+        })?;
+        if current_revisions
+            .get(entry_id)
+            .is_some_and(|revision| revision.as_str() == binding.book_revision_id.as_str())
+        {
+            exact.insert(entry_id.clone());
+        }
+    }
+    Ok(exact)
+}
+
 fn missing_preset_module_overlay(
     preset: &PromptPreset,
     dependencies: &[lorepia_storage::PromptPresetModuleDependency],
@@ -5236,33 +5361,43 @@ fn activation_rule_uses_semantic(rule: &ActivationRule) -> bool {
     }
 }
 
-fn lexical_knowledge_semantic_scores(
+fn lexical_knowledge_semantic_scores_with_budget(
     book: &KnowledgeBook,
     scan_texts: &[String],
+    work_budget: &mut KnowledgeWorkBudget,
 ) -> CoreResult<Vec<SemanticKnowledgeScore>> {
     const MAX_SCAN_CHARS: usize = 512 * 1_024;
     let depth = usize::try_from(book.scan_depth).unwrap_or(usize::MAX);
     let start = scan_texts.len().saturating_sub(depth);
-    let query_chars = scan_texts[start..]
-        .iter()
-        .flat_map(|text| text.chars())
-        .take(MAX_SCAN_CHARS)
-        .flat_map(char::to_lowercase)
-        .filter(|character| character.is_alphanumeric())
-        .collect::<BTreeSet<_>>();
+    let query_chars = normalized_semantic_characters(
+        scan_texts[start..]
+            .iter()
+            .flat_map(|text| text.chars())
+            .take(MAX_SCAN_CHARS),
+        book.id.as_str(),
+        work_budget,
+    )?;
     let mut scores = book
         .entries
         .iter()
         .filter(|entry| entry.enabled && activation_rule_uses_semantic(&entry.activation))
         .map(|entry| -> CoreResult<_> {
-            let candidate_chars = entry
-                .name
-                .chars()
-                .chain(entry.content.chars())
-                .take(MAX_SCAN_CHARS)
-                .flat_map(char::to_lowercase)
-                .filter(|character| character.is_alphanumeric())
-                .collect::<BTreeSet<_>>();
+            let candidate_chars = normalized_semantic_characters(
+                entry
+                    .name
+                    .chars()
+                    .chain(entry.content.chars())
+                    .take(MAX_SCAN_CHARS),
+                entry.id.as_str(),
+                work_budget,
+            )?;
+            let comparison_work = query_chars
+                .len()
+                .saturating_add(candidate_chars.len())
+                .saturating_mul(2);
+            work_budget
+                .charge_work_bytes(entry.id.as_str(), comparison_work)
+                .map_err(orchestration_validation_error)?;
             let union = query_chars.union(&candidate_chars).count();
             let intersection = query_chars.intersection(&candidate_chars).count();
             Ok(SemanticKnowledgeScore {
@@ -5277,6 +5412,35 @@ fn lexical_knowledge_semantic_scores(
         .collect::<CoreResult<Vec<_>>>()?;
     scores.sort_by(|left, right| left.entry_id.cmp(&right.entry_id));
     Ok(scores)
+}
+
+pub(crate) fn charge_provider_knowledge_work(
+    scope_id: &str,
+    work_budget: &mut KnowledgeWorkBudget,
+    work_bytes: usize,
+) -> CoreResult<()> {
+    work_budget
+        .charge_work_bytes(scope_id, work_bytes)
+        .map_err(orchestration_validation_error)
+}
+
+fn normalized_semantic_characters(
+    characters: impl Iterator<Item = char>,
+    scope_id: &str,
+    work_budget: &mut KnowledgeWorkBudget,
+) -> CoreResult<BTreeSet<char>> {
+    let mut normalized = BTreeSet::new();
+    for character in characters {
+        work_budget
+            .charge_work_bytes(scope_id, character.len_utf8())
+            .map_err(orchestration_validation_error)?;
+        normalized.extend(
+            character
+                .to_lowercase()
+                .filter(|character| character.is_alphanumeric()),
+        );
+    }
+    Ok(normalized)
 }
 
 fn jaccard_score(intersection: usize, union: usize) -> CoreResult<f32> {
@@ -5316,9 +5480,17 @@ pub(crate) fn semantic_score_from_millionths(millionths: u32) -> CoreResult<f32>
 fn knowledge_semantic_query_sha256(
     book: &KnowledgeBook,
     scan_texts: &[String],
+    work_budget: &mut KnowledgeWorkBudget,
 ) -> CoreResult<String> {
     let depth = usize::try_from(book.scan_depth).unwrap_or(usize::MAX);
     let start = scan_texts.len().saturating_sub(depth);
+    let hash_work = scan_texts[start..]
+        .iter()
+        .fold(0_usize, |total, text| total.saturating_add(text.len()))
+        .saturating_mul(6);
+    work_budget
+        .charge_work_bytes(book.id.as_str(), hash_work)
+        .map_err(orchestration_validation_error)?;
     let encoded = serde_json::to_vec(&("lorepia.knowledge-lexical-query.v1", &scan_texts[start..]))
         .map_err(|error| {
             CoreError::internal(format!(
@@ -5331,10 +5503,22 @@ fn knowledge_semantic_query_sha256(
 fn knowledge_semantic_scores_sha256(
     book_revision_id: &str,
     scores: &[SemanticKnowledgeScore],
+    scope_id: &str,
+    work_budget: &mut KnowledgeWorkBudget,
 ) -> CoreResult<String> {
     let fixed = scores
         .iter()
         .map(|score| {
+            work_budget
+                .charge_work_bytes(
+                    scope_id,
+                    score
+                        .entry_id
+                        .as_str()
+                        .len()
+                        .saturating_add(std::mem::size_of::<u32>()),
+                )
+                .map_err(orchestration_validation_error)?;
             if !score.score.is_finite() || !(0.0..=1.0).contains(&score.score) {
                 return Err(CoreError::internal(
                     "knowledge semantic score is outside the canonical domain",
@@ -5373,18 +5557,57 @@ fn semantic_score_millionths(score: f32) -> CoreResult<u32> {
 fn knowledge_embedding_matches_sha256(
     book_revision_id: &str,
     matches: &[KnowledgeEmbeddingMatch],
+    scope_id: &str,
+    work_budget: &mut KnowledgeWorkBudget,
 ) -> CoreResult<String> {
-    let encoded = serde_json::to_vec(&(
-        "lorepia.knowledge-embedding-matches.v1",
-        book_revision_id,
-        matches,
-    ))
-    .map_err(|error| {
-        CoreError::internal(format!(
+    let mut writer = BudgetedKnowledgeMatchHasher {
+        hasher: Sha256::new(),
+        scope_id,
+        work_budget,
+        exhausted: false,
+    };
+    if let Err(error) = serde_json::to_writer(
+        &mut writer,
+        &(
+            "lorepia.knowledge-embedding-matches.v1",
+            book_revision_id,
+            matches,
+        ),
+    ) {
+        if writer.exhausted {
+            return Err(CoreError::invalid(
+                "knowledge embedding match evidence exceeds the generation work budget",
+            ));
+        }
+        return Err(CoreError::internal(format!(
             "cannot encode knowledge embedding match evidence: {error}"
-        ))
-    })?;
-    Ok(format!("{:x}", Sha256::digest(encoded)))
+        )));
+    }
+    Ok(format!("{:x}", writer.hasher.finalize()))
+}
+
+struct BudgetedKnowledgeMatchHasher<'a> {
+    hasher: Sha256,
+    scope_id: &'a str,
+    work_budget: &'a mut KnowledgeWorkBudget,
+    exhausted: bool,
+}
+
+impl std::io::Write for BudgetedKnowledgeMatchHasher<'_> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        if charge_provider_knowledge_work(self.scope_id, self.work_budget, bytes.len()).is_err() {
+            self.exhausted = true;
+            return Err(std::io::Error::other(
+                "knowledge embedding match evidence budget exhausted",
+            ));
+        }
+        self.hasher.update(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 fn prompt_memory_semantic_scores(
@@ -5603,4 +5826,169 @@ fn prompt_execution_hash(
         CoreError::internal(format!("cannot encode prompt execution identity: {error}"))
     })?;
     Ok(format!("{:x}", Sha256::digest(encoded)))
+}
+
+#[cfg(test)]
+mod prompt_manual_knowledge_revision_tests {
+    use std::collections::BTreeMap;
+
+    use lorepia_domain::KnowledgeEntryId;
+    use lorepia_storage::InteractionKnowledgeBinding;
+
+    use super::exact_prompt_manual_knowledge;
+
+    #[test]
+    fn prompt_manual_activation_requires_the_exact_current_book_revision() {
+        let entry_id = KnowledgeEntryId::from("shared-entry");
+        let active = [entry_id.clone()];
+        let old_binding = [InteractionKnowledgeBinding {
+            book_revision_id: "book-old".to_owned(),
+            entry_id: entry_id.clone(),
+        }];
+        let current = BTreeMap::from([(entry_id.clone(), "book-new".to_owned())]);
+
+        let stale = exact_prompt_manual_knowledge(&active, &old_binding, &current)
+            .expect("stale state remains readable but inert");
+        assert!(stale.is_empty());
+
+        let exact_binding = [InteractionKnowledgeBinding {
+            book_revision_id: "book-new".to_owned(),
+            entry_id: entry_id.clone(),
+        }];
+        let exact = exact_prompt_manual_knowledge(&active, &exact_binding, &current)
+            .expect("exact binding");
+        assert!(exact.contains(&entry_id));
+    }
+}
+
+#[cfg(test)]
+mod knowledge_work_budget_tests {
+    use lorepia_domain::{
+        ActivationRule, KnowledgeBook, KnowledgeBookId, KnowledgeEntry, KnowledgeEntryId,
+        KnowledgePlacement, Provenance, SourceKind, TokenBudget, TokenPolicy,
+    };
+    use lorepia_orchestration::KnowledgeWorkBudget;
+    use lorepia_storage::KnowledgeEmbeddingMatch;
+
+    use super::{
+        charge_provider_knowledge_work, knowledge_embedding_matches_sha256,
+        lexical_knowledge_semantic_scores_with_budget,
+    };
+
+    fn semantic_only_book() -> KnowledgeBook {
+        let book_id = KnowledgeBookId::from("semantic-budget-book");
+        let provenance = Provenance {
+            source_kind: SourceKind::UserCreated,
+            source_id: None,
+            source_hash: None,
+            author: None,
+            license: None,
+            imported_at: None,
+        };
+        KnowledgeBook {
+            id: book_id.clone(),
+            name: "Semantic budget book".to_owned(),
+            schema_version: 1,
+            entries: vec![KnowledgeEntry {
+                id: KnowledgeEntryId::from("semantic-entry"),
+                book_id,
+                name: "Semantic entry".to_owned(),
+                content: "semantic fallback candidate text".repeat(8),
+                enabled: true,
+                activation: ActivationRule::Semantic {
+                    threshold: 0.0,
+                    top_k: 1,
+                },
+                priority: 0,
+                importance: 0,
+                placement: KnowledgePlacement::RetrievedContext,
+                token_policy: TokenPolicy {
+                    priority: 0,
+                    min_tokens: None,
+                    max_tokens: None,
+                    reserve_tokens: None,
+                },
+                parent_id: None,
+                activation_probability_basis_points: 10_000,
+                provenance: provenance.clone(),
+            }],
+            scan_depth: 8,
+            token_budget: TokenBudget { max_tokens: 1_024 },
+            recursive: false,
+            max_recursion_depth: 0,
+            provenance,
+        }
+    }
+
+    #[test]
+    fn semantic_only_fallback_exhausts_the_generation_budget() {
+        let book = semantic_only_book();
+        let scan = vec!["semantic fallback query".repeat(8)];
+        let mut measurement = KnowledgeWorkBudget::default();
+        let scores = lexical_knowledge_semantic_scores_with_budget(&book, &scan, &mut measurement)
+            .expect("semantic fallback fits the default budget");
+        assert_eq!(scores.len(), 1);
+        let one_fallback_work = measurement.used_work_bytes();
+        assert!(one_fallback_work > 0, "semantic fallback must be charged");
+
+        let mut exhausted =
+            KnowledgeWorkBudget::with_max_work_bytes(one_fallback_work.saturating_sub(1));
+        assert!(
+            lexical_knowledge_semantic_scores_with_budget(&book, &scan, &mut exhausted).is_err()
+        );
+    }
+
+    #[test]
+    fn provider_and_lexical_work_share_one_generation_budget() {
+        let book = semantic_only_book();
+        let scan = vec!["combined provider and lexical query".repeat(8)];
+        let mut measurement = KnowledgeWorkBudget::default();
+        lexical_knowledge_semantic_scores_with_budget(&book, &scan, &mut measurement)
+            .expect("measure lexical fallback work");
+        let lexical_work = measurement.used_work_bytes();
+        let provider_work = 256_usize;
+        let combined_limit = provider_work
+            .checked_add(lexical_work)
+            .expect("combined work fits usize")
+            .saturating_sub(1);
+        let mut combined = KnowledgeWorkBudget::with_max_work_bytes(combined_limit);
+
+        charge_provider_knowledge_work(book.id.as_str(), &mut combined, provider_work)
+            .expect("provider work fits before lexical fallback");
+        assert!(
+            lexical_knowledge_semantic_scores_with_budget(&book, &scan, &mut combined).is_err(),
+            "provider work must reduce the budget available to lexical fallback"
+        );
+    }
+
+    #[test]
+    fn provider_match_evidence_hash_uses_the_generation_budget() {
+        let matches = [KnowledgeEmbeddingMatch {
+            embedding_id: "embedding:budgeted-match".to_owned(),
+            entry_id: KnowledgeEntryId::from("entry:budgeted-match"),
+            vector_sha256: "a".repeat(64),
+            similarity_millionths: 750_000,
+        }];
+        let mut measurement = KnowledgeWorkBudget::default();
+        knowledge_embedding_matches_sha256(
+            "book-revision:budgeted-match",
+            &matches,
+            "book:budgeted-match",
+            &mut measurement,
+        )
+        .expect("measure provider match evidence hash work");
+        let hash_work = measurement.used_work_bytes();
+        assert!(hash_work > 0, "provider match hash must be charged");
+
+        let mut exhausted = KnowledgeWorkBudget::with_max_work_bytes(hash_work.saturating_sub(1));
+        assert!(
+            knowledge_embedding_matches_sha256(
+                "book-revision:budgeted-match",
+                &matches,
+                "book:budgeted-match",
+                &mut exhausted,
+            )
+            .is_err()
+        );
+    }
 }

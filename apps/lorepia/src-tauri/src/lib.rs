@@ -26,14 +26,25 @@ use tauri_plugin_lorepia_platform::LorepiaPlatformExt;
     reason = "one explicit handler list is easier to audit against capabilities and generated permissions"
 )]
 pub fn run() {
+    let asset_admission = asset_protocol::AssetProtocolAdmission::default();
     tauri::Builder::default()
         .plugin(tauri_plugin_lorepia_platform::init())
         .register_asynchronous_uri_scheme_protocol(
             "lorepia-asset",
-            |context, request, responder| {
+            move |context, request, responder| {
+                if let Some(response) = asset_protocol::preflight_response(&request) {
+                    responder.respond(response);
+                    return;
+                }
+                let Some(permit) = asset_admission.try_acquire(&request) else {
+                    responder.respond(asset_protocol::overloaded_response());
+                    return;
+                };
                 let app = context.app_handle().clone();
-                std::thread::spawn(move || {
-                    responder.respond(asset_protocol::handle(app.state(), request));
+                let _task = tauri::async_runtime::spawn_blocking(move || {
+                    let mut response = asset_protocol::handle(app.state(), request);
+                    asset_protocol::retain_permit_in_response(&mut response, permit);
+                    responder.respond(response);
                 });
             },
         )
@@ -229,6 +240,7 @@ pub fn run() {
             orchestration_commands::list_prompt_preset_bindings,
             orchestration_commands::list_memory_records,
             orchestration_commands::retry_interrupted_memory_job,
+            orchestration_commands::list_interrupted_memory_jobs,
             orchestration_commands::list_retryable_memory_query_embeddings,
             orchestration_commands::retry_memory_query_embedding,
             orchestration_commands::simulate_knowledge_activation,

@@ -17,8 +17,8 @@ use lorepia_core::{
     CoreErrorCode, CoreResult, CreatorControlValue as CoreCreatorControlValue, ExpertPromptPreview,
     GenerationPresetId, GenerationReasoningEffort, HistorySelector, InstructionAuthority,
     InteractionAction, InteractionEvent, InteractionRule, InteractionRuleId, InteractionRuleSet,
-    InteractionRuleSetId, KnowledgeActivationReason, KnowledgeBook, KnowledgeBookId,
-    KnowledgeEntry, KnowledgeEntryId, KnowledgePlacement, KnowledgeSelection,
+    InteractionRuleSetId, InterruptedMemoryJob, KnowledgeActivationReason, KnowledgeBook,
+    KnowledgeBookId, KnowledgeEntry, KnowledgeEntryId, KnowledgePlacement, KnowledgeSelection,
     KnowledgeSimulationRequest, KnowledgeTokenEstimate, MAX_BLOCK_TEXT_CHARS, MAX_NAME_CHARS,
     MemoryJobId, MemoryJobKind, MemoryJobStatus, MemoryKind, MemoryProfile, MemoryProfileId,
     MemoryQueryEmbeddingRetryCandidate, MemoryQueryEmbeddingStatus, MemoryRecord,
@@ -2175,12 +2175,16 @@ pub struct DeleteMemoryProfileInput {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GetMemoryRecordInput {
+    pub conversation_id: String,
+    pub branch_id: String,
     pub memory_record_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DeleteMemoryRecordInput {
+    pub conversation_id: String,
+    pub branch_id: String,
     pub memory_record_id: String,
     pub expected_revision: u64,
 }
@@ -2294,6 +2298,8 @@ pub struct ListRetryableMemoryQueryEmbeddingsInput {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RetryInterruptedMemoryJobInput {
+    pub conversation_id: String,
+    pub branch_id: String,
     pub memory_job_id: String,
     pub expected_revision: u64,
     pub acknowledge_unknown_outcome: bool,
@@ -2363,6 +2369,8 @@ impl TryFrom<ClaimedMemoryJob> for MemoryJobRetryReceiptDto {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RetryMemoryQueryEmbeddingInput {
+    pub conversation_id: String,
+    pub branch_id: String,
     pub id: String,
     pub expected_revision: u64,
     pub acknowledge_unknown_outcome: bool,
@@ -2419,6 +2427,75 @@ impl TryFrom<MemoryQueryEmbeddingRetryCandidate> for MemoryQueryEmbeddingRetryCa
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ListInterruptedMemoryJobsInput {
+    pub conversation_id: String,
+    pub branch_id: String,
+    pub limit: u32,
+}
+
+/// One interrupted memory job offered for an explicit user retry decision.
+///
+/// Interrupted jobs are never requeued automatically because the provider may
+/// already have applied a side effect. The bounded interruption audit lets the
+/// user see why the job stopped before acknowledging that unknown outcome.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InterruptedMemoryJobDto {
+    pub memory_job_id: String,
+    pub kind: MemoryJobRetryKindDto,
+    pub revision: u64,
+    pub conversation_id: String,
+    pub branch_id: String,
+    pub source_start_message_id: String,
+    pub source_end_message_id: String,
+    pub attempt: u32,
+    pub interruption_count: u32,
+    pub last_interrupted_at: Option<DateTime<Utc>>,
+    pub last_error_code: Option<String>,
+}
+
+impl TryFrom<InterruptedMemoryJob> for InterruptedMemoryJobDto {
+    type Error = ShellError;
+
+    fn try_from(value: InterruptedMemoryJob) -> Result<Self, Self::Error> {
+        let kind = match value.job.value.kind {
+            MemoryJobKind::Summary => MemoryJobRetryKindDto::Summary,
+            MemoryJobKind::Embedding => MemoryJobRetryKindDto::Embedding,
+            MemoryJobKind::InvalidateRange => {
+                return Err(ShellError::from(CoreError::internal(
+                    "Core listed a non-provider memory job as interrupted",
+                )));
+            }
+        };
+        if value.job.value.status != MemoryJobStatus::Interrupted {
+            return Err(ShellError::from(CoreError::internal(
+                "Core listed a memory job that is not interrupted",
+            )));
+        }
+        let interruption_count = u32::try_from(value.interruptions.len()).map_err(|_| {
+            ShellError::from(CoreError::internal(
+                "memory job interruption history exceeds the shell counter",
+            ))
+        })?;
+        let last = value.interruptions.last();
+        Ok(Self {
+            memory_job_id: value.job.value.id.as_str().to_owned(),
+            kind,
+            revision: value.job.revision,
+            conversation_id: value.job.value.conversation_id.0,
+            branch_id: value.job.value.branch_id.0,
+            source_start_message_id: value.job.value.source_start_message_id.0,
+            source_end_message_id: value.job.value.source_end_message_id.0,
+            attempt: value.job.value.attempt,
+            interruption_count,
+            last_interrupted_at: last.map(|entry| entry.interrupted_at),
+            last_error_code: last.and_then(|entry| entry.error_code.clone()),
+        })
+    }
+}
+
 /// Closed source range that the UI may use to focus already-loaded messages.
 ///
 /// It carries stable content identifiers only; no database row, package path,
@@ -2470,6 +2547,8 @@ pub struct MemoryRecordPatchDto {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PatchMemoryRecordInput {
+    pub conversation_id: String,
+    pub branch_id: String,
     pub memory_record_id: String,
     pub patch: MemoryRecordPatchDto,
     pub expected_revision: u64,
@@ -2494,6 +2573,8 @@ impl From<MemoryRecordExclusionScopeDto> for MemoryRecordExclusionScope {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SetMemoryRecordExclusionInput {
+    pub conversation_id: String,
+    pub branch_id: String,
     pub memory_record_id: String,
     pub scope: MemoryRecordExclusionScopeDto,
     pub excluded: bool,
@@ -3427,9 +3508,17 @@ impl ShellApi {
         &self,
         input: GetMemoryRecordInput,
     ) -> ShellResult<RevisionedDto<MemoryRecordDto>> {
+        validate_identifier("conversation_id", &input.conversation_id)?;
+        validate_identifier("branch_id", &input.branch_id)?;
         validate_identifier("memory_record_id", &input.memory_record_id)?;
+        let conversation_id = lorepia_core::ConversationId(input.conversation_id);
+        let branch_id = lorepia_core::ConversationBranchId(input.branch_id);
         self.core
-            .get_memory_record(&MemoryRecordId::from(input.memory_record_id))
+            .get_memory_record(
+                &conversation_id,
+                &branch_id,
+                &MemoryRecordId::from(input.memory_record_id),
+            )
             .map(Into::into)
             .map_err(ShellError::from)
             .and_then(validated_output)
@@ -3446,7 +3535,11 @@ impl ShellApi {
         &self,
         input: PatchMemoryRecordInput,
     ) -> ShellResult<MemoryRecordProjectionDto> {
+        validate_identifier("conversation_id", &input.conversation_id)?;
+        validate_identifier("branch_id", &input.branch_id)?;
         validate_identifier("memory_record_id", &input.memory_record_id)?;
+        let conversation_id = lorepia_core::ConversationId(input.conversation_id);
+        let branch_id = lorepia_core::ConversationBranchId(input.branch_id);
         let patch = MemoryRecordUserPatch {
             title: input.patch.title,
             summary: input.patch.summary,
@@ -3458,6 +3551,8 @@ impl ShellApi {
         };
         self.core
             .patch_memory_record_user_fields(
+                &conversation_id,
+                &branch_id,
                 &MemoryRecordId::from(input.memory_record_id),
                 input.expected_revision,
                 &patch,
@@ -3472,9 +3567,15 @@ impl ShellApi {
         &self,
         input: SetMemoryRecordExclusionInput,
     ) -> ShellResult<MemoryRecordProjectionDto> {
+        validate_identifier("conversation_id", &input.conversation_id)?;
+        validate_identifier("branch_id", &input.branch_id)?;
         validate_identifier("memory_record_id", &input.memory_record_id)?;
+        let conversation_id = lorepia_core::ConversationId(input.conversation_id);
+        let branch_id = lorepia_core::ConversationBranchId(input.branch_id);
         self.core
             .set_memory_record_exclusion(
+                &conversation_id,
+                &branch_id,
                 &MemoryRecordId::from(input.memory_record_id),
                 input.expected_revision,
                 input.scope.into(),
@@ -3487,9 +3588,15 @@ impl ShellApi {
     }
 
     pub fn delete_memory_record(&self, input: DeleteMemoryRecordInput) -> ShellResult<()> {
+        validate_identifier("conversation_id", &input.conversation_id)?;
+        validate_identifier("branch_id", &input.branch_id)?;
         validate_identifier("memory_record_id", &input.memory_record_id)?;
+        let conversation_id = lorepia_core::ConversationId(input.conversation_id);
+        let branch_id = lorepia_core::ConversationBranchId(input.branch_id);
         self.core
             .delete_memory_record(
+                &conversation_id,
+                &branch_id,
                 &MemoryRecordId::from(input.memory_record_id),
                 input.expected_revision,
             )
@@ -3504,6 +3611,8 @@ impl ShellApi {
         &self,
         input: RetryInterruptedMemoryJobInput,
     ) -> ShellResult<MemoryJobRetryReceiptDto> {
+        validate_identifier("conversation_id", &input.conversation_id)?;
+        validate_identifier("branch_id", &input.branch_id)?;
         validate_identifier("memory_job_id", &input.memory_job_id)?;
         if !input.acknowledge_unknown_outcome {
             return Err(ShellError::from(CoreError::new(
@@ -3514,11 +3623,32 @@ impl ShellApi {
         }
         self.core
             .retry_interrupted_memory_job(
+                &lorepia_core::ConversationId(input.conversation_id),
+                &lorepia_core::ConversationBranchId(input.branch_id),
                 &MemoryJobId::from(input.memory_job_id),
                 input.expected_revision,
             )
             .map_err(ShellError::from)
             .and_then(TryInto::try_into)
+            .and_then(validated_output)
+    }
+
+    pub fn list_interrupted_memory_jobs(
+        &self,
+        input: ListInterruptedMemoryJobsInput,
+    ) -> ShellResult<Vec<InterruptedMemoryJobDto>> {
+        validate_identifier("conversation_id", &input.conversation_id)?;
+        validate_identifier("branch_id", &input.branch_id)?;
+        self.core
+            .list_interrupted_memory_jobs(
+                &lorepia_core::ConversationId(input.conversation_id),
+                &lorepia_core::ConversationBranchId(input.branch_id),
+                input.limit,
+            )
+            .map_err(ShellError::from)?
+            .into_iter()
+            .map(TryInto::try_into)
+            .collect::<ShellResult<Vec<_>>>()
             .and_then(validated_output)
     }
 
@@ -3545,9 +3675,13 @@ impl ShellApi {
         &self,
         input: RetryMemoryQueryEmbeddingInput,
     ) -> ShellResult<MemoryQueryEmbeddingRetryCandidateDto> {
+        validate_identifier("conversation_id", &input.conversation_id)?;
+        validate_identifier("branch_id", &input.branch_id)?;
         validate_identifier("memory_query_embedding_id", &input.id)?;
         self.core
             .retry_memory_query_embedding(
+                &lorepia_core::ConversationId(input.conversation_id),
+                &lorepia_core::ConversationBranchId(input.branch_id),
                 &input.id,
                 input.expected_revision,
                 input.acknowledge_unknown_outcome,
@@ -5535,9 +5669,68 @@ mod tests {
     ) -> super::MemoryRecordProjectionDto {
         shell
             .get_memory_record_projection(GetMemoryRecordInput {
+                conversation_id: fixture.conversation.clone(),
+                branch_id: fixture.branch.clone(),
                 memory_record_id: fixture.record.clone(),
             })
             .expect("get memory record")
+    }
+
+    fn assert_shell_memory_owner_mismatch(
+        shell: &ShellApi,
+        fixture: &MemoryCrudFixture,
+        conversation_id: &str,
+        branch_id: &str,
+        mismatch: &str,
+    ) {
+        let get = shell
+            .get_memory_record_projection(GetMemoryRecordInput {
+                conversation_id: conversation_id.to_owned(),
+                branch_id: branch_id.to_owned(),
+                memory_record_id: fixture.record.clone(),
+            })
+            .unwrap_err();
+        assert_eq!(get.code, ShellErrorCode::NotFound, "{mismatch} get");
+
+        let patch = shell
+            .patch_memory_record(PatchMemoryRecordInput {
+                conversation_id: conversation_id.to_owned(),
+                branch_id: branch_id.to_owned(),
+                memory_record_id: fixture.record.clone(),
+                patch: MemoryRecordPatchDto {
+                    title: Some("foreign Shell overwrite".to_owned()),
+                    ..MemoryRecordPatchDto::default()
+                },
+                expected_revision: 1,
+            })
+            .unwrap_err();
+        assert_eq!(patch.code, ShellErrorCode::NotFound, "{mismatch} patch");
+
+        let exclusion = shell
+            .set_memory_record_exclusion(SetMemoryRecordExclusionInput {
+                conversation_id: conversation_id.to_owned(),
+                branch_id: branch_id.to_owned(),
+                memory_record_id: fixture.record.clone(),
+                scope: MemoryRecordExclusionScopeDto::Conversation,
+                excluded: true,
+                expected_revision: 1,
+            })
+            .unwrap_err();
+        assert_eq!(
+            exclusion.code,
+            ShellErrorCode::NotFound,
+            "{mismatch} exclusion"
+        );
+
+        let delete = shell
+            .delete_memory_record(DeleteMemoryRecordInput {
+                conversation_id: conversation_id.to_owned(),
+                branch_id: branch_id.to_owned(),
+                memory_record_id: fixture.record.clone(),
+                expected_revision: 1,
+            })
+            .unwrap_err();
+        assert_eq!(delete.code, ShellErrorCode::NotFound, "{mismatch} delete");
     }
 
     fn mutate_memory(
@@ -5547,6 +5740,8 @@ mod tests {
     ) -> super::MemoryRecordProjectionDto {
         let edited = shell
             .patch_memory_record(PatchMemoryRecordInput {
+                conversation_id: fixture.conversation.clone(),
+                branch_id: fixture.branch.clone(),
                 memory_record_id: fixture.record.clone(),
                 patch: MemoryRecordPatchDto {
                     title: Some("User-edited memory".to_owned()),
@@ -5566,6 +5761,8 @@ mod tests {
         assert!(!edited.pinned);
         let pinned = shell
             .patch_memory_record(PatchMemoryRecordInput {
+                conversation_id: fixture.conversation.clone(),
+                branch_id: fixture.branch.clone(),
                 memory_record_id: fixture.record.clone(),
                 patch: MemoryRecordPatchDto {
                     pinned: Some(true),
@@ -5578,6 +5775,8 @@ mod tests {
         assert!(pinned.pinned);
         let conversation_excluded = shell
             .set_memory_record_exclusion(SetMemoryRecordExclusionInput {
+                conversation_id: fixture.conversation.clone(),
+                branch_id: fixture.branch.clone(),
                 memory_record_id: fixture.record.clone(),
                 scope: MemoryRecordExclusionScopeDto::Conversation,
                 excluded: true,
@@ -5587,6 +5786,8 @@ mod tests {
         assert_eq!(conversation_excluded.revision, 4);
         let character_excluded = shell
             .set_memory_record_exclusion(SetMemoryRecordExclusionInput {
+                conversation_id: fixture.conversation.clone(),
+                branch_id: fixture.branch.clone(),
                 memory_record_id: fixture.record.clone(),
                 scope: MemoryRecordExclusionScopeDto::Character,
                 excluded: true,
@@ -5599,6 +5800,8 @@ mod tests {
 
         let stale = shell
             .patch_memory_record(PatchMemoryRecordInput {
+                conversation_id: fixture.conversation.clone(),
+                branch_id: fixture.branch.clone(),
                 memory_record_id: fixture.record.clone(),
                 patch: MemoryRecordPatchDto {
                     title: Some("Stale overwrite".to_owned()),
@@ -5636,6 +5839,8 @@ mod tests {
         assert_eq!(get_memory(&reopened, &fixture), character_excluded);
         reopened
             .delete_memory_record(DeleteMemoryRecordInput {
+                conversation_id: fixture.conversation.clone(),
+                branch_id: fixture.branch.clone(),
                 memory_record_id: fixture.record.clone(),
                 expected_revision: character_excluded.revision,
             })
@@ -5645,6 +5850,8 @@ mod tests {
         let deleted = open_shell_after_drop(root.path());
         let error = deleted
             .get_memory_record_projection(GetMemoryRecordInput {
+                conversation_id: fixture.conversation.clone(),
+                branch_id: fixture.branch.clone(),
                 memory_record_id: fixture.record,
             })
             .expect_err("deleted memory must stay absent after reopen");
@@ -5660,12 +5867,45 @@ mod tests {
     }
 
     #[test]
+    fn shell_memory_crud_rejects_each_partial_owner_mismatch() {
+        let root = tempdir().expect("temporary data root");
+        let fixture = seed_memory_crud_fixture(root.path());
+        let shell = ShellApi::open(CoreConfig::new(root.path())).expect("open Shell after seed");
+        let initial = get_memory(&shell, &fixture);
+
+        for (conversation_id, branch_id, mismatch) in [
+            (
+                "synthetic.foreign.conversation",
+                fixture.branch.as_str(),
+                "conversation",
+            ),
+            (
+                fixture.conversation.as_str(),
+                "synthetic.foreign.branch",
+                "branch",
+            ),
+        ] {
+            assert_shell_memory_owner_mismatch(
+                &shell,
+                &fixture,
+                conversation_id,
+                branch_id,
+                mismatch,
+            );
+        }
+
+        assert_eq!(get_memory(&shell, &fixture), initial);
+    }
+
+    #[test]
     fn interrupted_memory_job_retry_requires_explicit_unknown_outcome_acknowledgement() {
         let root = tempdir().expect("temporary data root");
         let shell = ShellApi::open(CoreConfig::new(root.path())).expect("open Shell");
 
         let error = shell
             .retry_interrupted_memory_job(super::RetryInterruptedMemoryJobInput {
+                conversation_id: "conversation:synthetic".to_owned(),
+                branch_id: "branch:synthetic".to_owned(),
                 memory_job_id: "synthetic.interrupted-memory-job".to_owned(),
                 expected_revision: 2,
                 acknowledge_unknown_outcome: false,
@@ -5683,6 +5923,8 @@ mod tests {
 
         let error = shell
             .retry_interrupted_memory_job(super::RetryInterruptedMemoryJobInput {
+                conversation_id: "conversation:synthetic".to_owned(),
+                branch_id: "branch:synthetic".to_owned(),
                 memory_job_id: "synthetic.missing-memory-job".to_owned(),
                 expected_revision: 2,
                 acknowledge_unknown_outcome: true,

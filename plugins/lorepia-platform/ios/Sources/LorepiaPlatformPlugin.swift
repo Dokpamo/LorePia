@@ -34,6 +34,15 @@ private struct SensitiveCaptureArgs: Decodable, RedactedDescription {
   let maximumBytes: UInt64
 }
 
+private struct CredentialEffectConfirmationArgs: Decodable,
+  RedactedDescription
+{
+  let effect: String
+  let targetId: String
+  let origin: String
+  let revision: String
+}
+
 private struct SaveContentSourceArgs: Decodable, RedactedDescription {
   let sourcePath: String
   let suggestedName: String
@@ -61,6 +70,10 @@ enum ClipboardCleanupStatus: String, Encodable {
 
 private struct CaptureStatusResponse: Encodable {
   let clipboardCleanup: ClipboardCleanupStatus
+}
+
+private struct CredentialEffectConfirmationResponse: Encodable {
+  let approved: Bool
 }
 
 struct SensitiveCaptureResponse: Encodable, RedactedDescription {
@@ -167,6 +180,7 @@ final class LorepiaPlatformPlugin: Plugin, UIDocumentPickerDelegate {
   private let storage: Result<NativeStorage, Error>
   private var pendingPickerOperation: PendingPickerOperation?
   private var sensitiveCaptureInFlight = false
+  private var credentialConfirmationInFlight = false
 
   override init() {
     storage = Result {
@@ -181,6 +195,62 @@ final class LorepiaPlatformPlugin: Plugin, UIDocumentPickerDelegate {
       invoke.resolve(PathResponse(path: storage.dataRoot.path))
     } catch {
       invoke.reject("storage unavailable", code: "storage_unavailable")
+    }
+  }
+
+  @objc public func confirmCredentialEffect(_ invoke: Invoke) {
+    DispatchQueue.main.async {
+      guard
+        !self.credentialConfirmationInFlight,
+        UIApplication.shared.applicationState == .active,
+        let viewController = self.manager.viewController,
+        viewController.viewIfLoaded?.window != nil
+      else {
+        invoke.reject(
+          "foreground confirmation required",
+          code: "permission_denied"
+        )
+        return
+      }
+
+      do {
+        let args = try invoke.parseArgs(
+          CredentialEffectConfirmationArgs.self
+        )
+        try self.validateCredentialConfirmation(args)
+        self.credentialConfirmationInFlight = true
+        let alert = UIAlertController(
+          title: self.credentialConfirmationTitle(args.effect),
+          message: self.credentialConfirmationMessage(args),
+          preferredStyle: .alert
+        )
+        alert.addAction(
+          UIAlertAction(title: "Cancel", style: .cancel) { _ in
+            self.finishCredentialConfirmation(invoke, approved: false)
+          }
+        )
+        alert.addAction(
+          UIAlertAction(
+            title: "Approve exact action",
+            style: .destructive
+          ) { _ in
+            let foreground =
+              UIApplication.shared.applicationState == .active
+              && viewController.viewIfLoaded?.window != nil
+            self.finishCredentialConfirmation(
+              invoke,
+              approved: foreground
+            )
+          }
+        )
+        viewController.present(alert, animated: true)
+      } catch {
+        self.credentialConfirmationInFlight = false
+        invoke.reject(
+          "foreground confirmation required",
+          code: "permission_denied"
+        )
+      }
     }
   }
 
@@ -535,6 +605,85 @@ final class LorepiaPlatformPlugin: Plugin, UIDocumentPickerDelegate {
       pendingPickerOperation = nil
     }
     return pendingPickerOperation
+  }
+
+  private func finishCredentialConfirmation(
+    _ invoke: Invoke,
+    approved: Bool
+  ) {
+    guard credentialConfirmationInFlight else {
+      return
+    }
+    credentialConfirmationInFlight = false
+    invoke.resolve(
+      CredentialEffectConfirmationResponse(approved: approved)
+    )
+  }
+
+  private func validateCredentialConfirmation(
+    _ args: CredentialEffectConfirmationArgs
+  ) throws {
+    guard
+      [
+        "capture_or_replace",
+        "delete",
+        "archive",
+        "discovery_compensation",
+      ].contains(args.effect)
+    else {
+      throw ImportStagingError.invalidSelection
+    }
+    try PlatformPolicy.validateCredentialConfirmationText(
+      args.targetId,
+      maximumBytes: 256
+    )
+    try PlatformPolicy.validateCredentialConfirmationText(
+      args.origin,
+      maximumBytes: 2_048
+    )
+    try PlatformPolicy.validateCredentialConfirmationText(
+      args.revision,
+      maximumBytes: 256
+    )
+  }
+
+  private func credentialConfirmationTitle(_ effect: String) -> String {
+    switch effect {
+    case "capture_or_replace":
+      return "Allow credential capture?"
+    case "delete":
+      return "Delete stored credential?"
+    case "archive":
+      return "Archive connection and delete credential?"
+    case "discovery_compensation":
+      return "Remove uncommitted credential?"
+    default:
+      return "Credential action"
+    }
+  }
+
+  private func credentialConfirmationMessage(
+    _ args: CredentialEffectConfirmationArgs
+  ) -> String {
+    let effect: String
+    switch args.effect {
+    case "capture_or_replace":
+      effect = "read one credential from the clipboard and store it. "
+        + "If an older credential exists, it will be deleted only after the replacement is stored"
+    case "delete":
+      effect = "permanently delete the stored credential"
+    case "archive":
+      effect = "archive this provider connection and permanently delete its stored credential"
+    case "discovery_compensation":
+      effect = "permanently delete the credential created by the cancelled or failed discovery"
+    default:
+      effect = "perform an invalid credential action"
+    }
+    return "LorePia will \(effect).\n\n"
+      + "Target: \(args.targetId)\n"
+      + "Origin: \(args.origin)\n"
+      + "Revision: \(args.revision)\n\n"
+      + "Approve only if these exact details match your intended action."
   }
 
   private func resolvePickerCancellation(

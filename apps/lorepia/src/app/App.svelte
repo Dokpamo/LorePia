@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { tr } from '../lib/i18n';
     import { onMount, untrack } from 'svelte';
 
     import {
@@ -30,7 +31,10 @@
     import { createLiveLorepiaClient } from '../lib/ipc/client';
     import type { LorepiaClient, MemoryRecordSourceNavigationDto } from '../lib/ipc/contracts';
 
-    type MobileView = 'library' | 'conversations' | 'chat' | 'providers';
+    /* The main region shows either the transcript or settings; never both. */
+    type MainView = 'chat' | 'settings';
+    /* Characters and conversations are one hierarchy, disclosed one at a time. */
+    type SidebarSection = 'characters' | 'conversations';
 
     interface Props {
         client?: LorepiaClient;
@@ -52,13 +56,35 @@
         structuredClone(INITIAL_CONTENT_PACKAGE_STATE),
     );
     let personaState = $state<PersonaState>(structuredClone(INITIAL_PERSONA_STATE));
-    let mobileView = $state<MobileView>('library');
+    let view = $state<MainView>('chat');
+    let sidebarSection = $state<SidebarSection>('characters');
+    /* Only meaningful below the sidebar breakpoint, where it slides over. */
+    let sidebarOpen = $state(false);
     let orchestrationContextKey = '';
     let personaContextKey = '';
     let messageFocusRequest = $state<
         (MemoryRecordSourceNavigationDto & { request_id: number }) | null
     >(null);
     let nextMessageFocusRequestId = 0;
+
+    function openSettings(): void {
+        view = 'settings';
+        sidebarOpen = false;
+        void controller.loadProviders();
+    }
+
+    function toggleSettings(): void {
+        if (view === 'settings') {
+            view = 'chat';
+            return;
+        }
+        openSettings();
+    }
+
+    function showChat(): void {
+        view = 'chat';
+        sidebarOpen = false;
+    }
 
     async function navigateToMemorySource(source: MemoryRecordSourceNavigationDto): Promise<void> {
         const conversation = appState.conversations.items.find(
@@ -70,7 +96,7 @@
         if (appState.conversation_state?.active_branch_id !== source.branch_id) {
             await controller.selectBranch(source.branch_id);
         }
-        mobileView = 'chat';
+        showChat();
         messageFocusRequest = {
             ...source,
             request_id: ++nextMessageFocusRequestId,
@@ -100,7 +126,7 @@
     });
 
     $effect(() => {
-        if (mobileView !== 'providers') return;
+        if (view !== 'settings') return;
         const conversationId = appState.selected_conversation?.id ?? null;
         const nextKey = conversationId ?? 'no-conversation';
         if (nextKey === personaContextKey) return;
@@ -141,78 +167,127 @@
 </script>
 
 <svelte:head>
-    <meta
-        name="description"
-        content="로컬 데이터와 운영체제 자격증명 저장소를 사용하는 LorePia 캐릭터 채팅"
-    />
+    <meta name="description" content={$tr('app.description')} />
 </svelte:head>
 
-<div class="app-shell">
-    <header class="app-bar">
-        <a class="brand" href="#main-content" aria-label="LorePia 본문으로 이동">
-            <span class="brand-mark" aria-hidden="true">L</span>
-            <span>LorePia</span>
-        </a>
-        <div class="app-bar-actions">
+<div class="app-shell" data-sidebar={sidebarOpen ? 'open' : 'closed'} data-view={view}>
+    <aside class="sidebar" aria-label={$tr('app.nav.label')}>
+        <div class="sidebar-head">
+            <a class="brand" href="#main-content">
+                <span class="brand-mark" aria-hidden="true">L</span>
+                <span>LorePia</span>
+                <span class="sr-only">— {$tr('app.brand.skip')}</span>
+            </a>
+            <button
+                class="icon-button ghost compact sidebar-close"
+                type="button"
+                aria-label={$tr('app.nav.close')}
+                onclick={() => (sidebarOpen = false)}
+            >
+                <span aria-hidden="true">×</span>
+            </button>
+        </div>
+
+        <div class="sidebar-body">
+            <section class="sidebar-section" class:open={sidebarSection === 'characters'}>
+                <button
+                    class="section-toggle"
+                    type="button"
+                    aria-expanded={sidebarSection === 'characters'}
+                    onclick={() => (sidebarSection = 'characters')}
+                >
+                    <span class="chevron" aria-hidden="true">›</span>
+                    <span class="section-name">{$tr('app.tab.library')}</span>
+                    {#if appState.selected_character !== null}
+                        <span class="section-value">{appState.selected_character.name}</span>
+                    {/if}
+                </button>
+                <LibraryPane
+                    state={appState}
+                    {controller}
+                    client={appClient}
+                    onOpenConversations={() => (sidebarSection = 'conversations')}
+                />
+            </section>
+
+            <section class="sidebar-section" class:open={sidebarSection === 'conversations'}>
+                <button
+                    class="section-toggle"
+                    type="button"
+                    aria-expanded={sidebarSection === 'conversations'}
+                    disabled={appState.selected_character === null}
+                    onclick={() => (sidebarSection = 'conversations')}
+                >
+                    <span class="chevron" aria-hidden="true">›</span>
+                    <span class="section-name">{$tr('app.tab.conversations')}</span>
+                </button>
+                <ConversationPane state={appState} {controller} onOpenChat={showChat} />
+            </section>
+        </div>
+
+        <div class="sidebar-foot">
             <div
                 class="health-chip"
                 class:unhealthy={!appState.bootstrap.value?.health.database_open}
             >
                 <span class="health-dot" aria-hidden="true"></span>
                 {#if appState.bootstrap.phase === 'loading'}
-                    Core 연결 중
+                    {$tr('app.core.connecting')}
                 {:else if appState.bootstrap.phase === 'ready'}
-                    로컬 Core
+                    {$tr('app.core.local')}
                 {:else}
-                    연결 확인 필요
+                    {$tr('app.core.checking')}
                 {/if}
             </div>
             <button
                 class="settings-button"
                 type="button"
-                aria-pressed={mobileView === 'providers'}
-                onclick={() => {
-                    mobileView = mobileView === 'providers' ? 'library' : 'providers';
-                    if (mobileView === 'providers') void controller.loadProviders();
-                }}
+                aria-pressed={view === 'settings'}
+                onclick={toggleSettings}
             >
-                {mobileView === 'providers' ? '대화로' : '설정'}
+                {view === 'settings' ? $tr('app.toggle.to_chat') : $tr('app.toggle.to_providers')}
             </button>
         </div>
-    </header>
+    </aside>
+
+    <button
+        class="sidebar-scrim"
+        type="button"
+        tabindex="-1"
+        aria-hidden="true"
+        onclick={() => (sidebarOpen = false)}
+    ></button>
 
     {#if appState.bootstrap.phase === 'error'}
-        <main id="main-content" class="fatal-screen">
-            <span class="large-mark" aria-hidden="true">!</span>
-            <h1>앱을 시작하지 못했습니다.</h1>
-            <p>{appState.bootstrap.error}</p>
-            <button class="primary" type="button" onclick={() => void controller.start()}>
-                다시 시도
-            </button>
+        <main id="main-content" class="main">
+            <div class="fatal-screen">
+                <span class="large-mark" aria-hidden="true">!</span>
+                <h1>{$tr('app.bootstrap.failed')}</h1>
+                <p>{appState.bootstrap.error}</p>
+                <button class="primary" type="button" onclick={() => void controller.start()}>
+                    {$tr('app.bootstrap.retry')}
+                </button>
+            </div>
         </main>
     {:else}
-        <main
-            id="main-content"
-            class="workspace"
-            class:provider-mode={mobileView === 'providers'}
-            data-mobile-view={mobileView}
-        >
-            <div class="workspace-pane library-slot">
-                <LibraryPane
-                    state={appState}
-                    {controller}
-                    client={appClient}
-                    onOpenConversations={() => (mobileView = 'conversations')}
-                />
-            </div>
-            <div class="workspace-pane conversations-slot">
-                <ConversationPane
-                    state={appState}
-                    {controller}
-                    onOpenChat={() => (mobileView = 'chat')}
-                />
-            </div>
-            <div class="workspace-pane chat-slot">
+        <main id="main-content" class="main">
+            {#if view === 'settings'}
+                <div class="settings-region">
+                    <ProviderSettings
+                        client={appClient}
+                        {appState}
+                        {controller}
+                        {orchestrationState}
+                        {orchestrationController}
+                        {contentPackageState}
+                        {contentPackageController}
+                        {personaState}
+                        {personaController}
+                        onNavigateToMemorySource={(source: MemoryRecordSourceNavigationDto) =>
+                            void navigateToMemorySource(source)}
+                    />
+                </div>
+            {:else}
                 <ChatPane
                     {appState}
                     {controller}
@@ -220,71 +295,12 @@
                     {orchestrationState}
                     {orchestrationController}
                     {messageFocusRequest}
-                    onOpenOrchestrationStudio={() => {
-                        mobileView = 'providers';
-                        void controller.loadProviders();
-                    }}
+                    onOpenSidebar={() => (sidebarOpen = true)}
+                    onOpenOrchestrationStudio={openSettings}
                 />
-            </div>
-            <div class="workspace-pane providers-slot">
-                <ProviderSettings
-                    client={appClient}
-                    {appState}
-                    {controller}
-                    {orchestrationState}
-                    {orchestrationController}
-                    {contentPackageState}
-                    {contentPackageController}
-                    {personaState}
-                    {personaController}
-                    onNavigateToMemorySource={(source: MemoryRecordSourceNavigationDto) =>
-                        void navigateToMemorySource(source)}
-                />
-            </div>
+            {/if}
         </main>
     {/if}
-
-    <nav class="mobile-tabs" aria-label="주요 화면">
-        <button
-            type="button"
-            class:active={mobileView === 'library'}
-            aria-current={mobileView === 'library' ? 'page' : undefined}
-            onclick={() => (mobileView = 'library')}
-        >
-            <span aria-hidden="true">⌂</span>
-            서재
-        </button>
-        <button
-            type="button"
-            class:active={mobileView === 'conversations'}
-            aria-current={mobileView === 'conversations' ? 'page' : undefined}
-            onclick={() => (mobileView = 'conversations')}
-        >
-            <span aria-hidden="true">☰</span>
-            대화
-        </button>
-        <button
-            type="button"
-            class:active={mobileView === 'chat'}
-            aria-current={mobileView === 'chat' ? 'page' : undefined}
-            onclick={() => (mobileView = 'chat')}
-        >
-            <span aria-hidden="true">✦</span>
-            채팅
-        </button>
-        <button
-            type="button"
-            class:active={mobileView === 'providers'}
-            aria-current={mobileView === 'providers' ? 'page' : undefined}
-            onclick={() => {
-                mobileView = 'providers';
-                void controller.loadProviders();
-            }}
-        >
-            <span aria-hidden="true">⚙</span>
-            설정
-        </button>
-    </nav>
 
     <div class="sr-only" role="status" aria-live="polite" aria-atomic="true">
         {appState.announcement}

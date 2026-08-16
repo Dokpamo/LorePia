@@ -1,17 +1,17 @@
 use std::{
     cell::RefCell,
-    ffi::OsString,
+    ffi::{OsStr, OsString},
     fs::File,
-    os::windows::ffi::OsStrExt,
+    os::windows::ffi::{OsStrExt, OsStringExt},
     os::windows::fs::MetadataExt,
-    os::windows::io::AsRawHandle,
+    os::windows::io::{AsRawHandle, FromRawHandle},
     path::{Path, PathBuf},
 };
 
 use ::windows::{
     ApplicationModel::DataTransfer::{Clipboard, StandardDataFormats},
     Security::Credentials::{PasswordCredential, PasswordVault},
-    Storage::Pickers::{FileOpenPicker, FileSavePicker},
+    Storage::Pickers::FileOpenPicker,
     Win32::{
         Foundation::{
             E_ABORT, E_POINTER, ERROR_CANCELLED, ERROR_NOT_FOUND, HLOCAL, RPC_E_CHANGED_MODE,
@@ -20,16 +20,27 @@ use ::windows::{
             CRYPT_INTEGER_BLOB, CRYPTPROTECT_UI_FORBIDDEN, CryptProtectData, CryptUnprotectData,
         },
         Storage::FileSystem::{
-            FILE_DISPOSITION_INFO, FileDispositionInfo, MOVEFILE_REPLACE_EXISTING,
-            MOVEFILE_WRITE_THROUGH, MoveFileExW, REPLACE_FILE_FLAGS, ReplaceFileW,
+            FILE_DISPOSITION_INFO, FILE_ID_INFO, FileDispositionInfo, FileIdInfo, FileRenameInfo,
+            GetFileInformationByHandleEx, MOVEFILE_WRITE_THROUGH, MoveFileExW,
             SetFileInformationByHandle,
         },
         System::{
+            Com::{CLSCTX_INPROC_SERVER, CoCreateInstance, CoTaskMemFree},
             DataExchange::GetClipboardSequenceNumber,
             Threading::{CreateMutexW, ReleaseMutex, WaitForSingleObject},
             WinRT::{RO_INIT_MULTITHREADED, RoInitialize, RoUninitialize},
         },
-        UI::Shell::IInitializeWithWindow,
+        UI::{
+            Shell::{
+                FOS_FORCEFILESYSTEM, FOS_NOCHANGEDIR, FOS_NOTESTFILECREATE, FOS_OVERWRITEPROMPT,
+                FOS_PATHMUSTEXIST, FileSaveDialog, IFileSaveDialog, IInitializeWithWindow,
+                SIGDN_FILESYSPATH,
+            },
+            WindowsAndMessaging::{
+                IDOK, MB_DEFBUTTON2, MB_ICONWARNING, MB_OKCANCEL, MB_SETFOREGROUND, MB_TASKMODAL,
+                MessageBoxW,
+            },
+        },
     },
     core::{Error as WindowsError, HRESULT, HSTRING, Interface, PCWSTR},
 };
@@ -51,6 +62,56 @@ pub(crate) const DEVELOPMENT_CREDENTIAL_RESOURCE: &str = "LorePia.ProviderCreden
 const WINDOWS_DPAPI_MAXIMUM_PLAINTEXT_BYTES: usize = 32 * 1024;
 const WINDOWS_DPAPI_MAXIMUM_CIPHERTEXT_BYTES: usize = 64 * 1024;
 const WINDOWS_DPAPI_MAXIMUM_ENTROPY_BYTES: usize = 4 * 1024;
+
+#[allow(unsafe_code)]
+pub(crate) async fn confirm_credential_effect<R: Runtime>(
+    app: &AppHandle<R>,
+    title: &str,
+    informative_text: &str,
+) -> PlatformResult<()> {
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    let window_app = app.clone();
+    let title = HSTRING::from(title);
+    let informative_text = HSTRING::from(informative_text);
+    app.run_on_main_thread(move || {
+        let result = (|| {
+            let window = window_app
+                .get_webview_window("main")
+                .ok_or_else(|| PlatformError::new(PlatformErrorCode::PermissionDenied))?;
+            if !window
+                .is_focused()
+                .map_err(|_| PlatformError::new(PlatformErrorCode::PermissionDenied))?
+            {
+                return Err(PlatformError::new(PlatformErrorCode::PermissionDenied));
+            }
+            let hwnd = window
+                .hwnd()
+                .map_err(|_| PlatformError::new(PlatformErrorCode::PermissionDenied))?;
+            // SAFETY: the owner HWND comes from the live focused Tauri window;
+            // both HSTRING buffers remain alive for this synchronous native
+            // modal call. Cancel is the default button and the only accepted
+            // result is an explicit click on OK.
+            let response = unsafe {
+                MessageBoxW(
+                    Some(hwnd),
+                    &informative_text,
+                    &title,
+                    MB_OKCANCEL | MB_ICONWARNING | MB_DEFBUTTON2 | MB_TASKMODAL | MB_SETFOREGROUND,
+                )
+            };
+            if response == IDOK {
+                Ok(())
+            } else {
+                Err(PlatformError::new(PlatformErrorCode::PermissionDenied))
+            }
+        })();
+        let _ = sender.send(result);
+    })
+    .map_err(|_| PlatformError::new(PlatformErrorCode::PermissionDenied))?;
+    receiver
+        .await
+        .map_err(|_| PlatformError::new(PlatformErrorCode::PermissionDenied))?
+}
 
 struct LocalDpapiBlob {
     blob: CRYPT_INTEGER_BLOB,
@@ -377,95 +438,525 @@ pub(crate) async fn pick_export_destination<R: Runtime>(
     let window_app = app.clone();
     let suggested_name = suggested_name.to_owned();
     app.run_on_main_thread(move || {
-        let operation = (|| {
+        let selection = (|| {
             let window = window_app
                 .get_webview_window("main")
                 .ok_or_else(WindowsError::empty)?;
-            let picker = FileSavePicker::new()?;
-            let initialize: IInitializeWithWindow = picker.cast()?;
             let hwnd = window.hwnd().map_err(|_| WindowsError::empty())?;
-            // SAFETY: the HWND comes from the live Tauri main window and this
-            // closure is scheduled on Tauri's UI thread.
-            unsafe {
-                initialize.Initialize(hwnd)?;
-            }
-            picker.SetSuggestedFileName(&HSTRING::from(&suggested_name))?;
             let extension = Path::new(&suggested_name)
                 .extension()
                 .and_then(|extension| extension.to_str())
-                .map(|extension| format!(".{extension}"))
                 .ok_or_else(WindowsError::empty)?;
-            picker.SetDefaultFileExtension(&HSTRING::from(&extension))?;
+            let suggested_name = OsStr::new(&suggested_name)
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect::<Vec<_>>();
+            let extension = OsStr::new(extension)
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect::<Vec<_>>();
 
-            // FileSavePicker requires at least one native file-type choice.
-            // Reuse a WinRT-owned string vector rather than constructing a
-            // generic filesystem or shell surface.
-            let extension_vector = FileOpenPicker::new()?.FileTypeFilter()?;
-            extension_vector.Append(&HSTRING::from(&extension))?;
-            picker
-                .FileTypeChoices()?
-                .Insert(&HSTRING::from("LorePia content source"), &extension_vector)?;
-            picker.PickSaveFileAsync()
+            // SAFETY: Tao initializes the Windows UI thread as an STA. The
+            // dialog is owned by the live Tauri window, all PCWSTR buffers stay
+            // alive for the synchronous calls, and IFileSaveDialog returns a
+            // path-only shell item without creating or truncating that path.
+            unsafe {
+                let dialog: IFileSaveDialog =
+                    CoCreateInstance(&FileSaveDialog, None, CLSCTX_INPROC_SERVER)?;
+                let options = dialog.GetOptions()?
+                    | FOS_FORCEFILESYSTEM
+                    | FOS_PATHMUSTEXIST
+                    | FOS_OVERWRITEPROMPT
+                    | FOS_NOCHANGEDIR
+                    | FOS_NOTESTFILECREATE;
+                dialog.SetOptions(options)?;
+                dialog.SetFileName(PCWSTR::from_raw(suggested_name.as_ptr()))?;
+                dialog.SetDefaultExtension(PCWSTR::from_raw(extension.as_ptr()))?;
+                if let Err(error) = dialog.Show(Some(hwnd)) {
+                    if is_picker_cancellation(&error) {
+                        return Ok(None);
+                    }
+                    return Err(error);
+                }
+                let selected = dialog.GetResult()?;
+                let display_name = selected.GetDisplayName(SIGDN_FILESYSPATH)?;
+                if display_name.is_null() {
+                    return Err(WindowsError::empty());
+                }
+                let path = OsString::from_wide(display_name.as_wide());
+                CoTaskMemFree(Some(display_name.as_ptr().cast()));
+                if path.is_empty() {
+                    return Err(WindowsError::empty());
+                }
+                Ok(Some(PathBuf::from(path)))
+            }
         })();
-        let _ = sender.send(operation);
+        let _ = sender.send(selection);
     })
     .map_err(|_| PlatformError::new(PlatformErrorCode::SelectionFailed))?;
 
-    let operation = receiver
+    receiver
         .await
         .map_err(|_| PlatformError::new(PlatformErrorCode::SelectionFailed))?
+        .map_err(|_| PlatformError::new(PlatformErrorCode::SelectionFailed))
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct WindowsFileIdentity {
+    volume_serial_number: u64,
+    file_id: [u8; 16],
+}
+
+/// Keeps the exact canonical destination directory and every canonical
+/// ancestor open without write or delete sharing. Windows has no stable
+/// `openat` equivalent in the Win32 API used here; retaining this handle chain
+/// prevents an attacker from turning a component into a junction or replacing
+/// it before the same-directory temporary file is promoted.
+pub(crate) struct PinnedExportDirectory {
+    path: PathBuf,
+    identity: WindowsFileIdentity,
+    parent: File,
+    _guards: Vec<File>,
+}
+
+pub(crate) fn pin_export_directory(
+    parent: &Path,
+    data_root: &Path,
+) -> PlatformResult<PinnedExportDirectory> {
+    reject_windows_network_export_path(parent)?;
+    let canonical_parent = std::fs::canonicalize(parent)
         .map_err(|_| PlatformError::new(PlatformErrorCode::SelectionFailed))?;
-    tokio::task::spawn_blocking(move || {
-        let _apartment = WinRtApartment::enter()
-            .map_err(|_| PlatformError::new(PlatformErrorCode::SelectionFailed))?;
-        let selected = match operation.get() {
-            Ok(selected) => selected,
-            Err(error) if is_picker_cancellation(&error) => return Ok(None),
-            Err(_) => return Err(PlatformError::new(PlatformErrorCode::SelectionFailed)),
-        };
-        let path = selected
-            .Path()
-            .map_err(|_| PlatformError::new(PlatformErrorCode::SelectionFailed))?;
-        if path.is_empty() {
-            return Err(PlatformError::new(PlatformErrorCode::SelectionFailed));
+    reject_windows_network_export_path(&canonical_parent)?;
+    let canonical_data_root = std::fs::canonicalize(data_root)
+        .map_err(|_| PlatformError::new(PlatformErrorCode::StorageUnavailable))?;
+    if windows_path_is_within(&canonical_parent, &canonical_data_root) {
+        return Err(PlatformError::new(PlatformErrorCode::InvalidInput));
+    }
+
+    let (mut guards, identity) =
+        pin_canonical_directory_chain(&canonical_parent, PlatformErrorCode::SelectionFailed)?;
+    let parent_handle = guards
+        .pop()
+        .ok_or_else(|| PlatformError::new(PlatformErrorCode::SelectionFailed))?;
+    let (data_root_guards, _) =
+        pin_canonical_directory_chain(&canonical_data_root, PlatformErrorCode::StorageUnavailable)?;
+    guards.extend(data_root_guards);
+
+    let stable_parent = std::fs::canonicalize(parent)
+        .map_err(|_| PlatformError::new(PlatformErrorCode::SelectionFailed))?;
+    let stable_data_root = std::fs::canonicalize(data_root)
+        .map_err(|_| PlatformError::new(PlatformErrorCode::StorageUnavailable))?;
+    if !windows_paths_equal(&stable_parent, &canonical_parent)
+        || !windows_paths_equal(&stable_data_root, &canonical_data_root)
+        || windows_path_is_within(&stable_parent, &stable_data_root)
+    {
+        return Err(PlatformError::new(PlatformErrorCode::SelectionFailed));
+    }
+
+    let pinned = PinnedExportDirectory {
+        path: canonical_parent,
+        identity,
+        parent: parent_handle,
+        _guards: guards,
+    };
+    pinned.verify_identity()?;
+    Ok(pinned)
+}
+
+impl PinnedExportDirectory {
+    pub(crate) fn verify_identity(&self) -> PlatformResult<()> {
+        let handle_metadata = self
+            .parent
+            .metadata()
+            .map_err(|_| PlatformError::new(PlatformErrorCode::StorageUnavailable))?;
+        let metadata = std::fs::symlink_metadata(&self.path)
+            .map_err(|_| PlatformError::new(PlatformErrorCode::StorageUnavailable))?;
+        if !handle_metadata.is_dir()
+            || !metadata.is_dir()
+            || metadata.file_attributes()
+                & ::windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT.0
+                != 0
+            || windows_file_identity(&self.parent, PlatformErrorCode::StorageUnavailable)?
+                != self.identity
+            || windows_path_identity(&self.path, PlatformErrorCode::StorageUnavailable)?
+                != self.identity
+        {
+            return Err(PlatformError::new(PlatformErrorCode::StorageUnavailable));
         }
-        Ok(Some(PathBuf::from(OsString::from(&path))))
-    })
-    .await
-    .map_err(|_| PlatformError::new(PlatformErrorCode::SelectionFailed))?
+        Ok(())
+    }
+
+    pub(crate) fn create_partial(&self, name: &OsStr) -> PlatformResult<File> {
+        use ::windows::Win32::{
+            Foundation::{GENERIC_READ, GENERIC_WRITE},
+            Storage::FileSystem::DELETE,
+        };
+        use std::os::windows::fs::OpenOptionsExt;
+
+        self.verify_identity()?;
+        let path = self.path.join(name);
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .access_mode(GENERIC_READ.0 | GENERIC_WRITE.0 | DELETE.0)
+            .share_mode(0)
+            .custom_flags(
+                (::windows::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT
+                    | ::windows::Win32::Storage::FileSystem::FILE_FLAG_WRITE_THROUGH)
+                    .0,
+            )
+            .open(&path)
+            .map_err(|_| PlatformError::new(PlatformErrorCode::StorageUnavailable))?;
+        let metadata = file
+            .metadata()
+            .map_err(|_| PlatformError::new(PlatformErrorCode::StorageUnavailable))?;
+        if !metadata.is_file()
+            || metadata.file_attributes()
+                & ::windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT.0
+                != 0
+        {
+            return Err(PlatformError::new(PlatformErrorCode::StorageUnavailable));
+        }
+        self.verify_identity()?;
+        Ok(file)
+    }
+
+    pub(crate) fn atomic_replace(
+        &self,
+        source: &File,
+        destination_name: &OsStr,
+    ) -> PlatformResult<()> {
+        self.verify_identity()?;
+        rename_open_file_at(source, &self.parent, destination_name)?;
+        source
+            .sync_all()
+            .map_err(|_| PlatformError::new(PlatformErrorCode::StorageUnavailable))?;
+        self.verify_identity()?;
+
+        let destination_metadata = std::fs::symlink_metadata(self.path.join(destination_name))
+            .map_err(|_| PlatformError::new(PlatformErrorCode::StorageUnavailable))?;
+        if !destination_metadata.is_file()
+            || destination_metadata.file_attributes()
+                & ::windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT.0
+                != 0
+            || windows_file_identity(source, PlatformErrorCode::StorageUnavailable)?
+                != windows_path_identity(
+                    &self.path.join(destination_name),
+                    PlatformErrorCode::StorageUnavailable,
+                )?
+        {
+            return Err(PlatformError::new(PlatformErrorCode::StorageUnavailable));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn remove_partial(&self, name: &OsStr) {
+        if self.verify_identity().is_ok() {
+            let _ = std::fs::remove_file(self.path.join(name));
+        }
+    }
+}
+fn pin_canonical_directory_chain(
+    path: &Path,
+    error_code: PlatformErrorCode,
+) -> PlatformResult<(Vec<File>, WindowsFileIdentity)> {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let mut ancestors = path
+        .ancestors()
+        .filter(|ancestor| !ancestor.as_os_str().is_empty())
+        .collect::<Vec<_>>();
+    ancestors.reverse();
+    let mut guards = Vec::with_capacity(ancestors.len());
+    let mut leaf_identity = None;
+    for ancestor in ancestors {
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(pinned_export_directory_share_mode())
+            .custom_flags(
+                (::windows::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS
+                    | ::windows::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT)
+                    .0,
+            )
+            .open(ancestor)
+            .map_err(|_| PlatformError::new(error_code))?;
+        let handle_metadata = file
+            .metadata()
+            .map_err(|_| PlatformError::new(error_code))?;
+        let path_metadata =
+            std::fs::symlink_metadata(ancestor).map_err(|_| PlatformError::new(error_code))?;
+        let reparse = ::windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT.0;
+        if !handle_metadata.is_dir()
+            || !path_metadata.is_dir()
+            || handle_metadata.file_attributes() & reparse != 0
+            || path_metadata.file_attributes() & reparse != 0
+        {
+            return Err(PlatformError::new(error_code));
+        }
+        let handle_identity = windows_file_identity(&file, error_code)?;
+        if handle_identity != windows_path_identity(ancestor, error_code)? {
+            return Err(PlatformError::new(error_code));
+        }
+        leaf_identity = Some(handle_identity);
+        guards.push(file);
+    }
+    let identity = leaf_identity.ok_or_else(|| PlatformError::new(error_code))?;
+    Ok((guards, identity))
+}
+
+const fn pinned_export_directory_share_mode() -> u32 {
+    // Denying WRITE prevents another process from opening the retained
+    // directory with the authority needed to turn it into a junction between
+    // identity verification and the path-based child create. Denying DELETE
+    // continues to prevent rename/replacement of every retained component.
+    ::windows::Win32::Storage::FileSystem::FILE_SHARE_READ.0
+}
+
+fn reject_windows_network_export_path(path: &Path) -> PlatformResult<()> {
+    if windows_export_path_is_network_with(path, |path| {
+        windows_export_drive_type(path).unwrap_or(4)
+    }) {
+        return Err(PlatformError::new(PlatformErrorCode::InvalidInput));
+    }
+    Ok(())
+}
+
+fn windows_export_path_is_network_with(path: &Path, drive_type: impl FnOnce(&Path) -> u32) -> bool {
+    use std::path::{Component, Prefix};
+
+    if !path.is_absolute() {
+        return true;
+    }
+    let mut components = path.components();
+    let Some(Component::Prefix(prefix)) = components.next() else {
+        return true;
+    };
+    match prefix.kind() {
+        Prefix::Disk(_) | Prefix::VerbatimDisk(_) => drive_type(path) == 4,
+        Prefix::UNC(_, _)
+        | Prefix::VerbatimUNC(_, _)
+        | Prefix::DeviceNS(_)
+        | Prefix::Verbatim(_) => true,
+    }
 }
 
 #[allow(unsafe_code)]
-pub(crate) fn atomic_replace_file(source: &Path, destination: &Path) -> PlatformResult<()> {
-    let source = null_terminated_wide(source);
-    let destination_wide = null_terminated_wide(destination);
-    let source_ptr = PCWSTR::from_raw(source.as_ptr());
-    let destination_ptr = PCWSTR::from_raw(destination_wide.as_ptr());
-    let result = if destination.exists() {
-        // SAFETY: both UTF-16 buffers are NUL-terminated and remain alive for
-        // the synchronous call. No backup path or callback pointers are used.
-        unsafe {
-            ReplaceFileW(
-                destination_ptr,
-                source_ptr,
-                PCWSTR::null(),
-                REPLACE_FILE_FLAGS(0),
-                None,
-                None,
-            )
-        }
-    } else {
-        // SAFETY: the same validated buffers remain alive. WRITE_THROUGH makes
-        // the atomic move durable before success is returned.
-        unsafe {
-            MoveFileExW(
-                source_ptr,
-                destination_ptr,
-                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-            )
-        }
+fn windows_export_drive_type(path: &Path) -> PlatformResult<u32> {
+    use ::windows::Win32::Storage::FileSystem::{GetDriveTypeW, GetVolumePathNameW};
+
+    let path = null_terminated_wide(path);
+    let volume_root_length = path
+        .len()
+        .checked_add(1)
+        .ok_or_else(|| PlatformError::new(PlatformErrorCode::InvalidInput))?;
+    let _ = u32::try_from(volume_root_length)
+        .map_err(|_| PlatformError::new(PlatformErrorCode::InvalidInput))?;
+    let mut volume_root = vec![0_u16; volume_root_length];
+    // SAFETY: both UTF-16 buffers are NUL-terminated/writable for their full
+    // declared lengths and remain alive through these synchronous calls.
+    unsafe {
+        GetVolumePathNameW(PCWSTR::from_raw(path.as_ptr()), &mut volume_root)
+            .map_err(|_| PlatformError::new(PlatformErrorCode::InvalidInput))?;
+    }
+    let Some(terminator) = volume_root.iter().position(|code_unit| *code_unit == 0) else {
+        return Err(PlatformError::new(PlatformErrorCode::InvalidInput));
     };
-    result.map_err(|_| PlatformError::new(PlatformErrorCode::StorageUnavailable))
+    if terminator == 0 {
+        return Err(PlatformError::new(PlatformErrorCode::InvalidInput));
+    }
+    let drive_type = unsafe { GetDriveTypeW(PCWSTR::from_raw(volume_root.as_ptr())) };
+    // DRIVE_UNKNOWN and DRIVE_NO_ROOT_DIR cannot establish the local-volume
+    // contract required by handle-relative promotion, so fail closed.
+    if drive_type <= 1 {
+        return Err(PlatformError::new(PlatformErrorCode::InvalidInput));
+    }
+    Ok(drive_type)
+}
+
+#[allow(unsafe_code)]
+fn windows_path_identity(
+    path: &Path,
+    error_code: PlatformErrorCode,
+) -> PlatformResult<WindowsFileIdentity> {
+    use ::windows::Win32::Storage::FileSystem::{
+        CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE,
+        FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+    };
+
+    let path = null_terminated_wide(path);
+    // SAFETY: the path buffer is NUL-terminated and remains live for the call.
+    // Zero desired access is sufficient for handle metadata, while full share
+    // flags let this verifier reopen the already pinned no-write/no-delete
+    // entry without granting another process mutation authority.
+    let handle = unsafe {
+        CreateFileW(
+            PCWSTR::from_raw(path.as_ptr()),
+            0,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            None,
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+            None,
+        )
+    }
+    .map_err(|_| PlatformError::new(error_code))?;
+    // SAFETY: CreateFileW returned one owned handle and File assumes exactly
+    // that ownership, closing it once at the end of this function.
+    let file = unsafe { File::from_raw_handle(handle.0) };
+    windows_file_identity(&file, error_code)
+}
+
+#[allow(unsafe_code)]
+fn windows_file_identity(
+    file: &File,
+    error_code: PlatformErrorCode,
+) -> PlatformResult<WindowsFileIdentity> {
+    let mut information = std::mem::MaybeUninit::<FILE_ID_INFO>::zeroed();
+    let information_bytes = u32::try_from(std::mem::size_of::<FILE_ID_INFO>())
+        .map_err(|_| PlatformError::new(error_code))?;
+    // SAFETY: information points to initialized writable storage of the exact
+    // Win32 structure and the borrowed File keeps its handle valid for the
+    // synchronous metadata query.
+    unsafe {
+        GetFileInformationByHandleEx(
+            ::windows::Win32::Foundation::HANDLE(file.as_raw_handle()),
+            FileIdInfo,
+            information.as_mut_ptr().cast(),
+            information_bytes,
+        )
+    }
+    .map_err(|_| PlatformError::new(error_code))?;
+    // SAFETY: a successful FileIdInfo query initializes the complete structure.
+    let information = unsafe { information.assume_init() };
+    Ok(windows_file_identity_from_information(information))
+}
+
+const fn windows_file_identity_from_information(information: FILE_ID_INFO) -> WindowsFileIdentity {
+    WindowsFileIdentity {
+        volume_serial_number: information.VolumeSerialNumber,
+        file_id: information.FileId.Identifier,
+    }
+}
+
+fn windows_paths_equal(left: &Path, right: &Path) -> bool {
+    windows_path_key(left) == windows_path_key(right)
+}
+
+fn windows_path_is_within(path: &Path, root: &Path) -> bool {
+    let path = windows_path_key(path);
+    let root = windows_path_key(root);
+    path == root
+        || path
+            .strip_prefix(&root)
+            .is_some_and(|suffix| suffix.starts_with('\\'))
+}
+
+fn windows_path_key(path: &Path) -> String {
+    path.as_os_str()
+        .to_string_lossy()
+        .replace('/', "\\")
+        .trim_end_matches('\\')
+        .to_lowercase()
+}
+
+#[repr(C)]
+struct RawFileRenameInfo {
+    replace_if_exists_or_flags: u32,
+    root_directory: ::windows::Win32::Foundation::HANDLE,
+    file_name_length: u32,
+    file_name: [u16; 1],
+}
+
+const fn file_rename_info_buffer_bytes(file_name_bytes: usize) -> Option<usize> {
+    std::mem::size_of::<RawFileRenameInfo>().checked_add(file_name_bytes)
+}
+
+#[cfg(test)]
+const _: () = {
+    let file_name_bytes = std::mem::size_of::<u16>();
+    let Some(actual) = file_rename_info_buffer_bytes(file_name_bytes) else {
+        panic!("one UTF-16 code unit must fit in a FILE_RENAME_INFO buffer");
+    };
+    let Some(required) = std::mem::size_of::<RawFileRenameInfo>().checked_add(file_name_bytes)
+    else {
+        panic!("one UTF-16 code unit must fit in a FILE_RENAME_INFO buffer");
+    };
+    assert!(actual >= required);
+};
+
+const _: () = {
+    assert!(
+        std::mem::offset_of!(RawFileRenameInfo, root_directory) == std::mem::size_of::<usize>()
+    );
+    assert!(
+        std::mem::offset_of!(RawFileRenameInfo, file_name_length)
+            == std::mem::size_of::<usize>() * 2
+    );
+    assert!(
+        std::mem::offset_of!(RawFileRenameInfo, file_name)
+            == std::mem::size_of::<usize>() * 2 + std::mem::size_of::<u32>()
+    );
+};
+
+#[allow(unsafe_code)]
+fn rename_open_file_at(
+    source: &File,
+    parent: &File,
+    destination_name: &OsStr,
+) -> PlatformResult<()> {
+    const REPLACE_IF_EXISTS: u32 = 0x0000_0001;
+
+    let mut components = Path::new(destination_name).components();
+    if !matches!(
+        components.next(),
+        Some(std::path::Component::Normal(name)) if name == destination_name
+    ) || components.next().is_some()
+    {
+        return Err(PlatformError::new(PlatformErrorCode::InvalidInput));
+    }
+    let destination = destination_name.encode_wide().collect::<Vec<_>>();
+    if destination.is_empty() || destination.contains(&0) {
+        return Err(PlatformError::new(PlatformErrorCode::InvalidInput));
+    }
+    let file_name_bytes = destination
+        .len()
+        .checked_mul(std::mem::size_of::<u16>())
+        .ok_or_else(|| PlatformError::new(PlatformErrorCode::InvalidInput))?;
+    let buffer_bytes = file_rename_info_buffer_bytes(file_name_bytes)
+        .ok_or_else(|| PlatformError::new(PlatformErrorCode::InvalidInput))?;
+    let buffer_length = u32::try_from(buffer_bytes)
+        .map_err(|_| PlatformError::new(PlatformErrorCode::InvalidInput))?;
+    let file_name_length = u32::try_from(file_name_bytes)
+        .map_err(|_| PlatformError::new(PlatformErrorCode::InvalidInput))?;
+    let word_bytes = std::mem::size_of::<usize>();
+    let word_count = buffer_bytes.div_ceil(word_bytes);
+    let mut buffer = vec![0_usize; word_count];
+    let info = buffer.as_mut_ptr().cast::<RawFileRenameInfo>();
+
+    // SAFETY: `buffer` is pointer-aligned and large enough for the fixed
+    // FILE_RENAME_INFO header plus the exact UTF-16 basename. Both file handles
+    // remain live for the synchronous call; source was opened with DELETE
+    // authority and parent is the retained, non-reparse directory handle.
+    unsafe {
+        info.write(RawFileRenameInfo {
+            replace_if_exists_or_flags: REPLACE_IF_EXISTS,
+            root_directory: ::windows::Win32::Foundation::HANDLE(parent.as_raw_handle()),
+            file_name_length,
+            file_name: [0],
+        });
+        std::ptr::copy_nonoverlapping(
+            destination.as_ptr(),
+            (&raw mut (*info).file_name).cast::<u16>(),
+            destination.len(),
+        );
+        SetFileInformationByHandle(
+            ::windows::Win32::Foundation::HANDLE(source.as_raw_handle()),
+            FileRenameInfo,
+            info.cast(),
+            buffer_length,
+        )
+    }
+    .map_err(|_| PlatformError::new(PlatformErrorCode::StorageUnavailable))
 }
 
 fn null_terminated_wide(path: &Path) -> Vec<u16> {
@@ -995,13 +1486,133 @@ impl Drop for WinRtApartment {
 #[cfg(test)]
 mod tests {
     use super::{
-        WINDOWS_DPAPI_MAXIMUM_CIPHERTEXT_BYTES, WINDOWS_DPAPI_MAXIMUM_ENTROPY_BYTES,
-        WINDOWS_DPAPI_MAXIMUM_PLAINTEXT_BYTES, delete_verified_file, protect_current_user_data,
-        unprotect_current_user_data,
+        RawFileRenameInfo, WINDOWS_DPAPI_MAXIMUM_CIPHERTEXT_BYTES,
+        WINDOWS_DPAPI_MAXIMUM_ENTROPY_BYTES, WINDOWS_DPAPI_MAXIMUM_PLAINTEXT_BYTES,
+        delete_verified_file, file_rename_info_buffer_bytes, pin_export_directory,
+        pinned_export_directory_share_mode, protect_current_user_data, unprotect_current_user_data,
+        windows_export_path_is_network_with, windows_file_identity_from_information,
     };
     use crate::PlatformErrorCode;
-    use std::{fs::OpenOptions, io::Read, os::windows::fs::OpenOptionsExt};
+    use std::{
+        ffi::OsStr,
+        fs::OpenOptions,
+        io::{Read, Write},
+        os::windows::fs::OpenOptionsExt,
+    };
     use zeroize::Zeroizing;
+
+    #[test]
+    fn windows_file_rename_buffer_includes_complete_header_and_name() {
+        let file_name_bytes = "export.charx".encode_utf16().count() * std::mem::size_of::<u16>();
+        assert_eq!(
+            file_rename_info_buffer_bytes(file_name_bytes),
+            std::mem::size_of::<RawFileRenameInfo>().checked_add(file_name_bytes),
+        );
+        assert_eq!(file_rename_info_buffer_bytes(usize::MAX), None);
+    }
+
+    #[test]
+    fn windows_export_picker_is_path_only_before_destination_validation() {
+        let source = include_str!("windows.rs");
+        let create_before_validation_api = ["PickSave", "FileAsync"].concat();
+        let path_only_api = ["IFileSave", "Dialog"].concat();
+        let no_test_create_option = ["FOS_NOTEST", "FILECREATE"].concat();
+
+        assert!(!source.contains(&create_before_validation_api));
+        assert!(source.contains(&path_only_api));
+        assert!(source.contains(&no_test_create_option));
+    }
+
+    #[test]
+    fn windows_file_identity_preserves_refs_volume_and_full_file_id() {
+        let file_id = [
+            0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd,
+            0xee, 0xff,
+        ];
+        let identity = windows_file_identity_from_information(
+            ::windows::Win32::Storage::FileSystem::FILE_ID_INFO {
+                VolumeSerialNumber: 0xfedc_ba98_7654_3210,
+                FileId: ::windows::Win32::Storage::FileSystem::FILE_ID_128 {
+                    Identifier: file_id,
+                },
+            },
+        );
+
+        assert_eq!(identity.volume_serial_number, 0xfedc_ba98_7654_3210);
+        assert_eq!(identity.file_id, file_id);
+    }
+
+    #[test]
+    fn windows_export_network_policy_rejects_unc_and_mapped_drives() {
+        let remote = |_path: &std::path::Path| 4_u32;
+        let local = |_path: &std::path::Path| 3_u32;
+
+        assert!(windows_export_path_is_network_with(
+            std::path::Path::new(r"\\server\share\exports"),
+            local,
+        ));
+        assert!(windows_export_path_is_network_with(
+            std::path::Path::new(r"\\?\UNC\server\share\exports"),
+            local,
+        ));
+        assert!(windows_export_path_is_network_with(
+            std::path::Path::new(r"Z:\exports"),
+            remote,
+        ));
+        assert!(windows_export_path_is_network_with(
+            std::path::Path::new(r"\\?\Z:\exports"),
+            remote,
+        ));
+        assert!(!windows_export_path_is_network_with(
+            std::path::Path::new(r"C:\exports"),
+            local,
+        ));
+    }
+
+    #[test]
+    fn pinned_export_directories_deny_write_and_delete_sharing() {
+        let share_mode = pinned_export_directory_share_mode();
+        assert_eq!(
+            share_mode,
+            ::windows::Win32::Storage::FileSystem::FILE_SHARE_READ.0
+        );
+        assert_eq!(
+            share_mode & ::windows::Win32::Storage::FileSystem::FILE_SHARE_WRITE.0,
+            0
+        );
+        assert_eq!(
+            share_mode & ::windows::Win32::Storage::FileSystem::FILE_SHARE_DELETE.0,
+            0
+        );
+    }
+
+    #[test]
+    fn pinned_export_directory_still_creates_and_promotes_child_file() {
+        let root = tempfile::tempdir().expect("temporary directory");
+        let data_root = root.path().join("data");
+        let export_root = root.path().join("exports");
+        std::fs::create_dir(&data_root).expect("data root");
+        std::fs::create_dir(&export_root).expect("export root");
+        let pinned = pin_export_directory(&export_root, &data_root).expect("pinned export root");
+        let partial_name = OsStr::new(".lorepia-export-test.partial");
+        let destination_name = OsStr::new("export.charx");
+
+        let mut partial = pinned.create_partial(partial_name).expect("partial file");
+        partial
+            .write_all(b"verified export")
+            .expect("write partial");
+        partial.sync_all().expect("sync partial");
+        pinned
+            .atomic_replace(&partial, destination_name)
+            .expect("promote partial");
+        drop(partial);
+
+        assert_eq!(
+            std::fs::read(export_root.join(destination_name)).expect("promoted export"),
+            b"verified export"
+        );
+        assert!(!export_root.join(partial_name).exists());
+    }
 
     #[test]
     fn windows_dpapi_current_user_round_trip_rejects_wrong_entropy() {

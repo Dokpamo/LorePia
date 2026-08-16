@@ -31,6 +31,8 @@ import {
     type LorepiaClient,
     type MessageActionGenerationDto,
     type MessageDto,
+    type InterruptedMemoryJobDto,
+    type MemoryJobRetryReceiptDto,
     type MemoryQueryEmbeddingRetryCandidateDto,
     type MemorySupervisorStatusDto,
     type ModelRouteDto,
@@ -47,6 +49,7 @@ import {
     type UpsertCapabilityOverrideInput,
     type UpsertModelRouteInput,
 } from '../lib/ipc/contracts';
+import { t } from '../lib/i18n';
 import { LorepiaClientError, normalizeClientError } from '../lib/ipc/errors';
 import { ChatStreamVerifier } from '../features/chat/chat-stream';
 
@@ -75,6 +78,7 @@ export interface GreetingCatalogState extends SectionState {
 
 export interface MemoryQueryRetryState extends SectionState {
     candidates: MemoryQueryEmbeddingRetryCandidateDto[];
+    interrupted_jobs: InterruptedMemoryJobDto[];
     busy_id: string | null;
     notice: string | null;
 }
@@ -161,6 +165,7 @@ export const INITIAL_APP_STATE: LorepiaAppState = {
         phase: 'idle',
         error: null,
         candidates: [],
+        interrupted_jobs: [],
         busy_id: null,
         notice: null,
     },
@@ -182,24 +187,27 @@ export const INITIAL_APP_STATE: LorepiaAppState = {
     announcement: '',
 };
 
-const GENERATION_REATTACHMENT_UNAVAILABLE_MESSAGE =
-    '앱을 다시 연 뒤에는 진행 중이던 응답 스트림에 다시 연결할 수 없습니다. 생성 취소 후 대화를 다시 열어 주세요.';
+const GENERATION_REATTACHMENT_UNAVAILABLE_MESSAGE = t('app.error.stream_lost');
 
 function errorLabel(error: unknown): string {
     const normalized = normalizeClientError(error);
     const fallback: Record<string, string> = {
-        'error.unexpected': '예상하지 못한 오류가 발생했습니다.',
-        'error.compatibility': '앱과 Core 버전이 호환되지 않습니다.',
-        'error.invalid_input': '입력 내용을 확인해 주세요.',
-        'error.core_unavailable': '로컬 Core를 열 수 없습니다.',
+        'error.unexpected': t('error.unexpected'),
+        'error.compatibility': t('error.compatibility'),
+        'error.invalid_input': t('error.invalid_input'),
+        'error.core_unavailable': t('error.core_unavailable'),
         'chat.generation_reattachment_unavailable': GENERATION_REATTACHMENT_UNAVAILABLE_MESSAGE,
-        'provider.discovery.assistant_pricing_unavailable':
-            '신뢰할 수 있는 가격·토큰 정책이 준비될 때까지 원격 설정 도우미를 사용할 수 없습니다.',
+        'provider.discovery.assistant_pricing_unavailable': t('app.error.remote_assistant_blocked'),
     };
     return fallback[normalized.messageKey] ?? normalized.messageKey;
 }
 
 const MAX_MEMORY_QUERY_RETRY_CANDIDATES = 16;
+const MAX_INTERRUPTED_MEMORY_JOBS = 16;
+// The DTO unions are claims about untrusted IPC payloads, not guarantees,
+// so these guards compare over `string` instead of the narrowed literal types.
+const MEMORY_JOB_RETRY_KINDS: readonly string[] = ['summary', 'embedding'];
+const MEMORY_JOB_RETRY_STATUSES: readonly string[] = ['queued'];
 const MAX_PROVIDER_DISCOVERY_EVENT_DRAIN = 100;
 
 function isRetryableMemoryQueryCandidate(
@@ -222,6 +230,47 @@ function isRetryableMemoryQueryCandidate(
         candidate.branch_id === branchId &&
         (candidate.error_code === null || typeof candidate.error_code === 'string') &&
         candidate.requires_unknown_outcome_acknowledgement === (candidate.status === 'interrupted')
+    );
+}
+
+function isInterruptedMemoryJob(
+    job: InterruptedMemoryJobDto,
+    conversationId: string,
+    branchId: string,
+): boolean {
+    return (
+        typeof job.memory_job_id === 'string' &&
+        job.memory_job_id.length > 0 &&
+        MEMORY_JOB_RETRY_KINDS.includes(job.kind) &&
+        Number.isSafeInteger(job.revision) &&
+        job.revision >= 0 &&
+        job.revision < Number.MAX_SAFE_INTEGER &&
+        job.conversation_id === conversationId &&
+        job.branch_id === branchId &&
+        typeof job.source_start_message_id === 'string' &&
+        typeof job.source_end_message_id === 'string' &&
+        Number.isSafeInteger(job.attempt) &&
+        job.attempt >= 0 &&
+        Number.isSafeInteger(job.interruption_count) &&
+        job.interruption_count >= 0 &&
+        (job.last_interrupted_at === null || typeof job.last_interrupted_at === 'string') &&
+        (job.last_error_code === null || typeof job.last_error_code === 'string')
+    );
+}
+
+function isQueuedMemoryJobRetryReceipt(
+    receipt: MemoryJobRetryReceiptDto,
+    job: InterruptedMemoryJobDto,
+): boolean {
+    return (
+        receipt.memory_job_id === job.memory_job_id &&
+        MEMORY_JOB_RETRY_STATUSES.includes(receipt.status) &&
+        receipt.kind === job.kind &&
+        receipt.revision === job.revision + 1 &&
+        receipt.conversation_id === job.conversation_id &&
+        receipt.branch_id === job.branch_id &&
+        receipt.source_start_message_id === job.source_start_message_id &&
+        receipt.source_end_message_id === job.source_end_message_id
     );
 }
 
@@ -337,9 +386,9 @@ function captureAnnouncement(status: NativeCaptureStatusDto, success: string): s
         case 'cleared':
             return success;
         case 'already_replaced':
-            return `${success} 캡처 중 클립보드 내용이 바뀌어 새 내용은 지우지 않았습니다.`;
+            return t('app.capture.clipboard_changed', { success });
         case 'clear_failed':
-            return `${success} 다만 클립보드를 지우지 못했으니 직접 삭제해 주세요.`;
+            return t('app.capture.clipboard_kept', { success });
     }
 }
 
@@ -566,7 +615,7 @@ export class LorepiaAppController {
                     phase: state.memory_supervisor.status === null ? 'error' : 'ready',
                     error:
                         state.memory_supervisor.status === null
-                            ? '기억 작업 상태를 확인하지 못했습니다.'
+                            ? t('memory_supervisor.error.status')
                             : null,
                 },
             }));
@@ -578,7 +627,7 @@ export class LorepiaAppController {
                 ...state,
                 memory_supervisor: {
                     ...state.memory_supervisor,
-                    error: '기억 작업 상태의 실시간 갱신을 연결하지 못했습니다.',
+                    error: t('memory_supervisor.error.subscribe'),
                 },
             }));
         }
@@ -639,7 +688,7 @@ export class LorepiaAppController {
                 ...state,
                 import_flow: { phase: 'ready', error: null, inspection },
             }));
-            this.announce(`${inspection.display_name} 가져오기를 검토해 주세요.`);
+            this.announce(t('import.notice.review', { name: inspection.display_name }));
         } catch (error: unknown) {
             this.update((state) => ({
                 ...state,
@@ -669,7 +718,7 @@ export class LorepiaAppController {
                 },
                 import_flow: { phase: 'idle', error: null, inspection: null },
             }));
-            this.announce(`${character.name}을(를) 서재에 추가했습니다.`);
+            this.announce(t('import.notice.added', { name: character.name }));
         } catch (error: unknown) {
             this.update((state) => ({
                 ...state,
@@ -710,6 +759,7 @@ export class LorepiaAppController {
                 phase: 'idle',
                 error: null,
                 candidates: [],
+                interrupted_jobs: [],
                 busy_id: null,
                 notice: null,
             },
@@ -747,7 +797,7 @@ export class LorepiaAppController {
                         ...state,
                         greeting_catalog: {
                             phase: 'error',
-                            error: '캐릭터 인사 목록이 선택한 캐릭터와 일치하지 않습니다.',
+                            error: t('chat.error.greeting_mismatch'),
                             value: null,
                             selected_greeting_id: null,
                         },
@@ -809,7 +859,7 @@ export class LorepiaAppController {
             state.greeting_catalog.phase !== 'ready' ||
             catalog?.character_id !== character.id
         ) {
-            this.announce('정확한 캐릭터 인사 리비전을 불러온 뒤 새 대화를 시작해 주세요.');
+            this.announce(t('chat.notice.greeting_revision'));
             return false;
         }
         const greetingId = state.greeting_catalog.selected_greeting_id;
@@ -817,7 +867,7 @@ export class LorepiaAppController {
             greetingId !== null &&
             !catalog.greetings.some((greeting) => greeting.id === greetingId && greeting.enabled)
         ) {
-            this.announce('사용 가능한 시작 인사를 다시 선택해 주세요.');
+            this.announce(t('chat.notice.greeting_reselect'));
             return false;
         }
         const epoch = ++this.conversationEpoch;
@@ -872,6 +922,7 @@ export class LorepiaAppController {
                 phase: 'idle',
                 error: null,
                 candidates: [],
+                interrupted_jobs: [],
                 busy_id: null,
                 notice: null,
             },
@@ -952,6 +1003,7 @@ export class LorepiaAppController {
                 phase: 'idle',
                 error: null,
                 candidates: [],
+                interrupted_jobs: [],
                 busy_id: null,
                 notice: null,
             },
@@ -987,7 +1039,7 @@ export class LorepiaAppController {
                 branches: [branch, ...state.branches.filter((item) => item.id !== branch.id)],
             }));
             await this.selectBranch(branch.id);
-            this.announce('새 대화 분기를 만들었습니다.');
+            this.announce(t('chat.notice.branch_created'));
         } catch (error: unknown) {
             this.announce(errorLabel(error));
         }
@@ -1000,7 +1052,7 @@ export class LorepiaAppController {
             const conversationState = await this.client.setConversationMode(conversation.id, mode);
             this.update((state) => ({ ...state, conversation_state: conversationState }));
             this.announce(
-                mode === 'chat' ? '채팅 모드로 변경했습니다.' : '스토리 모드로 변경했습니다.',
+                mode === 'chat' ? t('chat.notice.mode_chat') : t('chat.notice.mode_story'),
             );
         } catch (error: unknown) {
             this.announce(errorLabel(error));
@@ -1056,7 +1108,7 @@ export class LorepiaAppController {
     async sendMessage(content: string): Promise<boolean> {
         const state = get(this.mutable);
         if (state.chat.active_generation_id !== null) {
-            this.announce('진행 중인 생성을 취소한 뒤 새 메시지를 보내세요.');
+            this.announce(t('chat.notice.cancel_before_send'));
             return false;
         }
         const conversation = state.selected_conversation;
@@ -1068,7 +1120,7 @@ export class LorepiaAppController {
             selection === null ||
             content.trim().length === 0
         ) {
-            this.announce('대화와 저장된 기본 모델을 확인한 뒤 메시지를 보내세요.');
+            this.announce(t('chat.notice.check_model'));
             return false;
         }
 
@@ -1152,7 +1204,7 @@ export class LorepiaAppController {
     async sendReviewedPrompt(input: ReviewedPromptSendInput): Promise<boolean> {
         const state = get(this.mutable);
         if (state.chat.active_generation_id !== null) {
-            this.announce('진행 중인 생성을 취소한 뒤 검토한 계획을 보내세요.');
+            this.announce(t('chat.notice.cancel_before_plan'));
             return false;
         }
         const conversation = state.selected_conversation;
@@ -1167,7 +1219,7 @@ export class LorepiaAppController {
             input.branch_id !== conversationState.active_branch_id ||
             input.expected_head !== (branch?.head_message_id ?? null)
         ) {
-            this.announce('대화 상태가 미리보기 이후 바뀌었습니다. 최종 계획을 다시 검토하세요.');
+            this.announce(t('chat.notice.plan_stale'));
             return false;
         }
 
@@ -1285,13 +1337,13 @@ export class LorepiaAppController {
     ): Promise<boolean> {
         const state = get(this.mutable);
         if (state.chat.active_generation_id !== null) {
-            this.announce('진행 중인 생성을 취소한 뒤 메시지를 변경하세요.');
+            this.announce(t('chat.notice.cancel_before_edit'));
             return false;
         }
         const conversation = state.selected_conversation;
         const selection = this.generationSelection(state);
         if (conversation === null || state.conversation_state === null || selection === null) {
-            this.announce('대화와 저장된 기본 모델을 먼저 확인해 주세요.');
+            this.announce(t('chat.notice.check_model_first'));
             return false;
         }
 
@@ -1364,6 +1416,7 @@ export class LorepiaAppController {
                     phase: 'idle',
                     error: null,
                     candidates: [],
+                    interrupted_jobs: [],
                     busy_id: null,
                     notice: null,
                 },
@@ -1406,7 +1459,7 @@ export class LorepiaAppController {
             });
             if (!isCurrentBranchSnapshot(get(this.mutable))) return;
             if (branch.id !== branchId || branch.conversation_id !== conversationId) {
-                this.announce('메시지 제거 결과가 요청한 대화 분기와 일치하지 않습니다.');
+                this.announce(t('chat.notice.remove_mismatch'));
                 return;
             }
             const messages = await this.client.listBranchMessages(branchId);
@@ -1416,7 +1469,7 @@ export class LorepiaAppController {
                 branches: current.branches.map((item) => (item.id === branchId ? branch : item)),
                 messages: { phase: 'ready', error: null, items: messages },
             }));
-            this.announce('이 메시지부터 분기에서 제거했습니다.');
+            this.announce(t('chat.notice.removed'));
         } catch (error: unknown) {
             if (!isCurrentBranchSnapshot(get(this.mutable))) return;
             this.announce(errorLabel(error));
@@ -1435,6 +1488,7 @@ export class LorepiaAppController {
                     phase: 'idle',
                     error: null,
                     candidates: [],
+                    interrupted_jobs: [],
                     busy_id: null,
                     notice: null,
                 },
@@ -1452,11 +1506,26 @@ export class LorepiaAppController {
             },
         }));
         try {
-            const candidates = await this.client.listRetryableMemoryQueryEmbeddings({
-                conversation_id: conversationId,
-                branch_id: branchId,
-                limit: MAX_MEMORY_QUERY_RETRY_CANDIDATES,
-            });
+            // Settled independently: the interrupted-job listing is a
+            // supplementary surface, so its failure must never blank or fault
+            // the query-embedding candidates the user came here to retry.
+            const [candidateResult, jobResult] = await Promise.allSettled([
+                this.client.listRetryableMemoryQueryEmbeddings({
+                    conversation_id: conversationId,
+                    branch_id: branchId,
+                    limit: MAX_MEMORY_QUERY_RETRY_CANDIDATES,
+                }),
+                this.client.listInterruptedMemoryJobs({
+                    conversation_id: conversationId,
+                    branch_id: branchId,
+                    limit: MAX_INTERRUPTED_MEMORY_JOBS,
+                }),
+            ]);
+            if (candidateResult.status === 'rejected') throw candidateResult.reason;
+            const candidates = candidateResult.value;
+            const interruptedJobs = jobResult.status === 'fulfilled' ? jobResult.value : [];
+            const jobListError =
+                jobResult.status === 'rejected' ? errorLabel(jobResult.reason) : null;
             const current = get(this.mutable);
             if (
                 requestEpoch !== this.memoryQueryRetryEpoch ||
@@ -1466,11 +1535,17 @@ export class LorepiaAppController {
                 return;
             }
             const uniqueIds = new Set(candidates.map((candidate) => candidate.id));
+            const uniqueJobIds = new Set(interruptedJobs.map((job) => job.memory_job_id));
             if (
                 candidates.length > MAX_MEMORY_QUERY_RETRY_CANDIDATES ||
                 uniqueIds.size !== candidates.length ||
                 !candidates.every((candidate) =>
                     isRetryableMemoryQueryCandidate(candidate, conversationId, branchId),
+                ) ||
+                interruptedJobs.length > MAX_INTERRUPTED_MEMORY_JOBS ||
+                uniqueJobIds.size !== interruptedJobs.length ||
+                !interruptedJobs.every((job) =>
+                    isInterruptedMemoryJob(job, conversationId, branchId),
                 )
             ) {
                 this.update((value) => ({
@@ -1478,7 +1553,7 @@ export class LorepiaAppController {
                     memory_query_retries: {
                         ...value.memory_query_retries,
                         phase: 'error',
-                        error: '기억 검색 재시도 목록을 검증하지 못했습니다.',
+                        error: t('memory.retry.error.list'),
                         busy_id: null,
                     },
                 }));
@@ -1488,8 +1563,9 @@ export class LorepiaAppController {
                 ...value,
                 memory_query_retries: {
                     phase: 'ready',
-                    error: null,
+                    error: jobListError,
                     candidates,
+                    interrupted_jobs: interruptedJobs,
                     busy_id: null,
                     notice: value.memory_query_retries.notice,
                 },
@@ -1529,6 +1605,111 @@ export class LorepiaAppController {
         );
     }
 
+    async retryInterruptedMemoryJob(
+        job: InterruptedMemoryJobDto,
+        acknowledgeUnknownOutcome: boolean,
+    ): Promise<boolean> {
+        const state = get(this.mutable);
+        const listedJob = state.memory_query_retries.interrupted_jobs.find(
+            (value) => value.memory_job_id === job.memory_job_id,
+        );
+        if (listedJob?.revision !== job.revision) {
+            this.announce(t('memory.retry.notice.reload'));
+            return false;
+        }
+        if (
+            listedJob.kind !== job.kind ||
+            state.selected_conversation?.id !== listedJob.conversation_id ||
+            state.conversation_state?.active_branch_id !== listedJob.branch_id ||
+            !isInterruptedMemoryJob(listedJob, listedJob.conversation_id, listedJob.branch_id)
+        ) {
+            this.announce(t('memory.retry.notice.reload'));
+            return false;
+        }
+        if (state.memory_query_retries.busy_id !== null) {
+            this.announce(t('memory.retry.notice.busy_job'));
+            return false;
+        }
+        if (!acknowledgeUnknownOutcome) {
+            this.announce(t('memory.retry.notice.acknowledge'));
+            return false;
+        }
+        ++this.memoryQueryRetryEpoch;
+        this.update((current) => ({
+            ...current,
+            memory_query_retries: {
+                ...current.memory_query_retries,
+                phase: 'loading',
+                error: null,
+                busy_id: listedJob.memory_job_id,
+                notice: null,
+            },
+        }));
+        try {
+            const receipt = await this.client.retryInterruptedMemoryJob({
+                conversation_id: listedJob.conversation_id,
+                branch_id: listedJob.branch_id,
+                memory_job_id: listedJob.memory_job_id,
+                expected_revision: listedJob.revision,
+                acknowledge_unknown_outcome: true,
+            });
+            const current = get(this.mutable);
+            const sameRoom =
+                current.selected_conversation?.id === listedJob.conversation_id &&
+                current.conversation_state?.active_branch_id === listedJob.branch_id;
+            if (!isQueuedMemoryJobRetryReceipt(receipt, listedJob)) {
+                if (sameRoom) {
+                    this.update((value) => ({
+                        ...value,
+                        memory_query_retries: {
+                            ...value.memory_query_retries,
+                            phase: 'error',
+                            error: t('memory.retry.error.receipt'),
+                            busy_id: null,
+                        },
+                    }));
+                }
+                return false;
+            }
+            if (!sameRoom) return true;
+            const notice = t('memory.retry.notice.job_requeued');
+            this.update((value) => ({
+                ...value,
+                memory_query_retries: {
+                    ...value.memory_query_retries,
+                    phase: 'ready',
+                    error: null,
+                    interrupted_jobs: value.memory_query_retries.interrupted_jobs.filter(
+                        (listed) =>
+                            listed.memory_job_id !== listedJob.memory_job_id ||
+                            listed.revision !== listedJob.revision,
+                    ),
+                    busy_id: null,
+                    notice,
+                },
+            }));
+            this.announce(notice);
+            return true;
+        } catch (error: unknown) {
+            const current = get(this.mutable);
+            if (
+                current.selected_conversation?.id === listedJob.conversation_id &&
+                current.conversation_state?.active_branch_id === listedJob.branch_id
+            ) {
+                this.update((value) => ({
+                    ...value,
+                    memory_query_retries: {
+                        ...value.memory_query_retries,
+                        phase: 'error',
+                        error: errorLabel(error),
+                        busy_id: null,
+                    },
+                }));
+            }
+            return false;
+        }
+    }
+
     async retryMemoryQueryEmbedding(
         candidate: MemoryQueryEmbeddingRetryCandidateDto,
         acknowledgeUnknownOutcome: boolean,
@@ -1538,7 +1719,7 @@ export class LorepiaAppController {
             (value) => value.id === candidate.id,
         );
         if (listedCandidate?.revision !== candidate.revision) {
-            this.announce('현재 대화 분기의 재시도 항목을 다시 불러와 주세요.');
+            this.announce(t('memory.retry.notice.reload'));
             return false;
         }
         if (
@@ -1553,15 +1734,15 @@ export class LorepiaAppController {
                 listedCandidate.branch_id,
             )
         ) {
-            this.announce('현재 대화 분기의 재시도 항목을 다시 불러와 주세요.');
+            this.announce(t('memory.retry.notice.reload'));
             return false;
         }
         if (state.memory_query_retries.busy_id !== null) {
-            this.announce('진행 중인 기억 검색 재시도가 끝난 뒤 다시 시도해 주세요.');
+            this.announce(t('memory.retry.notice.busy_query'));
             return false;
         }
         if (listedCandidate.status === 'interrupted' && !acknowledgeUnknownOutcome) {
-            this.announce('결과를 알 수 없는 외부 요청임을 확인한 뒤 다시 시도해 주세요.');
+            this.announce(t('memory.retry.notice.acknowledge'));
             return false;
         }
         ++this.memoryQueryRetryEpoch;
@@ -1577,6 +1758,8 @@ export class LorepiaAppController {
         }));
         try {
             const receipt = await this.client.retryMemoryQueryEmbedding({
+                conversation_id: listedCandidate.conversation_id,
+                branch_id: listedCandidate.branch_id,
                 id: listedCandidate.id,
                 expected_revision: listedCandidate.revision,
                 acknowledge_unknown_outcome:
@@ -1593,7 +1776,7 @@ export class LorepiaAppController {
                         memory_query_retries: {
                             ...value.memory_query_retries,
                             phase: 'error',
-                            error: '재시도 결과를 검증하지 못했습니다. 목록을 새로고침해 상태를 확인하세요.',
+                            error: t('memory.retry.error.receipt'),
                             busy_id: null,
                         },
                     }));
@@ -1607,8 +1790,7 @@ export class LorepiaAppController {
             ) {
                 return true;
             }
-            const notice =
-                '임베딩 준비만 다시 대기열에 넣었습니다. 미리보기나 메시지 결과는 만들지 않았습니다. 원래 계획 미리보기 또는 메시지 전송·편집·재생성을 다시 실행하세요.';
+            const notice = t('memory.retry.notice.query_requeued');
             this.update((value) => ({
                 ...value,
                 memory_query_retries: {
@@ -1619,6 +1801,7 @@ export class LorepiaAppController {
                             listed.id !== listedCandidate.id ||
                             listed.revision !== listedCandidate.revision,
                     ),
+                    interrupted_jobs: value.memory_query_retries.interrupted_jobs,
                     busy_id: null,
                     notice,
                 },
@@ -1860,7 +2043,7 @@ export class LorepiaAppController {
                     reconcile_notice: null,
                 },
             }));
-            this.announce('대화가 저장된 상태와 동기화됐습니다.');
+            this.announce(t('chat.notice.synced'));
             return true;
         } catch {
             return false;
@@ -1967,15 +2150,16 @@ export class LorepiaAppController {
                 case 'usage_updated': {
                     const output = event.kind.payload.output_tokens;
                     chat.usage_label =
-                        output === null ? null : `출력 ${output.toLocaleString()} 토큰`;
+                        output === null
+                            ? null
+                            : t('chat.usage.output_tokens', { count: output.toLocaleString() });
                     break;
                 }
                 case 'message_committed':
-                    chat.reconcile_notice = '저장된 메시지를 확인하는 중입니다.';
+                    chat.reconcile_notice = t('chat.notice.reconciling');
                     break;
                 case 'tool_call_started':
-                    chat.reconcile_notice =
-                        '모델이 도구 사용을 제안했습니다. 자동 실행하지 않습니다.';
+                    chat.reconcile_notice = t('chat.notice.tool_suggested');
                     break;
                 case 'tool_call_arguments_delta':
                 case 'tool_call_completed':
@@ -2050,7 +2234,7 @@ export class LorepiaAppController {
             ...state,
             chat: {
                 ...state.chat,
-                reconcile_notice: `스트림 상태를 복구하는 중입니다. (${reason})`,
+                reconcile_notice: t('chat.notice.stream_recovering', { reason }),
             },
         }));
         try {
@@ -2089,13 +2273,12 @@ export class LorepiaAppController {
                               live_assistant_message_id: null,
                               streaming_text: '',
                               reasoning_text: '',
-                              reconcile_notice:
-                                  '저장된 상태에서 생성 스트림을 다시 연결하는 중입니다.',
+                              reconcile_notice: t('chat.notice.stream_reconnecting'),
                           },
             }));
             if (pendingAssistant === null) {
                 this.reconcileBufferedItems = [];
-                this.announce('대화가 저장된 상태와 동기화됐습니다.');
+                this.announce(t('chat.notice.synced'));
                 return;
             }
             this.reconcileBufferedItems = [];
@@ -2121,7 +2304,7 @@ export class LorepiaAppController {
                     live_assistant_message_id: null,
                     streaming_text: '',
                     reasoning_text: '',
-                    reconcile_notice: '대화 새로고침이 필요합니다.',
+                    reconcile_notice: t('chat.notice.refresh_needed'),
                 },
             }));
         } finally {
@@ -2134,7 +2317,7 @@ export class LorepiaAppController {
         if (generationId === null) return;
         try {
             await this.client.cancelGeneration(generationId);
-            this.announce('생성 취소를 요청했습니다.');
+            this.announce(t('chat.notice.cancel_requested'));
         } catch (error: unknown) {
             const normalized = normalizeClientError(error);
             if (normalized.code !== 'not_found' && normalized.code !== 'cancelled') {
@@ -2294,7 +2477,7 @@ export class LorepiaAppController {
                     },
                 },
             }));
-            this.announce(captureAnnouncement(capture, '운영체제 자격증명 저장소에 저장했습니다.'));
+            this.announce(captureAnnouncement(capture, t('provider.notice.credential_stored')));
             return true;
         } catch (error: unknown) {
             this.announce(errorLabel(error));
@@ -2319,7 +2502,7 @@ export class LorepiaAppController {
                     },
                 },
             }));
-            this.announce('저장된 자격증명을 삭제했습니다.');
+            this.announce(t('provider.notice.credential_deleted'));
         } catch (error: unknown) {
             this.announce(errorLabel(error));
         }
@@ -2338,7 +2521,7 @@ export class LorepiaAppController {
         try {
             await this.client.createProviderConnection(input);
             await this.loadProviders();
-            this.announce('프로바이더 연결을 만들었습니다.');
+            this.announce(t('provider.notice.connection_created'));
             return true;
         } catch (error: unknown) {
             this.announce(errorLabel(error));
@@ -2350,7 +2533,7 @@ export class LorepiaAppController {
         try {
             await this.client.upsertProviderConnection(input);
             await this.loadProviders();
-            this.announce('프로바이더 연결을 수정했습니다.');
+            this.announce(t('provider.notice.connection_updated'));
             return true;
         } catch (error: unknown) {
             this.announce(errorLabel(error));
@@ -2362,7 +2545,7 @@ export class LorepiaAppController {
         try {
             await this.client.deleteProviderConnection(connectionId);
             await this.loadProviders();
-            this.announce('프로바이더 연결과 연결된 자격증명을 삭제했습니다.');
+            this.announce(t('provider.notice.connection_deleted'));
             return true;
         } catch (error: unknown) {
             this.announce(errorLabel(error));
@@ -2374,7 +2557,7 @@ export class LorepiaAppController {
         try {
             await this.client.upsertModelRoute(input);
             await this.loadProviders();
-            this.announce('모델 라우트를 저장했습니다.');
+            this.announce(t('provider.notice.route_saved'));
             return true;
         } catch (error: unknown) {
             this.announce(errorLabel(error));
@@ -2386,7 +2569,7 @@ export class LorepiaAppController {
         try {
             await this.client.deleteModelRoute(modelRouteId);
             await this.loadProviders();
-            this.announce('모델 라우트를 삭제했습니다.');
+            this.announce(t('provider.notice.route_deleted'));
             return true;
         } catch (error: unknown) {
             this.announce(errorLabel(error));
@@ -2398,7 +2581,7 @@ export class LorepiaAppController {
         try {
             await this.client.upsertGenerationPreset(input);
             await this.loadProviders();
-            this.announce('생성 프리셋을 저장했습니다.');
+            this.announce(t('provider.notice.preset_saved'));
             return true;
         } catch (error: unknown) {
             this.announce(errorLabel(error));
@@ -2410,7 +2593,7 @@ export class LorepiaAppController {
         try {
             await this.client.deleteGenerationPreset(generationPresetId);
             await this.loadProviders();
-            this.announce('생성 프리셋을 삭제했습니다.');
+            this.announce(t('provider.notice.preset_deleted'));
             return true;
         } catch (error: unknown) {
             this.announce(errorLabel(error));
@@ -2423,7 +2606,7 @@ export class LorepiaAppController {
     ): Promise<boolean> {
         try {
             await this.client.validateGenerationPresetCandidate(input);
-            this.announce('프리셋 후보가 유효합니다.');
+            this.announce(t('provider.notice.preset_valid'));
             return true;
         } catch (error: unknown) {
             this.announce(errorLabel(error));
@@ -2449,7 +2632,7 @@ export class LorepiaAppController {
             settings.selected_model_route_id === null ||
             settings.selected_generation_preset_id === null
         ) {
-            this.announce('저장된 기본 모델 라우트가 없습니다.');
+            this.announce(t('provider.notice.no_default_route'));
             return;
         }
         try {
@@ -2554,7 +2737,7 @@ export class LorepiaAppController {
         try {
             await this.client.upsertUserCapabilityOverride(input);
             await this.loadProviderCapabilities(input.model_route_id);
-            this.announce('사용자 capability override를 저장했습니다.');
+            this.announce(t('provider.notice.override_saved'));
             return true;
         } catch (error: unknown) {
             this.announce(errorLabel(error));
@@ -2568,7 +2751,7 @@ export class LorepiaAppController {
         try {
             await this.client.deleteUserCapabilityOverride(routeId, observationId);
             await this.loadProviderCapabilities(routeId);
-            this.announce('사용자 capability override를 삭제했습니다.');
+            this.announce(t('provider.notice.override_deleted'));
         } catch (error: unknown) {
             this.announce(errorLabel(error));
         }
@@ -2592,8 +2775,8 @@ export class LorepiaAppController {
                 this.storeProviderSettings(settings);
                 this.announce(
                     modelRouteId === null
-                        ? '기본 생성 대상을 해제했습니다.'
-                        : '기본 생성 대상을 저장했습니다.',
+                        ? t('provider.notice.target_cleared')
+                        : t('provider.notice.target_saved'),
                 );
                 return true;
             } catch (error: unknown) {
@@ -2616,7 +2799,7 @@ export class LorepiaAppController {
                     selected_generation_preset_id: null,
                 });
                 this.storeProviderSettings(settings);
-                this.announce('기존 프로바이더를 기본 대상으로 저장했습니다.');
+                this.announce(t('provider.notice.existing_target_saved'));
                 return true;
             } catch (error: unknown) {
                 this.announce(errorLabel(error));
@@ -2634,7 +2817,7 @@ export class LorepiaAppController {
                     preserve_partial_generations: preserve,
                 });
                 this.storeProviderSettings(settings);
-                this.announce('부분 생성 보존 설정을 저장했습니다.');
+                this.announce(t('provider.notice.partial_saved'));
                 return true;
             } catch (error: unknown) {
                 this.announce(errorLabel(error));
@@ -2647,7 +2830,7 @@ export class LorepiaAppController {
         try {
             const started = await this.client.startProviderModelSync(connectionId);
             await this.refreshProviderModelSync(started.job_id);
-            this.announce('모델 동기화를 시작했습니다. 자동 승인하지 않습니다.');
+            this.announce(t('provider.notice.sync_started'));
         } catch (error: unknown) {
             this.announce(errorLabel(error));
         }
@@ -2683,7 +2866,7 @@ export class LorepiaAppController {
                 await this.client.approveProviderModelSync(jobId, job.review.sha256),
             );
             await this.loadProviders();
-            this.announce('검토한 정확한 모델 동기화 변경을 적용했습니다.');
+            this.announce(t('provider.notice.sync_applied'));
         } catch (error: unknown) {
             this.announce(errorLabel(error));
         }
@@ -2692,7 +2875,7 @@ export class LorepiaAppController {
     async cancelProviderModelSync(jobId: string): Promise<void> {
         try {
             this.storeModelSyncJob(await this.client.cancelProviderModelSync(jobId));
-            this.announce('모델 동기화를 취소했습니다.');
+            this.announce(t('provider.notice.sync_cancelled'));
         } catch (error: unknown) {
             this.announce(errorLabel(error));
         }
@@ -2718,8 +2901,8 @@ export class LorepiaAppController {
             await this.pollSelectedProviderDiscoveryEvents();
             this.announce(
                 capture === null
-                    ? '프로바이더 탐색을 시작했습니다.'
-                    : captureAnnouncement(capture, '캡처한 cURL로 프로바이더 탐색을 시작했습니다.'),
+                    ? t('provider.notice.discovery_started')
+                    : captureAnnouncement(capture, t('provider.notice.discovery_started_curl')),
             );
             return true;
         } catch (error: unknown) {
@@ -2834,7 +3017,7 @@ export class LorepiaAppController {
                 discovery_assistant_host_action: hostAction,
             }));
             await this.refreshProviderDiscovery(sessionId);
-            this.announce('설정 도우미 결과가 검토 대기 상태로 도착했습니다.');
+            this.announce(t('provider.notice.assistant_ready'));
         } catch (error: unknown) {
             this.announce(errorLabel(error));
         }
@@ -2946,9 +3129,7 @@ export class LorepiaAppController {
             if (!this.isCurrentDiscoveryRequest(selectedId, requestEpoch)) return;
             await this.refreshProviderDiscoveryAtEpoch(selectedId, requestEpoch);
             if (!drained && this.isCurrentDiscoveryRequest(selectedId, requestEpoch)) {
-                this.announce(
-                    '탐색 이벤트가 너무 많이 쌓여 일부만 확인했습니다. 다시 확인해 주세요.',
-                );
+                this.announce(t('provider.notice.events_truncated'));
             }
         } catch (error: unknown) {
             if (!this.isCurrentDiscoveryRequest(selectedId, requestEpoch)) return;
@@ -2964,7 +3145,7 @@ export class LorepiaAppController {
             (candidate) => candidate.id === workspace.selected_discovery_id,
         );
         if (!session?.action_required) {
-            this.announce('현재 탐색 상태에서 진행할 작업이 없습니다.');
+            this.announce(t('provider.notice.no_next_step'));
             return false;
         }
         const actionId = globalThis.crypto.randomUUID();
@@ -3022,9 +3203,7 @@ export class LorepiaAppController {
             this.storeDiscoverySession(captured.session);
             await this.refreshProviderDiscovery(session.id);
             await this.pollSelectedProviderDiscoveryEvents();
-            this.announce(
-                captureAnnouncement(captured.capture, '캡처한 cURL 근거를 추가했습니다.'),
-            );
+            this.announce(captureAnnouncement(captured.capture, t('provider.notice.curl_added')));
             return true;
         } catch (error: unknown) {
             this.announce(errorLabel(error));
@@ -3043,7 +3222,7 @@ export class LorepiaAppController {
                 await this.client.cancelProviderDiscovery(session.id, session.revision),
             );
             await this.refreshProviderDiscovery(session.id);
-            this.announce('프로바이더 탐색을 취소했습니다.');
+            this.announce(t('provider.notice.discovery_cancelled'));
         } catch (error: unknown) {
             this.announce(errorLabel(error));
         }
@@ -3055,7 +3234,7 @@ export class LorepiaAppController {
         try {
             await this.client.commitProviderDiscovery(sessionId);
             await this.loadProviders();
-            this.announce('검토·승인된 프로바이더 연결을 저장했습니다.');
+            this.announce(t('provider.notice.connection_saved'));
             return true;
         } catch (error: unknown) {
             this.announce(errorLabel(error));
@@ -3073,8 +3252,8 @@ export class LorepiaAppController {
             await this.loadProviders();
             this.announce(
                 results.length === 0
-                    ? '복구가 필요한 탐색 작업이 없습니다.'
-                    : `${String(results.length)}개 탐색 작업을 복구했습니다.`,
+                    ? t('provider.notice.no_recovery')
+                    : t('provider.notice.recovered', { count: results.length }),
             );
         } catch (error: unknown) {
             this.announce(errorLabel(error));
@@ -3103,7 +3282,7 @@ export class LorepiaAppController {
                 ...workspace,
                 pending_catalog_import: ticket,
             }));
-            this.announce('서명된 카탈로그 변경 계획을 검토해 주세요.');
+            this.announce(t('provider.notice.catalog_plan'));
         } catch (error: unknown) {
             this.announce(errorLabel(error));
         }
@@ -3121,7 +3300,7 @@ export class LorepiaAppController {
                 catalog_diff: result.diff,
             }));
             await this.loadProviders();
-            this.announce('검토한 카탈로그 변경을 적용했습니다.');
+            this.announce(t('provider.notice.catalog_applied'));
         } catch (error: unknown) {
             this.announce(errorLabel(error));
         }
@@ -3136,7 +3315,7 @@ export class LorepiaAppController {
                 ...workspace,
                 pending_catalog_import: null,
             }));
-            this.announce('카탈로그 가져오기 계획을 폐기했습니다.');
+            this.announce(t('provider.notice.catalog_discarded'));
         } catch (error: unknown) {
             this.announce(errorLabel(error));
         }
@@ -3165,7 +3344,7 @@ export class LorepiaAppController {
                 pending_catalog_rollback: plan,
                 catalog_diff: plan.catalog_plan.diff,
             }));
-            this.announce('정확한 롤백 계획을 검토해 주세요.');
+            this.announce(t('provider.notice.rollback_plan'));
         } catch (error: unknown) {
             this.announce(errorLabel(error));
         }
@@ -3183,7 +3362,7 @@ export class LorepiaAppController {
                 catalog_diff: exactPlan.catalog_plan.diff,
             }));
             await this.loadProviders();
-            this.announce('검토한 카탈로그 리비전으로 롤백했습니다.');
+            this.announce(t('provider.notice.rolled_back'));
         } catch (error: unknown) {
             this.announce(errorLabel(error));
         }

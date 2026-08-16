@@ -1,0 +1,143 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  android-dependency-integrity:
+    name: Android dependency integrity
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Test Android preparation path safety
+        run: python3 -m unittest scripts/test_prepare_tauri_android_gradle.py
+
+      - name: Verify committed Gradle integrity controls
+        run: python3 scripts/check_android_dependency_integrity.py
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: apps/lorepia/package-lock.json
+
+      - name: Install Tauri CLI dependencies
+        working-directory: apps/lorepia
+        run: npm ci
+
+      - name: Install pinned Android SDK components
+        run: >-
+          sdkmanager
+          "platforms;android-36"
+          "build-tools;36.0.0"
+          "ndk;27.2.12479018"
+
+      - name: Initialize Tauri Android project
+        working-directory: apps/lorepia
+        run: |
+          export NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018"
+          npm run tauri -- android init --ci --skip-targets-install
+
+      - name: Prepare ignored Tauri Android Gradle inputs
+        run: python3 scripts/prepare_tauri_android_gradle.py
+
+      - name: Resolve app buildscript and release dependencies with strict locks
+        working-directory: apps/lorepia/src-tauri/gen/android
+        run: |
+          ./gradlew --no-daemon --console=plain --dependency-verification strict \
+            buildEnvironment
+          ./gradlew --no-daemon --console=plain --dependency-verification strict \
+            :app:dependencies --configuration arm64ReleaseRuntimeClasspath
+          ./gradlew --no-daemon --console=plain --dependency-verification strict \
+            :tauri-plugin-lorepia-platform:dependencies \
+            --configuration releaseRuntimeClasspath
+          ./gradlew --no-daemon --console=plain --dependency-verification strict \
+            :tauri-android:dependencies --configuration releaseRuntimeClasspath
+
+      - name: Resolve standalone plugin dependencies with strict verification and locks
+        working-directory: plugins/lorepia-platform/android
+        run: |
+          WRAPPER="${{ github.workspace }}/apps/lorepia/src-tauri/gen/android/gradlew"
+          PLUGIN_ROOT="${{ github.workspace }}/plugins/lorepia-platform/android"
+          "$WRAPPER" -p "$PLUGIN_ROOT" --no-daemon --console=plain \
+            --dependency-verification strict dependencies \
+            --configuration releaseRuntimeClasspath
+          "$WRAPPER" -p "$PLUGIN_ROOT" --no-daemon --console=plain \
+            --dependency-verification strict :tauri-android:dependencies \
+            --configuration releaseRuntimeClasspath
+
+  rust:
+    name: Rust (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v6
+
+      # Linux needs the webkit stack for the Tauri crate to build.
+      - name: Install Linux system dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libxdo-dev
+
+      # rust-toolchain.toml pins the exact version and components.
+      - name: Show toolchain
+        run: rustc --version && cargo --version
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/lorepia
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: apps/lorepia/package-lock.json
+
+      - run: npm ci
+
+      # format:check + lint + typecheck
+      - run: npm run check
+
+      - run: npm run test

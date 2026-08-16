@@ -93,6 +93,10 @@ import type {
     ListCompletedContentPackageExportsInput,
     ListMemoryRecordsInput,
     ListRetryableGenerationAttemptsInput,
+    InterruptedMemoryJobDto,
+    ListInterruptedMemoryJobsInput,
+    MemoryJobRetryReceiptDto,
+    RetryInterruptedMemoryJobInput,
     ListRetryableMemoryQueryEmbeddingsInput,
     ListPromptPresetBindingsInput,
     ListPromptPresetRevisionsInput,
@@ -426,6 +430,8 @@ export const LOREPIA_COMMANDS = {
     deleteContentModule: 'delete_content_module',
     listPromptPresetBindings: 'list_prompt_preset_bindings',
     listMemoryRecords: 'list_memory_records',
+    listInterruptedMemoryJobs: 'list_interrupted_memory_jobs',
+    retryInterruptedMemoryJob: 'retry_interrupted_memory_job',
     listRetryableMemoryQueryEmbeddings: 'list_retryable_memory_query_embeddings',
     retryMemoryQueryEmbedding: 'retry_memory_query_embedding',
     simulateKnowledgeActivation: 'simulate_knowledge_activation',
@@ -1945,6 +1951,18 @@ export class LiveLorepiaClient
             error: result.error,
             truncated: result.truncated,
         };
+    }
+
+    listInterruptedMemoryJobs(
+        input: ListInterruptedMemoryJobsInput,
+    ): Promise<InterruptedMemoryJobDto[]> {
+        return this.call(LOREPIA_COMMANDS.listInterruptedMemoryJobs, { request: input });
+    }
+
+    retryInterruptedMemoryJob(
+        input: RetryInterruptedMemoryJobInput,
+    ): Promise<MemoryJobRetryReceiptDto> {
+        return this.call(LOREPIA_COMMANDS.retryInterruptedMemoryJob, { request: input });
     }
 
     listRetryableMemoryQueryEmbeddings(

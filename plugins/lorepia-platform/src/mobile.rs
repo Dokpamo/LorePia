@@ -7,12 +7,13 @@ use tauri::{
 };
 
 use crate::{
-    CredentialStatus, NativeCaptureStatus, NativeCredential, NativeSensitiveText, PlatformError,
-    PlatformErrorCode, PlatformResult, StagedImport,
+    CredentialStatus, NativeCaptureStatus, NativeCredential, NativeCredentialEffectContext,
+    NativeSensitiveText, PlatformError, PlatformErrorCode, PlatformResult, StagedImport,
     model::{
-        MobileCaptureStatusResponse, MobileCredentialResponse, MobileCredentialStatusResponse,
-        MobilePathResponse, MobilePickResponse, MobileSaveContentSourceResponse,
-        MobileSensitiveCaptureResponse, NativeSavedContentSource,
+        MobileCaptureStatusResponse, MobileCredentialEffectConfirmationResponse,
+        MobileCredentialResponse, MobileCredentialStatusResponse, MobilePathResponse,
+        MobilePickResponse, MobileSaveContentSourceResponse, MobileSensitiveCaptureResponse,
+        NativeSavedContentSource,
     },
     validation::{
         MAXIMUM_SENSITIVE_CAPTURE_BYTES, validate_credential_read, validate_credential_write,
@@ -55,6 +56,15 @@ struct SensitiveCaptureArgs {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct CredentialEffectConfirmationArgs<'a> {
+    effect: &'static str,
+    target_id: &'a str,
+    origin: &'a str,
+    revision: &'a str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct SaveContentSourceArgs<'a> {
     source_path: &'a str,
     suggested_name: &'a str,
@@ -76,6 +86,29 @@ impl<R: Runtime> MobilePlatform<R> {
 
     pub(crate) fn data_root(&self) -> &Path {
         &self.data_root
+    }
+
+    pub(crate) async fn confirm_credential_effect(
+        &self,
+        context: &NativeCredentialEffectContext,
+    ) -> PlatformResult<()> {
+        let response = self
+            .handle
+            .run_mobile_plugin_async::<MobileCredentialEffectConfirmationResponse>(
+                "confirmCredentialEffect",
+                CredentialEffectConfirmationArgs {
+                    effect: context.effect().as_str(),
+                    target_id: context.target_id(),
+                    origin: context.origin(),
+                    revision: context.revision(),
+                },
+            )
+            .await
+            .map_err(|_| PlatformError::new(PlatformErrorCode::PermissionDenied))?;
+        response
+            .approved
+            .then_some(())
+            .ok_or_else(|| PlatformError::new(PlatformErrorCode::PermissionDenied))
     }
 
     pub(crate) async fn pick_import(&self) -> PlatformResult<Option<StagedImport>> {

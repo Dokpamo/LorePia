@@ -10,7 +10,8 @@ use core_foundation::{
 };
 use objc2::MainThreadMarker;
 use objc2_app_kit::{
-    NSModalResponseOK, NSOpenPanel, NSPasteboard, NSPasteboardTypeString, NSSavePanel,
+    NSAlert, NSAlertSecondButtonReturn, NSAlertStyle, NSModalResponseOK, NSOpenPanel, NSPasteboard,
+    NSPasteboardTypeString, NSSavePanel,
 };
 use objc2_foundation::NSString;
 use security_framework_sys::{
@@ -47,6 +48,22 @@ unsafe extern "C" {
 }
 
 static KEYCHAIN_LOCK: Mutex<()> = Mutex::new(());
+
+pub(crate) fn confirm_credential_effect(title: &str, informative_text: &str) -> PlatformResult<()> {
+    let mtm = MainThreadMarker::new()
+        .ok_or_else(|| PlatformError::new(PlatformErrorCode::PermissionDenied))?;
+    let alert = NSAlert::new(mtm);
+    alert.setAlertStyle(NSAlertStyle::Warning);
+    alert.setMessageText(&NSString::from_str(title));
+    alert.setInformativeText(&NSString::from_str(informative_text));
+    // Cancel is intentionally the first/default button. Enter or Escape must
+    // never authorize a destructive credential effect by accident.
+    alert.addButtonWithTitle(&NSString::from_str("Cancel"));
+    alert.addButtonWithTitle(&NSString::from_str("Approve exact action"));
+    (alert.runModal() == NSAlertSecondButtonReturn)
+        .then_some(())
+        .ok_or_else(|| PlatformError::new(PlatformErrorCode::PermissionDenied))
+}
 
 pub(crate) async fn pick_file<R: Runtime>(app: &AppHandle<R>) -> PlatformResult<Option<PathBuf>> {
     let (sender, receiver) = tokio::sync::oneshot::channel();

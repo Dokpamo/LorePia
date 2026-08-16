@@ -17,6 +17,8 @@ use crate::{
 const ENVELOPE_MAGIC: &str = "lorepia-provider-credential\n";
 const ENVELOPE_PREFIX: &str = "lorepia-provider-credential\nv1\n";
 const PHYSICAL_REFERENCE_DOMAIN: &[u8] = b"dev.lorepia.provider-credential.physical-slot.v2\0";
+const LEGACY_CONFIRMATION_FINGERPRINT_DOMAIN: &[u8] =
+    b"dev.lorepia.legacy-credential.confirmation-state.v1\0";
 const PHYSICAL_REFERENCE_PREFIX: &str = "lpc2-";
 const PHYSICAL_REFERENCE_LENGTH: usize = PHYSICAL_REFERENCE_PREFIX.len() + 64;
 pub const MAXIMUM_BOUND_CREDENTIAL_SECRET_BYTES: usize =
@@ -118,6 +120,43 @@ pub(crate) fn observe_legacy(stored: NativeCredential) -> LegacyCredentialObserv
         ParsedEnvelope::Unreadable => LegacyCredentialObservation::Unreadable,
         ParsedEnvelope::Envelope { .. } => LegacyCredentialObservation::Bound,
     }
+}
+
+/// Returns a process-scoped, non-secret identity for the exact legacy slot
+/// contents used by a native confirmation.
+///
+/// The random process key never leaves the plugin, so the displayed digest is
+/// not an offline oracle for a low-entropy legacy credential. Receipts cannot
+/// survive a process restart, and the same key is used for every pre/post-lock
+/// observation during their lifetime.
+pub(crate) fn legacy_confirmation_revision(
+    reference: &str,
+    stored: Option<NativeCredential>,
+    process_key: &[u8; 32],
+) -> PlatformResult<String> {
+    validate_reference(reference)?;
+    let Some(stored) = stored else {
+        return Ok("legacy-profile-v1;slot=missing".to_owned());
+    };
+    let stored = Zeroizing::new(stored.into_secret_string());
+    if !matches!(parse(stored.as_str()), ParsedEnvelope::Legacy) {
+        return Err(PlatformError::new(
+            PlatformErrorCode::CredentialRecoveryRequired,
+        ));
+    }
+
+    let mut digest = Sha256::new();
+    digest.update(LEGACY_CONFIRMATION_FINGERPRINT_DOMAIN);
+    update_length_prefixed(&mut digest, process_key);
+    update_length_prefixed(&mut digest, reference.as_bytes());
+    update_length_prefixed(&mut digest, stored.as_bytes());
+    // Suffixing the process key prevents exposing the ordinary unkeyed hash
+    // even if a caller could control every other field and its length.
+    update_length_prefixed(&mut digest, process_key);
+    Ok(format!(
+        "legacy-profile-v1;slot=raw;state_sha256={:x}",
+        digest.finalize()
+    ))
 }
 
 pub(crate) fn read_legacy(stored: NativeCredential) -> PlatformResult<NativeCredential> {

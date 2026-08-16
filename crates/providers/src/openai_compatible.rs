@@ -26,6 +26,7 @@ use crate::{
     parameter_mapping::{PromptCacheWireDialect, ProviderRequestPlan},
     prompt_contract::ProviderPromptAdapterContract,
     request_plan::planned_json_payload,
+    sse::SseEventBuffer,
 };
 
 const MAX_SSE_BUFFER_BYTES: usize = 1024 * 1024;
@@ -209,7 +210,7 @@ impl Provider for OpenAiCompatibleProvider {
         ensure_event_stream_content_type(&response)?;
 
         let mut bytes = response.bytes_stream();
-        let mut pending = Vec::<u8>::new();
+        let mut pending = SseEventBuffer::default();
         let mut total_stream_bytes = 0_usize;
         let mut usage = GenerationUsage::default();
         let mut stream_state = SseStreamState::default();
@@ -232,18 +233,12 @@ impl Provider for OpenAiCompatibleProvider {
                         .checked_add(chunk.len())
                         .ok_or_else(stream_too_large_error)?;
                     ensure_stream_size(total_stream_bytes)?;
-                    pending.extend_from_slice(&chunk);
-                    if chunk
-                        .iter()
-                        .any(|byte| matches!(*byte, b'\r' | b'\n'))
-                    {
-                        while let Some((boundary, separator_len)) =
-                            find_event_boundary(&pending, false)
-                        {
+                    let mut next_boundary = pending
+                        .extend_chunk_and_find_boundary(&chunk, &SSE_EVENT_SEPARATORS);
+                    while let Some(boundary) = next_boundary {
                             ensure_not_cancelled(&cancelled)?;
-                            ensure_event_size(boundary)?;
-                            let event = pending.drain(..boundary).collect::<Vec<_>>();
-                            pending.drain(..separator_len);
+                            ensure_event_size(boundary.event_len())?;
+                            let event = pending.take_event(boundary);
                             if process_event(
                                 &event,
                                 &sink,
@@ -264,17 +259,17 @@ impl Provider for OpenAiCompatibleProvider {
                                 // after the marker can never be forwarded as provider events.
                                 return Ok(usage);
                             }
-                        }
+                            next_boundary =
+                                pending.next_boundary(&SSE_EVENT_SEPARATORS, false);
                     }
-                    ensure_pending_size(&pending, false)?;
+                    ensure_pending_size(pending.active_bytes(), false)?;
                 }
             }
         }
-        while let Some((boundary, separator_len)) = find_event_boundary(&pending, true) {
+        while let Some(boundary) = pending.next_boundary(&SSE_EVENT_SEPARATORS, true) {
             ensure_not_cancelled(&cancelled)?;
-            ensure_event_size(boundary)?;
-            let event = pending.drain(..boundary).collect::<Vec<_>>();
-            pending.drain(..separator_len);
+            ensure_event_size(boundary.event_len())?;
+            let event = pending.take_event(boundary);
             if process_event(
                 &event,
                 &sink,
@@ -294,7 +289,7 @@ impl Provider for OpenAiCompatibleProvider {
                 return Ok(usage);
             }
         }
-        ensure_pending_size(&pending, true)?;
+        ensure_pending_size(pending.active_bytes(), true)?;
         if !pending.is_empty() {
             return Err(streaming_error(
                 "provider stream ended with an incomplete event",
@@ -1687,23 +1682,6 @@ async fn send_provider_event(
     }
 }
 
-fn find_event_boundary(bytes: &[u8], end_of_stream: bool) -> Option<(usize, usize)> {
-    for position in 0..bytes.len() {
-        for separator in SSE_EVENT_SEPARATORS {
-            let ends_at_buffer_edge = position + separator.len() == bytes.len();
-            if bytes[position..].starts_with(separator)
-                && (end_of_stream
-                    || !separator.ends_with(b"\r")
-                    || separator == b"\r\r"
-                    || !ends_at_buffer_edge)
-            {
-                return Some((position, separator.len()));
-            }
-        }
-    }
-    None
-}
-
 fn ensure_event_size(size: usize) -> CoreResult<()> {
     if size > MAX_SSE_BUFFER_BYTES {
         return Err(streaming_error("provider streaming event exceeded 1 MiB"));
@@ -1904,6 +1882,16 @@ mod tests {
             preserve_opaque_reasoning_state: false,
             opaque_reasoning_context: Vec::new(),
         }
+    }
+
+    fn event_boundary(bytes: &[u8], end_of_stream: bool) -> Option<(usize, usize)> {
+        let mut pending = SseEventBuffer::default();
+        let mut boundary = pending.extend_chunk_and_find_boundary(bytes, &SSE_EVENT_SEPARATORS);
+        if boundary.is_none() && end_of_stream {
+            boundary = pending.next_boundary(&SSE_EVENT_SEPARATORS, true);
+        }
+        let boundary = boundary?;
+        Some((boundary.event_len(), boundary.separator_len()))
     }
 
     fn read_http_request(stream: &mut TcpStream) -> io::Result<()> {
@@ -2168,15 +2156,32 @@ mod tests {
     }
 
     #[test]
-    fn recognizes_complete_bare_cr_boundary_at_a_chunk_edge() {
+    fn defers_ambiguous_bare_cr_boundary_at_a_chunk_edge() {
+        assert_eq!(event_boundary(b"data: x\r\r", false), None);
         assert_eq!(
-            find_event_boundary(b"data: x\r\r", false),
+            event_boundary(b"data: x\r\r", true),
             Some((b"data: x".len(), 2))
         );
-        assert_eq!(find_event_boundary(b"data: x\r", false), None);
         assert_eq!(
-            find_event_boundary(b"data: x\r\n\r\n", false),
+            event_boundary(b"data: x\r\rx", false),
+            Some((b"data: x".len(), 2))
+        );
+        assert_eq!(event_boundary(b"data: x\r", false), None);
+        assert_eq!(
+            event_boundary(b"data: x\r\n\r\n", false),
             Some((b"data: x".len(), 4))
+        );
+    }
+
+    #[test]
+    fn sse_framing_work_is_linear_for_dense_and_fragmented_input() {
+        crate::sse::assert_sse_framing_work_is_linear(&SSE_EVENT_SEPARATORS);
+    }
+
+    #[test]
+    fn rescans_edge_deferred_separator_after_newline_free_chunk() {
+        crate::sse::assert_edge_deferred_separator_is_rescanned_after_newline_free_chunk(
+            &SSE_EVENT_SEPARATORS,
         );
     }
 

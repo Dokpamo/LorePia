@@ -12,6 +12,7 @@ use lorepia_domain::{
     CapabilityKey, CapabilityObservation, CapabilityValue, Confidence, CoreError, CoreErrorCode,
     CoreResult, EvidenceId, ModelRoute, ObservationId, ObservationSource, ParameterSpec,
     ProviderTemplate, ProviderTemplateId, SupportStatus,
+    discovery::DiscoveryCatalogAuthorityBinding,
 };
 use lorepia_providers::catalog::{
     BUNDLED_CATALOG_REVISION, BUNDLED_CATALOG_VERIFIED_AT, CATALOG_HISTORY_SCHEMA_VERSION,
@@ -19,12 +20,12 @@ use lorepia_providers::catalog::{
     CatalogErrorKind, CatalogFreshness, CatalogFreshnessPolicy, CatalogHistory,
     CatalogRevisionGuard, CatalogRevisionSnapshot, CatalogRollbackPlanDto, MergedCatalog,
     MergedCatalogModel, ModelMatch, SignedCatalogEnvelope, VerifiedCatalogUpdate,
-    merge_with_bundled_catalog, verify_manual_catalog_import,
+    merge_with_bundled_catalog, verify_manual_catalog_import, verify_stored_catalog_update,
 };
 use lorepia_storage::{
     CatalogActivationKind, CatalogActivationRecord, CatalogImportCommit, CatalogRollbackCommit,
     CatalogSnapshotSource, CatalogStorageError, NewCatalogSnapshot, NewSignedCatalogUpdate,
-    StoredCatalogRevisionGuard, StoredCatalogSnapshot, StoredCatalogState,
+    Storage, StoredCatalogRevisionGuard, StoredCatalogSnapshot, StoredCatalogState,
     StoredSignedCatalogUpdate,
 };
 use serde::{Deserialize, Serialize};
@@ -40,6 +41,7 @@ const MAX_CATALOG_HISTORY_PAGE_SIZE: u32 = 100;
 const CATALOG_STORAGE_PAGE_SIZE: u32 = 200;
 const CATALOG_IMPORT_PLAN_LIFETIME_MINUTES: i64 = 15;
 const MAX_PENDING_CATALOG_IMPORT_PLANS: usize = 32;
+const CATALOG_ROLLBACK_AUDIT_PLAN_VERSION: u32 = 2;
 
 /// Secret-free summary of the currently active durable catalog.
 ///
@@ -177,6 +179,18 @@ pub struct ProviderCatalogRollbackResult {
     pub from_revision: u64,
     pub activated_revision: u64,
     pub status: ProviderCatalogStatus,
+}
+
+#[derive(Serialize)]
+struct CatalogRollbackAuditPlan<'a> {
+    rollback_plan_version: u32,
+    from_revision: u64,
+    to_revision: u64,
+    expected_active_sha256: &'a str,
+    target_sha256: &'a str,
+    created_at: DateTime<Utc>,
+    expires_at: DateTime<Utc>,
+    diff_sha256: &'a str,
 }
 
 fn bundled_baseline_snapshot() -> CoreResult<CatalogRevisionSnapshot> {
@@ -425,41 +439,7 @@ impl Core {
         &self,
         now: DateTime<Utc>,
     ) -> CoreResult<OperationalCatalogProjection> {
-        let state = self
-            .storage()
-            .catalog_state()
-            .map_err(map_catalog_storage_error)?;
-        let accepted = load_verified_updates(self, &state)?;
-        let active = load_active_catalog(self, &state)?;
-        let updates = select_verified_updates(&accepted, &active.stored.signed_revision_chain)?;
-        let signed_layer_expirations = updates
-            .iter()
-            .map(|update| {
-                (
-                    format!(
-                        "signed:{}:{}",
-                        update.signing_key_id(),
-                        update.payload().revision
-                    ),
-                    update.payload().expires_at,
-                )
-            })
-            .collect();
-        let merged =
-            merge_with_bundled_catalog(&updates, &[], now, &CatalogFreshnessPolicy::default())
-                .map_err(catalog_request_error)?;
-        let snapshot = CatalogRevisionSnapshot::from_merged(
-            active.snapshot.revision,
-            active.snapshot.captured_at,
-            &merged,
-        )
-        .map_err(catalog_internal_error)?;
-        Ok(OperationalCatalogProjection {
-            state_version: state.state_version,
-            snapshot,
-            merged,
-            signed_layer_expirations,
-        })
+        operational_provider_catalog_projection_for_storage(self.storage(), now)
     }
 
     /// Return a bounded newest-first page of snapshot and activation history.
@@ -621,8 +601,21 @@ impl Core {
             .map_err(catalog_request_error)?;
         let diff_json = serde_json::to_string(&plan.catalog_plan.diff)
             .map_err(|_| CoreError::internal("catalog diff could not be serialized"))?;
-        let plan_json = serde_json::to_string(&plan.catalog_plan)
-            .map_err(|_| CoreError::internal("catalog rollback plan could not be serialized"))?;
+        let diff_sha256 = sha256_hex(diff_json.as_bytes());
+        let audit_plan = CatalogRollbackAuditPlan {
+            rollback_plan_version: CATALOG_ROLLBACK_AUDIT_PLAN_VERSION,
+            from_revision: plan.catalog_plan.from_revision,
+            to_revision: plan.catalog_plan.to_revision,
+            expected_active_sha256: &plan.catalog_plan.expected_active_sha256,
+            target_sha256: &plan.catalog_plan.target_sha256,
+            created_at: plan.catalog_plan.created_at,
+            expires_at: plan.catalog_plan.expires_at,
+            diff_sha256: &diff_sha256,
+        };
+        let plan_json = serde_json::to_string(&audit_plan).map_err(|_| {
+            CoreError::internal("catalog rollback audit plan could not be serialized")
+        })?;
+        let audit_plan_sha256 = sha256_hex(plan_json.as_bytes());
         let commit = CatalogRollbackCommit {
             expected: state.expectation(),
             action_id: &plan.action_id,
@@ -630,7 +623,7 @@ impl Core {
             target_snapshot_sha256: &target.stored.snapshot_sha256,
             diff_json: &diff_json,
             rollback_plan_json: &plan_json,
-            plan_sha256: &plan.plan_sha256,
+            plan_sha256: &audit_plan_sha256,
             activated_at: now,
         };
         self.storage()
@@ -861,6 +854,47 @@ impl OperationalCatalogProjection {
             .map(|manifest| manifest.entry.template.clone())
     }
 
+    pub(crate) fn discovery_authority_binding(
+        &self,
+        template: &ProviderTemplate,
+        now: DateTime<Utc>,
+    ) -> CoreResult<Option<DiscoveryCatalogAuthorityBinding>> {
+        if template.source != lorepia_domain::TemplateSource::SignedCatalog {
+            return Ok(None);
+        }
+        let manifest = self
+            .merged
+            .manifests
+            .iter()
+            .find(|manifest| {
+                manifest.entry.template.id == template.id
+                    && manifest.entry.template.manifest_version == template.manifest_version
+            })
+            .ok_or_else(stale_discovery_catalog_authority)?;
+        if manifest.entry.template != *template
+            || manifest.provenance.authority != CatalogAuthority::SignedCatalog
+        {
+            return Err(stale_discovery_catalog_authority());
+        }
+        let payload_expires_at = self
+            .signed_layer_expirations
+            .get(&manifest.provenance.layer_id)
+            .copied()
+            .ok_or_else(stale_discovery_catalog_authority)?;
+        let expires_at = manifest
+            .entry
+            .expires_at
+            .map_or(payload_expires_at, |entry_expiry| {
+                entry_expiry.min(payload_expires_at)
+            });
+        if expires_at <= now {
+            return Err(stale_discovery_catalog_authority());
+        }
+        DiscoveryCatalogAuthorityBinding::new(self.state_version, template, expires_at)
+            .map(Some)
+            .map_err(|_| stale_discovery_catalog_authority())
+    }
+
     pub(crate) fn route_projection(
         &self,
         route: &ModelRoute,
@@ -874,6 +908,51 @@ impl OperationalCatalogProjection {
             provider_template_id,
         )
     }
+}
+
+fn stale_discovery_catalog_authority() -> CoreError {
+    CoreError::new(
+        CoreErrorCode::InvalidInput,
+        "signed catalog authority changed or expired; restart provider discovery",
+        true,
+    )
+}
+
+pub(crate) fn operational_provider_catalog_projection_for_storage(
+    storage: &Storage,
+    now: DateTime<Utc>,
+) -> CoreResult<OperationalCatalogProjection> {
+    let state = storage.catalog_state().map_err(map_catalog_storage_error)?;
+    let accepted = load_verified_updates_from_storage(storage, &state)?;
+    let active = load_active_catalog_from_storage(storage, &state)?;
+    let updates = select_verified_updates(&accepted, &active.stored.signed_revision_chain)?;
+    let signed_layer_expirations = updates
+        .iter()
+        .map(|update| {
+            (
+                format!(
+                    "signed:{}:{}",
+                    update.signing_key_id(),
+                    update.payload().revision
+                ),
+                update.payload().expires_at,
+            )
+        })
+        .collect();
+    let merged = merge_with_bundled_catalog(&updates, &[], now, &CatalogFreshnessPolicy::default())
+        .map_err(catalog_request_error)?;
+    let snapshot = CatalogRevisionSnapshot::from_merged(
+        active.snapshot.revision,
+        active.snapshot.captured_at,
+        &merged,
+    )
+    .map_err(catalog_internal_error)?;
+    Ok(OperationalCatalogProjection {
+        state_version: state.state_version,
+        snapshot,
+        merged,
+        signed_layer_expirations,
+    })
 }
 
 #[allow(clippy::too_many_lines)]
@@ -1125,11 +1204,17 @@ fn load_verified_updates(
     core: &Core,
     state: &StoredCatalogState,
 ) -> CoreResult<BTreeMap<u64, VerifiedCatalogUpdate>> {
+    load_verified_updates_from_storage(core.storage(), state)
+}
+
+fn load_verified_updates_from_storage(
+    storage: &Storage,
+    state: &StoredCatalogState,
+) -> CoreResult<BTreeMap<u64, VerifiedCatalogUpdate>> {
     let mut stored = Vec::new();
     let mut before = None;
     loop {
-        let page = core
-            .storage()
+        let page = storage
             .catalog_updates(CATALOG_STORAGE_PAGE_SIZE, before)
             .map_err(map_catalog_storage_error)?;
         if page.is_empty() {
@@ -1153,7 +1238,7 @@ fn load_verified_updates(
     let mut verified_by_revision = BTreeMap::new();
     for update in stored {
         verify_stored_hashes(&update)?;
-        let verified = verify_manual_catalog_import(&update.envelope, &guard, update.accepted_at)
+        let verified = verify_stored_catalog_update(&update.envelope, &guard, update.accepted_at)
             .map_err(|_| catalog_storage_error("stored catalog signature is invalid"))?;
         verify_stored_update_metadata(&update, &verified)?;
         guard = verified.next_revision_guard().clone();
@@ -1226,9 +1311,15 @@ fn select_verified_updates(
 }
 
 fn load_active_catalog(core: &Core, state: &StoredCatalogState) -> CoreResult<ActiveCatalog> {
+    load_active_catalog_from_storage(core.storage(), state)
+}
+
+fn load_active_catalog_from_storage(
+    storage: &Storage,
+    state: &StoredCatalogState,
+) -> CoreResult<ActiveCatalog> {
     if let Some(pointer) = &state.active {
-        let stored = core
-            .storage()
+        let stored = storage
             .catalog_snapshot(pointer.local_revision)
             .map_err(map_catalog_storage_error)?
             .ok_or_else(|| catalog_storage_error("active catalog snapshot is missing"))?;
@@ -1585,6 +1676,81 @@ mod tests {
                 .provider_catalog_status()
                 .expect("reopened catalog status"),
             status
+        );
+    }
+
+    #[test]
+    fn discovery_authority_binds_state_expiry_and_exact_signed_template() {
+        let now = DateTime::parse_from_rfc3339("2026-08-01T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let expires_at = now + Duration::minutes(10);
+        let mut template =
+            AdapterRegistry::built_in_template(BuiltInTemplateId::OpenRouter).unwrap();
+        template.source = lorepia_domain::TemplateSource::SignedCatalog;
+        template.manifest_version += 1;
+        let entry = lorepia_providers::catalog::CatalogManifestEntry {
+            template: template.clone(),
+            verified_at: now - Duration::minutes(1),
+            expires_at: None,
+            sources: Vec::new(),
+        };
+        let layer_id = "signed:test-key:7".to_owned();
+        let projection = OperationalCatalogProjection {
+            state_version: 7,
+            snapshot: CatalogRevisionSnapshot {
+                snapshot_schema_version: CATALOG_HISTORY_SCHEMA_VERSION,
+                revision: 2,
+                captured_at: now,
+                manifests: vec![entry.clone()],
+                models: Vec::new(),
+            },
+            merged: MergedCatalog {
+                manifests: vec![lorepia_providers::catalog::MergedCatalogManifest {
+                    entry,
+                    provenance: lorepia_providers::catalog::CatalogFieldProvenance {
+                        authority: CatalogAuthority::SignedCatalog,
+                        layer_id: layer_id.clone(),
+                        revision: 7,
+                        verified_at: now - Duration::minutes(1),
+                        freshness: CatalogFreshness::Current,
+                    },
+                }],
+                models: Vec::new(),
+                report: lorepia_providers::catalog::CatalogMergeReport::default(),
+            },
+            signed_layer_expirations: BTreeMap::from([(layer_id, expires_at)]),
+        };
+
+        let binding = projection
+            .discovery_authority_binding(&template, now)
+            .unwrap()
+            .unwrap();
+        assert_eq!(binding.catalog_state_version, 7);
+        assert_eq!(binding.expires_at, expires_at);
+
+        let mut changed_state = projection.clone();
+        changed_state.state_version += 1;
+        assert_ne!(
+            changed_state
+                .discovery_authority_binding(&template, now)
+                .unwrap()
+                .unwrap(),
+            binding
+        );
+
+        let mut replaced = template.clone();
+        replaced.default_manifest.endpoints.generate.path =
+            lorepia_domain::EndpointPath::parse("/replacement").unwrap();
+        assert!(
+            projection
+                .discovery_authority_binding(&replaced, now)
+                .is_err()
+        );
+        assert!(
+            projection
+                .discovery_authority_binding(&template, expires_at)
+                .is_err()
         );
     }
 

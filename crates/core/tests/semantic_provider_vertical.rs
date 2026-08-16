@@ -999,11 +999,23 @@ async fn provider_semantic_unknown_outcome_is_not_implicitly_retried() {
     assert_eq!(retryable[0].revision, 3);
     assert!(retryable[0].requires_unknown_outcome_acknowledgement);
     let denied = core
-        .retry_memory_query_embedding(&retryable[0].id, retryable[0].revision, false)
+        .retry_memory_query_embedding(
+            &request.conversation_id,
+            &request.branch_id,
+            &retryable[0].id,
+            retryable[0].revision,
+            false,
+        )
         .expect_err("unknown outcome retry requires positive acknowledgement");
     assert_eq!(denied.code, CoreErrorCode::PermissionDenied);
     let admitted = core
-        .retry_memory_query_embedding(&retryable[0].id, retryable[0].revision, true)
+        .retry_memory_query_embedding(
+            &request.conversation_id,
+            &request.branch_id,
+            &retryable[0].id,
+            retryable[0].revision,
+            true,
+        )
         .expect("explicitly acknowledge unknown outcome");
     assert_eq!(admitted.status, MemoryQueryEmbeddingStatus::Queued);
     assert_eq!(admitted.revision, 4);

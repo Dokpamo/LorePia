@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { tr } from '../../lib/i18n';
     import type { PersonaController, PersonaState } from './persona-controller';
     import type { PersonaDto } from './persona-contracts';
 
@@ -46,15 +47,15 @@
     <div class="section-heading">
         <div>
             <p class="eyebrow">Local persona</p>
-            <h2 id="persona-settings-title">내 Persona</h2>
-            <p>Persona는 로컬 사용자 소유이며, 선택은 대화마다 따로 저장됩니다.</p>
+            <h2 id="persona-settings-title">{$tr('persona.title')}</h2>
+            <p>{$tr('persona.hint')}</p>
         </div>
         <button
             type="button"
             disabled={busy}
             onclick={() => void controller.loadContext(personaState.conversation_id)}
         >
-            새로고침
+            {$tr('common.refresh')}
         </button>
     </div>
 
@@ -64,12 +65,12 @@
         <section class="persona-selection" aria-labelledby="persona-selection-title">
             <div class="section-heading compact">
                 <div>
-                    <h3 id="persona-selection-title">현재 대화 Persona</h3>
+                    <h3 id="persona-selection-title">{$tr('persona.selection.title')}</h3>
                     <p>
                         {conversationTitle ??
                             (personaState.conversation_id === null
-                                ? '선택된 대화 없음'
-                                : '현재 대화')}
+                                ? $tr('persona.selection.none_conversation')
+                                : $tr('persona.selection.current'))}
                     </p>
                 </div>
                 {#if personaState.selection?.selected_persona}
@@ -78,23 +79,23 @@
                         disabled={busy}
                         onclick={() => void controller.clearSelection()}
                     >
-                        선택 해제
+                        {$tr('persona.selection.clear')}
                     </button>
                 {/if}
             </div>
             {#if personaState.conversation_id === null}
-                <p class="inline-note">대화를 선택하면 그 대화의 Persona를 지정할 수 있습니다.</p>
+                <p class="inline-note">{$tr('persona.selection.pick_conversation')}</p>
             {:else if personaState.selection?.selected_persona}
                 {@const selected = personaState.selection.selected_persona}
                 <article class="persona-selected-card">
                     <strong>{selected.value.name}</strong>
-                    <p>{selected.value.description || '설명 없음'}</p>
+                    <p>{selected.value.description || $tr('persona.description.empty')}</p>
                     <small>
-                        선택 리비전 {selected.revision} · 이후 Persona 편집과 분리된 불변 스냅샷
+                        {$tr('persona.selection.revision', { revision: selected.revision })}
                     </small>
                 </article>
             {:else}
-                <p class="inline-note">이 대화에는 선택된 Persona가 없습니다.</p>
+                <p class="inline-note">{$tr('persona.selection.empty')}</p>
             {/if}
         </section>
 
@@ -108,14 +109,18 @@
         >
             <div class="section-heading compact">
                 <h3 id="persona-editor-title">
-                    {editingPersona === null ? '새 Persona' : 'Persona 편집'}
+                    {editingPersona === null
+                        ? $tr('persona.editor.new')
+                        : $tr('persona.editor.edit')}
                 </h3>
                 {#if editingPersona !== null}
-                    <button type="button" disabled={busy} onclick={beginCreate}>새로 만들기</button>
+                    <button type="button" disabled={busy} onclick={beginCreate}
+                        >{$tr('persona.editor.create_button')}</button
+                    >
                 {/if}
             </div>
             <label>
-                <span>이름</span>
+                <span>{$tr('persona.editor.name')}</span>
                 <input
                     bind:value={name}
                     required
@@ -125,24 +130,26 @@
                 />
             </label>
             <label>
-                <span>설명</span>
+                <span>{$tr('persona.editor.description')}</span>
                 <textarea bind:value={description} rows="3" maxlength="4000" disabled={busy}
                 ></textarea>
             </label>
             <button class="primary" type="submit" disabled={busy || name.trim() === ''}>
-                {editingPersona === null ? 'Persona 만들기' : '변경 저장'}
+                {editingPersona === null
+                    ? $tr('persona.editor.submit_create')
+                    : $tr('persona.editor.submit_update')}
             </button>
         </form>
 
         {#if personaState.phase === 'loading'}
-            <p class="inline-note" role="status">Persona를 불러오는 중입니다.</p>
+            <p class="inline-note" role="status">{$tr('persona.loading')}</p>
         {:else if personaState.phase === 'error'}
             <p class="inline-note warning" role="alert">{personaState.error}</p>
         {/if}
 
-        <div class="persona-list" aria-label="저장된 Persona">
+        <div class="persona-list" aria-label={$tr('persona.list.label')}>
             {#if personaState.personas.length === 0 && personaState.phase !== 'loading'}
-                <p class="inline-note">저장된 Persona가 없습니다.</p>
+                <p class="inline-note">{$tr('persona.list.empty')}</p>
             {/if}
             {#each personaState.personas as persona (persona.value.id)}
                 {@const isSelected =
@@ -151,15 +158,15 @@
                     <header>
                         <div>
                             <h3>{persona.value.name}</h3>
-                            <p>{persona.value.description || '설명 없음'}</p>
+                            <p>{persona.value.description || $tr('persona.description.empty')}</p>
                         </div>
                         <span class="status-pill">r{persona.revision}</span>
                     </header>
                     {#if isSelected}
                         <p class="persona-pin-note">
-                            이 대화는 현재 Persona의 r{personaState.selection?.selected_persona
-                                ?.revision}
-                            스냅샷을 사용합니다.
+                            {$tr('persona.list.pinned', {
+                                revision: personaState.selection?.selected_persona?.revision ?? 0,
+                            })}
                         </p>
                     {/if}
                     <div class="persona-actions">
@@ -169,10 +176,10 @@
                             disabled={busy || personaState.conversation_id === null || isSelected}
                             onclick={() => void controller.selectPersona(persona)}
                         >
-                            {isSelected ? '이 대화에서 사용 중' : '이 대화에 선택'}
+                            {isSelected ? $tr('persona.list.in_use') : $tr('persona.list.select')}
                         </button>
                         <button type="button" disabled={busy} onclick={() => beginEdit(persona)}>
-                            편집
+                            {$tr('persona.list.edit')}
                         </button>
                         {#if deleteConfirmationId === persona.value.id}
                             <button
@@ -184,14 +191,14 @@
                                     void controller.deletePersona(persona);
                                 }}
                             >
-                                삭제 확인
+                                {$tr('persona.list.confirm_delete')}
                             </button>
                             <button
                                 type="button"
                                 disabled={busy}
                                 onclick={() => (deleteConfirmationId = null)}
                             >
-                                취소
+                                {$tr('persona.list.cancel')}
                             </button>
                         {:else}
                             <button
@@ -199,7 +206,7 @@
                                 disabled={busy}
                                 onclick={() => (deleteConfirmationId = persona.value.id)}
                             >
-                                삭제
+                                {$tr('persona.list.delete')}
                             </button>
                         {/if}
                     </div>
@@ -212,7 +219,7 @@
                     disabled={busy}
                     onclick={() => void controller.loadMore()}
                 >
-                    더 불러오기
+                    {$tr('persona.list.load_more')}
                 </button>
             {/if}
         </div>
@@ -230,9 +237,9 @@
         display: grid;
         gap: 0.75rem;
         padding: 1rem;
-        border: 1px solid var(--line, #d8d6d0);
+        border: 1px solid var(--line);
         border-radius: 0.85rem;
-        background: var(--surface-raised, #fff);
+        background: var(--surface-raised);
     }
 
     .section-heading.compact {
@@ -252,9 +259,9 @@
 
     .persona-selected-card {
         padding: 0.85rem;
-        border-left: 0.25rem solid var(--accent, #6750a4);
+        border-left: 0.25rem solid var(--accent);
         border-radius: 0.5rem;
-        background: var(--surface-muted, #f6f3fb);
+        background: var(--surface-sunken);
     }
 
     .persona-selected-card p,
@@ -283,12 +290,12 @@
         display: grid;
         gap: 0.75rem;
         padding: 1rem;
-        border: 1px solid var(--line, #d8d6d0);
+        border: 1px solid var(--line);
         border-radius: 0.85rem;
     }
 
     .persona-card.selected {
-        border-color: var(--accent, #6750a4);
+        border-color: var(--accent);
     }
 
     .persona-card header {
@@ -298,7 +305,7 @@
     }
 
     .persona-pin-note {
-        color: var(--text-muted, #625f68);
+        color: var(--ink-muted);
         font-size: 0.9rem;
     }
 
@@ -313,6 +320,6 @@
     }
 
     button.danger {
-        color: var(--danger, #9f1d20);
+        color: var(--danger);
     }
 </style>

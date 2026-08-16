@@ -3549,7 +3549,7 @@
         gap: 6px;
         padding: 4px;
         border-radius: 12px;
-        background: var(--surface-muted);
+        background: var(--surface-sunken);
     }
 
     .studio-tabs button {
@@ -3557,7 +3557,7 @@
     }
 
     .studio-tabs button[aria-selected='true'] {
-        color: var(--accent-ink);
+        color: var(--ink);
         background: var(--surface-raised);
         box-shadow: 0 2px 8px rgb(18 25 38 / 8%);
     }
@@ -3583,7 +3583,7 @@
         padding: 11px 13px;
         border-radius: 10px;
         color: var(--ink-muted);
-        background: var(--surface-muted);
+        background: var(--surface-sunken);
     }
 
     .studio-status.error,
@@ -3592,7 +3592,7 @@
     }
 
     .bounded-note {
-        color: var(--warning-ink, #7a4b00);
+        color: var(--warning);
     }
 
     .search-field,
@@ -3621,7 +3621,7 @@
         padding: 10px;
         border: 1px solid var(--line);
         border-radius: 12px;
-        background: var(--surface-muted);
+        background: var(--surface-sunken);
     }
 
     .block-minimap > span {
@@ -3753,14 +3753,14 @@
         width: fit-content;
         padding: 4px 7px;
         border-radius: 999px;
-        color: var(--accent-ink);
+        color: var(--accent);
         background: var(--accent-soft);
         font-size: 0.72rem;
     }
 
     .status-badge.disabled {
         color: var(--ink-muted);
-        background: var(--surface-muted);
+        background: var(--surface-sunken);
     }
 
     details {
@@ -3835,7 +3835,7 @@
         padding: 10px;
         border: 1px solid var(--line);
         border-radius: 9px;
-        background: var(--surface-muted);
+        background: var(--surface-sunken);
     }
 
     .template-slot-row label {
@@ -3856,7 +3856,7 @@
         padding: 9px;
         border: 1px solid var(--line);
         border-radius: 9px;
-        background: var(--surface-muted);
+        background: var(--surface-sunken);
     }
 
     .expert-preview-controls {
@@ -3892,7 +3892,7 @@
         min-width: 0;
         padding: 9px;
         border-radius: 9px;
-        background: var(--surface-muted);
+        background: var(--surface-sunken);
     }
 
     dt {
@@ -3914,7 +3914,7 @@
         white-space: pre-wrap;
         overflow-wrap: anywhere;
         color: var(--ink);
-        background: var(--surface-muted);
+        background: var(--surface-sunken);
     }
 
     .profile-columns,
@@ -3929,7 +3929,7 @@
     .proposal-list li {
         padding: 9px;
         border-radius: 9px;
-        background: var(--surface-muted);
+        background: var(--surface-sunken);
     }
 
     .evidence-list li.selected {

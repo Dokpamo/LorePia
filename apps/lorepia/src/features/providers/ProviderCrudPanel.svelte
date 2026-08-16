@@ -1164,7 +1164,7 @@
         min-height: var(--touch);
         padding: 8px 10px;
         border-radius: 10px;
-        background: var(--surface-muted);
+        background: var(--surface-sunken);
     }
 
     .confirm-row input {
@@ -1196,7 +1196,7 @@
         padding: 14px;
         border: 1px solid var(--line);
         border-radius: 12px;
-        background: var(--surface-muted);
+        background: var(--surface-sunken);
     }
 
     .preview-card dl {

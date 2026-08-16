@@ -133,6 +133,7 @@ function mockClient(overrides: Partial<LorepiaClient>): LorepiaClient {
         listBranches: () => Promise.resolve([branch]),
         listBranchMessages: () => Promise.resolve([]),
         listRetryableMemoryQueryEmbeddings: () => Promise.resolve([]),
+        listInterruptedMemoryJobs: () => Promise.resolve([]),
         disposeChatStream: () => Promise.resolve(false),
     };
     return new Proxy({ ...defaults, ...overrides } as LorepiaClient, {
@@ -941,6 +942,8 @@ describe('LorepiaAppController memory query retry', () => {
 
         await expect(controller.retryMemoryQueryEmbedding(candidate, true)).resolves.toBe(true);
         expect(retry).toHaveBeenCalledWith({
+            conversation_id: candidate.conversation_id,
+            branch_id: candidate.branch_id,
             id: candidate.id,
             expected_revision: 4,
             acknowledge_unknown_outcome: true,
@@ -993,12 +996,89 @@ describe('LorepiaAppController memory query retry', () => {
             );
 
             expect(retry).toHaveBeenCalledWith({
+                conversation_id: candidate.conversation_id,
+                branch_id: candidate.branch_id,
                 id: candidate.id,
                 expected_revision: 8,
                 acknowledge_unknown_outcome: false,
             });
         },
     );
+
+    it('pins the CAS revision and requires acknowledgement for an interrupted memory job', async () => {
+        const job = {
+            memory_job_id: 'memory-job-1',
+            kind: 'summary' as const,
+            revision: 5,
+            conversation_id: conversation.id,
+            branch_id: branch.id,
+            source_start_message_id: 'message-1',
+            source_end_message_id: 'message-2',
+            attempt: 1,
+            interruption_count: 1,
+            last_interrupted_at: '2026-01-01T00:00:00Z',
+            last_error_code: 'process_restarted',
+        };
+        const retry = vi.fn().mockResolvedValue({
+            memory_job_id: job.memory_job_id,
+            kind: 'summary',
+            status: 'queued',
+            revision: 6,
+            conversation_id: job.conversation_id,
+            branch_id: job.branch_id,
+            source_start_message_id: job.source_start_message_id,
+            source_end_message_id: job.source_end_message_id,
+            attempt: 1,
+        });
+        const controller = new LorepiaAppController(
+            mockClient({
+                listInterruptedMemoryJobs: () => Promise.resolve([job]),
+                retryInterruptedMemoryJob: retry,
+            }),
+        );
+        await controller.selectConversation(conversation);
+        await vi.waitFor(() =>
+            expect(get(controller.state).memory_query_retries.interrupted_jobs).toEqual([job]),
+        );
+
+        await expect(controller.retryInterruptedMemoryJob(job, false)).resolves.toBe(false);
+        expect(retry).not.toHaveBeenCalled();
+
+        await expect(controller.retryInterruptedMemoryJob(job, true)).resolves.toBe(true);
+        expect(retry).toHaveBeenCalledWith({
+            conversation_id: job.conversation_id,
+            branch_id: job.branch_id,
+            memory_job_id: job.memory_job_id,
+            expected_revision: 5,
+            acknowledge_unknown_outcome: true,
+        });
+        expect(get(controller.state).memory_query_retries.interrupted_jobs).toEqual([]);
+    });
+
+    it('keeps embedding retry candidates usable when the interrupted job listing fails', async () => {
+        const candidate = {
+            id: 'query-embedding-1',
+            status: 'failed' as const,
+            revision: 2,
+            conversation_id: conversation.id,
+            branch_id: branch.id,
+            error_code: 'provider_unavailable',
+            requires_unknown_outcome_acknowledgement: false,
+        };
+        const controller = new LorepiaAppController(
+            mockClient({
+                listRetryableMemoryQueryEmbeddings: () => Promise.resolve([candidate]),
+                listInterruptedMemoryJobs: () => Promise.reject(new Error('listing unavailable')),
+            }),
+        );
+        await controller.selectConversation(conversation);
+        await vi.waitFor(() =>
+            expect(get(controller.state).memory_query_retries.candidates).toEqual([candidate]),
+        );
+
+        expect(get(controller.state).memory_query_retries.interrupted_jobs).toEqual([]);
+        expect(get(controller.state).memory_query_retries.phase).toBe('ready');
+    });
 
     it('retains the candidate and reports an error when the retry receipt cannot be verified', async () => {
         const candidate = {

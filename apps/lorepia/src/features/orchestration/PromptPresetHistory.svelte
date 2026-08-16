@@ -256,9 +256,9 @@
         gap: 0.8rem;
         margin-block: 1rem;
         padding: 1rem;
-        border: 1px solid var(--border-soft, #d6d7db);
+        border: 1px solid var(--line);
         border-radius: 0.8rem;
-        background: color-mix(in srgb, var(--surface-raised, white) 94%, transparent);
+        background: color-mix(in srgb, var(--surface-raised) 94%, transparent);
     }
 
     .history-heading,
@@ -291,12 +291,12 @@
 
     .revision-list li {
         padding: 0.7rem;
-        border: 1px solid var(--border-soft, #d6d7db);
+        border: 1px solid var(--line);
         border-radius: 0.6rem;
     }
 
     .revision-list li.current {
-        border-color: var(--accent, #5b5bd6);
+        border-color: var(--accent);
     }
 
     .revision-list li > div {
@@ -313,7 +313,7 @@
     .current-badge {
         padding: 0.2rem 0.5rem;
         border-radius: 999px;
-        background: var(--accent-soft, #ececff);
+        background: var(--accent-soft);
     }
 
     .history-note,
@@ -321,11 +321,11 @@
         margin: 0;
         padding: 0.65rem;
         border-radius: 0.5rem;
-        background: var(--surface-muted, #f4f4f6);
+        background: var(--surface-sunken);
     }
 
     .history-error {
-        color: var(--danger, #a32323);
+        color: var(--danger);
     }
 
     .rollback-review,
@@ -334,7 +334,7 @@
         gap: 0.75rem;
         padding: 0.8rem;
         border-radius: 0.6rem;
-        background: var(--surface-muted, #f4f4f6);
+        background: var(--surface-sunken);
     }
 
     dl {

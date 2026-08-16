@@ -322,12 +322,21 @@ impl Storage {
     /// retryable revision; ordinary enqueue/prepare never invokes it.
     pub fn retry_memory_query_embedding(
         &self,
+        conversation_id: &ConversationId,
+        branch_id: &ConversationBranchId,
         id: &str,
         expected_revision: u64,
         available_at: DateTime<Utc>,
     ) -> CoreResult<StoredMemoryQueryEmbedding> {
-        let connection = self.connection()?;
-        let changed = connection
+        validate_text("query embedding conversation", &conversation_id.0, 256)?;
+        validate_text("query embedding branch", &branch_id.0, 256)?;
+        validate_text("query embedding id", id, 256)?;
+        let mut connection = self.connection()?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(storage_db_error)?;
+        ensure_memory_query_embedding_owner(&transaction, conversation_id, branch_id, id)?;
+        let changed = transaction
             .execute(
                 "UPDATE memory_query_embeddings
                  SET state = 'queued', revision = revision + 1,
@@ -336,24 +345,41 @@ impl Storage {
                  WHERE id = ?1
                    AND state IN ('interrupted', 'failed', 'cancelled')
                    AND revision = ?2
-                   AND ?3 >= updated_at",
-                params![id, to_i64(expected_revision)?, available_at.to_rfc3339()],
+                   AND ?3 >= updated_at
+                   AND conversation_id = ?4 AND branch_id = ?5",
+                params![
+                    id,
+                    to_i64(expected_revision)?,
+                    available_at.to_rfc3339(),
+                    conversation_id.0,
+                    branch_id.0,
+                ],
             )
             .map_err(storage_db_error)?;
         ensure_cas(changed, "memory query embedding explicit retry")?;
-        load_by_id_or_key(&connection, Some(id), None)?
-            .ok_or_else(|| corrupted("retried memory query embedding is missing"))
+        let retried = load_by_id_or_key(&transaction, Some(id), None)?
+            .ok_or_else(|| corrupted("retried memory query embedding is missing"))?;
+        transaction.commit().map_err(storage_db_error)?;
+        Ok(retried)
     }
 
     /// Compatibility name retained for callers that specifically recovered an
     /// ambiguous outcome. Validation still occurs against the stored state.
     pub fn retry_interrupted_memory_query_embedding(
         &self,
+        conversation_id: &ConversationId,
+        branch_id: &ConversationBranchId,
         id: &str,
         expected_revision: u64,
         available_at: DateTime<Utc>,
     ) -> CoreResult<StoredMemoryQueryEmbedding> {
-        self.retry_memory_query_embedding(id, expected_revision, available_at)
+        self.retry_memory_query_embedding(
+            conversation_id,
+            branch_id,
+            id,
+            expected_revision,
+            available_at,
+        )
     }
 
     /// Bounded, credential-free product surface for explicit user retry.
@@ -595,6 +621,29 @@ fn load_by_id_or_key(
         .optional()
         .map_err(storage_db_error)?;
     row.map(decode_memory_query_embedding_row).transpose()
+}
+
+fn ensure_memory_query_embedding_owner(
+    connection: &rusqlite::Connection,
+    conversation_id: &ConversationId,
+    branch_id: &ConversationBranchId,
+    id: &str,
+) -> CoreResult<()> {
+    let owned = connection
+        .query_row(
+            "SELECT EXISTS(
+                 SELECT 1 FROM memory_query_embeddings
+                 WHERE id = ?1 AND conversation_id = ?2 AND branch_id = ?3
+             )",
+            params![id, conversation_id.0, branch_id.0],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(storage_db_error)?;
+    if owned {
+        Ok(())
+    } else {
+        Err(not_found("memory query embedding"))
+    }
 }
 
 struct RawMemoryQueryEmbeddingRow {

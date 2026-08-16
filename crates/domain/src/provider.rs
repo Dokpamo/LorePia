@@ -1,6 +1,6 @@
 use std::{fmt, net::IpAddr, str::FromStr};
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 use url::Url;
 use uuid::Uuid;
@@ -445,6 +445,30 @@ pub struct ProviderLocalNetworkApproval {
     pub addresses: Vec<IpAddr>,
 }
 
+/// Maximum lifetime of one immutable exact-origin LAN approval.
+///
+/// The approval mirror records `ProviderConnection::created_at` as its issue
+/// time. Reusing that existing immutable timestamp keeps old serialized
+/// connections compatible while ensuring DHCP/address reuse eventually fails
+/// closed and requires the user to create a fresh approval.
+pub const PROVIDER_LOCAL_NETWORK_APPROVAL_TTL_SECONDS: i64 = 24 * 60 * 60;
+
+/// Returns whether an immutable LAN approval is active at `observed_at`.
+///
+/// Future-dated issue times fail closed. The expiry instant itself is no
+/// longer active.
+pub fn provider_local_network_approval_is_active_at(
+    approved_at: DateTime<Utc>,
+    observed_at: DateTime<Utc>,
+) -> bool {
+    approved_at <= observed_at
+        && approved_at
+            .checked_add_signed(TimeDelta::seconds(
+                PROVIDER_LOCAL_NETWORK_APPROVAL_TTL_SECONDS,
+            ))
+            .is_some_and(|expires_at| observed_at < expires_at)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CredentialRedirectPolicy {
@@ -706,6 +730,17 @@ pub struct ProviderConnection {
     pub status: ConnectionStatus,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+impl ProviderConnection {
+    /// Checks the lifetime of this connection's immutable LAN approval.
+    ///
+    /// Callers should invoke this only when `network_mode` is
+    /// `ApprovedLocalNetwork`; the connection creation timestamp is also the
+    /// issue time stored by the immutable approval mirror.
+    pub fn local_network_approval_is_active_at(&self, observed_at: DateTime<Utc>) -> bool {
+        provider_local_network_approval_is_active_at(self.created_at, observed_at)
+    }
 }
 
 /// Secret-free input used to create or update a provider connection.
@@ -2228,6 +2263,8 @@ pub struct GenerationUsage {
 
 #[cfg(test)]
 mod tests {
+    use chrono::{TimeDelta, Utc};
+
     use super::{
         ApiFamily, BoundedJson, CanonicalOrigin, EndpointPath, GenerationPresetId,
         GenerationProviderProvenance, GenerationReasoningSettings, GenerationRequest, HeaderName,
@@ -2236,10 +2273,31 @@ mod tests {
         MAX_OPAQUE_REASONING_TOTAL_BYTES, MAX_TOOL_ARGUMENT_DELTA_BYTES, MAX_TOOL_CALL_ID_BYTES,
         MAX_TOOL_NAME_BYTES, ModelRouteId, OpaqueReasoningContext, OpaqueReasoningData,
         OpaqueReasoningState, OpenAiResponsesReasoningItem, OpenRouterReasoningDetail,
-        OpenRouterReasoningTopology, ParameterId, ParameterLiteral, ParameterValue,
-        ParameterValueState, ToolCallArgumentsDelta, ToolCallId, ToolName,
-        validate_opaque_reasoning_states,
+        OpenRouterReasoningTopology, PROVIDER_LOCAL_NETWORK_APPROVAL_TTL_SECONDS, ParameterId,
+        ParameterLiteral, ParameterValue, ParameterValueState, ToolCallArgumentsDelta, ToolCallId,
+        ToolName, provider_local_network_approval_is_active_at, validate_opaque_reasoning_states,
     };
+
+    #[test]
+    fn local_network_approval_lifetime_fails_closed_at_expiry_and_for_future_issue_time() {
+        let approved_at = Utc::now();
+        assert!(provider_local_network_approval_is_active_at(
+            approved_at,
+            approved_at
+        ));
+        assert!(provider_local_network_approval_is_active_at(
+            approved_at,
+            approved_at + TimeDelta::seconds(PROVIDER_LOCAL_NETWORK_APPROVAL_TTL_SECONDS - 1)
+        ));
+        assert!(!provider_local_network_approval_is_active_at(
+            approved_at,
+            approved_at + TimeDelta::seconds(PROVIDER_LOCAL_NETWORK_APPROVAL_TTL_SECONDS)
+        ));
+        assert!(!provider_local_network_approval_is_active_at(
+            approved_at,
+            approved_at - TimeDelta::seconds(1)
+        ));
+    }
 
     #[test]
     fn stable_ids_serialize_as_plain_strings() {

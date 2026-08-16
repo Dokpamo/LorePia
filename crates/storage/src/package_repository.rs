@@ -10,7 +10,7 @@ use chrono::{DateTime, Utc};
 use lorepia_domain::{
     AssetDescriptor, AssetId, ContentCapability, ControlId, CoreError, CoreErrorCode, CoreResult,
     InstructionAuthority, ModuleComponentRef, PackageId, PlacementZone, PromptBlockId,
-    Sha256Digest, SourceKind, VersionedJson,
+    Sha256Digest, SourceKind, ValidateOrchestration, VersionedJson,
 };
 use lorepia_orchestration::{
     ApprovedPackageImportPlan, ModuleImportApprovalEvidence, ModuleImportComponentAuthority,
@@ -4179,12 +4179,12 @@ fn validate_normalized_package_documents(documents: &[PackageCommitDocument]) ->
                     ));
                 }
                 for block in preset.blocks.iter().skip(1) {
-                    if block.authority == InstructionAuthority::Application
+                    if block.authority != InstructionAuthority::ImportedContent
                         || block.placement_zone == PlacementZone::ApplicationPolicy
                         || block.provenance.source_kind == SourceKind::ApplicationBuiltIn
                     {
                         return Err(CoreError::invalid(
-                            "imported prompt preset retains caller-owned application policy",
+                            "imported prompt preset retains elevated package block authority",
                         ));
                     }
                 }
@@ -4219,9 +4219,17 @@ fn validate_normalized_package_documents(documents: &[PackageCommitDocument]) ->
                     ));
                 }
             }
-            PackageCommitDocument::KnowledgeBook(_)
-            | PackageCommitDocument::MemoryProfile(_)
-            | PackageCommitDocument::CharacterContent { .. } => {}
+            PackageCommitDocument::KnowledgeBook(book) => {
+                book.validate().map_err(|error| {
+                    CoreError::invalid(format!("invalid imported knowledge book: {error}"))
+                })?;
+            }
+            PackageCommitDocument::MemoryProfile(profile) => {
+                profile.validate().map_err(|error| {
+                    CoreError::invalid(format!("invalid imported memory profile: {error}"))
+                })?;
+            }
+            PackageCommitDocument::CharacterContent { .. } => {}
         }
     }
     Ok(())
@@ -5963,8 +5971,8 @@ fn storage_corrupted(message: impl Into<String>) -> CoreError {
 #[cfg(test)]
 mod tests {
     use lorepia_domain::{
-        AssetDescriptor, AssetId, AssetRole, AssetSource, AssetSourceKind, PackageManifest,
-        Provenance, Sha256Digest,
+        AssetDescriptor, AssetId, AssetRole, AssetSource, AssetSourceKind, KnowledgeBook,
+        MemoryProfile, PackageManifest, PromptPresetId, Provenance, Sha256Digest,
     };
     use lorepia_orchestration::RedistributionStatus;
     use tempfile::tempdir;
@@ -6047,6 +6055,84 @@ mod tests {
             )
             .expect("promote source");
         (source_hash, source_size)
+    }
+
+    fn imported_document_provenance() -> Provenance {
+        Provenance {
+            source_kind: SourceKind::ImportedPackage,
+            source_id: Some("dev.lorepia.storage-validation-test".to_owned()),
+            source_hash: Some("ab".repeat(32)),
+            author: Some("LorePia tests".to_owned()),
+            license: Some("MIT".to_owned()),
+            imported_at: None,
+        }
+    }
+
+    #[test]
+    fn storage_rejects_noncanonical_imported_knowledge_before_persistence() {
+        let book: KnowledgeBook = serde_json::from_value(json!({
+            "id": "storage.package.invalid-knowledge",
+            "name": "Invalid imported knowledge",
+            "schema_version": 1,
+            "entries": [],
+            "scan_depth": 1025,
+            "token_budget": {"max_tokens": 1024},
+            "recursive": false,
+            "max_recursion_depth": 0,
+            "provenance": imported_document_provenance()
+        }))
+        .expect("typed invalid knowledge fixture");
+        let error =
+            validate_normalized_package_documents(&[PackageCommitDocument::KnowledgeBook(book)])
+                .expect_err("storage must reject invalid knowledge before persistence");
+        assert_eq!(error.code, CoreErrorCode::InvalidInput);
+    }
+
+    #[test]
+    fn storage_rejects_noncanonical_imported_memory_before_persistence() {
+        let profile: MemoryProfile = serde_json::from_value(json!({
+            "id": "storage.package.invalid-memory",
+            "name": "Invalid imported memory",
+            "schema_version": 1,
+            "summary_task": "memory-summary",
+            "embedding_task": null,
+            "turns_per_summary": 0,
+            "recent_raw_budget": {"max_tokens": 1024},
+            "episodic_budget": {"max_tokens": 1024},
+            "semantic_budget": {"max_tokens": 1024},
+            "retrieval_count": 8,
+            "recency_weight": 1.0,
+            "similarity_weight": 1.0,
+            "importance_weight": 1.0,
+            "preserve_invalidated_records": false,
+            "summary_schema": "memory-summary-v1",
+            "provenance": imported_document_provenance()
+        }))
+        .expect("typed invalid memory fixture");
+        let error =
+            validate_normalized_package_documents(&[PackageCommitDocument::MemoryProfile(profile)])
+                .expect_err("storage must reject invalid memory before persistence");
+        assert_eq!(error.code, CoreErrorCode::InvalidInput);
+    }
+
+    #[test]
+    fn storage_rejects_imported_prompt_with_elevated_package_block_authority() {
+        let imported_provenance = imported_document_provenance();
+        let mut preset = crate::orchestration::built_in_prompt_presets()[0].clone();
+        preset.id = PromptPresetId::from("storage.package.prompt-authority-boundary");
+        preset.metadata.provenance = imported_provenance.clone();
+        for block in preset.blocks.iter_mut().skip(1) {
+            block.authority = InstructionAuthority::ImportedContent;
+            block.provenance = imported_provenance.clone();
+        }
+        preset.blocks[1].authority = InstructionAuthority::Creator;
+
+        let error =
+            validate_normalized_package_documents(&[PackageCommitDocument::PromptPreset(preset)])
+                .expect_err(
+                    "storage must reject elevated imported prompt authority before persistence",
+                );
+        assert_eq!(error.code, CoreErrorCode::InvalidInput);
     }
 
     fn promote_missing_approved_asset(

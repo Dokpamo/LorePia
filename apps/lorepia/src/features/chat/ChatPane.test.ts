@@ -196,6 +196,7 @@ describe('ChatPane live response', () => {
             listBranches: vi.fn().mockResolvedValue([branch]),
             listBranchMessages: vi.fn().mockResolvedValue([]),
             listRetryableMemoryQueryEmbeddings: vi.fn().mockResolvedValue([]),
+            listInterruptedMemoryJobs: vi.fn().mockResolvedValue([]),
             sendMessage: vi.fn(
                 (
                     _input: unknown,
@@ -1241,6 +1242,43 @@ describe('ChatPane composer', () => {
         controller.destroy();
     });
 
+    it('requires a distinct acknowledgement before retrying an interrupted memory job', async () => {
+        const appState = chatReadyState();
+        const job = {
+            memory_job_id: 'memory-job-1',
+            kind: 'summary' as const,
+            revision: 3,
+            conversation_id: 'conversation-1',
+            branch_id: 'branch-1',
+            source_start_message_id: 'message-1',
+            source_end_message_id: 'message-2',
+            attempt: 1,
+            interruption_count: 2,
+            last_interrupted_at: '2026-01-01T00:00:00Z',
+            last_error_code: 'process_restarted',
+        };
+        appState.memory_query_retries = {
+            phase: 'ready',
+            error: null,
+            candidates: [],
+            interrupted_jobs: [job],
+            busy_id: null,
+            notice: null,
+        };
+        const { controller } = renderChat(appState);
+        const retry = vi.spyOn(controller, 'retryInterruptedMemoryJob').mockResolvedValue(true);
+
+        await fireEvent.click(screen.getByRole('button', { name: '작업 재시도 검토' }));
+        expect(retry).not.toHaveBeenCalled();
+        expect(
+            screen.getByText(/같은 기억 작업이\s+중복 처리될 수 있음을 확인하세요/),
+        ).toBeInTheDocument();
+
+        await fireEvent.click(screen.getByRole('button', { name: '위험을 확인하고 작업 재시도' }));
+        expect(retry).toHaveBeenCalledWith(job, true);
+        controller.destroy();
+    });
+
     it('requires a distinct acknowledgement before retrying an unknown embedding outcome', async () => {
         const appState = chatReadyState();
         const candidate = {
@@ -1256,6 +1294,7 @@ describe('ChatPane composer', () => {
             phase: 'ready',
             error: null,
             candidates: [candidate],
+            interrupted_jobs: [],
             busy_id: null,
             notice: null,
         };
@@ -1298,6 +1337,7 @@ describe('ChatPane composer', () => {
                     requires_unknown_outcome_acknowledgement: false,
                 },
             ],
+            interrupted_jobs: [],
             busy_id: null,
             notice: null,
         };

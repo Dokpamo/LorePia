@@ -3280,6 +3280,8 @@ fn drift_authority_runtime_sources(
 fn drift_authority_memories(core: &Core, scenario: &AuthorityScenario) {
     let edited_selected = core
         .patch_memory_record_user_fields(
+            &scenario.sealed_selected_memory.value.conversation_id,
+            &scenario.sealed_selected_memory.value.branch_id,
             &scenario.sealed_selected_memory.value.id,
             scenario.sealed_selected_memory.revision,
             &MemoryRecordUserPatch {
@@ -3290,6 +3292,8 @@ fn drift_authority_memories(core: &Core, scenario: &AuthorityScenario) {
         .expect("edit selected-memory head during approval");
     let edited_summary = core
         .patch_memory_record_user_fields(
+            &scenario.sealed_summary_memory.value.conversation_id,
+            &scenario.sealed_summary_memory.value.branch_id,
             &scenario.sealed_summary_memory.value.id,
             scenario.sealed_summary_memory.revision,
             &MemoryRecordUserPatch {

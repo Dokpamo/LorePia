@@ -626,7 +626,7 @@
         margin-top: 12px;
         padding: 12px;
         border-radius: 11px;
-        background: var(--surface-muted);
+        background: var(--surface-sunken);
     }
 
     .inspection-card article.warning {
@@ -729,7 +729,7 @@
         gap: 10px;
         padding: 11px;
         border-radius: 11px;
-        background: var(--surface-muted);
+        background: var(--surface-sunken);
     }
 
     .observation-main,
@@ -782,7 +782,7 @@
         margin-top: 16px;
         padding: 12px;
         border-radius: 11px;
-        background: var(--surface-muted);
+        background: var(--surface-sunken);
     }
 
     @media (max-width: 760px) {

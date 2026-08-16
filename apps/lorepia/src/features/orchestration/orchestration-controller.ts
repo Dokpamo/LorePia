@@ -1,5 +1,6 @@
 import { get, writable, type Readable } from 'svelte/store';
 
+import { t } from '../../lib/i18n';
 import { normalizeClientError } from '../../lib/ipc/errors';
 import type {
     CreatorContentModuleDocumentDto,
@@ -38,8 +39,7 @@ export const MAX_ROOM_PROMPT_NAME_CHARS = 128;
 export const MAX_ROOM_PROMPT_TEXT_CHARS = 32_768;
 export const MAX_ROOM_PROMPT_TEMPLATE_SLOTS = 128;
 
-const MEMORY_RECORD_RESPONSE_AUTHORITY_ERROR =
-    'Core가 요청 권한과 일치하지 않는 장기기억 응답을 반환했습니다.';
+const MEMORY_RECORD_RESPONSE_AUTHORITY_ERROR = t('orchestration.error.memory_scope');
 
 export type OrchestrationPhase = 'idle' | 'loading' | 'ready' | 'error' | 'unavailable';
 
@@ -178,16 +178,20 @@ function invalidOptionalRoomText(
 
 export function roomPromptSourceValidationError(config: RoomPromptSourceConfig): string | null {
     if (invalidOptionalRoomText(config.user_name_override, MAX_ROOM_PROMPT_NAME_CHARS, true)) {
-        return `사용자 표시 이름은 앞뒤 공백 없이 ${String(MAX_ROOM_PROMPT_NAME_CHARS)}자 이하여야 합니다.`;
+        return t('orchestration.error.name_length', { max: MAX_ROOM_PROMPT_NAME_CHARS });
     }
     if (invalidOptionalRoomText(config.author_note, MAX_ROOM_PROMPT_TEXT_CHARS, false)) {
-        return `작가 메모는 공백만으로 구성할 수 없고 ${MAX_ROOM_PROMPT_TEXT_CHARS.toLocaleString()}자 이하여야 합니다.`;
+        return t('orchestration.error.author_note_length', {
+            max: MAX_ROOM_PROMPT_TEXT_CHARS.toLocaleString(),
+        });
     }
     if (invalidOptionalRoomText(config.group_context, MAX_ROOM_PROMPT_TEXT_CHARS, false)) {
-        return `그룹 문맥은 공백만으로 구성할 수 없고 ${MAX_ROOM_PROMPT_TEXT_CHARS.toLocaleString()}자 이하여야 합니다.`;
+        return t('orchestration.error.group_context_length', {
+            max: MAX_ROOM_PROMPT_TEXT_CHARS.toLocaleString(),
+        });
     }
     if (config.template_slots.length > MAX_ROOM_PROMPT_TEMPLATE_SLOTS) {
-        return `템플릿 슬롯은 최대 ${String(MAX_ROOM_PROMPT_TEMPLATE_SLOTS)}개까지 저장할 수 있습니다.`;
+        return t('orchestration.error.slot_count', { max: MAX_ROOM_PROMPT_TEMPLATE_SLOTS });
     }
 
     const names = new Set<string>();
@@ -199,16 +203,22 @@ export function roomPromptSourceValidationError(config: RoomPromptSourceConfig):
             characterCount(slot.name) > MAX_ROOM_PROMPT_NAME_CHARS ||
             Array.from(slot.name).some((character) => /\p{Cc}/u.test(character))
         ) {
-            return `템플릿 슬롯 ${String(displayIndex)} 이름은 앞뒤 공백과 제어 문자 없이 ${String(MAX_ROOM_PROMPT_NAME_CHARS)}자 이하여야 합니다.`;
+            return t('orchestration.error.slot_name', {
+                index: displayIndex,
+                max: MAX_ROOM_PROMPT_NAME_CHARS,
+            });
         }
         if (slot.name === 'block_content') {
-            return '`block_content`는 블록 변환 전용 예약 슬롯입니다.';
+            return t('orchestration.error.reserved_slot');
         }
         if (names.has(slot.name)) {
-            return `템플릿 슬롯 이름 “${slot.name}”이(가) 중복되었습니다.`;
+            return t('orchestration.error.slot_duplicate', { name: slot.name });
         }
         if (characterCount(slot.value) > MAX_ROOM_PROMPT_TEXT_CHARS || slot.value.includes('\0')) {
-            return `템플릿 슬롯 ${String(displayIndex)} 값은 ${MAX_ROOM_PROMPT_TEXT_CHARS.toLocaleString()}자 이하여야 합니다.`;
+            return t('orchestration.error.slot_value_length', {
+                index: displayIndex,
+                max: MAX_ROOM_PROMPT_TEXT_CHARS.toLocaleString(),
+            });
         }
         names.add(slot.name);
     }
@@ -315,7 +325,7 @@ export const INITIAL_ORCHESTRATION_STATE: OrchestrationState = {
 function errorLabel(error: unknown): string {
     const normalized = normalizeClientError(error);
     return normalized.messageKey === 'error.unexpected'
-        ? '프롬프트 오케스트레이션 작업을 완료하지 못했습니다.'
+        ? t('orchestration.error.generic')
         : normalized.messageKey;
 }
 
@@ -337,13 +347,13 @@ export function taskProfileValidationError(profile: TaskProfileDocumentDto): str
             profile.embedding_dimensions < 1 ||
             profile.embedding_dimensions > 32_768
         ) {
-            return '메모리 임베딩 차원은 1에서 32768 사이의 정수여야 합니다.';
+            return t('orchestration.error.embedding_dimensions');
         }
         if (profile.fallback_route_ids.length > 0) {
-            return '메모리 임베딩은 하나의 벡터 공간만 사용하므로 fallback route를 허용하지 않습니다.';
+            return t('orchestration.error.embedding_fallback');
         }
     } else if (profile.embedding_dimensions !== null) {
-        return '임베딩이 아닌 작업 프로필에는 임베딩 차원을 설정할 수 없습니다.';
+        return t('orchestration.error.embedding_not_applicable');
     }
     return null;
 }
@@ -619,7 +629,7 @@ export class OrchestrationController {
                 editable_prompt_preset_loading: false,
                 editable_prompt_preset_error:
                     promptPresetId !== null && loader === undefined
-                        ? '현재 Core가 안전한 프롬프트 블록 편집 API를 제공하지 않습니다.'
+                        ? t('orchestration.error.unsupported_block_edit')
                         : null,
             }));
             return;
@@ -658,8 +668,7 @@ export class OrchestrationController {
                 ...state,
                 editable_task_profiles: [],
                 editable_task_profiles_loading: false,
-                editable_task_profiles_error:
-                    '현재 Core가 안전한 작업 프로필 편집 API를 제공하지 않습니다.',
+                editable_task_profiles_error: t('orchestration.error.unsupported_task_edit'),
             }));
             return;
         }
@@ -706,8 +715,7 @@ export class OrchestrationController {
             this.updateForContext(contextKey, (state) => ({
                 ...state,
                 editable_creator_documents_loading: false,
-                editable_creator_documents_error:
-                    '현재 Core가 안전한 Creator 문서 편집 API를 제공하지 않습니다.',
+                editable_creator_documents_error: t('orchestration.error.unsupported_creator_edit'),
             }));
             return;
         }
@@ -765,7 +773,7 @@ export class OrchestrationController {
                 ...structuredClone(INITIAL_ORCHESTRATION_STATE),
                 phase: 'unavailable',
                 context_key: contextKey,
-                error: '현재 Core가 프롬프트 오케스트레이션 API를 제공하지 않습니다.',
+                error: t('orchestration.error.unsupported'),
                 workspace: emptyOrchestrationWorkspace(conversationId, branchId),
             });
             return;
@@ -854,7 +862,7 @@ export class OrchestrationController {
             const promptSourceError = roomPromptSourceValidationError(response.room_config);
             if (promptSourceError !== null) {
                 throw new Error(
-                    `방별 프롬프트 소스가 표시 한도를 위반했습니다: ${promptSourceError}`,
+                    t('orchestration.error.prompt_source_limit', { detail: promptSourceError }),
                 );
             }
             const bounded = boundedWorkspace(response);
@@ -966,7 +974,7 @@ export class OrchestrationController {
             this.update((state) => ({
                 ...state,
                 phase: 'unavailable',
-                error: '현재 Core에서는 방별 오케스트레이션 설정을 저장할 수 없습니다.',
+                error: t('orchestration.error.unsupported_room_save'),
             }));
             return false;
         }
@@ -1013,8 +1021,7 @@ export class OrchestrationController {
                         ...current,
                         saving: false,
                         dirty_room_config: true,
-                        announcement:
-                            '저장 중 추가로 바꾼 값이 있습니다. 새 변경 사항은 아직 저장되지 않았습니다.',
+                        announcement: t('orchestration.notice.unsaved_changes'),
                         workspace: {
                             ...current.workspace,
                             room_config: {
@@ -1033,7 +1040,7 @@ export class OrchestrationController {
                     ...current,
                     saving: false,
                     dirty_room_config: false,
-                    announcement: '이 방의 프롬프트와 생성 설정을 저장했습니다.',
+                    announcement: t('orchestration.notice.room_saved'),
                     workspace: {
                         ...current.workspace,
                         room_config: saved.room_config,
@@ -1189,8 +1196,7 @@ export class OrchestrationController {
         if (save === undefined || reload === undefined) {
             this.updateForContext(state.context_key, (current) => ({
                 ...current,
-                editable_prompt_preset_error:
-                    '현재 Core가 안전한 프롬프트 블록 저장 API를 제공하지 않습니다.',
+                editable_prompt_preset_error: t('orchestration.error.unsupported_block_save'),
             }));
             return false;
         }
@@ -1227,8 +1233,10 @@ export class OrchestrationController {
                     editable_prompt_preset_loading: false,
                     editable_prompt_preset_error: null,
                     announcement: hasNewerDraft
-                        ? `${summary.value.name} 프롬프트 프리셋을 저장했지만 저장 중 추가로 바꾼 내용은 아직 저장되지 않았습니다.`
-                        : `${summary.value.name} 프롬프트 프리셋을 저장했습니다.`,
+                        ? t('orchestration.notice.preset_saved_partial', {
+                              name: summary.value.name,
+                          })
+                        : t('orchestration.notice.preset_saved', { name: summary.value.name }),
                     workspace: {
                         ...current.workspace,
                         prompt_preset_revision: refreshed.revision,
@@ -1336,8 +1344,7 @@ export class OrchestrationController {
         if (save === undefined) {
             this.updateForContext(state.context_key, (current) => ({
                 ...current,
-                editable_task_profiles_error:
-                    '현재 Core가 안전한 작업 프로필 저장 API를 제공하지 않습니다.',
+                editable_task_profiles_error: t('orchestration.error.unsupported_task_save'),
             }));
             return false;
         }
@@ -1380,8 +1387,8 @@ export class OrchestrationController {
                     editable_task_profiles_loading: false,
                     editable_task_profiles_error: null,
                     announcement: hasNewerDraft
-                        ? `${saved.value.id} 작업 프로필을 저장했지만 저장 중 추가 변경은 아직 저장되지 않았습니다.`
-                        : `${saved.value.id} 작업 프로필을 저장했습니다.`,
+                        ? t('orchestration.notice.task_saved_partial', { name: saved.value.id })
+                        : t('orchestration.notice.task_saved', { name: saved.value.id }),
                 };
             });
         } catch (error: unknown) {
@@ -1412,8 +1419,7 @@ export class OrchestrationController {
         if (remove === undefined) {
             this.updateForContext(state.context_key, (current) => ({
                 ...current,
-                editable_task_profiles_error:
-                    '현재 Core가 안전한 작업 프로필 삭제 API를 제공하지 않습니다.',
+                editable_task_profiles_error: t('orchestration.error.unsupported_task_delete'),
             }));
             return false;
         }
@@ -1435,7 +1441,7 @@ export class OrchestrationController {
                 ),
                 editable_task_profiles_loading: false,
                 editable_task_profiles_error: null,
-                announcement: `${taskProfileId} 작업 프로필을 삭제했습니다.`,
+                announcement: t('orchestration.notice.task_deleted', { name: taskProfileId }),
             }));
         } catch (error: unknown) {
             this.updateForContext(contextKey, (current) => ({
@@ -1736,7 +1742,10 @@ export class OrchestrationController {
         if (save === undefined) {
             this.updateForContext(state.context_key, (current) => ({
                 ...current,
-                editable_creator_documents_error: `현재 Core가 ${label} 저장 API를 제공하지 않습니다.`,
+                editable_creator_documents_error: t(
+                    'orchestration.error.unsupported_document_save',
+                    { label },
+                ),
             }));
             return false;
         }
@@ -1764,8 +1773,11 @@ export class OrchestrationController {
                     editable_creator_documents_loading: false,
                     editable_creator_documents_error: null,
                     announcement: hasNewerDraft
-                        ? `${saved.value.id} ${label}을(를) 저장했지만 저장 중 추가 변경은 아직 저장되지 않았습니다.`
-                        : `${saved.value.id} ${label}을(를) 저장했습니다.`,
+                        ? t('orchestration.notice.document_saved_partial', {
+                              id: saved.value.id,
+                              label,
+                          })
+                        : t('orchestration.notice.document_saved', { id: saved.value.id, label }),
                 };
             });
         } catch (error: unknown) {
@@ -1797,7 +1809,7 @@ export class OrchestrationController {
                         document,
                     ),
                 }),
-                '메모리 프로필',
+                t('orchestration.label.memory_profile'),
             );
         }
         if (kind === 'knowledge_book') {
@@ -1817,7 +1829,7 @@ export class OrchestrationController {
                         document,
                     ),
                 }),
-                '지식 책',
+                t('orchestration.label.knowledge_book'),
             );
         }
         if (kind === 'transform_set') {
@@ -1837,7 +1849,7 @@ export class OrchestrationController {
                         document,
                     ),
                 }),
-                '변환 세트',
+                t('orchestration.label.transform_set'),
             );
         }
         if (kind === 'interaction_rule_set') {
@@ -1857,7 +1869,7 @@ export class OrchestrationController {
                         document,
                     ),
                 }),
-                '상호작용 규칙 세트',
+                t('orchestration.label.interaction_rule_set'),
             );
         }
         const document = state.editable_content_modules.find(
@@ -1876,7 +1888,7 @@ export class OrchestrationController {
                     document,
                 ),
             }),
-            '콘텐츠 모듈',
+            t('orchestration.label.content_module'),
         );
     }
 
@@ -1891,7 +1903,10 @@ export class OrchestrationController {
         if (remove === undefined) {
             this.updateForContext(state.context_key, (current) => ({
                 ...current,
-                editable_creator_documents_error: `현재 Core가 ${label} 삭제 API를 제공하지 않습니다.`,
+                editable_creator_documents_error: t(
+                    'orchestration.error.unsupported_document_delete',
+                    { label },
+                ),
             }));
             return false;
         }
@@ -1907,7 +1922,7 @@ export class OrchestrationController {
                 ...applyDeleted(current),
                 editable_creator_documents_loading: false,
                 editable_creator_documents_error: null,
-                announcement: `${documentId} ${label}을(를) 삭제했습니다.`,
+                announcement: t('orchestration.notice.document_deleted', { id: documentId, label }),
             }));
         } catch (error: unknown) {
             this.updateForContext(contextKey, (current) => ({
@@ -1933,7 +1948,10 @@ export class OrchestrationController {
                         editable_memory_profiles: current.editable_memory_profiles.filter(
                             (candidate) => candidate.value.id !== documentId,
                         ),
-                        announcement: `${documentId} 메모리 프로필 초안을 버렸습니다.`,
+                        announcement: t('orchestration.notice.draft_discarded', {
+                            id: documentId,
+                            label: t('orchestration.label.memory_profile'),
+                        }),
                     })),
                 );
             }
@@ -1949,7 +1967,7 @@ export class OrchestrationController {
                         (candidate) => candidate.value.id !== documentId,
                     ),
                 }),
-                '메모리 프로필',
+                t('orchestration.label.memory_profile'),
                 documentId,
             );
         }
@@ -1965,7 +1983,10 @@ export class OrchestrationController {
                         editable_knowledge_books: current.editable_knowledge_books.filter(
                             (candidate) => candidate.value.id !== documentId,
                         ),
-                        announcement: `${documentId} 지식 책 초안을 버렸습니다.`,
+                        announcement: t('orchestration.notice.draft_discarded', {
+                            id: documentId,
+                            label: t('orchestration.label.knowledge_book'),
+                        }),
                     })),
                 );
             }
@@ -1981,7 +2002,7 @@ export class OrchestrationController {
                         (candidate) => candidate.value.id !== documentId,
                     ),
                 }),
-                '지식 책',
+                t('orchestration.label.knowledge_book'),
                 documentId,
             );
         }
@@ -1997,7 +2018,10 @@ export class OrchestrationController {
                         editable_transform_sets: current.editable_transform_sets.filter(
                             (candidate) => candidate.value.id !== documentId,
                         ),
-                        announcement: `${documentId} 변환 세트 초안을 버렸습니다.`,
+                        announcement: t('orchestration.notice.draft_discarded', {
+                            id: documentId,
+                            label: t('orchestration.label.transform_set'),
+                        }),
                     })),
                 );
             }
@@ -2013,7 +2037,7 @@ export class OrchestrationController {
                         (candidate) => candidate.value.id !== documentId,
                     ),
                 }),
-                '변환 세트',
+                t('orchestration.label.transform_set'),
                 documentId,
             );
         }
@@ -2030,7 +2054,10 @@ export class OrchestrationController {
                             current.editable_interaction_rule_sets.filter(
                                 (candidate) => candidate.value.id !== documentId,
                             ),
-                        announcement: `${documentId} 상호작용 규칙 세트 초안을 버렸습니다.`,
+                        announcement: t('orchestration.notice.draft_discarded', {
+                            id: documentId,
+                            label: t('orchestration.label.interaction_rule_set'),
+                        }),
                     })),
                 );
             }
@@ -2046,7 +2073,7 @@ export class OrchestrationController {
                         (candidate) => candidate.value.id !== documentId,
                     ),
                 }),
-                '상호작용 규칙 세트',
+                t('orchestration.label.interaction_rule_set'),
                 documentId,
             );
         }
@@ -2061,7 +2088,10 @@ export class OrchestrationController {
                     editable_content_modules: current.editable_content_modules.filter(
                         (candidate) => candidate.value.id !== documentId,
                     ),
-                    announcement: `${documentId} 콘텐츠 모듈 초안을 버렸습니다.`,
+                    announcement: t('orchestration.notice.draft_discarded', {
+                        id: documentId,
+                        label: t('orchestration.label.content_module'),
+                    }),
                 })),
             );
         }
@@ -2077,7 +2107,7 @@ export class OrchestrationController {
                     (candidate) => candidate.value.id !== documentId,
                 ),
             }),
-            '콘텐츠 모듈',
+            t('orchestration.label.content_module'),
             documentId,
         );
     }
@@ -2109,7 +2139,7 @@ export class OrchestrationController {
         const reordered = moveBlockByDrop(state.workspace.prompt_blocks, blockId, targetId);
         if (reordered === state.workspace.prompt_blocks) return false;
         const moved = reordered.find((block) => block.id === blockId);
-        return this.persistPromptOrder(reordered, moved?.name ?? '프롬프트');
+        return this.persistPromptOrder(reordered, moved?.name ?? t('orchestration.label.prompt'));
     }
 
     private async persistPromptOrder(
@@ -2124,8 +2154,8 @@ export class OrchestrationController {
         if (presetId === null || expectedRevision === null || persist === undefined) {
             this.updateForContext(contextKey, (current) => ({
                 ...current,
-                error: '현재 Core가 프롬프트 블록 순서 저장 API를 제공하지 않습니다.',
-                announcement: '블록 순서를 변경하지 못했습니다.',
+                error: t('orchestration.error.unsupported_block_order'),
+                announcement: t('orchestration.notice.order_failed'),
             }));
             return false;
         }
@@ -2138,7 +2168,7 @@ export class OrchestrationController {
             if (!this.invalidatePlanPreviewForContext(contextKey)) return false;
             return this.updateForContext(contextKey, (current) => ({
                 ...current,
-                announcement: `${movedName} 블록 순서를 저장했습니다.`,
+                announcement: t('orchestration.notice.order_saved', { name: movedName }),
                 error: null,
                 workspace: {
                     ...current.workspace,
@@ -2166,12 +2196,12 @@ export class OrchestrationController {
             if (simulate === undefined) {
                 this.updateForContext(contextKey, (current) => ({
                     ...current,
-                    error: '현재 Core가 세계관 지식 시뮬레이터를 제공하지 않습니다.',
+                    error: t('orchestration.error.unsupported_knowledge_sim'),
                 }));
             } else if (knowledgeBookId === null) {
                 this.updateForContext(contextKey, (current) => ({
                     ...current,
-                    error: '현재 프롬프트 프리셋에 연결된 세계관 지식 책이 없습니다.',
+                    error: t('orchestration.error.no_knowledge_book'),
                 }));
             }
             return false;
@@ -2213,7 +2243,7 @@ export class OrchestrationController {
             if (preview === undefined) {
                 this.updateForContext(contextKey, (state) => ({
                     ...state,
-                    error: '현재 Core가 안전한 변환 미리보기를 제공하지 않습니다.',
+                    error: t('orchestration.error.unsupported_transform_preview'),
                 }));
             }
             return false;
@@ -2223,8 +2253,8 @@ export class OrchestrationController {
                 ...state,
                 error:
                     matchingTransformSets.length === 0
-                        ? '저장된 Creator 변환 규칙에서 해당 ID를 찾을 수 없습니다.'
-                        : '여러 변환 세트에 같은 규칙 ID가 있어 미리보기를 실행할 수 없습니다.',
+                        ? t('orchestration.error.rule_not_found')
+                        : t('orchestration.error.rule_ambiguous'),
             }));
             return false;
         }
@@ -2271,12 +2301,14 @@ export class OrchestrationController {
         if (update === undefined) {
             this.updateForContext(contextKey, (state) => ({
                 ...state,
-                error: '현재 Core가 장기기억 편집 API를 제공하지 않습니다.',
+                error: t('orchestration.error.unsupported_memory_edit'),
             }));
             return false;
         }
         try {
             const saved = await update.call(this.client, {
+                conversation_id: record.conversation_id,
+                branch_id: record.branch_id,
                 memory_record_id: recordId,
                 patch,
                 expected_revision: record.revision,
@@ -2286,7 +2318,7 @@ export class OrchestrationController {
                 recordId,
                 record.revision,
                 saved,
-                '장기기억을 수정했습니다.',
+                t('orchestration.notice.memory_updated'),
             );
         } catch (error: unknown) {
             this.updateForContext(contextKey, (state) => ({
@@ -2309,19 +2341,21 @@ export class OrchestrationController {
         if (remove === undefined) {
             this.updateForContext(contextKey, (state) => ({
                 ...state,
-                error: '현재 Core가 장기기억 삭제 API를 제공하지 않습니다.',
+                error: t('orchestration.error.unsupported_memory_delete'),
             }));
             return false;
         }
         try {
             await remove.call(this.client, {
+                conversation_id: record.conversation_id,
+                branch_id: record.branch_id,
                 memory_record_id: recordId,
                 expected_revision: record.revision,
             });
             if (!this.invalidatePlanPreviewForContext(contextKey)) return false;
             return this.updateForContext(contextKey, (state) => ({
                 ...state,
-                announcement: '장기기억을 삭제했습니다.',
+                announcement: t('orchestration.notice.memory_deleted'),
                 workspace: {
                     ...state.workspace,
                     memory_records: state.workspace.memory_records.filter(
@@ -2352,12 +2386,14 @@ export class OrchestrationController {
         if (update === undefined) {
             this.updateForContext(contextKey, (state) => ({
                 ...state,
-                error: '현재 Core가 장기기억 고정 설정 API를 제공하지 않습니다.',
+                error: t('orchestration.error.unsupported_memory_pin'),
             }));
             return false;
         }
         try {
             const saved = await update.call(this.client, {
+                conversation_id: record.conversation_id,
+                branch_id: record.branch_id,
                 memory_record_id: recordId,
                 patch: { pinned },
                 expected_revision: record.revision,
@@ -2367,7 +2403,7 @@ export class OrchestrationController {
                 recordId,
                 record.revision,
                 saved,
-                '장기기억 고정 설정을 변경했습니다.',
+                t('orchestration.notice.memory_pinned'),
             );
         } catch (error: unknown) {
             this.updateForContext(contextKey, (state) => ({
@@ -2394,24 +2430,29 @@ export class OrchestrationController {
         if (update === undefined) {
             this.updateForContext(contextKey, (state) => ({
                 ...state,
-                error: '현재 Core가 장기기억 제외 범위 API를 제공하지 않습니다.',
+                error: t('orchestration.error.unsupported_memory_exclusion'),
             }));
             return false;
         }
         try {
             const saved = await update.call(this.client, {
+                conversation_id: record.conversation_id,
+                branch_id: record.branch_id,
                 memory_record_id: recordId,
                 scope,
                 excluded,
                 expected_revision: record.revision,
             });
-            const label = scope === 'conversation' ? '현재 대화' : '캐릭터';
+            const label =
+                scope === 'conversation'
+                    ? t('orchestration.label.conversation_scope')
+                    : t('orchestration.label.character_scope');
             return this.replaceMemoryRecord(
                 contextKey,
                 recordId,
                 record.revision,
                 saved,
-                `${label} 장기기억 제외 설정을 변경했습니다.`,
+                t('orchestration.notice.exclusion_changed', { scope: label }),
             );
         } catch (error: unknown) {
             this.updateForContext(contextKey, (state) => ({
@@ -2482,7 +2523,7 @@ export class OrchestrationController {
             const contextKey = get(this.mutable).context_key;
             this.updateForContext(contextKey, (state) => ({
                 ...state,
-                error: 'Core가 유효하지 않은 생성 시도 ID를 반환했습니다.',
+                error: t('orchestration.error.invalid_attempt_id'),
             }));
             return null;
         }
@@ -2507,7 +2548,7 @@ export class OrchestrationController {
             if (resolve === undefined) {
                 this.updateForContext(contextKey, (current) => ({
                     ...current,
-                    error: '현재 Core가 최종 프롬프트 계획 미리보기를 제공하지 않습니다.',
+                    error: t('orchestration.error.unsupported_plan_preview'),
                 }));
             }
             return null;
@@ -2570,8 +2611,8 @@ export class OrchestrationController {
                     return {
                         ...current,
                         error: isValidGenerationAttemptId(preview.generation_attempt_id)
-                            ? 'Core가 요청한 생성 시도와 다른 계획을 반환했습니다.'
-                            : 'Core가 유효하지 않은 생성 시도 ID를 반환했습니다.',
+                            ? t('orchestration.error.plan_attempt_mismatch')
+                            : t('orchestration.error.invalid_attempt_id'),
                     };
                 }
                 return {
@@ -2673,8 +2714,7 @@ export class OrchestrationController {
         if (approved && target.proposal.projection_rejection_reason === 'unsafe_native_text') {
             this.updateForContext(contextKey, (state) => ({
                 ...state,
-                announcement:
-                    '안전하게 표시할 수 없는 저장 제안은 내용을 검토할 수 없어 승인할 수 없습니다.',
+                announcement: t('interaction.error.unreviewable'),
             }));
             return false;
         }
@@ -2682,7 +2722,9 @@ export class OrchestrationController {
             ...state,
             busy_interaction_proposal_id: proposalId,
             error: null,
-            announcement: approved ? '제안을 승인하고 있습니다.' : '제안을 거절하고 있습니다.',
+            announcement: approved
+                ? t('interaction.notice.approving')
+                : t('interaction.notice.rejecting'),
         }));
         try {
             const receipt = await this.client.decideInteractionProposal({
@@ -2718,7 +2760,9 @@ export class OrchestrationController {
             return this.updateForContext(contextKey, (state) => ({
                 ...state,
                 busy_interaction_proposal_id: null,
-                announcement: approved ? '제안을 승인했습니다.' : '제안을 거절했습니다.',
+                announcement: approved
+                    ? t('interaction.notice.approved')
+                    : t('interaction.notice.rejected'),
                 workspace: {
                     ...state.workspace,
                     interaction_state_revision: receipt.state_revision,
@@ -2733,7 +2777,7 @@ export class OrchestrationController {
                 ...state,
                 busy_interaction_proposal_id: null,
                 error: errorLabel(error),
-                announcement: '제안 결정에 실패했습니다. 최신 승인 목록을 다시 불러오세요.',
+                announcement: t('orchestration.notice.decision_failed'),
             }));
             return false;
         }

@@ -11,6 +11,36 @@ import org.junit.Test
 
 class PlatformPolicyTest {
     @Test
+    fun credentialConfirmationTextRejectsPromptSpoofingControls() {
+        for (
+            invalid in listOf(
+                "",
+                "   ",
+                "connection\nApprove",
+                "connection\u0000Approve",
+                "connection\u2028Approve",
+                "connection\u2029Approve",
+                "connection\u202eApprove",
+                "connection\u2066Approve",
+                "connection\u2069Approve",
+                "connection\u200bApprove",
+                "connection\u200dApprove",
+                "connection\u2060Approve",
+                "connection\ufeffApprove",
+                "connection\u00adApprove",
+                "connection\u034fApprove",
+                "connection\udb40\udc01Approve",
+            )
+        ) {
+            assertThrows(IllegalArgumentException::class.java) {
+                PlatformPolicy.validateCredentialConfirmationText(invalid, 256)
+            }
+        }
+
+        PlatformPolicy.validateCredentialConfirmationText("연결 a", 256)
+    }
+
+    @Test
     fun credentialNamesAreDeterministicLowercaseHashes() {
         val first = PlatformPolicy.credentialFileName("synthetic-profile")
         val second = PlatformPolicy.credentialFileName("synthetic-profile")

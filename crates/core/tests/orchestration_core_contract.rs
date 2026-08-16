@@ -360,6 +360,57 @@ fn interaction_counter_module(rule_set_id: &InteractionRuleSetId) -> ContentModu
     module
 }
 
+fn interaction_knowledge_rule_set(entry_id: &KnowledgeEntryId) -> InteractionRuleSet {
+    InteractionRuleSet {
+        id: InteractionRuleSetId::from("synthetic.core.interaction.knowledge-activation"),
+        name: "Synthetic interaction knowledge activation".to_owned(),
+        schema_version: 1,
+        rules: vec![InteractionRule {
+            id: InteractionRuleId::from("synthetic.core.interaction.knowledge-activation.commit"),
+            name: "Activate knowledge after one committed message".to_owned(),
+            enabled: true,
+            imported_author_enabled: false,
+            event: InteractionEvent::MessageCommitted,
+            condition: None,
+            actions: vec![InteractionAction::ActivateKnowledge {
+                entry_id: entry_id.clone(),
+            }],
+            priority: 0,
+            stop_after_match: false,
+            provenance: provenance(
+                SourceKind::UserCreated,
+                "synthetic.core.interaction.knowledge-activation.commit",
+            ),
+        }],
+        max_actions_per_event: 8,
+        provenance: provenance(
+            SourceKind::UserCreated,
+            "synthetic.core.interaction.knowledge-activation",
+        ),
+    }
+}
+
+fn interaction_knowledge_module(
+    book_id: &KnowledgeBookId,
+    rule_set_id: &InteractionRuleSetId,
+) -> ContentModule {
+    let mut module = content_module();
+    module.id = ContentModuleId::from("synthetic.core.module.interaction-knowledge");
+    "Synthetic interaction knowledge module".clone_into(&mut module.name);
+    module.knowledge_book_ids = vec![book_id.clone()];
+    module.interaction_rule_set_ids = vec![rule_set_id.clone()];
+    module.imported_components_enabled = true;
+    module.required_capabilities = vec![
+        ContentCapability::Knowledge,
+        ContentCapability::DeclarativeInteractions,
+    ];
+    module.metadata.provenance = provenance(
+        SourceKind::UserCreated,
+        "synthetic.core.module.interaction-knowledge",
+    );
+    module
+}
+
 fn activate_app_module(
     core: &Core,
     module: &ContentModule,
@@ -406,6 +457,110 @@ fn activate_app_module(
         )
         .expect("activate app-scope content module");
     receipt.verify().expect("verify app-scope module receipt");
+}
+
+fn reactivate_app_module(
+    core: &Core,
+    module: &ContentModule,
+    runtime_target: ContentModuleRuntimeTarget,
+    binding_id: &ModuleBindingId,
+) {
+    let stored_binding = core
+        .list_content_module_bindings(&module.id)
+        .expect("list app-scope module bindings before reactivation")
+        .into_iter()
+        .find(|binding| binding.value.id == *binding_id && binding.deleted_at.is_none())
+        .expect("active app-scope module binding before reactivation");
+    let request = ContentModuleActivationRequest {
+        runtime_target,
+        expected_binding_revision: Some(stored_binding.revision),
+        binding: ContentModuleBindingDraft {
+            id: binding_id.clone(),
+            module_id: module.id.clone(),
+            scope: ModuleScope::App,
+            target_id: None,
+            conversation_id: None,
+            priority: stored_binding.value.priority,
+            resolution_mode: ModuleRevisionResolutionMode::Active,
+            pinned_revision_id: None,
+            package_import_approval_id: None,
+            variable_overrides: stored_binding.value.variable_overrides,
+        },
+    };
+    let review = core
+        .review_content_module_activation(&request)
+        .expect("review advanced app-scope module");
+    let resolutions = ModuleMergeResolutionSet {
+        expected_review_sha256: review.review_sha256.clone(),
+        resolutions: Vec::new(),
+    };
+    let plan = core
+        .resolve_content_module_activation(&request, &resolutions)
+        .expect("resolve advanced app-scope module");
+    let receipt = core
+        .activate_content_module(
+            &request,
+            &resolutions,
+            &ModuleActivationApproval {
+                approval_id: format!("{}-advanced-approval", binding_id.as_str()),
+                expected_review_sha256: review.review_sha256,
+                expected_plan_sha256: plan.plan_sha256,
+            },
+        )
+        .expect("activate advanced app-scope module");
+    receipt.verify().expect("verify advanced module receipt");
+}
+
+fn active_interaction_knowledge_bindings(
+    root: &Path,
+    conversation_id: &lorepia_core::ConversationId,
+    branch_id: &lorepia_core::ConversationBranchId,
+) -> Vec<(String, String)> {
+    let connection = rusqlite::Connection::open(active_database_path(root))
+        .expect("open interaction knowledge database");
+    let mut statement = connection
+        .prepare(
+            "SELECT knowledge.book_revision_id, knowledge.entry_id
+             FROM interaction_state_knowledge AS knowledge
+             JOIN interaction_state AS state
+               ON state.id = knowledge.interaction_state_id
+             WHERE state.conversation_id = ?1
+               AND state.branch_id = ?2
+               AND knowledge.enabled = 1
+             ORDER BY knowledge.book_revision_id, knowledge.entry_id",
+        )
+        .expect("prepare interaction knowledge query");
+    statement
+        .query_map(
+            rusqlite::params![conversation_id.0.as_str(), branch_id.0.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("query active interaction knowledge")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("collect active interaction knowledge")
+}
+
+fn wait_for_active_interaction_knowledge_bindings(
+    core: &Core,
+    root: &Path,
+    conversation_id: &lorepia_core::ConversationId,
+    branch_id: &lorepia_core::ConversationBranchId,
+    expected: &[(String, String)],
+) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        core.list_interaction_effect_history(conversation_id, branch_id, None, 1_024)
+            .expect("drain interaction lifecycle before reading knowledge bindings");
+        let bindings = active_interaction_knowledge_bindings(root, conversation_id, branch_id);
+        if bindings == expected {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "interaction knowledge did not converge to {expected:?}; got {bindings:?}"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
 }
 
 fn memory_record(
@@ -1114,6 +1269,8 @@ fn memory_user_edits_deletes_and_branch_lineage_are_durable() {
 
     let edited = core
         .patch_memory_record_user_fields(
+            &current_memory.conversation_id,
+            &current_memory.branch_id,
             &current_memory.id,
             current_stored.revision,
             &MemoryRecordUserPatch {
@@ -1126,6 +1283,8 @@ fn memory_user_edits_deletes_and_branch_lineage_are_durable() {
     assert_eq!(edited.value.summary, "User-edited current memory");
     let stale = core
         .patch_memory_record_user_fields(
+            &current_memory.conversation_id,
+            &current_memory.branch_id,
             &current_memory.id,
             current_stored.revision,
             &MemoryRecordUserPatch {
@@ -1150,14 +1309,23 @@ fn memory_user_edits_deletes_and_branch_lineage_are_durable() {
     );
 
     let deleted = core
-        .delete_memory_record(&current_memory.id, edited.revision)
+        .delete_memory_record(
+            &current_memory.conversation_id,
+            &current_memory.branch_id,
+            &current_memory.id,
+            edited.revision,
+        )
         .expect("soft-delete edited memory");
     assert_eq!(deleted.revision, 3);
     assert!(deleted.deleted_at.is_some());
     assert_eq!(
-        core.get_memory_record(&current_memory.id)
-            .expect_err("deleted memory must be hidden")
-            .code,
+        core.get_memory_record(
+            &current_memory.conversation_id,
+            &current_memory.branch_id,
+            &current_memory.id,
+        )
+        .expect_err("deleted memory must be hidden")
+        .code,
         CoreErrorCode::NotFound
     );
     let after_delete = core
@@ -2309,6 +2477,183 @@ fn app_scope_module_applies_in_a_second_room_and_on_a_manual_branch_first_send()
         );
     }
     provider.join().expect("join synthetic provider");
+}
+
+#[derive(Clone, Copy)]
+enum StaleManualKnowledgePolicyChange {
+    RemoveEntry,
+    AdvanceBookRevision,
+}
+
+#[allow(
+    clippy::too_many_lines,
+    reason = "one fixture proves exact activation, policy drift, next-turn progress, and durable reconciliation"
+)]
+fn assert_stale_manual_knowledge_conversation_remains_operable(
+    change: StaleManualKnowledgePolicyChange,
+) {
+    let root = tempdir().expect("temporary Core root");
+    let core = Core::open(CoreConfig::new(root.path())).expect("open Core");
+    let character_id = import_synthetic_character(&core);
+    let (origin, requests, provider) = spawn_provider(2);
+    let target = provider_fixture(&core, &origin);
+    let conversation = core
+        .create_conversation(
+            &character_id,
+            "Synthetic stale manual knowledge room",
+            lorepia_core::ConversationMode::Chat,
+        )
+        .expect("create stale manual knowledge conversation");
+    let branch = core
+        .list_conversation_branches(&conversation.id)
+        .expect("list stale manual knowledge branches")
+        .into_iter()
+        .next()
+        .expect("stale manual knowledge root branch");
+    let book = knowledge_book();
+    let first_book = core
+        .upsert_knowledge_book(&book, None)
+        .expect("save first interaction knowledge revision");
+    let first_book_revision_id = first_book
+        .revision_id
+        .clone()
+        .expect("first interaction knowledge immutable revision");
+    let entry_id = book.entries[0].id.clone();
+    let rule_set = interaction_knowledge_rule_set(&entry_id);
+    core.upsert_interaction_rule_set(&rule_set, None)
+        .expect("save interaction knowledge activation rule");
+    let module = interaction_knowledge_module(&book.id, &rule_set.id);
+    let runtime_target = ContentModuleRuntimeTarget {
+        conversation_id: conversation.id.clone(),
+        branch_id: branch.id.clone(),
+    };
+    let binding_id = ModuleBindingId::from("synthetic.core.module.interaction-knowledge.binding");
+    activate_app_module(&core, &module, runtime_target.clone(), binding_id.as_str());
+
+    let first_generation = core
+        .send_message_to_branch_with_connection_credential(
+            &conversation.id,
+            &branch.id,
+            None,
+            lorepia_core::ConversationMode::Chat,
+            "Activate the synthetic interaction knowledge",
+            GenerationOperationContext::New {
+                operation_nonce: "stale-manual-knowledge-first-turn-v1",
+            },
+            &target,
+            reviewed_provider_credential(&core),
+        )
+        .expect("send interaction knowledge activation turn");
+    requests
+        .recv_timeout(Duration::from_secs(2))
+        .expect("capture interaction knowledge activation request");
+    wait_for_generation(&core, &branch.id, &first_generation);
+    wait_for_active_interaction_knowledge_bindings(
+        &core,
+        root.path(),
+        &conversation.id,
+        &branch.id,
+        &[(first_book_revision_id.clone(), entry_id.as_str().to_owned())],
+    );
+
+    match change {
+        StaleManualKnowledgePolicyChange::RemoveEntry => {
+            let request = ContentModuleDeactivationRequest {
+                runtime_target: runtime_target.clone(),
+                binding_id: binding_id.clone(),
+            };
+            let review = core
+                .review_content_module_deactivation(&request)
+                .expect("review knowledge module deactivation");
+            core.deactivate_content_module(&request, &review.review_sha256)
+                .expect("deactivate knowledge module")
+                .verify()
+                .expect("verify knowledge module deactivation");
+        }
+        StaleManualKnowledgePolicyChange::AdvanceBookRevision => {
+            let mut advanced_book = book.clone();
+            "Synthetic Core knowledge revision two".clone_into(&mut advanced_book.name);
+            let advanced_book = core
+                .upsert_knowledge_book(&advanced_book, Some(first_book.revision))
+                .expect("save advanced interaction knowledge revision");
+            assert_ne!(
+                advanced_book.revision_id.as_ref(),
+                Some(&first_book_revision_id)
+            );
+            let current_module = core
+                .get_content_module(&module.id)
+                .expect("load first interaction knowledge module revision");
+            let mut advanced_module = module.clone();
+            "2.0.0".clone_into(&mut advanced_module.version);
+            advanced_module.interaction_rule_set_ids.clear();
+            advanced_module.required_capabilities = vec![ContentCapability::Knowledge];
+            core.upsert_content_module(&advanced_module, Some(current_module.revision))
+                .expect("save module with advanced knowledge revision");
+            reactivate_app_module(&core, &advanced_module, runtime_target.clone(), &binding_id);
+        }
+    }
+
+    let previous_revision = core
+        .get_interaction_state_revision(&conversation.id, &branch.id)
+        .expect("read interaction revision before stale reconciliation");
+    let expected_head = core
+        .list_branch_messages(&branch.id)
+        .expect("list messages before stale reconciliation turn")
+        .last()
+        .map(|message| message.id.clone());
+    let second_generation = core
+        .send_message_to_branch_with_connection_credential(
+            &conversation.id,
+            &branch.id,
+            expected_head.as_ref(),
+            lorepia_core::ConversationMode::Chat,
+            "Continue after the knowledge policy changed",
+            GenerationOperationContext::New {
+                operation_nonce: match change {
+                    StaleManualKnowledgePolicyChange::RemoveEntry => {
+                        "stale-manual-knowledge-removed-turn-v1"
+                    }
+                    StaleManualKnowledgePolicyChange::AdvanceBookRevision => {
+                        "stale-manual-knowledge-advanced-turn-v1"
+                    }
+                },
+            },
+            &target,
+            reviewed_provider_credential(&core),
+        )
+        .expect("stale manual knowledge must not block the next turn");
+    requests
+        .recv_timeout(Duration::from_secs(2))
+        .expect("capture request after stale knowledge reconciliation");
+    wait_for_generation(&core, &branch.id, &second_generation);
+    wait_for_active_interaction_knowledge_bindings(
+        &core,
+        root.path(),
+        &conversation.id,
+        &branch.id,
+        &[],
+    );
+    assert!(
+        core.get_interaction_state_revision(&conversation.id, &branch.id)
+            .expect("read reconciled interaction revision")
+            > previous_revision,
+        "the stale authority must reconcile through an auditable state transition"
+    );
+    provider.join().expect("join synthetic provider");
+}
+
+#[test]
+fn removed_module_knowledge_does_not_block_an_existing_conversation() {
+    assert_stale_manual_knowledge_conversation_remains_operable(
+        StaleManualKnowledgePolicyChange::RemoveEntry,
+    );
+}
+
+#[test]
+fn advanced_module_knowledge_revision_does_not_rebind_existing_authority() {
+    assert_stale_manual_knowledge_conversation_remains_operable(
+        StaleManualKnowledgePolicyChange::AdvanceBookRevision,
+    );
 }
 
 #[test]

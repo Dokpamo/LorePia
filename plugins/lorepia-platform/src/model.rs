@@ -1,6 +1,7 @@
 use std::{
     fmt,
     path::{Path, PathBuf},
+    time::{Duration, Instant},
 };
 
 use serde::{Deserialize, Serialize};
@@ -60,6 +61,198 @@ pub enum CredentialStatus {
     Missing,
     Available,
     Unreadable,
+}
+
+/// Exact backend-owned credential effect shown by the native confirmation UI.
+///
+/// This value never crosses the app's renderer IPC boundary. The platform
+/// plugin owns the presentation and returns a non-cloneable confirmation which
+/// the Rust backend consumes immediately.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NativeCredentialEffect {
+    CaptureOrReplace,
+    Delete,
+    Archive,
+    DiscoveryCompensation,
+}
+
+impl NativeCredentialEffect {
+    #[cfg(mobile)]
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::CaptureOrReplace => "capture_or_replace",
+            Self::Delete => "delete",
+            Self::Archive => "archive",
+            Self::DiscoveryCompensation => "discovery_compensation",
+        }
+    }
+}
+
+/// Non-secret, exact context for one native credential-effect prompt.
+///
+/// Construction rejects controls and unbounded text so a compromised database
+/// cannot shape or visually truncate the trusted native prompt. This type has
+/// no serialization implementation; mobile serialization is confined to the
+/// private Rust-to-native plugin bridge.
+#[derive(Debug, PartialEq, Eq)]
+pub struct NativeCredentialEffectContext {
+    effect: NativeCredentialEffect,
+    target_id: String,
+    origin: String,
+    revision: String,
+}
+
+impl NativeCredentialEffectContext {
+    pub fn new(
+        effect: NativeCredentialEffect,
+        target_id: String,
+        origin: String,
+        revision: String,
+    ) -> crate::PlatformResult<Self> {
+        validate_confirmation_text(&target_id, 256)?;
+        validate_confirmation_text(&origin, 2_048)?;
+        validate_confirmation_text(&revision, 256)?;
+        Ok(Self {
+            effect,
+            target_id,
+            origin,
+            revision,
+        })
+    }
+
+    pub const fn effect(&self) -> NativeCredentialEffect {
+        self.effect
+    }
+
+    pub fn target_id(&self) -> &str {
+        &self.target_id
+    }
+
+    pub fn origin(&self) -> &str {
+        &self.origin
+    }
+
+    pub fn revision(&self) -> &str {
+        &self.revision
+    }
+}
+
+fn validate_confirmation_text(value: &str, maximum_bytes: usize) -> crate::PlatformResult<()> {
+    if value.is_empty()
+        || value.chars().all(|character| character == ' ')
+        || value.len() > maximum_bytes
+        || value
+            .chars()
+            .any(|character| is_confirmation_spoofing_code_point(character as u32))
+    {
+        return Err(crate::PlatformError::new(
+            crate::PlatformErrorCode::InvalidInput,
+        ));
+    }
+    Ok(())
+}
+
+/// Platform-neutral scalar policy for trusted native prompt fields.
+///
+/// Only the ordinary ASCII space remains available for layout inside a field.
+/// The list deliberately covers C0/C1 controls, every Unicode whitespace
+/// scalar, bidi shaping, zero-width/default-ignorable format characters,
+/// variation selectors, and tag characters. Android and iOS mirror these
+/// exact numeric ranges before constructing their native dialogs.
+const fn is_confirmation_spoofing_code_point(code_point: u32) -> bool {
+    matches!(
+        code_point,
+        0x0000..=0x001f
+            | 0x007f..=0x00a0
+            | 0x00ad
+            | 0x034f
+            | 0x0600..=0x0605
+            | 0x061c
+            | 0x06dd
+            | 0x070f
+            | 0x0890..=0x0891
+            | 0x08e2
+            | 0x115f..=0x1160
+            | 0x1680
+            | 0x17b4..=0x17b5
+            | 0x180b..=0x180f
+            | 0x2000..=0x200f
+            | 0x2028..=0x202f
+            | 0x205f..=0x206f
+            | 0x3000
+            | 0x3164
+            | 0xfe00..=0xfe0f
+            | 0xfeff
+            | 0xffa0
+            | 0xfff0..=0xfffb
+            | 0x110bd
+            | 0x110cd
+            | 0x13430..=0x13455
+            | 0x1bca0..=0x1bca3
+            | 0x1d173..=0x1d17a
+            | 0xe0000..=0xe0fff
+    )
+}
+
+/// One native modal approval. It cannot be cloned, serialized, or constructed
+/// outside this crate and is consumed by the app backend before the effect.
+pub struct NativeCredentialEffectConfirmation {
+    context: NativeCredentialEffectContext,
+    expires_at: Instant,
+}
+
+impl NativeCredentialEffectConfirmation {
+    const VALIDITY: Duration = Duration::from_secs(30);
+
+    pub(crate) fn new(context: NativeCredentialEffectContext) -> Self {
+        let issued_at = Instant::now();
+        let expires_at = issued_at.checked_add(Self::VALIDITY).unwrap_or(issued_at);
+        Self {
+            context,
+            expires_at,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn new_with_deadline_for_test(
+        context: NativeCredentialEffectContext,
+        expires_at: Instant,
+    ) -> Self {
+        Self {
+            context,
+            expires_at,
+        }
+    }
+
+    pub fn context(&self) -> &NativeCredentialEffectContext {
+        &self.context
+    }
+
+    /// Consumes this one-use receipt only when every backend-derived prompt
+    /// field still matches the state immediately preceding the native effect.
+    pub fn consume_exact(
+        self,
+        expected_effect: NativeCredentialEffect,
+        expected_target_id: &str,
+        expected_origin: &str,
+        expected_revision: &str,
+    ) -> crate::PlatformResult<()> {
+        if Instant::now() >= self.expires_at {
+            return Err(crate::PlatformError::new(
+                crate::PlatformErrorCode::PermissionDenied,
+            ));
+        }
+        if self.context.effect != expected_effect
+            || self.context.target_id != expected_target_id
+            || self.context.origin != expected_origin
+            || self.context.revision != expected_revision
+        {
+            return Err(crate::PlatformError::new(
+                crate::PlatformErrorCode::InvalidInput,
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// Non-secret authority expected inside one atomic native credential item.
@@ -308,6 +501,13 @@ pub(crate) struct MobileCredentialResponse {
 #[cfg(mobile)]
 pub(crate) struct MobileCredentialStatusResponse {
     pub status: CredentialStatus,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg(mobile)]
+pub(crate) struct MobileCredentialEffectConfirmationResponse {
+    pub approved: bool,
 }
 
 #[derive(Debug, Deserialize)]

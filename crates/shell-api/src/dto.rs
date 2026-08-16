@@ -128,6 +128,7 @@ impl From<CharacterGreetingCatalog> for CharacterGreetingCatalogDto {
 #[serde(rename_all = "snake_case")]
 pub enum ContentKindDto {
     CharacterCardV3,
+    CharacterCardPng,
     CharxPackage,
 }
 
@@ -135,6 +136,7 @@ impl From<ContentKind> for ContentKindDto {
     fn from(value: ContentKind) -> Self {
         match value {
             ContentKind::CharacterCardV3 => Self::CharacterCardV3,
+            ContentKind::CharacterCardPng => Self::CharacterCardPng,
             ContentKind::CharxPackage => Self::CharxPackage,
         }
     }

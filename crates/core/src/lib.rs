@@ -169,9 +169,10 @@ pub use orchestration_runtime::{
     GenerationAttemptProposalDecisionReceipt, GenerationAttemptProposalDecisionRequest,
     GenerationAttemptProposalExpiryReceipt, GenerationAttemptProposalView, InteractionEventReview,
     InteractionProposalDecisionReceipt, InteractionProposalDecisionRequest,
-    InteractionReviewRequest, InteractionRuleSetRevision, MemoryJobEnqueueReceipt,
-    MemoryJobExecutionResult, MemoryQueryEmbeddingRetryCandidate, MemoryRuntimeProvenance,
-    RuntimeTaskTargetRevision, RuntimeTransformRevision, TaskCredentialBroker,
+    InteractionReviewRequest, InteractionRuleSetRevision, InterruptedMemoryJob,
+    MemoryJobEnqueueReceipt, MemoryJobExecutionResult, MemoryQueryEmbeddingRetryCandidate,
+    MemoryRuntimeProvenance, RuntimeTaskTargetRevision, RuntimeTransformRevision,
+    TaskCredentialBroker,
 };
 pub use persona::{
     ConversationPersonaClearRequest, ConversationPersonaSelectionRequest, MAX_PERSONA_LIST_LIMIT,

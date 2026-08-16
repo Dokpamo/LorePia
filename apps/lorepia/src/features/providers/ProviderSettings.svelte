@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { setThemePreference, themePreference } from '../../lib/theme';
     import type { LorepiaAppController, LorepiaAppState } from '../../app/app-controller';
     import type {
         CredentialTargetDto,
@@ -180,6 +181,44 @@
     </header>
 
     <div class="provider-scroll">
+        <section class="settings-section" aria-labelledby="appearance-title">
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">Appearance</p>
+                    <h2 id="appearance-title">화면 모드</h2>
+                </div>
+            </div>
+            <p class="inline-note">
+                시스템을 고르면 운영체제 설정을 따라갑니다. 나머지는 이 앱에만 고정되며 다시 열어도
+                유지됩니다.
+            </p>
+            <div class="segmented theme-picker" role="group" aria-label="화면 모드 선택">
+                <button
+                    type="button"
+                    class:active={$themePreference === 'system'}
+                    aria-pressed={$themePreference === 'system'}
+                    onclick={() => setThemePreference('system')}
+                >
+                    시스템
+                </button>
+                <button
+                    type="button"
+                    class:active={$themePreference === 'light'}
+                    aria-pressed={$themePreference === 'light'}
+                    onclick={() => setThemePreference('light')}
+                >
+                    라이트
+                </button>
+                <button
+                    type="button"
+                    class:active={$themePreference === 'dark'}
+                    aria-pressed={$themePreference === 'dark'}
+                    onclick={() => setThemePreference('dark')}
+                >
+                    다크
+                </button>
+            </div>
+        </section>
         {#if personaState && personaController}
             <PersonaPanel
                 {personaState}
@@ -607,6 +646,10 @@
         font-size: 1.08rem;
     }
 
+    .theme-picker {
+        margin-top: 12px;
+    }
+
     .provider-state {
         margin: auto;
         padding: 32px;
@@ -632,7 +675,7 @@
     .compact-list > div {
         padding: 12px;
         border-radius: 12px;
-        background: var(--surface-muted);
+        background: var(--surface-sunken);
     }
 
     .target-form {
@@ -742,7 +785,7 @@
         padding: 5px 9px;
         border-radius: 999px;
         color: var(--ink-muted);
-        background: var(--surface-muted);
+        background: var(--surface-sunken);
         font-size: 0.7rem;
         font-weight: 800;
     }
@@ -772,7 +815,7 @@
         gap: 3px;
         padding: 10px;
         border-radius: 10px;
-        background: var(--surface-muted);
+        background: var(--surface-sunken);
     }
 
     .route-list span,

@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { t, tr } from '../../lib/i18n';
     import type { LorepiaAppState, LorepiaAppController } from '../../app/app-controller';
     import type {
         CharacterDto,
@@ -75,7 +76,7 @@
         if (exportingCharacterId !== null) return;
         const exportContentSource = client.exportContentSource;
         if (exportContentSource === undefined) {
-            exportError = '현재 Core가 안전한 콘텐츠 소스 내보내기 API를 제공하지 않습니다.';
+            exportError = t('library.export.unsupported');
             exportAnnouncement = exportError;
             return;
         }
@@ -90,17 +91,17 @@
             if (receipt === null) return;
             const projected = projectCharacterExportReceipt(receipt, character.id);
             if (projected === null) {
-                exportError = 'Core 내보내기 영수증이 선택한 캐릭터와 일치하지 않습니다.';
+                exportError = t('library.export.mismatch');
                 exportAnnouncement = exportError;
                 return;
             }
             exportReceipt = projected;
-            exportAnnouncement = `${projected.file_name} 파일로 캐릭터 소스를 내보냈습니다.`;
+            exportAnnouncement = t('library.export.success', { name: projected.file_name });
         } catch (error: unknown) {
             const normalized = normalizeClientError(error);
             exportError =
                 normalized.messageKey === 'error.unexpected'
-                    ? '캐릭터 소스를 내보내지 못했습니다.'
+                    ? t('library.export.error')
                     : normalized.messageKey;
             exportAnnouncement = exportError;
         } finally {
@@ -111,18 +112,15 @@
 
 <section class="pane library-pane" aria-labelledby="library-title">
     <header class="pane-header">
-        <div>
-            <p class="eyebrow">Local library</p>
-            <h1 id="library-title">서재</h1>
-        </div>
-        <button class="primary compact" type="button" onclick={() => void controller.beginImport()}>
-            가져오기
+        <h1 id="library-title" class="sr-only">{$tr('library.title')}</h1>
+        <button class="compact" type="button" onclick={() => void controller.beginImport()}>
+            {$tr('library.import')}
         </button>
     </header>
 
     <div class="export-status" aria-live="polite" aria-atomic="true">
         {#if exportingCharacterId !== null}
-            <p role="status">운영체제 저장 위치를 선택하고 있습니다.</p>
+            <p role="status">{$tr('library.export.picking')}</p>
         {/if}
         {#if exportError}
             <p class="state-panel error" role="alert">{exportError}</p>
@@ -132,31 +130,33 @@
         {/if}
         {#if exportReceipt}
             <article class="export-receipt" aria-labelledby="character-export-title">
-                <h2 id="character-export-title">최근 캐릭터 내보내기</h2>
-                <p>파일명 {exportReceipt.file_name}</p>
-                <p>크기 {exportReceipt.size_bytes}바이트</p>
+                <h2 id="character-export-title">{$tr('library.export.title')}</h2>
+                <p>{$tr('library.export.file', { name: exportReceipt.file_name })}</p>
+                <p>{$tr('library.export.size', { bytes: exportReceipt.size_bytes })}</p>
                 <p>SHA-256 <code>{exportReceipt.sha256}</code></p>
             </article>
         {/if}
     </div>
 
     {#if appState.library.phase === 'loading'}
-        <div class="state-panel" role="status">캐릭터를 불러오는 중입니다.</div>
+        <div class="state-panel" role="status">{$tr('library.loading')}</div>
     {:else if appState.library.phase === 'error'}
         <div class="state-panel error" role="alert">
             <p>{appState.library.error}</p>
-            <button type="button" onclick={() => void controller.loadLibrary()}>다시 시도</button>
+            <button type="button" onclick={() => void controller.loadLibrary()}
+                >{$tr('library.retry')}</button
+            >
         </div>
     {:else if appState.library.characters.length === 0}
         <div class="state-panel empty">
-            <strong>아직 캐릭터가 없습니다.</strong>
-            <p>로컬 CCv3 JSON 또는 CHARX 파일을 안전하게 검사한 뒤 추가할 수 있습니다.</p>
+            <strong>{$tr('library.empty.title')}</strong>
+            <p>{$tr('library.empty.hint')}</p>
             <button class="primary" type="button" onclick={() => void controller.beginImport()}>
-                첫 캐릭터 가져오기
+                {$tr('library.empty.import')}
             </button>
         </div>
     {:else}
-        <ul class="entity-list" aria-label="캐릭터 목록">
+        <ul class="entity-list" aria-label={$tr('library.list.label')}>
             {#each appState.library.characters as character (character.id)}
                 <li>
                     <div class="character-row">
@@ -178,23 +178,32 @@
                                             asset_id: character.avatar_asset_id,
                                         }}
                                         expectedKind="image"
-                                        alt={`${character.name.slice(0, 256)} 캐릭터 이미지`}
+                                        alt={$tr('library.character.image', {
+                                            name: character.name.slice(0, 256),
+                                        })}
                                     />
                                 {/if}
                             </span>
                             <span class="entity-copy">
                                 <strong>{character.name}</strong>
-                                <span>{character.description || '설명이 없습니다.'}</span>
+                                <span
+                                    >{character.description ||
+                                        $tr('library.description.empty')}</span
+                                >
                             </span>
                         </button>
                         <button
                             class="compact"
                             type="button"
-                            aria-label={`${character.name.slice(0, 256)} 캐릭터 소스 내보내기`}
+                            aria-label={$tr('library.export.label', {
+                                name: character.name.slice(0, 256),
+                            })}
                             disabled={exportingCharacterId !== null}
                             onclick={() => void exportCharacter(character)}
                         >
-                            {exportingCharacterId === character.id ? '내보내는 중…' : '내보내기'}
+                            {exportingCharacterId === character.id
+                                ? $tr('library.export.busy')
+                                : $tr('library.export')}
                         </button>
                     </div>
                 </li>
@@ -229,8 +238,29 @@
 
     .character-row {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) auto;
-        gap: 6px;
         align-items: center;
+        gap: 4px;
+        grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    /*
+     * Export is a rare, deliberate action. Keeping it hidden until the row is
+     * hovered or focused lets the list read as a roster of characters instead
+     * of a table of controls, without removing it from the tab order.
+     */
+    .character-row > :global(button:last-child) {
+        opacity: 0;
+        transition: opacity 120ms ease;
+    }
+
+    .character-row:hover > :global(button:last-child),
+    .character-row:focus-within > :global(button:last-child) {
+        opacity: 1;
+    }
+
+    @media (hover: none) {
+        .character-row > :global(button:last-child) {
+            opacity: 1;
+        }
     }
 </style>

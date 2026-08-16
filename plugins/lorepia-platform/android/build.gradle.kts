@@ -1,3 +1,5 @@
+import org.gradle.api.artifacts.dsl.LockMode
+
 plugins {
     id("com.android.library")
     id("org.jetbrains.kotlin.android")
@@ -19,6 +21,16 @@ android {
 
     kotlinOptions {
         jvmTarget = "17"
+    }
+}
+
+allprojects {
+    dependencyLocking {
+        lockAllConfigurations()
+        lockMode.set(LockMode.STRICT)
+        if (project.name == "tauri-android") {
+            lockFile.set(rootProject.layout.projectDirectory.file("tauri-android-gradle.lockfile"))
+        }
     }
 }
 

@@ -32,7 +32,7 @@ use crate::{
     AuthBindingDto, ConnectionConfigEntryDto, ParameterSpecDto, ProviderConnectionDto,
     ProviderCredentialAccessAuthorityContext, ProviderLocalNetworkApprovalDto,
     ProviderLocalNetworkApprovalInput, ProviderNetworkModeInput, RequestPreviewDto,
-    SecretCredential, SecretProviderCurl, ShellApi, ShellError, ShellResult,
+    SecretCredential, SecretProviderCurl, ShellApi, ShellError, ShellResult, TaskCredentialLease,
     api::validate_identifier,
 };
 
@@ -89,6 +89,9 @@ impl TryFrom<ProviderDiscoveryConnectionOptionsInput> for ProviderDiscoveryConne
                 .local_network_approval
                 .map(parse_local_network_approval)
                 .transpose()?,
+            // Issued only by Core at durable session creation; the WebView
+            // cannot choose or extend LAN authority lifetime.
+            local_network_approved_at: None,
         })
     }
 }
@@ -1214,6 +1217,7 @@ impl TryFrom<&ProviderDiscoveryCredentialInstallContextDto>
 pub struct ProviderDiscoveryCredentialLeaseContextDto {
     pub session_id: String,
     pub connection_id: String,
+    pub credential_api_origin: String,
     pub credential_origin_approval_id: String,
     pub credential_origin_grant_sha256: String,
     pub connection_binding_sha256: String,
@@ -1225,6 +1229,9 @@ pub struct ProviderDiscoveryCredentialAuthorityDto {
     pub native_execution_id: String,
     pub commit_attempt_id: String,
     pub connection_id: String,
+    pub credential_api_origin: String,
+    pub credential_origin_approval_id: String,
+    pub credential_origin_grant_sha256: String,
     pub connection_binding_sha256: String,
 }
 
@@ -1235,6 +1242,9 @@ impl From<ProviderDiscoveryCredentialAuthority> for ProviderDiscoveryCredentialA
             native_execution_id: value.native_execution_id,
             commit_attempt_id: value.commit_attempt_id.to_string(),
             connection_id: value.connection_id.0,
+            credential_api_origin: value.credential_api_origin.to_string(),
+            credential_origin_approval_id: value.credential_origin_approval_id.to_string(),
+            credential_origin_grant_sha256: value.credential_origin_grant_sha256,
             connection_binding_sha256: value.connection_binding_sha256,
         }
     }
@@ -1265,6 +1275,7 @@ impl From<ProviderDiscoveryCredentialLeaseContext> for ProviderDiscoveryCredenti
         Self {
             session_id: value.session_id.0,
             connection_id: value.connection_id.0,
+            credential_api_origin: value.credential_api_origin.to_string(),
             credential_origin_approval_id: value.credential_origin_approval_id.to_string(),
             credential_origin_grant_sha256: value.credential_origin_grant_sha256,
             connection_binding_sha256: value.connection_binding_sha256,
@@ -1642,6 +1653,28 @@ impl ShellApi {
         input: ContinueProviderDiscoveryInput,
         credential: Option<SecretCredential>,
     ) -> ShellResult<ProviderDiscoverySessionDto> {
+        let (_cancel, cancelled) = tokio::sync::watch::channel(false);
+        self.continue_provider_discovery_inner(input, credential, cancelled)
+    }
+
+    pub fn continue_provider_discovery_with_credential_dispatch(
+        &self,
+        input: ContinueProviderDiscoveryInput,
+        credential: SecretCredential,
+        dispatch_lease: TaskCredentialLease,
+        cancelled: tokio::sync::watch::Receiver<bool>,
+    ) -> ShellResult<ProviderDiscoverySessionDto> {
+        let result = self.continue_provider_discovery_inner(input, Some(credential), cancelled);
+        drop(dispatch_lease);
+        result
+    }
+
+    fn continue_provider_discovery_inner(
+        &self,
+        input: ContinueProviderDiscoveryInput,
+        credential: Option<SecretCredential>,
+        cancelled: tokio::sync::watch::Receiver<bool>,
+    ) -> ShellResult<ProviderDiscoverySessionDto> {
         let session_id = parse_session_id(&input.session_id)?;
         let action_id = DiscoveryActionId::parse(input.action_id)
             .map_err(|_| shell_invalid("action_id is invalid"))?;
@@ -1653,10 +1686,11 @@ impl ShellApi {
         .map_err(ShellError::from)?;
         let snapshot = self
             .core
-            .continue_provider_discovery(
+            .continue_provider_discovery_with_cancellation(
                 &session_id,
                 envelope,
                 credential.as_ref().map(SecretCredential::expose_to_core),
+                cancelled,
             )
             .map_err(ShellError::from)?;
         self.project_provider_discovery_session(snapshot)
@@ -2604,6 +2638,7 @@ mod tests {
             .expect("backend credential lease context");
         assert_eq!(context.session_id, approval.id);
         assert_eq!(context.connection_id, "shell-precommit-lease");
+        assert_eq!(context.credential_api_origin, "https://openrouter.ai");
         assert!(!context.credential_origin_approval_id.is_empty());
         assert_eq!(context.credential_origin_grant_sha256.len(), 64);
         assert_eq!(context.connection_binding_sha256.len(), 64);

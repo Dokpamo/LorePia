@@ -34,6 +34,7 @@ const MAX_MEMORY_EMBEDDING_DIMENSIONS: usize = 32_768;
 const MAX_MEMORY_EMBEDDING_CANDIDATES: u32 = 2_048;
 const MAX_MEMORY_EMBEDDING_QUERY_BYTES: usize = 16 * 1024 * 1024;
 const MAX_VISIBLE_MEMORY_SUMMARY_JOBS: usize = 100_000;
+const MAX_INTERRUPTED_MEMORY_JOB_PAGE: u32 = 256;
 
 /// Immutable inputs used to enqueue one durable memory job.
 ///
@@ -313,6 +314,13 @@ struct UserMemoryRecordState {
     excluded_from_character_at: Option<DateTime<Utc>>,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct OwnedMemoryRecordTarget<'a> {
+    conversation_id: &'a ConversationId,
+    branch_id: &'a ConversationBranchId,
+    id: &'a MemoryRecordId,
+}
+
 #[derive(Debug)]
 struct RawUserMemoryRecordState {
     conversation_id: String,
@@ -498,6 +506,48 @@ impl Storage {
         Ok(recovered)
     }
 
+    /// Lists interrupted jobs for one branch so a user can review and retry
+    /// them explicitly.  Interrupted jobs are never requeued automatically, so
+    /// without this read they stay durably invisible to the shell.
+    pub fn list_interrupted_memory_jobs(
+        &self,
+        conversation_id: &ConversationId,
+        branch_id: &ConversationBranchId,
+        limit: u32,
+    ) -> CoreResult<Vec<StoredMemoryJobQueueEntry>> {
+        if limit == 0 || limit > MAX_INTERRUPTED_MEMORY_JOB_PAGE {
+            return Err(CoreError::invalid(
+                "interrupted memory job list limit must be between 1 and 256",
+            ));
+        }
+        let connection = self.connection()?;
+        let ids = {
+            let mut statement = connection
+                .prepare(
+                    "SELECT id FROM memory_jobs
+                     WHERE conversation_id = ?1 AND branch_id = ?2
+                       AND state = 'interrupted'
+                     ORDER BY updated_at DESC, id
+                     LIMIT ?3",
+                )
+                .map_err(storage_db_error)?;
+            statement
+                .query_map(
+                    params![conversation_id.0, branch_id.0, i64::from(limit)],
+                    |row| row.get::<_, String>(0),
+                )
+                .map_err(storage_db_error)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(storage_db_error)?
+        };
+        ids.iter()
+            .map(|id| {
+                load_queue_entry(&connection, id)?
+                    .ok_or_else(|| corrupted("listed interrupted memory job is missing"))
+            })
+            .collect()
+    }
+
     /// Records an ambiguous running-job outcome without treating it as a
     /// provider failure or retrying it.  Timeouts and network disconnects
     /// after request dispatch should use this transition.
@@ -567,16 +617,21 @@ impl Storage {
     /// Explicitly requeues one interrupted job under compare-and-swap.
     pub fn retry_interrupted_memory_job(
         &self,
+        conversation_id: &ConversationId,
+        branch_id: &ConversationBranchId,
         id: &MemoryJobId,
         expected_revision: u64,
         available_at: DateTime<Utc>,
         retried_at: DateTime<Utc>,
     ) -> CoreResult<StoredMemoryJobQueueEntry> {
+        validate_identifier("conversation", &conversation_id.0)?;
+        validate_identifier("conversation branch", &branch_id.0)?;
         validate_identifier("memory job", id.as_str())?;
         let mut connection = self.connection()?;
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage_db_error)?;
+        ensure_memory_job_owner(&transaction, conversation_id, branch_id, id)?;
         let mut entry =
             load_queue_entry(&transaction, id.as_str())?.ok_or_else(|| not_found("memory job"))?;
         ensure_expected_revision(&entry, expected_revision)?;
@@ -607,13 +662,16 @@ impl Storage {
                      available_at = ?3, started_at = NULL, finished_at = NULL,
                      result_record_id = NULL, failure_json = NULL,
                      payload_json = ?4, updated_at = ?5
-                 WHERE id = ?1 AND state = 'interrupted' AND revision = ?2",
+                 WHERE id = ?1 AND state = 'interrupted' AND revision = ?2
+                   AND conversation_id = ?6 AND branch_id = ?7",
                 params![
                     id.as_str(),
                     i64_revision(expected_revision)?,
                     available_at.to_rfc3339(),
                     payload_json,
                     retried_at.to_rfc3339(),
+                    conversation_id.0,
+                    branch_id.0,
                 ],
             )
             .map_err(storage_db_error)?;
@@ -928,11 +986,15 @@ impl Storage {
     /// job cancellation, and audit event commit in one immediate transaction.
     pub fn patch_memory_record_user_fields(
         &self,
+        conversation_id: &ConversationId,
+        branch_id: &ConversationBranchId,
         id: &MemoryRecordId,
         expected_revision: u64,
         patch: &MemoryRecordUserPatch,
         updated_at: DateTime<Utc>,
     ) -> CoreResult<StoredRevision<MemoryRecord>> {
+        validate_identifier("conversation", &conversation_id.0)?;
+        validate_identifier("conversation branch", &branch_id.0)?;
         validate_identifier("memory record", id.as_str())?;
         let mut connection = self.connection()?;
         let transaction = connection
@@ -940,6 +1002,8 @@ impl Storage {
             .map_err(storage_db_error)?;
         let stored = patch_memory_record_user_fields_in_transaction(
             &transaction,
+            conversation_id,
+            branch_id,
             id,
             expected_revision,
             patch,
@@ -952,13 +1016,17 @@ impl Storage {
     /// Sets exactly one room- or character-level exclusion flag.
     pub fn set_memory_record_exclusion(
         &self,
+        conversation_id: &ConversationId,
+        branch_id: &ConversationBranchId,
         id: &MemoryRecordId,
         expected_revision: u64,
-        scope: MemoryRecordExclusionScope,
-        excluded: bool,
+        exclusion: (MemoryRecordExclusionScope, bool),
         updated_at: DateTime<Utc>,
     ) -> CoreResult<StoredRevision<MemoryRecord>> {
+        validate_identifier("conversation", &conversation_id.0)?;
+        validate_identifier("conversation branch", &branch_id.0)?;
         validate_identifier("memory record", id.as_str())?;
+        let (scope, excluded) = exclusion;
         let patch = match scope {
             MemoryRecordExclusionScope::Conversation => MemoryRecordUserPatch {
                 excluded_from_conversation: Some(excluded),
@@ -975,6 +1043,8 @@ impl Storage {
             .map_err(storage_db_error)?;
         let stored = patch_memory_record_user_fields_in_transaction(
             &transaction,
+            conversation_id,
+            branch_id,
             id,
             expected_revision,
             &patch,
@@ -987,15 +1057,20 @@ impl Storage {
     /// Tombstones a memory record without deleting immutable content history.
     pub fn delete_memory_record_tombstone(
         &self,
+        conversation_id: &ConversationId,
+        branch_id: &ConversationBranchId,
         id: &MemoryRecordId,
         expected_revision: u64,
         deleted_at: DateTime<Utc>,
     ) -> CoreResult<StoredRevision<MemoryRecord>> {
+        validate_identifier("conversation", &conversation_id.0)?;
+        validate_identifier("conversation branch", &branch_id.0)?;
         validate_identifier("memory record", id.as_str())?;
         let mut connection = self.connection()?;
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage_db_error)?;
+        ensure_memory_record_owner(&transaction, conversation_id, branch_id, id)?;
         let current = load_user_memory_record_state(&transaction, id)?;
         ensure_memory_record_expected_revision(&current, id, expected_revision)?;
         if current.stored.deleted_at.is_some() {
@@ -1012,12 +1087,20 @@ impl Storage {
                 "UPDATE memory_record_state
                  SET state_version = ?2, updated_at = ?3, deleted_at = ?3
                  WHERE record_id = ?1 AND state_version = ?4
-                   AND deleted_at IS NULL",
+                   AND deleted_at IS NULL
+                   AND EXISTS (
+                       SELECT 1 FROM memory_records AS record
+                       WHERE record.id = memory_record_state.record_id
+                         AND record.conversation_id = ?5
+                         AND record.branch_id = ?6
+                   )",
                 params![
                     id.as_str(),
                     i64_revision(next_revision)?,
                     deleted_at.to_rfc3339(),
                     i64_revision(expected_revision)?,
+                    conversation_id.0,
+                    branch_id.0,
                 ],
             )
             .map_err(storage_db_error)?;
@@ -2729,7 +2812,7 @@ fn insert_user_memory_record_revision(
 
 fn update_user_memory_record_state(
     connection: &Connection,
-    id: &MemoryRecordId,
+    target: OwnedMemoryRecordTarget<'_>,
     current: &UserMemoryRecordState,
     value: &MemoryRecord,
     revision_id: &str,
@@ -2756,9 +2839,15 @@ fn update_user_memory_record_state(
                  excluded_from_character_at = ?5,
                  state_version = ?6, updated_at = ?7
              WHERE record_id = ?1 AND state_version = ?8
-               AND deleted_at IS NULL",
+               AND deleted_at IS NULL
+               AND EXISTS (
+                   SELECT 1 FROM memory_records AS record
+                   WHERE record.id = memory_record_state.record_id
+                     AND record.conversation_id = ?9
+                     AND record.branch_id = ?10
+               )",
             params![
-                id.as_str(),
+                target.id.as_str(),
                 revision_id,
                 value.pinned,
                 excluded_from_conversation_at.map(|time| time.to_rfc3339()),
@@ -2766,10 +2855,12 @@ fn update_user_memory_record_state(
                 i64_revision(next_state_revision)?,
                 updated_at.to_rfc3339(),
                 i64_revision(current.stored.revision)?,
+                target.conversation_id.0,
+                target.branch_id.0,
             ],
         )
         .map_err(storage_db_error)?;
-    ensure_memory_record_cas(changed, id, current.stored.revision)?;
+    ensure_memory_record_cas(changed, target.id, current.stored.revision)?;
     let previous_revision_id = current
         .stored
         .revision_id
@@ -2780,11 +2871,14 @@ fn update_user_memory_record_state(
 
 fn patch_memory_record_user_fields_in_transaction(
     connection: &Connection,
+    conversation_id: &ConversationId,
+    branch_id: &ConversationBranchId,
     id: &MemoryRecordId,
     expected_revision: u64,
     patch: &MemoryRecordUserPatch,
     updated_at: DateTime<Utc>,
 ) -> CoreResult<StoredRevision<MemoryRecord>> {
+    ensure_memory_record_owner(connection, conversation_id, branch_id, id)?;
     let current = load_user_memory_record_state(connection, id)?;
     ensure_memory_record_expected_revision(&current, id, expected_revision)?;
     if current.stored.deleted_at.is_some() {
@@ -2807,7 +2901,11 @@ fn patch_memory_record_user_fields_in_transaction(
     insert_user_memory_record_revision(connection, id, &current, &value, &revision_id, updated_at)?;
     let cancelled_embedding_jobs = update_user_memory_record_state(
         connection,
-        id,
+        OwnedMemoryRecordTarget {
+            conversation_id,
+            branch_id,
+            id,
+        },
         &current,
         &value,
         &revision_id,
@@ -3236,6 +3334,52 @@ fn load_queue_entry(
         .optional()
         .map_err(storage_db_error)?;
     row.map(|row| decode_queue_row(connection, row)).transpose()
+}
+
+fn ensure_memory_job_owner(
+    connection: &Connection,
+    conversation_id: &ConversationId,
+    branch_id: &ConversationBranchId,
+    id: &MemoryJobId,
+) -> CoreResult<()> {
+    let owned = connection
+        .query_row(
+            "SELECT EXISTS(
+                 SELECT 1 FROM memory_jobs
+                 WHERE id = ?1 AND conversation_id = ?2 AND branch_id = ?3
+             )",
+            params![id.as_str(), conversation_id.0, branch_id.0],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(storage_db_error)?;
+    if owned {
+        Ok(())
+    } else {
+        Err(not_found("memory job"))
+    }
+}
+
+fn ensure_memory_record_owner(
+    connection: &Connection,
+    conversation_id: &ConversationId,
+    branch_id: &ConversationBranchId,
+    id: &MemoryRecordId,
+) -> CoreResult<()> {
+    let owned = connection
+        .query_row(
+            "SELECT EXISTS(
+                 SELECT 1 FROM memory_records
+                 WHERE id = ?1 AND conversation_id = ?2 AND branch_id = ?3
+             )",
+            params![id.as_str(), conversation_id.0, branch_id.0],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(storage_db_error)?;
+    if owned {
+        Ok(())
+    } else {
+        Err(not_found("memory record"))
+    }
 }
 
 fn decode_queue_row(
@@ -4538,6 +4682,8 @@ mod tests {
         let retried = fixture
             .storage
             .retry_interrupted_memory_job(
+                &fixture.conversation_id,
+                &fixture.branch_id,
                 &second_claim.job.id,
                 recovered[0].revision,
                 now + Duration::seconds(122),
@@ -4551,6 +4697,87 @@ mod tests {
             .expect("retry claim")
             .expect("retried eligible job");
         assert_eq!(retried_claim.job.attempt, 2);
+    }
+
+    #[test]
+    fn explicit_memory_job_retry_denies_cross_room_owner() {
+        let fixture = queue_fixture();
+        let now = Utc::now() + Duration::seconds(10);
+        let input = enqueue_input(&fixture, "cross-room-retry", now);
+        fixture
+            .storage
+            .enqueue_memory_job_idempotent(&input)
+            .expect("enqueue retry fixture");
+        let claimed = fixture
+            .storage
+            .claim_next_memory_job(now)
+            .expect("claim retry fixture")
+            .expect("eligible retry fixture");
+        let interrupted = fixture
+            .storage
+            .interrupt_memory_job(
+                &claimed.job.id,
+                claimed.revision,
+                Some("provider_unknown_outcome"),
+                now + Duration::seconds(1),
+            )
+            .expect("interrupt retry fixture");
+        let foreign_conversation = ConversationId("conversation:foreign".to_owned());
+        let foreign_branch = ConversationBranchId("branch:foreign".to_owned());
+        for (conversation_id, branch_id, mismatch) in [
+            (&foreign_conversation, &fixture.branch_id, "conversation"),
+            (&fixture.conversation_id, &foreign_branch, "branch"),
+        ] {
+            let error = fixture
+                .storage
+                .retry_interrupted_memory_job(
+                    conversation_id,
+                    branch_id,
+                    &claimed.job.id,
+                    interrupted.revision,
+                    now + Duration::seconds(2),
+                    now + Duration::seconds(2),
+                )
+                .unwrap_err();
+            assert_eq!(error.code, CoreErrorCode::NotFound, "{mismatch} mismatch");
+        }
+        let unchanged = fixture
+            .storage
+            .get_memory_job_queue_entry(&claimed.job.id)
+            .expect("load denied retry");
+        assert_eq!(unchanged.revision, interrupted.revision);
+        assert_eq!(unchanged.job.status, MemoryJobStatus::Interrupted);
+
+        let retried = fixture
+            .storage
+            .retry_interrupted_memory_job(
+                &fixture.conversation_id,
+                &fixture.branch_id,
+                &claimed.job.id,
+                interrupted.revision,
+                now + Duration::seconds(2),
+                now + Duration::seconds(2),
+            )
+            .expect("owner-bound retry");
+        let replay = fixture
+            .storage
+            .retry_interrupted_memory_job(
+                &fixture.conversation_id,
+                &fixture.branch_id,
+                &claimed.job.id,
+                interrupted.revision,
+                now + Duration::seconds(2),
+                now + Duration::seconds(2),
+            )
+            .expect_err("stale retry replay must fail");
+        assert_eq!(replay.code, CoreErrorCode::InvalidInput);
+        assert_eq!(
+            fixture
+                .storage
+                .get_memory_job_queue_entry(&claimed.job.id)
+                .expect("load single retry"),
+            retried
+        );
     }
 
     #[test]
@@ -4615,6 +4842,8 @@ mod tests {
         let requeued = fixture
             .storage
             .retry_interrupted_memory_job(
+                &fixture.conversation_id,
+                &fixture.branch_id,
                 &claimed.job.id,
                 interrupted[0].revision,
                 now + Duration::seconds(61),
@@ -4773,7 +5002,12 @@ mod tests {
                 .status,
             MemoryJobStatus::Running
         );
-        assert!(fixture.storage.get_memory_record(&record.id).is_err());
+        assert!(
+            fixture
+                .storage
+                .get_memory_record(&fixture.conversation_id, &fixture.branch_id, &record.id,)
+                .is_err()
+        );
         assert!(
             fixture
                 .storage
@@ -4865,7 +5099,13 @@ mod tests {
 
         fixture
             .storage
-            .delete_memory_record_tombstone(&record.id, completed.record.revision, finished_at)
+            .delete_memory_record_tombstone(
+                &fixture.conversation_id,
+                &fixture.branch_id,
+                &record.id,
+                completed.record.revision,
+                finished_at,
+            )
             .expect("user summary tombstone");
         let covered_after_tombstone = fixture
             .storage
@@ -5162,6 +5402,8 @@ mod tests {
         let requeued = fixture
             .storage
             .retry_interrupted_memory_query_embedding(
+                &fixture.conversation_id,
+                &fixture.branch_id,
                 &intent.id,
                 interrupted.revision,
                 now + Duration::seconds(2),
@@ -5195,6 +5437,85 @@ mod tests {
             .expect("completed exact replay");
         assert!(replay.exact_replay);
         assert_eq!(replay.entry, completed);
+    }
+
+    #[test]
+    fn query_embedding_retry_denies_cross_room_owner() {
+        use crate::MemoryQueryEmbeddingStatus;
+
+        let fixture = queue_fixture();
+        let now = Utc::now() + Duration::seconds(10);
+        let intent = memory_query_embedding_intent(&fixture, now);
+        let queued = fixture
+            .storage
+            .enqueue_memory_query_embedding(&intent)
+            .expect("enqueue query retry fixture");
+        let running = fixture
+            .storage
+            .claim_memory_query_embedding(&intent.id, queued.entry.revision, now)
+            .expect("claim query retry fixture");
+        let interrupted = fixture
+            .storage
+            .interrupt_memory_query_embedding(
+                &intent.id,
+                running.revision,
+                "provider_unknown_outcome",
+                now + Duration::seconds(1),
+            )
+            .expect("interrupt query retry fixture");
+        let foreign_conversation = ConversationId("conversation:foreign".to_owned());
+        let foreign_branch = ConversationBranchId("branch:foreign".to_owned());
+        for (conversation_id, branch_id, mismatch) in [
+            (&foreign_conversation, &fixture.branch_id, "conversation"),
+            (&fixture.conversation_id, &foreign_branch, "branch"),
+        ] {
+            let error = fixture
+                .storage
+                .retry_memory_query_embedding(
+                    conversation_id,
+                    branch_id,
+                    &intent.id,
+                    interrupted.revision,
+                    now + Duration::seconds(2),
+                )
+                .unwrap_err();
+            assert_eq!(error.code, CoreErrorCode::NotFound, "{mismatch} mismatch");
+        }
+        let unchanged = fixture
+            .storage
+            .get_memory_query_embedding(&intent.id)
+            .expect("load denied query retry");
+        assert_eq!(unchanged.revision, interrupted.revision);
+        assert_eq!(unchanged.status, MemoryQueryEmbeddingStatus::Interrupted);
+
+        let retried = fixture
+            .storage
+            .retry_memory_query_embedding(
+                &fixture.conversation_id,
+                &fixture.branch_id,
+                &intent.id,
+                interrupted.revision,
+                now + Duration::seconds(2),
+            )
+            .expect("owner-bound query retry");
+        let replay = fixture
+            .storage
+            .retry_memory_query_embedding(
+                &fixture.conversation_id,
+                &fixture.branch_id,
+                &intent.id,
+                interrupted.revision,
+                now + Duration::seconds(2),
+            )
+            .expect_err("stale query retry replay must fail");
+        assert_eq!(replay.code, CoreErrorCode::StorageUnavailable);
+        assert_eq!(
+            fixture
+                .storage
+                .get_memory_query_embedding(&intent.id)
+                .expect("load single query retry"),
+            retried
+        );
     }
 
     struct RewindMemoryCase {
@@ -5270,7 +5591,11 @@ mod tests {
         assert!(
             fixture
                 .storage
-                .get_memory_record(&case.record.id)
+                .get_memory_record(
+                    &fixture.conversation_id,
+                    &fixture.branch_id,
+                    &case.record.id,
+                )
                 .expect("record after failed rewind")
                 .value
                 .invalidated_at
@@ -5310,7 +5635,11 @@ mod tests {
         );
         let invalidated_record = fixture
             .storage
-            .get_memory_record(&case.record.id)
+            .get_memory_record(
+                &fixture.conversation_id,
+                &fixture.branch_id,
+                &case.record.id,
+            )
             .expect("invalidated record");
         assert!(invalidated_record.value.invalidated_at.is_some());
         let cancelled_running = fixture
@@ -5369,6 +5698,8 @@ mod tests {
         let patched = fixture
             .storage
             .patch_memory_record_user_fields(
+                &fixture.conversation_id,
+                &fixture.branch_id,
                 &original.id,
                 completed_revision,
                 &MemoryRecordUserPatch {
@@ -5414,6 +5745,8 @@ mod tests {
             fixture
                 .storage
                 .patch_memory_record_user_fields(
+                    &fixture.conversation_id,
+                    &fixture.branch_id,
                     &original.id,
                     stale_revision,
                     &MemoryRecordUserPatch {
@@ -5429,6 +5762,8 @@ mod tests {
             fixture
                 .storage
                 .patch_memory_record_user_fields(
+                    &fixture.conversation_id,
+                    &fixture.branch_id,
                     &original.id,
                     current_revision,
                     &MemoryRecordUserPatch::default(),
@@ -5457,16 +5792,17 @@ mod tests {
         assert_eq!(invalidated.invalidated_records, 1);
         let invalidated_revision = fixture
             .storage
-            .get_memory_record(&original.id)
+            .get_memory_record(&fixture.conversation_id, &fixture.branch_id, &original.id)
             .expect("invalidated record");
         assert_eq!(invalidated_revision.revision, 3);
         let excluded_conversation = fixture
             .storage
             .set_memory_record_exclusion(
+                &fixture.conversation_id,
+                &fixture.branch_id,
                 &original.id,
                 invalidated_revision.revision,
-                MemoryRecordExclusionScope::Conversation,
-                true,
+                (MemoryRecordExclusionScope::Conversation, true),
                 now + Duration::seconds(4),
             )
             .expect("conversation exclusion");
@@ -5475,10 +5811,11 @@ mod tests {
         let excluded_character = fixture
             .storage
             .set_memory_record_exclusion(
+                &fixture.conversation_id,
+                &fixture.branch_id,
                 &original.id,
                 excluded_conversation.revision,
-                MemoryRecordExclusionScope::Character,
-                true,
+                (MemoryRecordExclusionScope::Character, true),
                 now + Duration::seconds(5),
             )
             .expect("character exclusion");
@@ -5486,10 +5823,11 @@ mod tests {
         let restored = fixture
             .storage
             .set_memory_record_exclusion(
+                &fixture.conversation_id,
+                &fixture.branch_id,
                 &original.id,
                 excluded_character.revision,
-                MemoryRecordExclusionScope::Conversation,
-                false,
+                (MemoryRecordExclusionScope::Conversation, false),
                 now + Duration::seconds(6),
             )
             .expect("conversation inclusion");
@@ -5508,6 +5846,8 @@ mod tests {
         let deleted = fixture
             .storage
             .delete_memory_record_tombstone(
+                &fixture.conversation_id,
+                &fixture.branch_id,
                 &original.id,
                 expected_revision,
                 now + Duration::seconds(7),
@@ -5515,7 +5855,12 @@ mod tests {
             .expect("tombstone");
         assert_eq!(deleted.revision, 7);
         assert_eq!(deleted.deleted_at, Some(now + Duration::seconds(7)));
-        assert!(fixture.storage.get_memory_record(&original.id).is_err());
+        assert!(
+            fixture
+                .storage
+                .get_memory_record(&fixture.conversation_id, &fixture.branch_id, &original.id,)
+                .is_err()
+        );
         let audit = fixture
             .storage
             .connection()
@@ -5560,5 +5905,206 @@ mod tests {
         );
         let restored = invalidate_and_exclude_user_memory_record(&fixture, &original, now);
         tombstone_and_assert_user_memory_audit(&fixture, &original, restored.revision, now);
+    }
+
+    fn assert_memory_record_owner_mismatch(
+        fixture: &QueueFixture,
+        original: &MemoryRecord,
+        completed_revision: u64,
+        now: DateTime<Utc>,
+        conversation_id: &ConversationId,
+        branch_id: &ConversationBranchId,
+        mismatch: &str,
+    ) {
+        let get_error = fixture
+            .storage
+            .get_memory_record(conversation_id, branch_id, &original.id)
+            .unwrap_err();
+        assert_eq!(get_error.code, CoreErrorCode::NotFound, "{mismatch} get");
+
+        let patch_error = fixture
+            .storage
+            .patch_memory_record_user_fields(
+                conversation_id,
+                branch_id,
+                &original.id,
+                completed_revision,
+                &MemoryRecordUserPatch {
+                    title: Some("foreign overwrite".to_owned()),
+                    ..MemoryRecordUserPatch::default()
+                },
+                now + Duration::seconds(2),
+            )
+            .unwrap_err();
+        assert_eq!(
+            patch_error.code,
+            CoreErrorCode::NotFound,
+            "{mismatch} patch"
+        );
+
+        let exclusion_error = fixture
+            .storage
+            .set_memory_record_exclusion(
+                conversation_id,
+                branch_id,
+                &original.id,
+                completed_revision,
+                (MemoryRecordExclusionScope::Conversation, true),
+                now + Duration::seconds(2),
+            )
+            .unwrap_err();
+        assert_eq!(
+            exclusion_error.code,
+            CoreErrorCode::NotFound,
+            "{mismatch} exclusion"
+        );
+
+        let delete_error = fixture
+            .storage
+            .delete_memory_record_tombstone(
+                conversation_id,
+                branch_id,
+                &original.id,
+                completed_revision,
+                now + Duration::seconds(2),
+            )
+            .unwrap_err();
+        assert_eq!(
+            delete_error.code,
+            CoreErrorCode::NotFound,
+            "{mismatch} delete"
+        );
+    }
+
+    #[test]
+    fn memory_record_controls_deny_cross_room_owner() {
+        let fixture = queue_fixture();
+        let now = Utc::now() - Duration::seconds(30);
+        let (original, completed) = prepare_user_memory_record(&fixture, now);
+        let foreign_conversation = ConversationId("conversation:foreign".to_owned());
+        let foreign_branch = ConversationBranchId("branch:foreign".to_owned());
+        for (conversation_id, branch_id, mismatch) in [
+            (&foreign_conversation, &fixture.branch_id, "conversation"),
+            (&fixture.conversation_id, &foreign_branch, "branch"),
+        ] {
+            assert_memory_record_owner_mismatch(
+                &fixture,
+                &original,
+                completed.revision,
+                now,
+                conversation_id,
+                branch_id,
+                mismatch,
+            );
+        }
+
+        let unchanged = fixture
+            .storage
+            .get_memory_record(&fixture.conversation_id, &fixture.branch_id, &original.id)
+            .expect("load denied record operations");
+        assert_eq!(unchanged, completed);
+
+        let patched = fixture
+            .storage
+            .patch_memory_record_user_fields(
+                &fixture.conversation_id,
+                &fixture.branch_id,
+                &original.id,
+                completed.revision,
+                &MemoryRecordUserPatch {
+                    title: Some("single accepted overwrite".to_owned()),
+                    ..MemoryRecordUserPatch::default()
+                },
+                now + Duration::seconds(2),
+            )
+            .expect("owner-bound patch");
+        let replay = fixture
+            .storage
+            .patch_memory_record_user_fields(
+                &fixture.conversation_id,
+                &fixture.branch_id,
+                &original.id,
+                completed.revision,
+                &MemoryRecordUserPatch {
+                    title: Some("replayed overwrite".to_owned()),
+                    ..MemoryRecordUserPatch::default()
+                },
+                now + Duration::seconds(2),
+            )
+            .expect_err("stale record patch replay must fail");
+        assert_eq!(replay.code, CoreErrorCode::InvalidInput);
+        assert_eq!(
+            fixture
+                .storage
+                .get_memory_record(&fixture.conversation_id, &fixture.branch_id, &original.id)
+                .expect("load single patch"),
+            patched
+        );
+    }
+
+    #[test]
+    fn descendant_listing_preserves_ancestor_record_owner_for_mutation() {
+        let fixture = queue_fixture();
+        let now = Utc::now() - Duration::seconds(30);
+        let (original, completed) = prepare_user_memory_record(&fixture, now);
+        let descendant_id = ConversationBranchId("branch:memory-descendant".to_owned());
+        fixture
+            .storage
+            .connection()
+            .expect("descendant branch fixture connection")
+            .execute(
+                "INSERT INTO conversation_branches
+                 (id, conversation_id, title, fork_message_id, head_message_id,
+                  created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?4, ?5, ?5)",
+                params![
+                    descendant_id.0,
+                    fixture.conversation_id.0,
+                    "descendant memory view",
+                    fixture.source_end_message_id.0,
+                    now.to_rfc3339(),
+                ],
+            )
+            .expect("insert descendant branch topology");
+
+        let visible = fixture
+            .storage
+            .list_memory_records(&fixture.conversation_id, &descendant_id, false)
+            .expect("list descendant-visible memory");
+        assert_eq!(visible.len(), 1);
+        assert_eq!(visible[0].value.id, original.id);
+        assert_eq!(visible[0].value.branch_id, fixture.branch_id);
+
+        let descendant_owner = fixture
+            .storage
+            .patch_memory_record_user_fields(
+                &fixture.conversation_id,
+                &descendant_id,
+                &original.id,
+                completed.revision,
+                &MemoryRecordUserPatch {
+                    pinned: Some(true),
+                    ..MemoryRecordUserPatch::default()
+                },
+                now + Duration::seconds(2),
+            )
+            .expect_err("descendant visibility must not rewrite persisted ownership");
+        assert_eq!(descendant_owner.code, CoreErrorCode::NotFound);
+
+        let updated = fixture
+            .storage
+            .patch_memory_record_user_fields(
+                &fixture.conversation_id,
+                &fixture.branch_id,
+                &original.id,
+                completed.revision,
+                &MemoryRecordUserPatch {
+                    pinned: Some(true),
+                    ..MemoryRecordUserPatch::default()
+                },
+                now + Duration::seconds(2),
+            )
+            .expect("persisted ancestor owner may mutate visible memory");
+        assert!(updated.value.pinned);
     }
 }

@@ -1,4 +1,5 @@
 import java.util.Properties
+import org.gradle.api.artifacts.dsl.LockMode
 
 plugins {
     id("com.android.application")
@@ -55,6 +56,11 @@ android {
 
 rust {
     rootDirRel = "../../../"
+}
+
+dependencyLocking {
+    lockAllConfigurations()
+    lockMode.set(LockMode.STRICT)
 }
 
 dependencies {

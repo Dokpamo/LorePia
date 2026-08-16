@@ -1,5 +1,6 @@
 import { get, writable, type Readable } from 'svelte/store';
 
+import { t } from '../../lib/i18n';
 import { normalizeClientError } from '../../lib/ipc/errors';
 import type {
     ApplyContentModuleRollbackInput,
@@ -120,14 +121,14 @@ function errorLabel(error: unknown): string {
     const normalized = normalizeClientError(error);
     switch (normalized.code) {
         case 'invalid_input':
-            return '검토한 모듈·바인딩·패키지 승인 상태가 변경되었습니다. 최신 상태를 다시 검토해 주세요.';
+            return t('module_lifecycle.error.conflict');
         case 'not_found':
-            return '콘텐츠 모듈, 바인딩 또는 불변 리비전을 찾을 수 없습니다.';
+            return t('module_lifecycle.error.not_found');
         case 'permission_denied':
-            return '이 콘텐츠 모듈은 현재 범위에서 로컬 활성화할 수 없습니다.';
+            return t('module_lifecycle.error.out_of_scope');
         default:
             return normalized.messageKey === 'error.unexpected'
-                ? '콘텐츠 모듈 수명주기 작업을 완료하지 못했습니다.'
+                ? t('module_lifecycle.error.generic')
                 : normalized.messageKey;
     }
 }
@@ -331,8 +332,7 @@ export class ContentModuleLifecycleController {
     constructor(private readonly client: Partial<ContentModuleLifecycleClientApi>) {
         this.available = hasLifecycleApi(client);
         if (!this.available) {
-            const message =
-                '현재 Core가 해시로 고정된 콘텐츠 모듈 활성화·롤백 API(비활성화 포함)를 제공하지 않습니다.';
+            const message = t('module_lifecycle.error.unsupported');
             this.mutable.set({
                 ...structuredClone(INITIAL_CONTENT_MODULE_LIFECYCLE_STATE),
                 phase: 'unavailable',
@@ -380,9 +380,7 @@ export class ContentModuleLifecycleController {
             this.mutable.set({
                 ...structuredClone(INITIAL_CONTENT_MODULE_LIFECYCLE_STATE),
                 phase: this.available ? 'idle' : 'unavailable',
-                error: this.available
-                    ? null
-                    : '현재 Core가 해시로 고정된 콘텐츠 모듈 활성화·롤백 API(비활성화 포함)를 제공하지 않습니다.',
+                error: this.available ? null : t('module_lifecycle.error.unsupported'),
             });
             return false;
         }
@@ -416,9 +414,7 @@ export class ContentModuleLifecycleController {
                 candidates.items.length > MAX_VISIBLE_LIFECYCLE_ITEMS ||
                 bindings.items.length > MAX_VISIBLE_LIFECYCLE_ITEMS
             ) {
-                return this.failInvariant(
-                    'Core의 콘텐츠 모듈 목록이 화면의 안전한 표시 한도를 초과했습니다.',
-                );
+                return this.failInvariant(t('module_lifecycle.error.list_limit'));
             }
             this.mutable.set({
                 phase: 'ready',
@@ -432,7 +428,7 @@ export class ContentModuleLifecycleController {
                 rollback: null,
                 deactivation: null,
                 error: null,
-                announcement: '콘텐츠 모듈 후보와 활성 바인딩을 다시 불러왔습니다.',
+                announcement: t('module_lifecycle.notice.reloaded'),
             });
             return true;
         } catch (error: unknown) {
@@ -490,17 +486,13 @@ export class ContentModuleLifecycleController {
             existingBinding !== null &&
             existingBinding.binding.binding.module_id !== candidate.module_id
         ) {
-            return this.failInvariant('선택한 바인딩과 모듈 후보가 일치하지 않습니다.');
+            return this.failInvariant(t('module_lifecycle.error.binding_mismatch'));
         }
         if (candidate.source_kind === 'application_built_in') {
-            return this.failInvariant(
-                '앱 내장 모듈은 제품 정책에 따라 사용자 활성화 바인딩을 만들 수 없습니다.',
-            );
+            return this.failInvariant(t('module_lifecycle.error.builtin'));
         }
         if (!candidate.local_use_allowed) {
-            return this.failInvariant(
-                '이 리비전은 로컬 사용이 허용되지 않아 활성화 검토를 시작할 수 없습니다.',
-            );
+            return this.failInvariant(t('module_lifecycle.error.revision_not_local'));
         }
         const existingValue = existingBinding?.binding.binding;
         const scopeTarget =
@@ -515,9 +507,7 @@ export class ContentModuleLifecycleController {
             state.scope_targets.find((target) => target.scope === 'user') ??
             state.scope_targets[0];
         if (scopeTarget === undefined) {
-            return this.failInvariant(
-                'Core가 이 대화에 사용할 수 있는 모듈 범위를 제공하지 않았습니다.',
-            );
+            return this.failInvariant(t('module_lifecycle.error.no_scope'));
         }
         const request: ContentModuleActivationRequestInput = {
             runtime_target: structuredClone(runtimeTarget),
@@ -552,7 +542,7 @@ export class ContentModuleLifecycleController {
             rollback: null,
             deactivation: null,
             error: null,
-            announcement: `${candidate.name} 모듈의 활성화 초안을 만들었습니다.`,
+            announcement: t('module_lifecycle.notice.draft_created', { name: candidate.name }),
         }));
         return true;
     }
@@ -681,15 +671,13 @@ export class ContentModuleLifecycleController {
         }
         const activation = structuredClone(state.activation);
         if (!activation.candidate.local_use_allowed) {
-            return this.failInvariant('이 리비전은 로컬 사용이 허용되지 않습니다.');
+            return this.failInvariant(t('module_lifecycle.error.revision_blocked'));
         }
         if (
             activation.candidate.source_kind === 'imported_package' &&
             activation.request.binding.package_import_approval_id === null
         ) {
-            return this.failInvariant(
-                '가져온 패키지 모듈은 완료된 패키지 승인 ID를 명시적으로 선택해야 합니다.',
-            );
+            return this.failInvariant(t('module_lifecycle.error.approval_required'));
         }
         const epoch = ++this.operationEpoch;
         this.update((current) => ({ ...current, phase: 'reviewing', error: null }));
@@ -708,14 +696,10 @@ export class ContentModuleLifecycleController {
                 ).length !== 1 ||
                 !review.proposed_revision.local_use_allowed
             ) {
-                return this.failInvariant(
-                    'Core 검토 결과가 선택한 불변 모듈 리비전 또는 바인딩과 일치하지 않습니다.',
-                );
+                return this.failInvariant(t('module_lifecycle.error.review_revision_mismatch'));
             }
             if (!hasExactImportedActivationAuthority(activation, review)) {
-                return this.failInvariant(
-                    'Core 검토 결과가 선택한 바인딩의 단일 패키지 승인 체인과 정확히 일치하지 않습니다.',
-                );
+                return this.failInvariant(t('module_lifecycle.error.review_chain_mismatch'));
             }
             this.update((current) => ({
                 ...current,
@@ -732,7 +716,9 @@ export class ContentModuleLifecycleController {
                               receipt: null,
                           },
                 error: null,
-                announcement: `${review.proposed_revision.name} 모듈의 정확한 리비전과 충돌을 검토했습니다.`,
+                announcement: t('module_lifecycle.notice.reviewed', {
+                    name: review.proposed_revision.name,
+                }),
             }));
             return true;
         } catch (error: unknown) {
@@ -756,9 +742,7 @@ export class ContentModuleLifecycleController {
             activation.conflict_choices,
         );
         if (resolutions === null) {
-            return this.failInvariant(
-                '모든 충돌에서 사용할 후보 또는 명시적 제외를 선택해 주세요.',
-            );
+            return this.failInvariant(t('module_lifecycle.error.conflict_choice_required'));
         }
         const input = {
             activation: structuredClone(activation.request),
@@ -777,9 +761,7 @@ export class ContentModuleLifecycleController {
                 plan.expected_state_revision !== activation.review.review.state_revision ||
                 !plan.activation_binding_ids.includes(activation.request.binding.id)
             ) {
-                return this.failInvariant(
-                    'Core 활성화 계획이 검토 해시, 상태 리비전 또는 바인딩과 일치하지 않습니다.',
-                );
+                return this.failInvariant(t('module_lifecycle.error.plan_mismatch'));
             }
             this.update((current) => ({
                 ...current,
@@ -794,7 +776,7 @@ export class ContentModuleLifecycleController {
                               receipt: null,
                           },
                 error: null,
-                announcement: '검토한 충돌 선택으로 활성화 계획을 만들었습니다.',
+                announcement: t('module_lifecycle.notice.plan_ready'),
             }));
             return true;
         } catch (error: unknown) {
@@ -819,7 +801,7 @@ export class ContentModuleLifecycleController {
             activation.conflict_choices,
         );
         if (resolutions === null) {
-            this.failInvariant('검토한 모든 충돌 선택이 필요합니다.');
+            this.failInvariant(t('module_lifecycle.error.all_choices_required'));
             return null;
         }
         const approvalId = activation.approval_id ?? globalThis.crypto.randomUUID();
@@ -859,9 +841,7 @@ export class ContentModuleLifecycleController {
                     activation.request.expected_binding_revision ?? 0,
                 )
             ) {
-                this.failInvariant(
-                    'Core 영수증이 검증 완료 상태 또는 승인·검토·계획·바인딩 해시와 일치하지 않습니다.',
-                );
+                this.failInvariant(t('module_lifecycle.error.receipt_mismatch'));
                 return null;
             }
             this.update((current) => ({
@@ -872,7 +852,9 @@ export class ContentModuleLifecycleController {
                         ? null
                         : { ...current.activation, approval_id: approvalId, receipt },
                 error: null,
-                announcement: `${activation.candidate.name} 모듈을 검증된 영수증으로 활성화했습니다.`,
+                announcement: t('module_lifecycle.notice.activated', {
+                    name: activation.candidate.name,
+                }),
             }));
             await this.refreshWorkspaceAfterReceipt(epoch, activation.request.runtime_target);
             return receipt;
@@ -924,9 +906,7 @@ export class ContentModuleLifecycleController {
                 review.binding_updated_at !== binding.binding.updated_at ||
                 review.disposition !== binding.disposition
             ) {
-                return this.failInvariant(
-                    'Core 비활성화 검토가 선택한 바인딩, 승인 리비전 또는 상태 CAS와 일치하지 않습니다.',
-                );
+                return this.failInvariant(t('module_lifecycle.error.deactivation_review_mismatch'));
             }
             this.update((current) => ({
                 ...current,
@@ -936,7 +916,9 @@ export class ContentModuleLifecycleController {
                         ? null
                         : { ...current.deactivation, review, receipt: null },
                 error: null,
-                announcement: `${binding.module_name} 모듈 바인딩의 정확한 상태와 해시를 비활성화 전에 검토했습니다.`,
+                announcement: t('module_lifecycle.notice.deactivation_reviewed', {
+                    name: binding.module_name,
+                }),
             }));
             return true;
         } catch (error: unknown) {
@@ -969,9 +951,7 @@ export class ContentModuleLifecycleController {
             });
             if (!this.isCurrent(epoch)) return null;
             if (!exactDeactivationReceipt(receipt, deactivation.review)) {
-                this.failInvariant(
-                    'Core 비활성화 영수증이 검증 완료 상태 또는 검토·바인딩·삭제 CAS와 일치하지 않습니다.',
-                );
+                this.failInvariant(t('module_lifecycle.error.deactivation_receipt_mismatch'));
                 return null;
             }
             this.update((current) => ({
@@ -980,7 +960,9 @@ export class ContentModuleLifecycleController {
                 deactivation:
                     current.deactivation === null ? null : { ...current.deactivation, receipt },
                 error: null,
-                announcement: `${deactivation.binding.module_name} 모듈 바인딩을 검증된 영수증으로 비활성화했습니다.`,
+                announcement: t('module_lifecycle.notice.deactivated', {
+                    name: deactivation.binding.module_name,
+                }),
             }));
             await this.refreshWorkspaceAfterReceipt(epoch, runtimeTarget);
             return receipt;
@@ -1048,7 +1030,7 @@ export class ContentModuleLifecycleController {
             return false;
         }
         if (!revision.rollback_allowed) {
-            return this.failInvariant('선택한 불변 리비전은 이 바인딩의 롤백 대상이 아닙니다.');
+            return this.failInvariant(t('module_lifecycle.error.rollback_target_invalid'));
         }
         const importedTarget = revision.source_kind === 'imported_package';
         if (
@@ -1058,9 +1040,7 @@ export class ContentModuleLifecycleController {
                 )) ||
             (!importedTarget && targetPackageImportApprovalId !== null)
         ) {
-            return this.failInvariant(
-                '가져온 롤백 대상은 해당 불변 리비전의 완료된 패키지 승인을 명시적으로 선택해야 합니다.',
-            );
+            return this.failInvariant(t('module_lifecycle.error.rollback_approval_required'));
         }
         const epoch = ++this.operationEpoch;
         this.update((current) => ({
@@ -1094,9 +1074,7 @@ export class ContentModuleLifecycleController {
                 review.target_revision.revision_id !== targetRevisionId ||
                 review.target_revision.module_id !== binding.binding.binding.module_id
             ) {
-                return this.failInvariant(
-                    'Core 롤백 검토가 선택한 바인딩 또는 불변 대상 리비전과 일치하지 않습니다.',
-                );
+                return this.failInvariant(t('module_lifecycle.error.rollback_review_mismatch'));
             }
             const targetAuthorities = review.review.activation.import_approvals.filter(
                 (approval) => approval.binding_id === bindingId,
@@ -1112,9 +1090,7 @@ export class ContentModuleLifecycleController {
                             revision.source_sha256)) ||
                 (!importedTarget && targetAuthorities.length !== 0)
             ) {
-                return this.failInvariant(
-                    'Core 롤백 검토의 패키지 승인 근거가 선택한 불변 대상 리비전과 일치하지 않습니다.',
-                );
+                return this.failInvariant(t('module_lifecycle.error.rollback_evidence_mismatch'));
             }
             this.update((current) => ({
                 ...current,
@@ -1124,7 +1100,9 @@ export class ContentModuleLifecycleController {
                         ? null
                         : { ...current.rollback, review, conflict_choices: {} },
                 error: null,
-                announcement: `${binding.module_name} 모듈의 불변 리비전 차이와 차단 사유를 검토했습니다.`,
+                announcement: t('module_lifecycle.notice.rollback_reviewed', {
+                    name: binding.module_name,
+                }),
             }));
             return true;
         } catch (error: unknown) {
@@ -1173,11 +1151,11 @@ export class ContentModuleLifecycleController {
             return false;
         }
         if (!rollback.review.review.rollback.eligible) {
-            return this.failInvariant('차단 사유가 있는 롤백은 계획으로 만들 수 없습니다.');
+            return this.failInvariant(t('module_lifecycle.error.rollback_blocked'));
         }
         const input = this.rollbackResolution(rollback, runtimeTarget);
         if (input === null) {
-            return this.failInvariant('모든 롤백 충돌에서 사용할 후보 또는 제외를 선택해 주세요.');
+            return this.failInvariant(t('module_lifecycle.error.rollback_choice_required'));
         }
         const epoch = ++this.operationEpoch;
         this.update((current) => ({ ...current, phase: 'resolving', error: null }));
@@ -1192,9 +1170,7 @@ export class ContentModuleLifecycleController {
                 plan.rollback.target_revision_id !== rollback.target_revision_id ||
                 plan.activation.review_sha256 !== rollback.review.review.activation.review_sha256
             ) {
-                return this.failInvariant(
-                    'Core 롤백 계획이 검토 해시, 상태 리비전, 바인딩 또는 대상 리비전과 일치하지 않습니다.',
-                );
+                return this.failInvariant(t('module_lifecycle.error.rollback_plan_mismatch'));
             }
             this.update((current) => ({
                 ...current,
@@ -1209,7 +1185,7 @@ export class ContentModuleLifecycleController {
                               receipt: null,
                           },
                 error: null,
-                announcement: '검토한 불변 리비전으로 원자적 롤백 계획을 만들었습니다.',
+                announcement: t('module_lifecycle.notice.rollback_plan_ready'),
             }));
             return true;
         } catch (error: unknown) {
@@ -1233,7 +1209,7 @@ export class ContentModuleLifecycleController {
         }
         const resolution = this.rollbackResolution(rollback, runtimeTarget);
         if (resolution === null) {
-            this.failInvariant('검토한 모든 롤백 충돌 선택이 필요합니다.');
+            this.failInvariant(t('module_lifecycle.error.rollback_all_choices_required'));
             return null;
         }
         const approvalId = rollback.approval_id ?? globalThis.crypto.randomUUID();
@@ -1273,9 +1249,7 @@ export class ContentModuleLifecycleController {
                     rollback.review.review.rollback.expected_state_revision,
                 )
             ) {
-                this.failInvariant(
-                    'Core 롤백 영수증이 검증 완료 상태 또는 승인·검토·계획·바인딩 해시와 일치하지 않습니다.',
-                );
+                this.failInvariant(t('module_lifecycle.error.rollback_receipt_mismatch'));
                 return null;
             }
             this.update((current) => ({
@@ -1286,7 +1260,9 @@ export class ContentModuleLifecycleController {
                         ? null
                         : { ...current.rollback, approval_id: approvalId, receipt },
                 error: null,
-                announcement: `${binding.module_name} 모듈을 검증된 영수증으로 롤백했습니다.`,
+                announcement: t('module_lifecycle.notice.rolled_back', {
+                    name: binding.module_name,
+                }),
             }));
             await this.refreshWorkspaceAfterReceipt(epoch, runtimeTarget);
             return receipt;

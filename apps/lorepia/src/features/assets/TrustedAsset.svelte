@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { t, tr } from '../../lib/i18n';
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { SvelteURL } from 'svelte/reactivity';
 
@@ -58,13 +59,13 @@
                     (activeExpectedKind !== undefined && result.kind !== activeExpectedKind)
                 ) {
                     phase = 'error';
-                    error = '안전하게 표시할 수 없는 미디어입니다.';
+                    error = t('asset.error.unsafe');
                     return;
                 }
                 const resolvedRendererUrl = rendererAssetUrl(result.sha256);
                 if (resolvedRendererUrl === null) {
                     phase = 'error';
-                    error = '안전하게 표시할 수 없는 미디어입니다.';
+                    error = t('asset.error.unsafe');
                     return;
                 }
                 descriptor = result;
@@ -74,7 +75,7 @@
             .catch(() => {
                 if (cancelled) return;
                 phase = 'error';
-                error = '미디어를 불러오지 못했습니다.';
+                error = t('asset.error.load');
             });
 
         return () => {
@@ -196,7 +197,7 @@
         descriptor = null;
         rendererUrl = null;
         phase = 'error';
-        error = '미디어를 표시하지 못했습니다.';
+        error = t('asset.error.render');
     }
 
     function formattedSize(sizeBytes: number): string {
@@ -225,7 +226,7 @@
         {:else if descriptor.kind === 'audio'}
             <audio
                 src={rendererUrl}
-                aria-label={safeAlt || '오디오'}
+                aria-label={safeAlt || $tr('asset.audio')}
                 controls
                 preload="metadata"
                 onloadedmetadata={mediaReady}
@@ -235,7 +236,7 @@
             <!-- svelte-ignore a11y_media_has_caption (opaque local assets do not expose a trusted caption track) -->
             <video
                 src={rendererUrl}
-                aria-label={safeAlt || '비디오'}
+                aria-label={safeAlt || $tr('asset.video')}
                 width={descriptor.width ?? undefined}
                 height={descriptor.height ?? undefined}
                 controls
@@ -249,7 +250,7 @@
 
     {#if phase === 'loading' || phase === 'media_loading'}
         <span class="asset-status" role="status">
-            {phase === 'loading' ? '미디어 확인 중' : '미디어 불러오는 중'}
+            {phase === 'loading' ? $tr('asset.verifying') : $tr('asset.loading')}
         </span>
     {:else if error !== null}
         <span class="asset-error" role="alert">{error}</span>

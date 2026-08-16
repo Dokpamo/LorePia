@@ -17,6 +17,7 @@ pub mod prompt_contract;
 mod registry;
 mod request_plan;
 pub mod setup_assistant;
+mod sse;
 pub mod url_policy;
 
 use async_trait::async_trait;

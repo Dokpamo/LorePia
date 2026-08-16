@@ -520,6 +520,7 @@ fn discovery_input(provider: &SyntheticProvider, connection_id: &str) -> Sanitiz
             timeout_seconds: 5,
             network_mode: ProviderNetworkMode::LocalLoopback,
             local_network_approval: None,
+            local_network_approved_at: None,
         },
         supplied_evidence_ids: Vec::new(),
     }

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -3346,6 +3348,12 @@ impl ValidateOrchestration for KnowledgeBook {
                 "scan depth, recursion depth, or token budget is out of range",
             ));
         }
+        if !self.recursive && self.max_recursion_depth != 0 {
+            return Err(OrchestrationValidationError::new(
+                "max_recursion_depth",
+                "must be zero when recursive retrieval is disabled",
+            ));
+        }
         let mut entry_ids = Vec::with_capacity(self.entries.len());
         for (index, entry) in self.entries.iter().enumerate() {
             if entry.book_id != self.id {
@@ -3392,32 +3400,94 @@ impl ValidateOrchestration for KnowledgeBook {
                 "entry identifiers must be unique",
             ));
         }
-        for (index, entry) in self.entries.iter().enumerate() {
-            let mut cursor = entry.parent_id.as_ref();
-            let mut visited: Vec<&KnowledgeEntryId> = Vec::new();
-            while let Some(parent_id) = cursor {
-                if visited.contains(&parent_id) {
+        validate_knowledge_parent_graph(&self.entries)?;
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum KnowledgeParentVisit {
+    Unseen,
+    Active,
+    Done,
+}
+
+fn validate_knowledge_parent_graph(
+    entries: &[KnowledgeEntry],
+) -> Result<(), OrchestrationValidationError> {
+    let entries_by_id = entries
+        .iter()
+        .enumerate()
+        .map(|(index, entry)| (entry.id.as_str(), index))
+        .collect::<HashMap<_, _>>();
+    let mut visits = vec![KnowledgeParentVisit::Unseen; entries.len()];
+    let mut path = Vec::new();
+
+    for root_index in 0..entries.len() {
+        if visits[root_index] == KnowledgeParentVisit::Done {
+            continue;
+        }
+        path.clear();
+        let mut cursor = Some(root_index);
+        while let Some(index) = cursor {
+            match visits[index] {
+                KnowledgeParentVisit::Done => break,
+                KnowledgeParentVisit::Active => {
                     return Err(OrchestrationValidationError::new(
-                        format!("entries[{index}].parent_id"),
+                        format!("entries[{root_index}].parent_id"),
                         "parent graph contains a cycle",
                     ));
                 }
-                visited.push(parent_id);
-                let parent = self
-                    .entries
-                    .iter()
-                    .find(|candidate| &candidate.id == parent_id)
-                    .ok_or_else(|| {
-                        OrchestrationValidationError::new(
-                            format!("entries[{index}].parent_id"),
-                            "parent must reference an entry in the same book",
-                        )
-                    })?;
-                cursor = parent.parent_id.as_ref();
+                KnowledgeParentVisit::Unseen => {
+                    visits[index] = KnowledgeParentVisit::Active;
+                    path.push(index);
+                    cursor = entries[index]
+                        .parent_id
+                        .as_ref()
+                        .map(|parent_id| {
+                            record_knowledge_parent_edge_visit();
+                            entries_by_id
+                                .get(parent_id.as_str())
+                                .copied()
+                                .ok_or_else(|| {
+                                    OrchestrationValidationError::new(
+                                        format!("entries[{root_index}].parent_id"),
+                                        "parent must reference an entry in the same book",
+                                    )
+                                })
+                        })
+                        .transpose()?;
+                }
             }
         }
-        Ok(())
+        for index in path.drain(..) {
+            visits[index] = KnowledgeParentVisit::Done;
+        }
     }
+    Ok(())
+}
+
+#[cfg(test)]
+std::thread_local! {
+    static KNOWLEDGE_PARENT_EDGE_VISITS: std::cell::Cell<usize> = const {
+        std::cell::Cell::new(0)
+    };
+}
+
+#[inline]
+fn record_knowledge_parent_edge_visit() {
+    #[cfg(test)]
+    KNOWLEDGE_PARENT_EDGE_VISITS.with(|visits| visits.set(visits.get().saturating_add(1)));
+}
+
+#[cfg(test)]
+fn reset_knowledge_parent_edge_visits() {
+    KNOWLEDGE_PARENT_EDGE_VISITS.with(|visits| visits.set(0));
+}
+
+#[cfg(test)]
+fn knowledge_parent_edge_visits() -> usize {
+    KNOWLEDGE_PARENT_EDGE_VISITS.with(std::cell::Cell::get)
 }
 
 fn validate_activation_rule(
@@ -3503,9 +3573,25 @@ impl ValidateOrchestration for MemoryProfile {
         validate_text("name", &self.name, 1, MAX_NAME_CHARS)?;
         validate_id("summary_task", self.summary_task.as_str())?;
         validate_id("summary_schema", self.summary_schema.as_str())?;
+        if !self
+            .summary_schema
+            .as_str()
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-' | b':'))
+        {
+            return Err(OrchestrationValidationError::new(
+                "summary_schema",
+                "must contain only canonical ASCII identifier characters",
+            ));
+        }
         if let Some(embedding_task) = &self.embedding_task {
             validate_id("embedding_task", embedding_task.as_str())?;
         }
+        let retrieval_weights = [
+            self.recency_weight,
+            self.similarity_weight,
+            self.importance_weight,
+        ];
         if self.schema_version == 0
             || self.turns_per_summary == 0
             || self.turns_per_summary > 10_000
@@ -3514,17 +3600,19 @@ impl ValidateOrchestration for MemoryProfile {
             || self.recent_raw_budget.max_tokens > 10_000_000
             || self.episodic_budget.max_tokens > 10_000_000
             || self.semantic_budget.max_tokens > 10_000_000
-            || [
-                self.recency_weight,
-                self.similarity_weight,
-                self.importance_weight,
-            ]
-            .iter()
-            .any(|weight| !weight.is_finite() || *weight < 0.0)
+            || retrieval_weights
+                .iter()
+                .any(|weight| !weight.is_finite() || *weight < 0.0)
         {
             return Err(OrchestrationValidationError::new(
                 "memory_profile",
                 "schema, counts, and finite non-negative weights are required",
+            ));
+        }
+        if !retrieval_weights.iter().any(|weight| *weight > 0.0) {
+            return Err(OrchestrationValidationError::new(
+                "retrieval_weights",
+                "at least one retrieval weight must be positive",
             ));
         }
         validate_provenance(&self.provenance, "provenance")
@@ -4382,15 +4470,164 @@ mod tests {
     use chrono::{TimeZone, Utc};
 
     use super::{
-        AuxiliaryTaskKind, BlockSource, CharacterField, ConditionExpr, ContentModuleId,
-        GenerationPresetId, InstructionAuthority, InteractionProposalRecord,
+        ActivationRule, AuxiliaryTaskKind, BlockSource, CharacterField, ConditionExpr,
+        ContentModuleId, GenerationPresetId, InstructionAuthority, InteractionProposalRecord,
         InteractionProposalRecordId, InteractionProposalStatus, InteractionRuleId,
-        InteractionRuleSetId, InteractionState, MergePolicy, ModelRouteId, OverflowPolicy, Persona,
-        PersonaId, PlacementZone, PromptBlock, PromptBlockId, PromptBlockKind, Provenance,
-        RateLimit, RoleHint, SafeTemplate, SourceKind, TaskProfile, TaskProfileId, TokenPolicy,
+        InteractionRuleSetId, InteractionState, KnowledgeBook, KnowledgeBookId, KnowledgeEntry,
+        KnowledgeEntryId, KnowledgePlacement, MemoryProfile, MemoryProfileId, MergePolicy,
+        ModelRouteId, OverflowPolicy, Persona, PersonaId, PlacementZone, PromptBlock,
+        PromptBlockId, PromptBlockKind, Provenance, RateLimit, RoleHint, SafeTemplate, SourceKind,
+        SummarySchemaId, TaskProfile, TaskProfileId, TokenBudget, TokenPolicy,
         ValidateOrchestration, VariableBinding, VariableId, VariableMap, VariableRef,
-        VariableScope, VariableValue, validate_prompt_block,
+        VariableScope, VariableValue, knowledge_parent_edge_visits,
+        reset_knowledge_parent_edge_visits, validate_prompt_block,
     };
+
+    fn knowledge_parent_chain(entry_count: usize) -> KnowledgeBook {
+        let provenance = Provenance {
+            source_kind: SourceKind::UserCreated,
+            source_id: None,
+            source_hash: None,
+            author: None,
+            license: None,
+            imported_at: None,
+        };
+        let entries = (0..entry_count)
+            .map(|index| KnowledgeEntry {
+                id: KnowledgeEntryId::from(format!("entry-{index:04}")),
+                book_id: KnowledgeBookId::from("linear-parent-book"),
+                name: format!("Entry {index}"),
+                content: "content".to_owned(),
+                enabled: true,
+                activation: ActivationRule::Always,
+                priority: 0,
+                importance: 0,
+                placement: KnowledgePlacement::RetrievedContext,
+                token_policy: TokenPolicy {
+                    priority: 0,
+                    min_tokens: None,
+                    max_tokens: None,
+                    reserve_tokens: None,
+                },
+                parent_id: index
+                    .checked_sub(1)
+                    .map(|parent| KnowledgeEntryId::from(format!("entry-{parent:04}"))),
+                activation_probability_basis_points: 10_000,
+                provenance: provenance.clone(),
+            })
+            .collect();
+        KnowledgeBook {
+            id: KnowledgeBookId::from("linear-parent-book"),
+            name: "Linear parent book".to_owned(),
+            schema_version: 1,
+            entries,
+            scan_depth: 8,
+            token_budget: TokenBudget { max_tokens: 10_000 },
+            recursive: false,
+            max_recursion_depth: 0,
+            provenance,
+        }
+    }
+
+    fn valid_memory_profile() -> MemoryProfile {
+        MemoryProfile {
+            id: MemoryProfileId::from("canonical-memory-profile"),
+            name: "Canonical memory profile".to_owned(),
+            schema_version: 1,
+            summary_task: TaskProfileId::from("memory-summary-task"),
+            embedding_task: None,
+            turns_per_summary: 8,
+            recent_raw_budget: TokenBudget { max_tokens: 1_024 },
+            episodic_budget: TokenBudget { max_tokens: 1_024 },
+            semantic_budget: TokenBudget { max_tokens: 1_024 },
+            retrieval_count: 8,
+            recency_weight: 1.0,
+            similarity_weight: 0.0,
+            importance_weight: 0.0,
+            preserve_invalidated_records: false,
+            summary_schema: SummarySchemaId::from("memory-summary-schema"),
+            provenance: Provenance {
+                source_kind: SourceKind::UserCreated,
+                source_id: None,
+                source_hash: None,
+                author: None,
+                license: None,
+                imported_at: None,
+            },
+        }
+    }
+
+    #[test]
+    fn memory_profile_requires_at_least_one_positive_retrieval_weight() {
+        let valid = valid_memory_profile();
+        valid.validate().expect("one positive weight is canonical");
+
+        let mut invalid = valid;
+        invalid.recency_weight = 0.0;
+        invalid.similarity_weight = 0.0;
+        invalid.importance_weight = 0.0;
+
+        let error = invalid
+            .validate()
+            .expect_err("an all-zero retrieval policy must be rejected");
+        assert_eq!(error.path, "retrieval_weights");
+    }
+
+    #[test]
+    fn knowledge_book_requires_canonical_recursion_policy() {
+        let non_recursive = knowledge_parent_chain(0);
+        non_recursive
+            .validate()
+            .expect("non-recursive with zero depth is canonical");
+
+        let mut recursive = non_recursive.clone();
+        recursive.recursive = true;
+        recursive.max_recursion_depth = 1;
+        recursive
+            .validate()
+            .expect("recursive with a bounded positive depth is canonical");
+
+        recursive.max_recursion_depth = 0;
+        recursive
+            .validate()
+            .expect("recursive with zero configured depth remains canonical");
+
+        let mut invalid = non_recursive;
+        invalid.max_recursion_depth = 1;
+        let error = invalid
+            .validate()
+            .expect_err("non-recursive books cannot carry recursion depth");
+        assert_eq!(error.path, "max_recursion_depth");
+    }
+
+    #[test]
+    fn knowledge_parent_validation_visits_each_edge_once() {
+        let entry_count = 256;
+        let book = knowledge_parent_chain(entry_count);
+        reset_knowledge_parent_edge_visits();
+
+        book.validate().expect("valid parent chain");
+
+        assert_eq!(knowledge_parent_edge_visits(), entry_count - 1);
+    }
+
+    #[test]
+    fn knowledge_parent_validation_preserves_error_paths() {
+        let mut missing = knowledge_parent_chain(3);
+        missing.entries[0].parent_id = Some(KnowledgeEntryId::from("missing"));
+        let error = missing.validate().expect_err("missing parent");
+        assert_eq!(error.path, "entries[0].parent_id");
+        assert_eq!(
+            error.reason,
+            "parent must reference an entry in the same book"
+        );
+
+        let mut cycle = knowledge_parent_chain(3);
+        cycle.entries[0].parent_id = Some(KnowledgeEntryId::from("entry-0002"));
+        let error = cycle.validate().expect_err("parent cycle");
+        assert_eq!(error.path, "entries[0].parent_id");
+        assert_eq!(error.reason, "parent graph contains a cycle");
+    }
 
     fn source_validation_block(kind: PromptBlockKind, source: BlockSource) -> PromptBlock {
         PromptBlock {

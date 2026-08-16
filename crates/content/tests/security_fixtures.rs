@@ -62,6 +62,69 @@ fn card_entry() -> (String, Vec<u8>) {
     ("card.json".to_owned(), VALID_CARD.to_vec())
 }
 
+fn rewrite_single_entry_as_zip64(path: &Path, central_record_copies: u16) {
+    const EOCD_MAGIC: &[u8; 4] = b"PK\x05\x06";
+    const ZIP64_EOCD_MAGIC: &[u8; 4] = b"PK\x06\x06";
+    const ZIP64_LOCATOR_MAGIC: &[u8; 4] = b"PK\x06\x07";
+
+    let bytes = fs::read(path).expect("read ZIP fixture");
+    let eocd_offset = bytes
+        .windows(EOCD_MAGIC.len())
+        .rposition(|window| window == EOCD_MAGIC)
+        .expect("ZIP32 EOCD");
+    let central_size = u32::from_le_bytes(
+        bytes[eocd_offset + 12..eocd_offset + 16]
+            .try_into()
+            .expect("central size"),
+    ) as usize;
+    let central_offset = u32::from_le_bytes(
+        bytes[eocd_offset + 16..eocd_offset + 20]
+            .try_into()
+            .expect("central offset"),
+    ) as usize;
+    assert_eq!(central_offset + central_size, eocd_offset);
+    let central_record = &bytes[central_offset..eocd_offset];
+
+    let mut rewritten = bytes[..central_offset].to_vec();
+    for _ in 0..central_record_copies {
+        rewritten.extend_from_slice(central_record);
+    }
+    let rewritten_central_size = u64::try_from(central_record.len())
+        .expect("central record length")
+        * u64::from(central_record_copies);
+    let zip64_eocd_offset = u64::try_from(rewritten.len()).expect("ZIP64 EOCD offset");
+    rewritten.extend_from_slice(ZIP64_EOCD_MAGIC);
+    rewritten.extend_from_slice(&44_u64.to_le_bytes());
+    rewritten.extend_from_slice(&45_u16.to_le_bytes());
+    rewritten.extend_from_slice(&45_u16.to_le_bytes());
+    rewritten.extend_from_slice(&0_u32.to_le_bytes());
+    rewritten.extend_from_slice(&0_u32.to_le_bytes());
+    rewritten.extend_from_slice(&u64::from(central_record_copies).to_le_bytes());
+    rewritten.extend_from_slice(&u64::from(central_record_copies).to_le_bytes());
+    rewritten.extend_from_slice(&rewritten_central_size.to_le_bytes());
+    rewritten.extend_from_slice(
+        &u64::try_from(central_offset)
+            .expect("central offset")
+            .to_le_bytes(),
+    );
+    rewritten.extend_from_slice(ZIP64_LOCATOR_MAGIC);
+    rewritten.extend_from_slice(&0_u32.to_le_bytes());
+    rewritten.extend_from_slice(&zip64_eocd_offset.to_le_bytes());
+    rewritten.extend_from_slice(&1_u32.to_le_bytes());
+
+    let mut classic_eocd = bytes[eocd_offset..].to_vec();
+    classic_eocd[8..10].copy_from_slice(&1_u16.to_le_bytes());
+    classic_eocd[10..12].copy_from_slice(&1_u16.to_le_bytes());
+    classic_eocd[12..16].copy_from_slice(
+        &u32::try_from(rewritten_central_size)
+            .expect("small central directory")
+            .to_le_bytes(),
+    );
+    classic_eocd[16..20].copy_from_slice(&u32::MAX.to_le_bytes());
+    rewritten.extend_from_slice(&classic_eocd);
+    fs::write(path, rewritten).expect("write deterministic ZIP64 fixture");
+}
+
 #[test]
 fn accepts_project_owned_valid_fixtures() {
     let json = inspect_file(&fixture("cards/minimal-v3.json"), ImportLimits::default())
@@ -187,6 +250,24 @@ fn blocks_symbolic_links_duplicate_entries_and_too_many_entries() {
 }
 
 #[test]
+fn bounds_raw_zip64_duplicate_records_before_archive_parsing() {
+    let duplicate_records = synthetic_archive(vec![card_entry()]);
+    rewrite_single_entry_as_zip64(duplicate_records.path(), 3);
+    let limits = ImportLimits {
+        max_entries: 2,
+        ..ImportLimits::default()
+    };
+    let error = inspect_file(duplicate_records.path(), limits)
+        .expect_err("raw ZIP64 central-directory records must be bounded");
+    assert_eq!(error.code, CoreErrorCode::UnsafeArchive);
+
+    let compatible = synthetic_archive(vec![card_entry()]);
+    rewrite_single_entry_as_zip64(compatible.path(), 1);
+    inspect_file(compatible.path(), ImportLimits::default())
+        .expect("ordinary single-entry ZIP64 CHARX remains compatible");
+}
+
+#[test]
 fn rejects_corrupt_metadata_missing_canonical_metadata_and_empty_inputs() {
     let corrupt_json = synthetic_file("corrupt.json", br#"{"spec":"chara_card_v3","data":"#);
     let error = inspect_file(corrupt_json.path(), ImportLimits::default())
@@ -285,9 +366,29 @@ fn returns_stable_kind_warning_and_error_semantics() {
         vec!["extension_mismatch"]
     );
 
+    // A V2 card is promoted to the canonical V3 shape, and the reviewer is
+    // told before anything is committed.
+    let legacy_spec = synthetic_file(
+        "legacy.json",
+        br#"{"spec":"chara_card_v2","data":{"name":"Legacy"}}"#,
+    );
+    let inspection =
+        inspect_file(legacy_spec.path(), ImportLimits::default()).expect("V2 card is promoted");
+    assert_eq!(inspection.kind, ContentKind::CharacterCardV3);
+    assert_eq!(inspection.display_name, "Legacy");
+    assert_eq!(
+        inspection
+            .warnings
+            .iter()
+            .map(|warning| warning.code.as_str())
+            .collect::<Vec<_>>(),
+        vec!["character_card_v2_promoted"]
+    );
+
+    // Every other spec is still refused outright.
     let wrong_spec = synthetic_file(
         "wrong.json",
-        br#"{"spec":"chara_card_v2","data":{"name":"Legacy"}}"#,
+        br#"{"spec":"chara_card_v1","data":{"name":"Ancient"}}"#,
     );
     let error = inspect_file(wrong_spec.path(), ImportLimits::default())
         .expect_err("unsupported spec must fail");

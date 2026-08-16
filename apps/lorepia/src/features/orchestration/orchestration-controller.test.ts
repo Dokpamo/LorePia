@@ -695,6 +695,8 @@ describe('OrchestrationController', () => {
         ).resolves.toBe(true);
 
         expect(patchMemoryRecord).toHaveBeenCalledWith({
+            conversation_id: 'conversation-1',
+            branch_id: 'branch-1',
             memory_record_id: 'memory-0',
             patch: { summary: '수정된 합성 요약' },
             expected_revision: 1,
@@ -719,6 +721,8 @@ describe('OrchestrationController', () => {
         ).resolves.toBe(true);
 
         expect(setMemoryRecordExclusion).toHaveBeenCalledWith({
+            conversation_id: 'conversation-1',
+            branch_id: 'branch-1',
             memory_record_id: 'memory-0',
             scope: 'character',
             excluded: true,
@@ -739,6 +743,8 @@ describe('OrchestrationController', () => {
 
         await expect(controller.deleteMemoryRecord('memory-0')).resolves.toBe(true);
         expect(deleteMemoryRecord).toHaveBeenCalledWith({
+            conversation_id: 'conversation-1',
+            branch_id: 'branch-1',
             memory_record_id: 'memory-0',
             expected_revision: 1,
         });
@@ -747,6 +753,74 @@ describe('OrchestrationController', () => {
                 (record) => record.id === 'memory-0',
             ),
         ).toBe(false);
+    });
+
+    it('uses a visible ancestor memory record persisted owner for every mutation', async () => {
+        const projection = workspace();
+        const initialRecord = projection.memory_records[0];
+        if (initialRecord === undefined) throw new Error('synthetic memory fixture is empty');
+        const ancestorRecord = {
+            ...initialRecord,
+            conversation_id: 'conversation-ancestor',
+            branch_id: 'branch-ancestor',
+            source_navigation: {
+                ...initialRecord.source_navigation,
+                conversation_id: 'conversation-ancestor',
+                branch_id: 'branch-ancestor',
+            },
+        };
+        projection.memory_records = [ancestorRecord];
+        const patchMemoryRecord = vi.fn().mockResolvedValue({
+            ...ancestorRecord,
+            summary: 'ancestor summary updated',
+            revision: 2,
+        });
+        const setMemoryRecordExclusion = vi.fn().mockResolvedValue({
+            ...ancestorRecord,
+            summary: 'ancestor summary updated',
+            excluded_from_character: true,
+            revision: 3,
+        });
+        const deleteMemoryRecord = vi.fn().mockResolvedValue(undefined);
+        const controller = new OrchestrationController(
+            capableClient({
+                getOrchestrationWorkspace: vi.fn().mockResolvedValue(projection),
+                patchMemoryRecord,
+                setMemoryRecordExclusion,
+                deleteMemoryRecord,
+            }),
+        );
+        await controller.loadContext('conversation-1', 'branch-1');
+
+        await expect(
+            controller.updateMemoryRecord('memory-0', { summary: 'ancestor summary updated' }),
+        ).resolves.toBe(true);
+        await expect(
+            controller.setMemoryRecordExclusion('memory-0', 'character', true),
+        ).resolves.toBe(true);
+        await expect(controller.deleteMemoryRecord('memory-0')).resolves.toBe(true);
+
+        expect(patchMemoryRecord).toHaveBeenCalledWith({
+            conversation_id: 'conversation-ancestor',
+            branch_id: 'branch-ancestor',
+            memory_record_id: 'memory-0',
+            patch: { summary: 'ancestor summary updated' },
+            expected_revision: 1,
+        });
+        expect(setMemoryRecordExclusion).toHaveBeenCalledWith({
+            conversation_id: 'conversation-ancestor',
+            branch_id: 'branch-ancestor',
+            memory_record_id: 'memory-0',
+            scope: 'character',
+            excluded: true,
+            expected_revision: 2,
+        });
+        expect(deleteMemoryRecord).toHaveBeenCalledWith({
+            conversation_id: 'conversation-ancestor',
+            branch_id: 'branch-ancestor',
+            memory_record_id: 'memory-0',
+            expected_revision: 3,
+        });
     });
 
     it('persists memory controls through exact live envelopes and reopens the durable projection', async () => {
@@ -1016,6 +1090,8 @@ describe('OrchestrationController', () => {
                 commandName: 'patch_memory_record',
                 args: {
                     request: {
+                        conversation_id: 'conversation-1',
+                        branch_id: 'branch-1',
                         memory_record_id: 'memory-0',
                         patch: {
                             title: '수정된 합성 기억',
@@ -1031,6 +1107,8 @@ describe('OrchestrationController', () => {
                 commandName: 'patch_memory_record',
                 args: {
                     request: {
+                        conversation_id: 'conversation-1',
+                        branch_id: 'branch-1',
                         memory_record_id: 'memory-0',
                         patch: { pinned: true },
                         expected_revision: 2,
@@ -1041,6 +1119,8 @@ describe('OrchestrationController', () => {
                 commandName: 'set_memory_record_exclusion',
                 args: {
                     request: {
+                        conversation_id: 'conversation-1',
+                        branch_id: 'branch-1',
                         memory_record_id: 'memory-0',
                         scope: 'conversation',
                         excluded: true,
@@ -1052,6 +1132,8 @@ describe('OrchestrationController', () => {
                 commandName: 'set_memory_record_exclusion',
                 args: {
                     request: {
+                        conversation_id: 'conversation-1',
+                        branch_id: 'branch-1',
                         memory_record_id: 'memory-0',
                         scope: 'character',
                         excluded: true,
@@ -1063,6 +1145,8 @@ describe('OrchestrationController', () => {
                 commandName: 'patch_memory_record',
                 args: {
                     request: {
+                        conversation_id: 'conversation-1',
+                        branch_id: 'branch-1',
                         memory_record_id: 'memory-0',
                         patch: { summary: '반영되면 안 되는 로컬 요약' },
                         expected_revision: 5,
@@ -1082,6 +1166,8 @@ describe('OrchestrationController', () => {
                 commandName: 'patch_memory_record',
                 args: {
                     request: {
+                        conversation_id: 'conversation-1',
+                        branch_id: 'branch-1',
                         memory_record_id: 'memory-0',
                         patch: { summary: '잘못된 ID 응답이 반영하면 안 되는 요약' },
                         expected_revision: 6,
@@ -1092,6 +1178,8 @@ describe('OrchestrationController', () => {
                 commandName: 'patch_memory_record',
                 args: {
                     request: {
+                        conversation_id: 'conversation-1',
+                        branch_id: 'branch-1',
                         memory_record_id: 'memory-0',
                         patch: { pinned: false },
                         expected_revision: 6,
@@ -1102,6 +1190,8 @@ describe('OrchestrationController', () => {
                 commandName: 'set_memory_record_exclusion',
                 args: {
                     request: {
+                        conversation_id: 'conversation-1',
+                        branch_id: 'branch-1',
                         memory_record_id: 'memory-0',
                         scope: 'conversation',
                         excluded: false,
@@ -1113,6 +1203,8 @@ describe('OrchestrationController', () => {
                 commandName: 'delete_memory_record',
                 args: {
                     request: {
+                        conversation_id: 'conversation-1',
+                        branch_id: 'branch-1',
                         memory_record_id: 'memory-0',
                         expected_revision: 6,
                     },

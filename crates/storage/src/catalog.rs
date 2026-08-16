@@ -23,6 +23,12 @@ const MAX_PAYLOAD_BYTES: usize = 1024 * 1024;
 const MAX_SNAPSHOT_BYTES: usize = 2 * 1024 * 1024;
 const MAX_DIFF_BYTES: usize = 2 * 1024 * 1024;
 const MAX_PLAN_BYTES: usize = 1024 * 1024;
+const ROLLBACK_PLAN_VERSION_WITH_INLINE_DIFF: u64 = 1;
+const ROLLBACK_AUDIT_PLAN_VERSION_WITH_DIFF_HASH: u64 = 2;
+// Keep these schema-v1 limits aligned with lorepia-providers without adding a
+// reverse storage -> providers dependency.
+const CATALOG_REVISION_V1_MAX: u64 = (1_u64 << 48) - 1;
+const CATALOG_REVISION_MAX_ADVANCE: u64 = 1_000_000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoredCatalogRevisionGuard {
@@ -855,6 +861,11 @@ pub(crate) fn commit_catalog_import(
     validate_snapshot(&commit.snapshot, false)?;
     validate_import_guard(commit)?;
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    if commit.update.expires_at <= Utc::now() {
+        return Err(CatalogStorageError::InvalidInput(
+            "catalog payload is expired",
+        ));
+    }
     let current = load_catalog_state(&transaction)?;
     require_expected_state(&current, &commit.expected)?;
     let maximum_local_revision = maximum_local_revision(&transaction)?;
@@ -1019,6 +1030,15 @@ fn validate_import_guard(commit: &CatalogImportCommit<'_>) -> Result<(), Catalog
     {
         return Err(CatalogStorageError::InvalidInput(
             "signed revision guard does not advance exactly once",
+        ));
+    }
+    if commit.update.catalog_revision > CATALOG_REVISION_V1_MAX
+        || commit.expected.guard.highest_accepted_revision > CATALOG_REVISION_V1_MAX
+        || commit.update.catalog_revision - commit.expected.guard.highest_accepted_revision
+            > CATALOG_REVISION_MAX_ADVANCE
+    {
+        return Err(CatalogStorageError::InvalidInput(
+            "signed revision exceeds the supported catalog epoch or advance bound",
         ));
     }
     Ok(())
@@ -1395,6 +1415,7 @@ fn validate_signed_update(update: &NewSignedCatalogUpdate<'_>) -> Result<(), Cat
     validate_signing_key_id(update.signing_key_id)?;
     if update.catalog_schema_version == 0
         || update.catalog_revision == 0
+        || update.catalog_revision > CATALOG_REVISION_V1_MAX
         || update.envelope_version == 0
     {
         return Err(CatalogStorageError::InvalidInput(
@@ -1616,8 +1637,10 @@ fn validate_rollback_plan(
         .get("rollback_plan_version")
         .and_then(Value::as_u64)
         .unwrap_or(0);
-    if version == 0
-        || plan.get("from_revision").and_then(Value::as_u64) != Some(from.local_revision)
+    if !matches!(
+        version,
+        ROLLBACK_PLAN_VERSION_WITH_INLINE_DIFF | ROLLBACK_AUDIT_PLAN_VERSION_WITH_DIFF_HASH
+    ) || plan.get("from_revision").and_then(Value::as_u64) != Some(from.local_revision)
         || plan.get("to_revision").and_then(Value::as_u64) != Some(target.local_revision)
         || plan.get("expected_active_sha256").and_then(Value::as_str)
             != Some(from.snapshot_sha256.as_str())
@@ -1640,15 +1663,28 @@ fn validate_rollback_plan(
     {
         return Err(CatalogStorageError::InvalidInput("rollback plan is stale"));
     }
-    let plan_diff = plan.get("diff").ok_or(CatalogStorageError::InvalidInput(
-        "rollback plan diff is missing",
-    ))?;
     let supplied_diff =
         validate_diff_json(commit.diff_json, from.local_revision, target.local_revision)?;
-    if plan_diff != &supplied_diff {
-        return Err(CatalogStorageError::InvalidInput(
-            "rollback plan diff was changed",
-        ));
+    match version {
+        ROLLBACK_PLAN_VERSION_WITH_INLINE_DIFF => {
+            if plan.get("diff") != Some(&supplied_diff) {
+                return Err(CatalogStorageError::InvalidInput(
+                    "rollback plan diff was changed",
+                ));
+            }
+        }
+        ROLLBACK_AUDIT_PLAN_VERSION_WITH_DIFF_HASH => {
+            let supplied_diff_sha256 = sha256_hex(commit.diff_json.as_bytes());
+            if plan.get("diff").is_some()
+                || plan.get("diff_sha256").and_then(Value::as_str)
+                    != Some(supplied_diff_sha256.as_str())
+            {
+                return Err(CatalogStorageError::InvalidInput(
+                    "rollback plan diff hash was changed",
+                ));
+            }
+        }
+        _ => unreachable!("rollback plan version was checked above"),
     }
     Ok(())
 }
@@ -1836,6 +1872,7 @@ mod tests {
     const CAPTURED: &str = "2026-07-31T00:00:00Z";
     const ISSUED: &str = "2026-08-01T00:00:00Z";
     const EFFECTIVE: &str = "2026-08-01T00:00:01Z";
+    const EXPIRED_AFTER_ACCEPTANCE: &str = "2026-08-02T00:00:00Z";
     const EXPIRES: &str = "2027-08-01T00:00:00Z";
 
     #[test]
@@ -1895,6 +1932,95 @@ mod tests {
     }
 
     #[test]
+    fn compact_rollback_plan_accepts_a_diff_larger_than_the_legacy_plan_limit() {
+        let mut connection = Connection::open_in_memory().expect("in-memory database");
+        migrate(&connection);
+        let imported = commit_first_update(&mut connection).expect("first import");
+        let baseline = load_catalog_snapshot(&connection, 1)
+            .expect("load baseline")
+            .expect("baseline snapshot");
+        let signed = load_catalog_snapshot(&connection, 2)
+            .expect("load signed snapshot")
+            .expect("signed snapshot");
+        let diff = large_diff_json(2, 1);
+        assert!(diff.len() > MAX_PLAN_BYTES);
+        assert!(diff.len() <= MAX_DIFF_BYTES);
+        let diff_hash = sha256_hex(diff.as_bytes());
+        let plan = compact_rollback_plan_json(
+            2,
+            1,
+            &signed.snapshot_sha256,
+            &baseline.snapshot_sha256,
+            &diff_hash,
+        );
+        assert!(plan.len() < MAX_PLAN_BYTES);
+        let plan_hash = sha256_hex(plan.as_bytes());
+        let tampered_plan = compact_rollback_plan_json(
+            2,
+            1,
+            &signed.snapshot_sha256,
+            &baseline.snapshot_sha256,
+            &sha256_hex(b"different diff"),
+        );
+        let tampered_plan_hash = sha256_hex(tampered_plan.as_bytes());
+        let tampered = CatalogRollbackCommit {
+            expected: imported.expectation(),
+            action_id: "rollback-with-tampered-large-diff",
+            target_local_revision: 1,
+            target_snapshot_sha256: &baseline.snapshot_sha256,
+            diff_json: &diff,
+            rollback_plan_json: &tampered_plan,
+            plan_sha256: &tampered_plan_hash,
+            activated_at: time("2026-08-01T00:05:00Z"),
+        };
+        assert!(matches!(
+            activate_catalog_rollback(&mut connection, &tampered),
+            Err(CatalogStorageError::InvalidInput(
+                "rollback plan diff hash was changed"
+            ))
+        ));
+        let rollback = CatalogRollbackCommit {
+            expected: imported.expectation(),
+            action_id: "rollback-with-large-diff",
+            target_local_revision: 1,
+            target_snapshot_sha256: &baseline.snapshot_sha256,
+            diff_json: &diff,
+            rollback_plan_json: &plan,
+            plan_sha256: &plan_hash,
+            activated_at: time("2026-08-01T00:05:00Z"),
+        };
+
+        let rolled_back = activate_catalog_rollback(&mut connection, &rollback)
+            .expect("compact rollback proof must not duplicate the large diff");
+
+        assert_eq!(
+            rolled_back.active.expect("active snapshot").local_revision,
+            1
+        );
+    }
+
+    #[test]
+    fn loading_a_pre_bound_high_revision_guard_remains_compatible() {
+        let connection = Connection::open_in_memory().expect("in-memory database");
+        migrate(&connection);
+        connection
+            .execute_batch(
+                "DROP TRIGGER provider_catalog_state_guard_matches_history;
+                 UPDATE provider_catalog_state
+                 SET highest_accepted_revision = 9223372036854775807,
+                     latest_issued_at = '2026-08-01T00:00:00Z'
+                 WHERE singleton = 1;",
+            )
+            .expect("simulate a guard persisted by the pre-bound release");
+
+        let state = load_catalog_state(&connection)
+            .expect("pre-bound persisted guard must remain readable");
+
+        assert_eq!(state.guard.highest_accepted_revision, i64::MAX as u64);
+        assert_eq!(state.guard.latest_issued_at, Some(time(ISSUED)));
+    }
+
+    #[test]
     fn stale_import_cas_is_atomic_and_guard_cannot_be_lowered() {
         let mut connection = Connection::open_in_memory().expect("in-memory database");
         migrate(&connection);
@@ -1918,6 +2044,68 @@ mod tests {
                 .guard,
             state.guard
         );
+    }
+
+    #[test]
+    fn signed_update_rejects_revision_values_that_consume_reserved_epoch_space() {
+        let revision = i64::MAX as u64;
+        let payload = format!(
+            "{{\"schema_version\":1,\"catalog_id\":\"lorepia-provider-model-catalog\",\
+             \"revision\":{revision},\"issued_at\":\"{ISSUED}\",\
+             \"effective_at\":\"{EFFECTIVE}\",\"expires_at\":\"{EXPIRES}\",\
+             \"manifests\":[],\"models\":[]}}"
+        );
+        let payload_hash = sha256_hex(payload.as_bytes());
+        let envelope = br#"{"envelope_version":1,"signing_key_id":"test-key-1","payload_base64":"e30=","signature_base64":"c2ln"}"#;
+        let envelope_hash = sha256_hex(envelope);
+        let update = NewSignedCatalogUpdate {
+            id: "catalog-envelope-exhausting",
+            catalog_id: "lorepia-provider-model-catalog",
+            catalog_schema_version: 1,
+            catalog_revision: revision,
+            envelope_version: 1,
+            signing_key_id: "test-key-1",
+            envelope,
+            envelope_sha256: &envelope_hash,
+            payload_json: &payload,
+            payload_sha256: &payload_hash,
+            issued_at: time(ISSUED),
+            effective_at: time(EFFECTIVE),
+            expires_at: time(EXPIRES),
+            accepted_at: time(EFFECTIVE),
+        };
+
+        assert!(matches!(
+            validate_signed_update(&update),
+            Err(CatalogStorageError::InvalidInput(_))
+        ));
+    }
+
+    #[test]
+    fn import_rejects_payload_expired_at_transaction_time_despite_supplied_acceptance_time() {
+        let mut connection = Connection::open_in_memory().expect("in-memory database");
+        migrate(&connection);
+        let expected = load_catalog_state(&connection)
+            .expect("initial state")
+            .expectation();
+
+        let result = commit_first_update_with_expected_and_expiry(
+            &mut connection,
+            expected,
+            EXPIRED_AFTER_ACCEPTANCE,
+        );
+
+        assert!(matches!(
+            result,
+            Err(CatalogStorageError::InvalidInput(
+                "catalog payload is expired"
+            ))
+        ));
+        let state = load_catalog_state(&connection).expect("state after rejected expired import");
+        assert_eq!(state.state_version, 0);
+        assert_eq!(state.snapshot_count, 0);
+        assert_eq!(state.update_count, 0);
+        assert_eq!(state.activation_count, 0);
     }
 
     #[test]
@@ -2078,9 +2266,17 @@ mod tests {
         connection: &mut Connection,
         expected: CatalogStateExpectation,
     ) -> Result<StoredCatalogState, CatalogStorageError> {
+        commit_first_update_with_expected_and_expiry(connection, expected, EXPIRES)
+    }
+
+    fn commit_first_update_with_expected_and_expiry(
+        connection: &mut Connection,
+        expected: CatalogStateExpectation,
+        expires_at: &str,
+    ) -> Result<StoredCatalogState, CatalogStorageError> {
         let baseline_json = snapshot_json(1, CAPTURED);
         let baseline_hash = sha256_hex(baseline_json.as_bytes());
-        let payload = payload_json();
+        let payload = payload_json(expires_at);
         let payload_hash = sha256_hex(payload.as_bytes());
         let envelope = br#"{"envelope_version":1,"signing_key_id":"test-key-1","payload_base64":"e30=","signature_base64":"c2ln"}"#;
         let envelope_hash = sha256_hex(envelope);
@@ -2123,7 +2319,7 @@ mod tests {
                 payload_sha256: &payload_hash,
                 issued_at: time(ISSUED),
                 effective_at: time(EFFECTIVE),
-                expires_at: time(EXPIRES),
+                expires_at: time(expires_at),
                 accepted_at: time(EFFECTIVE),
             },
             snapshot,
@@ -2145,12 +2341,12 @@ mod tests {
         )
     }
 
-    fn payload_json() -> String {
+    fn payload_json(expires_at: &str) -> String {
         format!(
             "{{\"schema_version\":1,\
              \"catalog_id\":\"lorepia-provider-model-catalog\",\
              \"revision\":2,\"issued_at\":\"{ISSUED}\",\
-             \"effective_at\":\"{EFFECTIVE}\",\"expires_at\":\"{EXPIRES}\",\
+             \"effective_at\":\"{EFFECTIVE}\",\"expires_at\":\"{expires_at}\",\
              \"manifests\":[],\"models\":[]}}"
         )
     }
@@ -2175,6 +2371,34 @@ mod tests {
              \"target_sha256\":\"{target_hash}\",\
              \"created_at\":\"2026-08-01T00:04:00Z\",\
              \"expires_at\":\"2026-08-01T00:20:00Z\",\"diff\":{diff}}}"
+        )
+    }
+
+    fn large_diff_json(from: u64, to: u64) -> String {
+        let model_changes = std::iter::repeat_n("{}", 360_000)
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(
+            "{{\"diff_schema_version\":1,\"from_revision\":{from},\
+             \"to_revision\":{to},\"manifest_changes\":[],\
+             \"model_changes\":[{model_changes}]}}"
+        )
+    }
+
+    fn compact_rollback_plan_json(
+        from_revision: u64,
+        to_revision: u64,
+        active_hash: &str,
+        target_hash: &str,
+        diff_hash: &str,
+    ) -> String {
+        format!(
+            "{{\"rollback_plan_version\":2,\"from_revision\":{from_revision},\
+             \"to_revision\":{to_revision},\"expected_active_sha256\":\"{active_hash}\",\
+             \"target_sha256\":\"{target_hash}\",\
+             \"created_at\":\"2026-08-01T00:04:00Z\",\
+             \"expires_at\":\"2026-08-01T00:20:00Z\",\
+             \"diff_sha256\":\"{diff_hash}\"}}"
         )
     }
 

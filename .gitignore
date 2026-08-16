@@ -69,3 +69,7 @@
 
 # Local and CI smoke logs
 *.log
+
+# Python caches
+__pycache__/
+*.py[cod]

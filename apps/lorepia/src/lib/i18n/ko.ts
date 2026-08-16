@@ -1,0 +1,633 @@
+/**
+ * Korean message catalog.
+ *
+ * Keys are `feature.area.detail`. Keep them sorted so additions are easy to
+ * find in review, and keep placeholders named (`{count}`) so a translation may
+ * reorder them.
+ */
+
+export const ko = {
+    'app.bootstrap.failed': '앱을 시작하지 못했습니다.',
+    'app.bootstrap.retry': '다시 시도',
+    'app.brand.skip': 'LorePia 본문으로 이동',
+    'app.capture.clipboard_changed':
+        '{success} 캡처 중 클립보드 내용이 바뀌어 새 내용은 지우지 않았습니다.',
+    'app.capture.clipboard_kept': '{success} 다만 클립보드를 지우지 못했으니 직접 삭제해 주세요.',
+    'app.core.checking': '연결 확인 필요',
+    'app.core.connecting': 'Core 연결 중',
+    'app.core.local': '로컬 Core',
+    'app.description': '로컬 데이터와 운영체제 자격증명 저장소를 사용하는 LorePia 캐릭터 채팅',
+    'app.error.remote_assistant_blocked':
+        '신뢰할 수 있는 가격·토큰 정책이 준비될 때까지 원격 설정 도우미를 사용할 수 없습니다.',
+    'app.error.stream_lost':
+        '앱을 다시 연 뒤에는 진행 중이던 응답 스트림에 다시 연결할 수 없습니다. 생성 취소 후 대화를 다시 열어 주세요.',
+    'app.nav.close': '탐색 닫기',
+    'app.nav.label': '주요 화면',
+    'app.nav.open': '탐색 열기',
+    'app.tab.chat': '채팅',
+    'app.tab.conversations': '대화',
+    'app.tab.library': '서재',
+    'app.tab.providers': '설정',
+    'app.toggle.to_chat': '대화로',
+    'app.toggle.to_providers': '설정',
+    'asset.audio': '오디오',
+    'asset.error.load': '미디어를 불러오지 못했습니다.',
+    'asset.error.render': '미디어를 표시하지 못했습니다.',
+    'asset.error.unsafe': '안전하게 표시할 수 없는 미디어입니다.',
+    'asset.loading': '미디어 불러오는 중',
+    'asset.verifying': '미디어 확인 중',
+    'asset.video': '비디오',
+    'attempt_approval.approve': '승인',
+    'attempt_approval.approve.label': '제안 {index} 승인',
+    'attempt_approval.busy': '반영 중…',
+    'attempt_approval.empty': '대기 중인 생성 시도 승인 제안이 없습니다.',
+    'attempt_approval.error.generic': '생성 시도의 승인 제안을 불러오거나 결정하지 못했습니다.',
+    'attempt_approval.error.unsupported':
+        '현재 Core가 생성 시도 단위 승인 API를 제공하지 않습니다.',
+    'attempt_approval.expires_at': '{time} 만료',
+    'attempt_approval.field.attempt': '생성 시도',
+    'attempt_approval.field.branch': '제안 브랜치',
+    'attempt_approval.field.expiry': '만료',
+    'attempt_approval.field.pending': '남은 승인',
+    'attempt_approval.field.pending_count': '{count}개',
+    'attempt_approval.hint':
+        '이 생성 시도에 고정된 제안만 승인하거나 거절합니다. 결정 뒤 생성은 자동으로 다시 제출되지 않습니다.',
+    'attempt_approval.list.label': '대기 중인 생성 시도 승인 제안',
+    'attempt_approval.loading': '만료 제안을 정리한 뒤 승인 목록을 불러오는 중입니다.',
+    'attempt_approval.no_expiry': '자동 만료 없음',
+    'attempt_approval.notice.after.more':
+        '{prefix}{action} 최신 승인 목록에 남은 만료 제안이 있어 다시 불러와야 합니다.',
+    'attempt_approval.notice.after.retry':
+        '{prefix}{action} 최신 승인 목록을 복원했습니다. 생성을 다시 시도하세요.',
+    'attempt_approval.notice.after.review':
+        '{prefix}{action} 최신 승인 목록을 복원했습니다. 남은 승인 제안을 검토하세요.',
+    'attempt_approval.notice.approving': '생성 시도의 제안을 승인하고 있습니다.',
+    'attempt_approval.notice.expired_more':
+        '만료된 승인 제안을 정리했습니다. 남은 만료 제안을 다시 불러오세요.',
+    'attempt_approval.notice.expired_retry':
+        '만료된 승인 제안을 정리했습니다. 생성을 다시 시도하세요.',
+    'attempt_approval.notice.expired_review':
+        '만료된 승인 제안을 정리했습니다. 남은 승인 제안을 검토하세요.',
+    'attempt_approval.notice.local.retry': '{prefix}{action} 생성을 다시 시도하세요.',
+    'attempt_approval.notice.local.review':
+        '{prefix}{action} 남은 승인 제안을 검토한 뒤 생성을 다시 시도하세요.',
+    'attempt_approval.notice.rejecting': '생성 시도의 제안을 거절하고 있습니다.',
+    'attempt_approval.notice.reload': '{message} 제안 목록을 다시 불러오세요.',
+    'attempt_approval.notice.replay_prefix': '이미 반영된 결정을 확인했습니다. ',
+    'attempt_approval.notice.restored': '생성 시도의 승인 제안을 복원했습니다.',
+    'attempt_approval.notice.resumable':
+        '재개 가능한 생성 시도를 정확한 시도 ID로 다시 시도할 수 있습니다.',
+    'attempt_approval.pick_room':
+        '대화와 소스 브랜치를 선택하면 중단된 생성 시도의 승인 제안을 확인할 수 있습니다.',
+    'attempt_approval.reject': '거절',
+    'attempt_approval.reject.label': '제안 {index} 거절',
+    'attempt_approval.reload': '승인 목록 다시 불러오기',
+    'attempt_approval.reload_latest': '최신 승인 목록 다시 불러오기',
+    'attempt_approval.retry_item': '생성 시도',
+    'attempt_approval.retry_item.label': '{label}: 생성 시도 {id}',
+    'attempt_approval.retry_label': '원래 작업으로 돌아가기',
+    'attempt_approval.retry_list.label': '다시 시도할 재개 가능한 생성 시도',
+    'attempt_approval.title': '생성 시도 승인',
+    'attempt_approval.too_many':
+        '한 번에 정리할 수 있는 100개보다 많은 만료 제안이 있습니다. 결정을 계속하기 전에 목록을 다시 불러오세요.',
+    'attempt_approval.unrenderable.hint':
+        '안전한 표시 범위를 벗어난 원문은 숨겼습니다. 이 제안은 거절만 할 수 있습니다.',
+    'attempt_approval.unrenderable.title': '저장 제안 내용을 표시할 수 없음',
+    'catalog.active_revision': '활성 리비전',
+    'catalog.active_snapshot': '활성 스냅샷',
+    'catalog.count': '{count}개',
+    'catalog.diff.transition': 'r{from} → r{to} 변경 {count}개',
+    'catalog.highest_revision': '최고 승인 리비전',
+    'catalog.hint': '서명·상태 버전·정확한 계획 해시를 검토한 뒤 가져오기나 롤백을 적용합니다.',
+    'catalog.history.active': '활성',
+    'catalog.history.compare': '활성 버전과 비교',
+    'catalog.history.prepare_rollback': '이 리비전으로 롤백 준비',
+    'catalog.history.title': '로컬 리비전 이력',
+    'catalog.import': '서명 카탈로그 가져오기',
+    'catalog.review.apply': '검토한 정확한 가져오기 계획 적용',
+    'catalog.review.discard': '가져오기 계획 폐기',
+    'catalog.review.exact_plan': '정확한 계획',
+    'catalog.review.manifest_changes': 'Manifest 변경',
+    'catalog.review.model_changes': '모델 변경',
+    'catalog.review.signed_revision': '서명 카탈로그 리비전',
+    'catalog.review.signing_key': '서명 키',
+    'catalog.review.title': '가져오기 계획 검토',
+    'catalog.review.transition': '활성 r{from} → 후보 r{to} · 변경 {count}개',
+    'catalog.rollback.apply': '검토한 정확한 롤백 계획 적용',
+    'catalog.rollback.current_hash': '현재 해시',
+    'catalog.rollback.target_hash': '대상 해시',
+    'catalog.rollback.title': '롤백 계획 검토',
+    'catalog.rollback.transition': 'r{from} → r{to} · 변경 {count}개',
+    'catalog.snapshots': '저장 스냅샷',
+    'catalog.state_version': '상태 버전',
+    'catalog.status_unavailable': '카탈로그 상태를 아직 불러오지 못했습니다.',
+    'catalog.title': '프로바이더 카탈로그',
+    'chat.error.greeting_mismatch': '캐릭터 인사 목록이 선택한 캐릭터와 일치하지 않습니다.',
+    'chat.notice.branch_created': '새 대화 분기를 만들었습니다.',
+    'chat.notice.cancel_before_edit': '진행 중인 생성을 취소한 뒤 메시지를 변경하세요.',
+    'chat.notice.cancel_before_plan': '진행 중인 생성을 취소한 뒤 검토한 계획을 보내세요.',
+    'chat.notice.cancel_before_send': '진행 중인 생성을 취소한 뒤 새 메시지를 보내세요.',
+    'chat.notice.cancel_requested': '생성 취소를 요청했습니다.',
+    'chat.notice.check_model': '대화와 저장된 기본 모델을 확인한 뒤 메시지를 보내세요.',
+    'chat.notice.check_model_first': '대화와 저장된 기본 모델을 먼저 확인해 주세요.',
+    'chat.notice.greeting_reselect': '사용 가능한 시작 인사를 다시 선택해 주세요.',
+    'chat.notice.greeting_revision':
+        '정확한 캐릭터 인사 리비전을 불러온 뒤 새 대화를 시작해 주세요.',
+    'chat.notice.mode_chat': '채팅 모드로 변경했습니다.',
+    'chat.notice.mode_story': '스토리 모드로 변경했습니다.',
+    'chat.notice.plan_stale':
+        '대화 상태가 미리보기 이후 바뀌었습니다. 최종 계획을 다시 검토하세요.',
+    'chat.notice.reconciling': '저장된 메시지를 확인하는 중입니다.',
+    'chat.notice.refresh_needed': '대화 새로고침이 필요합니다.',
+    'chat.notice.remove_mismatch': '메시지 제거 결과가 요청한 대화 분기와 일치하지 않습니다.',
+    'chat.notice.removed': '이 메시지부터 분기에서 제거했습니다.',
+    'chat.notice.stream_reconnecting': '저장된 상태에서 생성 스트림을 다시 연결하는 중입니다.',
+    'chat.notice.stream_recovering': '스트림 상태를 복구하는 중입니다. ({reason})',
+    'chat.notice.synced': '대화가 저장된 상태와 동기화됐습니다.',
+    'chat.notice.tool_suggested': '모델이 도구 사용을 제안했습니다. 자동 실행하지 않습니다.',
+    'chat.usage.output_tokens': '출력 {count} 토큰',
+    'common.refresh': '새로고침',
+    'content_package.error.export_mismatch':
+        'Core 내보내기 영수증이 완료된 패키지와 일치하지 않습니다.',
+    'content_package.error.generic': '콘텐츠 패키지 작업을 완료하지 못했습니다.',
+    'content_package.error.review_mismatch':
+        'Core 검토 결과가 현재 패키지 스냅샷과 일치하지 않습니다.',
+    'content_package.error.unsafe_exports':
+        'Core 완료 패키지 내보내기 목록이 안전한 스냅샷이 아닙니다.',
+    'content_package.error.unsupported_approval':
+        '현재 Core가 콘텐츠 패키지 명시적 승인 API를 제공하지 않습니다.',
+    'content_package.error.unsupported_commit':
+        '현재 Core가 콘텐츠 패키지 가져오기 확정 API를 제공하지 않습니다.',
+    'content_package.error.unsupported_discard':
+        '현재 Core가 콘텐츠 패키지 검토 폐기 API를 제공하지 않습니다.',
+    'content_package.error.unsupported_export':
+        '현재 Core가 안전한 콘텐츠 소스 내보내기 API를 제공하지 않습니다.',
+    'content_package.error.unsupported_exports':
+        '현재 Core가 완료된 패키지 내보내기 목록 API를 제공하지 않습니다.',
+    'content_package.error.unsupported_flow':
+        '현재 Core가 안전한 콘텐츠 패키지 선택·검토·승인·확정 API를 제공하지 않습니다.',
+    'content_package.error.unsupported_pending':
+        '현재 Core가 중단된 콘텐츠 패키지 검토 목록 API를 제공하지 않습니다.',
+    'content_package.error.unsupported_reopen':
+        '현재 Core가 중단된 콘텐츠 패키지 검토 재개 API를 제공하지 않습니다.',
+    'content_package.error.unsupported_select':
+        '현재 Core가 안전한 콘텐츠 패키지 선택 및 검토 API를 제공하지 않습니다.',
+    'content_package.error.unsupported_selection_review':
+        '현재 Core가 콘텐츠 패키지 선택 검토 API를 제공하지 않습니다.',
+    'content_package.notice.capability_approved': '패키지 기능을 명시적으로 승인했습니다.',
+    'content_package.notice.capability_revoked': '패키지 기능 승인을 취소했습니다.',
+    'content_package.notice.discarded': '콘텐츠 패키지 검토를 폐기했습니다.',
+    'content_package.notice.discarding': '콘텐츠 패키지 검토를 폐기하고 있습니다.',
+    'content_package.notice.evidence_ready':
+        '정규화와 대상 쓰기 근거가 준비되었습니다. 기존 대상 업데이트를 각각 확인한 뒤 별도로 승인하세요.',
+    'content_package.notice.excluded': '가져올 구성 요소에서 제외했습니다.',
+    'content_package.notice.export_picking':
+        '완료된 콘텐츠 패키지의 저장 위치를 선택하고 있습니다.',
+    'content_package.notice.exported': '{name} 파일로 콘텐츠 패키지를 내보냈습니다.',
+    'content_package.notice.import_active': '구성 요소를 활성 상태로 가져오도록 선택했습니다.',
+    'content_package.notice.import_inactive': '구성 요소를 비활성 상태로 가져옵니다.',
+    'content_package.notice.imported': '콘텐츠 패키지를 안전하게 가져왔습니다.',
+    'content_package.notice.importing': '승인된 콘텐츠 패키지를 가져오고 있습니다.',
+    'content_package.notice.included': '가져올 구성 요소로 선택했습니다.',
+    'content_package.notice.pinned':
+        '정규화·대상 쓰기 근거와 기능 승인이 고정되었습니다. 이제 가져오기를 확정할 수 있습니다.',
+    'content_package.notice.pinning':
+        '표시된 정규화·대상 쓰기 근거와 기능 승인을 고정하고 있습니다.',
+    'content_package.notice.reopened': '중단된 콘텐츠 패키지 검토를 다시 열었습니다.',
+    'content_package.notice.reopening': '중단된 콘텐츠 패키지 검토를 다시 열고 있습니다.',
+    'content_package.notice.review_ready': '콘텐츠 패키지 검토가 준비되었습니다.',
+    'content_package.notice.reviewing_selection':
+        '선택한 구성 요소, 비활성 정규화, 대상 쓰기를 검토하고 있습니다.',
+    'content_package.notice.selection_cancelled': '콘텐츠 패키지 선택을 취소했습니다.',
+    'content_package.notice.target_confirmed': '기존 대상 업데이트를 명시적으로 확인했습니다.',
+    'content_package.notice.target_unconfirmed': '기존 대상 업데이트 확인을 취소했습니다.',
+    'conversation.empty.hint': '서재에서 캐릭터를 고르면 저장된 대화를 볼 수 있습니다.',
+    'conversation.empty.title': '캐릭터를 선택하세요.',
+    'conversation.greeting.alternate': '대체',
+    'conversation.greeting.default': '기본',
+    'conversation.greeting.disabled': ' · 비활성',
+    'conversation.greeting.label': '시작 인사',
+    'conversation.greeting.loading': '시작 인사 ID를 불러오는 중입니다.',
+    'conversation.greeting.none': '사용 가능한 시작 인사 없음',
+    'conversation.greeting.note': '인사 본문은 UI로 전달하지 않으며 ID와 종류만 선택합니다.',
+    'conversation.list.label': '{name} 대화 목록',
+    'conversation.loading': '대화를 불러오는 중입니다.',
+    'conversation.new': '새 대화',
+    'conversation.none.start': '대화 시작',
+    'conversation.none.title': '저장된 대화가 없습니다.',
+    'conversation.title': '대화',
+    'error.compatibility': '앱과 Core 버전이 호환되지 않습니다.',
+    'error.core_unavailable': '로컬 Core를 열 수 없습니다.',
+    'error.invalid_input': '입력 내용을 확인해 주세요.',
+    'error.unexpected': '예상하지 못한 오류가 발생했습니다.',
+    'import.assets': '에셋',
+    'import.assets.count': '{count}개',
+    'import.blocked': '가져올 수 없음',
+    'import.cancel': '취소',
+    'import.close': '닫기',
+    'import.commit': '서재에 추가',
+    'import.description.empty': '설명이 없습니다.',
+    'import.dialog.close': '가져오기 검토 닫기',
+    'import.estimated_size': '예상 저장 크기',
+    'import.inspecting': '로컬 파일을 안전하게 검사하는 중입니다.',
+    'import.kind': '형식',
+    'import.kind.png': 'PNG 카드',
+    'import.notice.added': '{name}을(를) 서재에 추가했습니다.',
+    'import.notice.review': '{name} 가져오기를 검토해 주세요.',
+    'import.source_size': '원본 크기',
+    'import.title': '가져오기 검토',
+    'import.unsupported_fields': '아직 지원하지 않는 선택 필드',
+    'import.warnings': '확인할 내용',
+    'interaction.error.ack_failed': '상호작용 표시 확인에 실패했습니다. Core가 다시 전달합니다.',
+    'interaction.error.decision_mismatch': 'Core 제안 결정이 현재 대화 스냅샷과 일치하지 않습니다.',
+    'interaction.error.load': '대화 상호작용 상태를 불러오지 못했습니다.',
+    'interaction.error.snapshot_mismatch': 'Core 선택 결과가 현재 대화 스냅샷과 일치하지 않습니다.',
+    'interaction.error.unreviewable':
+        '안전하게 표시할 수 없는 저장 제안은 내용을 검토할 수 없어 승인할 수 없습니다.',
+    'interaction.error.unsupported': '현재 Core가 안전한 대화 상호작용 API를 제공하지 않습니다.',
+    'interaction.notice.approved': '제안을 승인했습니다.',
+    'interaction.notice.approving': '제안을 승인하고 있습니다.',
+    'interaction.notice.expired_cleared':
+        '만료된 승인 제안을 정리했습니다. 생성을 다시 시도할 수 있습니다.',
+    'interaction.notice.hidden': '호환되지 않는 저장 상호작용을 안전하게 숨겼습니다.',
+    'interaction.notice.rejected': '제안을 거절했습니다.',
+    'interaction.notice.rejecting': '제안을 거절하고 있습니다.',
+    'interaction.notice.restored': '대화 상호작용 상태를 복원했습니다.',
+    'interaction.notice.selected': '선택을 반영했습니다.',
+    'interaction.notice.selecting': '선택을 Core에 반영하고 있습니다.',
+    'interaction.notice.shown': '대화 상호작용 효과를 표시했습니다.',
+    'library.character.image': '{name} 캐릭터 이미지',
+    'library.description.empty': '설명이 없습니다.',
+    'library.empty.hint':
+        '로컬 CCv3/CCv2 카드(JSON 또는 PNG)와 CHARX 파일을 안전하게 검사한 뒤 추가할 수 있습니다.',
+    'library.empty.import': '첫 캐릭터 가져오기',
+    'library.empty.title': '아직 캐릭터가 없습니다.',
+    'library.export': '내보내기',
+    'library.export.busy': '내보내는 중…',
+    'library.export.error': '캐릭터 소스를 내보내지 못했습니다.',
+    'library.export.file': '파일명 {name}',
+    'library.export.label': '{name} 캐릭터 소스 내보내기',
+    'library.export.mismatch': 'Core 내보내기 영수증이 선택한 캐릭터와 일치하지 않습니다.',
+    'library.export.picking': '운영체제 저장 위치를 선택하고 있습니다.',
+    'library.export.size': '크기 {bytes}바이트',
+    'library.export.success': '{name} 파일로 캐릭터 소스를 내보냈습니다.',
+    'library.export.title': '최근 캐릭터 내보내기',
+    'library.export.unsupported':
+        '현재 Core가 안전한 콘텐츠 소스 내보내기 API를 제공하지 않습니다.',
+    'library.import': '가져오기',
+    'library.list.label': '캐릭터 목록',
+    'library.loading': '캐릭터를 불러오는 중입니다.',
+    'library.retry': '다시 시도',
+    'library.title': '서재',
+    'memory.retry.ack.embedding':
+        '이전 외부 제공자 요청의 결과를 확인할 수 없습니다. 같은 임베딩 요청이 중복 처리될 수 있음을 확인하세요.',
+    'memory.retry.ack.job':
+        '이전 외부 제공자 요청의 결과를 확인할 수 없습니다. 같은 기억 작업이 중복 처리될 수 있음을 확인하세요.',
+    'memory.retry.confirm': '위험을 확인하고 재시도',
+    'memory.retry.confirm.job': '위험을 확인하고 작업 재시도',
+    'memory.retry.error.list': '기억 검색 재시도 목록을 검증하지 못했습니다.',
+    'memory.retry.error.receipt':
+        '재시도 결과를 검증하지 못했습니다. 목록을 새로고침해 상태를 확인하세요.',
+    'memory.retry.error_code': '오류 코드: {code}',
+    'memory.retry.heading': '기억 검색 준비가 중단되었습니다',
+    'memory.retry.hint':
+        '준비 작업을 재시도한 뒤 원래 계획 미리보기 또는 메시지 전송·편집·재생성을 다시 실행하세요.',
+    'memory.retry.job.attempts': '시도 {attempt}회 · 중단 {interruptions}회',
+    'memory.retry.job.embedding': '기억 임베딩 작업',
+    'memory.retry.job.summary': '대화 요약 작업',
+    'memory.retry.jobs.heading': '중단된 기억 작업',
+    'memory.retry.loading': '재시도할 준비 작업을 확인하는 중입니다.',
+    'memory.retry.notice.acknowledge':
+        '결과를 알 수 없는 외부 요청임을 확인한 뒤 다시 시도해 주세요.',
+    'memory.retry.notice.busy_job': '진행 중인 기억 작업 재시도가 끝난 뒤 다시 시도해 주세요.',
+    'memory.retry.notice.busy_query': '진행 중인 기억 검색 재시도가 끝난 뒤 다시 시도해 주세요.',
+    'memory.retry.notice.job_requeued':
+        '기억 작업만 다시 대기열에 넣었습니다. 이전 시도가 외부에 남긴 결과는 되돌리지 않습니다.',
+    'memory.retry.notice.query_requeued':
+        '임베딩 준비만 다시 대기열에 넣었습니다. 미리보기나 메시지 결과는 만들지 않았습니다. 원래 계획 미리보기 또는 메시지 전송·편집·재생성을 다시 실행하세요.',
+    'memory.retry.notice.reload': '현재 대화 분기의 재시도 항목을 다시 불러와 주세요.',
+    'memory.retry.review': '재시도 검토',
+    'memory.retry.review.job': '작업 재시도 검토',
+    'memory.retry.start': '준비 작업 재시도',
+    'memory.retry.status.cancelled': '취소된 요청',
+    'memory.retry.status.failed': '실패한 요청',
+    'memory.retry.status.interrupted': '결과를 알 수 없는 요청',
+    'memory.retry.status.queued': '이미 대기열에 들어간 요청',
+    'memory_supervisor.error.status': '기억 작업 상태를 확인하지 못했습니다.',
+    'memory_supervisor.error.subscribe': '기억 작업 상태의 실시간 갱신을 연결하지 못했습니다.',
+    'model_sync.cancel': '동기화 취소',
+    'model_sync.connection': '프로바이더 연결',
+    'model_sync.hint':
+        '자격증명이 필요한 요청은 자동 재실행하지 않고, diff digest를 검토한 뒤 적용합니다.',
+    'model_sync.interrupted':
+        '중단된 credential-bearing 작업은 자동 재개하지 않습니다. 저장 상태를 확인한 뒤 새 동기화를 명시적으로 시작하세요.',
+    'model_sync.refresh_events': '이벤트 확인·새로고침',
+    'model_sync.review.apply': '검토한 정확한 diff 적용',
+    'model_sync.review.count': '{count}개',
+    'model_sync.review.initial_presets': '초기 프리셋',
+    'model_sync.review.missing': '일시 누락',
+    'model_sync.review.needs_preset': '프리셋 설정 필요',
+    'model_sync.review.new': '새 모델',
+    'model_sync.review.source': '출처: {source} ·',
+    'model_sync.review.title': '동기화 변경 검토',
+    'model_sync.saved_jobs': '저장된 동기화 작업',
+    'model_sync.select': '선택',
+    'model_sync.start.label': '모델 동기화 시작',
+    'model_sync.title': '모델 동기화',
+    'module_lifecycle.error.all_choices_required': '검토한 모든 충돌 선택이 필요합니다.',
+    'module_lifecycle.error.approval_required':
+        '가져온 패키지 모듈은 완료된 패키지 승인 ID를 명시적으로 선택해야 합니다.',
+    'module_lifecycle.error.binding_mismatch': '선택한 바인딩과 모듈 후보가 일치하지 않습니다.',
+    'module_lifecycle.error.builtin':
+        '앱 내장 모듈은 제품 정책에 따라 사용자 활성화 바인딩을 만들 수 없습니다.',
+    'module_lifecycle.error.conflict':
+        '검토한 모듈·바인딩·패키지 승인 상태가 변경되었습니다. 최신 상태를 다시 검토해 주세요.',
+    'module_lifecycle.error.conflict_choice_required':
+        '모든 충돌에서 사용할 후보 또는 명시적 제외를 선택해 주세요.',
+    'module_lifecycle.error.deactivation_receipt_mismatch':
+        'Core 비활성화 영수증이 검증 완료 상태 또는 검토·바인딩·삭제 CAS와 일치하지 않습니다.',
+    'module_lifecycle.error.deactivation_review_mismatch':
+        'Core 비활성화 검토가 선택한 바인딩, 승인 리비전 또는 상태 CAS와 일치하지 않습니다.',
+    'module_lifecycle.error.generic': '콘텐츠 모듈 수명주기 작업을 완료하지 못했습니다.',
+    'module_lifecycle.error.list_limit':
+        'Core의 콘텐츠 모듈 목록이 화면의 안전한 표시 한도를 초과했습니다.',
+    'module_lifecycle.error.no_scope':
+        'Core가 이 대화에 사용할 수 있는 모듈 범위를 제공하지 않았습니다.',
+    'module_lifecycle.error.not_found': '콘텐츠 모듈, 바인딩 또는 불변 리비전을 찾을 수 없습니다.',
+    'module_lifecycle.error.out_of_scope':
+        '이 콘텐츠 모듈은 현재 범위에서 로컬 활성화할 수 없습니다.',
+    'module_lifecycle.error.plan_mismatch':
+        'Core 활성화 계획이 검토 해시, 상태 리비전 또는 바인딩과 일치하지 않습니다.',
+    'module_lifecycle.error.receipt_mismatch':
+        'Core 영수증이 검증 완료 상태 또는 승인·검토·계획·바인딩 해시와 일치하지 않습니다.',
+    'module_lifecycle.error.review_chain_mismatch':
+        'Core 검토 결과가 선택한 바인딩의 단일 패키지 승인 체인과 정확히 일치하지 않습니다.',
+    'module_lifecycle.error.review_revision_mismatch':
+        'Core 검토 결과가 선택한 불변 모듈 리비전 또는 바인딩과 일치하지 않습니다.',
+    'module_lifecycle.error.revision_blocked': '이 리비전은 로컬 사용이 허용되지 않습니다.',
+    'module_lifecycle.error.revision_not_local':
+        '이 리비전은 로컬 사용이 허용되지 않아 활성화 검토를 시작할 수 없습니다.',
+    'module_lifecycle.error.rollback_all_choices_required':
+        '검토한 모든 롤백 충돌 선택이 필요합니다.',
+    'module_lifecycle.error.rollback_approval_required':
+        '가져온 롤백 대상은 해당 불변 리비전의 완료된 패키지 승인을 명시적으로 선택해야 합니다.',
+    'module_lifecycle.error.rollback_blocked': '차단 사유가 있는 롤백은 계획으로 만들 수 없습니다.',
+    'module_lifecycle.error.rollback_choice_required':
+        '모든 롤백 충돌에서 사용할 후보 또는 제외를 선택해 주세요.',
+    'module_lifecycle.error.rollback_evidence_mismatch':
+        'Core 롤백 검토의 패키지 승인 근거가 선택한 불변 대상 리비전과 일치하지 않습니다.',
+    'module_lifecycle.error.rollback_plan_mismatch':
+        'Core 롤백 계획이 검토 해시, 상태 리비전, 바인딩 또는 대상 리비전과 일치하지 않습니다.',
+    'module_lifecycle.error.rollback_receipt_mismatch':
+        'Core 롤백 영수증이 검증 완료 상태 또는 승인·검토·계획·바인딩 해시와 일치하지 않습니다.',
+    'module_lifecycle.error.rollback_review_mismatch':
+        'Core 롤백 검토가 선택한 바인딩 또는 불변 대상 리비전과 일치하지 않습니다.',
+    'module_lifecycle.error.rollback_target_invalid':
+        '선택한 불변 리비전은 이 바인딩의 롤백 대상이 아닙니다.',
+    'module_lifecycle.error.unsupported':
+        '현재 Core가 해시로 고정된 콘텐츠 모듈 활성화·롤백 API(비활성화 포함)를 제공하지 않습니다.',
+    'module_lifecycle.notice.activated': '{name} 모듈을 검증된 영수증으로 활성화했습니다.',
+    'module_lifecycle.notice.deactivated':
+        '{name} 모듈 바인딩을 검증된 영수증으로 비활성화했습니다.',
+    'module_lifecycle.notice.deactivation_reviewed':
+        '{name} 모듈 바인딩의 정확한 상태와 해시를 비활성화 전에 검토했습니다.',
+    'module_lifecycle.notice.draft_created': '{name} 모듈의 활성화 초안을 만들었습니다.',
+    'module_lifecycle.notice.plan_ready': '검토한 충돌 선택으로 활성화 계획을 만들었습니다.',
+    'module_lifecycle.notice.reloaded': '콘텐츠 모듈 후보와 활성 바인딩을 다시 불러왔습니다.',
+    'module_lifecycle.notice.reviewed': '{name} 모듈의 정확한 리비전과 충돌을 검토했습니다.',
+    'module_lifecycle.notice.rollback_plan_ready':
+        '검토한 불변 리비전으로 원자적 롤백 계획을 만들었습니다.',
+    'module_lifecycle.notice.rollback_reviewed':
+        '{name} 모듈의 불변 리비전 차이와 차단 사유를 검토했습니다.',
+    'module_lifecycle.notice.rolled_back': '{name} 모듈을 검증된 영수증으로 롤백했습니다.',
+    'orchestration.error.author_note_length':
+        '작가 메모는 공백만으로 구성할 수 없고 {max}자 이하여야 합니다.',
+    'orchestration.error.embedding_dimensions':
+        '메모리 임베딩 차원은 1에서 32768 사이의 정수여야 합니다.',
+    'orchestration.error.embedding_fallback':
+        '메모리 임베딩은 하나의 벡터 공간만 사용하므로 fallback route를 허용하지 않습니다.',
+    'orchestration.error.embedding_not_applicable':
+        '임베딩이 아닌 작업 프로필에는 임베딩 차원을 설정할 수 없습니다.',
+    'orchestration.error.generic': '프롬프트 오케스트레이션 작업을 완료하지 못했습니다.',
+    'orchestration.error.group_context_length':
+        '그룹 문맥은 공백만으로 구성할 수 없고 {max}자 이하여야 합니다.',
+    'orchestration.error.invalid_attempt_id': 'Core가 유효하지 않은 생성 시도 ID를 반환했습니다.',
+    'orchestration.error.memory_scope':
+        'Core가 요청 권한과 일치하지 않는 장기기억 응답을 반환했습니다.',
+    'orchestration.error.name_length': '사용자 표시 이름은 앞뒤 공백 없이 {max}자 이하여야 합니다.',
+    'orchestration.error.no_knowledge_book':
+        '현재 프롬프트 프리셋에 연결된 세계관 지식 책이 없습니다.',
+    'orchestration.error.plan_attempt_mismatch':
+        'Core가 요청한 생성 시도와 다른 계획을 반환했습니다.',
+    'orchestration.error.prompt_source_limit':
+        '방별 프롬프트 소스가 표시 한도를 위반했습니다: {detail}',
+    'orchestration.error.reserved_slot': '`block_content`는 블록 변환 전용 예약 슬롯입니다.',
+    'orchestration.error.rule_ambiguous':
+        '여러 변환 세트에 같은 규칙 ID가 있어 미리보기를 실행할 수 없습니다.',
+    'orchestration.error.rule_not_found':
+        '저장된 Creator 변환 규칙에서 해당 ID를 찾을 수 없습니다.',
+    'orchestration.error.slot_count': '템플릿 슬롯은 최대 {max}개까지 저장할 수 있습니다.',
+    'orchestration.error.slot_duplicate': '템플릿 슬롯 이름 “{name}”이(가) 중복되었습니다.',
+    'orchestration.error.slot_name':
+        '템플릿 슬롯 {index} 이름은 앞뒤 공백과 제어 문자 없이 {max}자 이하여야 합니다.',
+    'orchestration.error.slot_value_length': '템플릿 슬롯 {index} 값은 {max}자 이하여야 합니다.',
+    'orchestration.error.unsupported':
+        '현재 Core가 프롬프트 오케스트레이션 API를 제공하지 않습니다.',
+    'orchestration.error.unsupported_block_edit':
+        '현재 Core가 안전한 프롬프트 블록 편집 API를 제공하지 않습니다.',
+    'orchestration.error.unsupported_block_order':
+        '현재 Core가 프롬프트 블록 순서 저장 API를 제공하지 않습니다.',
+    'orchestration.error.unsupported_block_save':
+        '현재 Core가 안전한 프롬프트 블록 저장 API를 제공하지 않습니다.',
+    'orchestration.error.unsupported_creator_edit':
+        '현재 Core가 안전한 Creator 문서 편집 API를 제공하지 않습니다.',
+    'orchestration.error.unsupported_document_delete':
+        '현재 Core가 {label} 삭제 API를 제공하지 않습니다.',
+    'orchestration.error.unsupported_document_save':
+        '현재 Core가 {label} 저장 API를 제공하지 않습니다.',
+    'orchestration.error.unsupported_knowledge_sim':
+        '현재 Core가 세계관 지식 시뮬레이터를 제공하지 않습니다.',
+    'orchestration.error.unsupported_memory_delete':
+        '현재 Core가 장기기억 삭제 API를 제공하지 않습니다.',
+    'orchestration.error.unsupported_memory_edit':
+        '현재 Core가 장기기억 편집 API를 제공하지 않습니다.',
+    'orchestration.error.unsupported_memory_exclusion':
+        '현재 Core가 장기기억 제외 범위 API를 제공하지 않습니다.',
+    'orchestration.error.unsupported_memory_pin':
+        '현재 Core가 장기기억 고정 설정 API를 제공하지 않습니다.',
+    'orchestration.error.unsupported_plan_preview':
+        '현재 Core가 최종 프롬프트 계획 미리보기를 제공하지 않습니다.',
+    'orchestration.error.unsupported_room_save':
+        '현재 Core에서는 방별 오케스트레이션 설정을 저장할 수 없습니다.',
+    'orchestration.error.unsupported_task_delete':
+        '현재 Core가 안전한 작업 프로필 삭제 API를 제공하지 않습니다.',
+    'orchestration.error.unsupported_task_edit':
+        '현재 Core가 안전한 작업 프로필 편집 API를 제공하지 않습니다.',
+    'orchestration.error.unsupported_task_save':
+        '현재 Core가 안전한 작업 프로필 저장 API를 제공하지 않습니다.',
+    'orchestration.error.unsupported_transform_preview':
+        '현재 Core가 안전한 변환 미리보기를 제공하지 않습니다.',
+    'orchestration.label.character_scope': '캐릭터',
+    'orchestration.label.content_module': '콘텐츠 모듈',
+    'orchestration.label.conversation_scope': '현재 대화',
+    'orchestration.label.interaction_rule_set': '상호작용 규칙 세트',
+    'orchestration.label.knowledge_book': '지식 책',
+    'orchestration.label.memory_profile': '메모리 프로필',
+    'orchestration.label.prompt': '프롬프트',
+    'orchestration.label.transform_set': '변환 세트',
+    'orchestration.notice.decision_failed':
+        '제안 결정에 실패했습니다. 최신 승인 목록을 다시 불러오세요.',
+    'orchestration.notice.document_deleted': '{id} {label}을(를) 삭제했습니다.',
+    'orchestration.notice.document_saved': '{id} {label}을(를) 저장했습니다.',
+    'orchestration.notice.document_saved_partial':
+        '{id} {label}을(를) 저장했지만 저장 중 추가 변경은 아직 저장되지 않았습니다.',
+    'orchestration.notice.draft_discarded': '{id} {label} 초안을 버렸습니다.',
+    'orchestration.notice.exclusion_changed': '{scope} 장기기억 제외 설정을 변경했습니다.',
+    'orchestration.notice.memory_deleted': '장기기억을 삭제했습니다.',
+    'orchestration.notice.memory_pinned': '장기기억 고정 설정을 변경했습니다.',
+    'orchestration.notice.memory_updated': '장기기억을 수정했습니다.',
+    'orchestration.notice.order_failed': '블록 순서를 변경하지 못했습니다.',
+    'orchestration.notice.order_saved': '{name} 블록 순서를 저장했습니다.',
+    'orchestration.notice.preset_saved': '{name} 프롬프트 프리셋을 저장했습니다.',
+    'orchestration.notice.preset_saved_partial':
+        '{name} 프롬프트 프리셋을 저장했지만 저장 중 추가로 바꾼 내용은 아직 저장되지 않았습니다.',
+    'orchestration.notice.room_saved': '이 방의 프롬프트와 생성 설정을 저장했습니다.',
+    'orchestration.notice.task_deleted': '{name} 작업 프로필을 삭제했습니다.',
+    'orchestration.notice.task_saved': '{name} 작업 프로필을 저장했습니다.',
+    'orchestration.notice.task_saved_partial':
+        '{name} 작업 프로필을 저장했지만 저장 중 추가 변경은 아직 저장되지 않았습니다.',
+    'orchestration.notice.unsaved_changes':
+        '저장 중 추가로 바꾼 값이 있습니다. 새 변경 사항은 아직 저장되지 않았습니다.',
+    'persona.description.empty': '설명 없음',
+    'persona.editor.create_button': '새로 만들기',
+    'persona.editor.description': '설명',
+    'persona.editor.edit': 'Persona 편집',
+    'persona.editor.name': '이름',
+    'persona.editor.new': '새 Persona',
+    'persona.editor.submit_create': 'Persona 만들기',
+    'persona.editor.submit_update': '변경 저장',
+    'persona.error.conflict':
+        '다른 화면에서 Persona가 변경되었습니다. 최신 상태를 다시 불러와 주세요.',
+    'persona.error.generic': 'Persona 작업을 완료하지 못했습니다.',
+    'persona.error.not_found': 'Persona 또는 대화를 찾을 수 없습니다.',
+    'persona.error.not_owner': '현재 로컬 사용자가 소유한 Persona만 수정할 수 있습니다.',
+    'persona.error.unsupported': '현재 Core가 안전한 Persona 관리 API를 제공하지 않습니다.',
+    'persona.hint': 'Persona는 로컬 사용자 소유이며, 선택은 대화마다 따로 저장됩니다.',
+    'persona.list.cancel': '취소',
+    'persona.list.confirm_delete': '삭제 확인',
+    'persona.list.delete': '삭제',
+    'persona.list.edit': '편집',
+    'persona.list.empty': '저장된 Persona가 없습니다.',
+    'persona.list.in_use': '이 대화에서 사용 중',
+    'persona.list.label': '저장된 Persona',
+    'persona.list.load_more': '더 불러오기',
+    'persona.list.pinned': '이 대화는 현재 Persona의 r{revision} 스냅샷을 사용합니다.',
+    'persona.list.select': '이 대화에 선택',
+    'persona.loading': 'Persona를 불러오는 중입니다.',
+    'persona.notice.cleared': '이 대화의 Persona 선택을 해제했습니다.',
+    'persona.notice.created': '{name} Persona를 만들었습니다.',
+    'persona.notice.deleted': '{name} Persona를 삭제했습니다.',
+    'persona.notice.reloaded': 'Persona 목록이 변경되어 최신 첫 페이지부터 다시 불러왔습니다.',
+    'persona.notice.selected': '{name} Persona를 이 대화에 선택했습니다.',
+    'persona.notice.updated': '{name} Persona를 수정했습니다.',
+    'persona.notice.updated_pinned':
+        '{name} Persona를 수정했습니다. 현재 대화는 선택 당시 리비전을 계속 사용합니다.',
+    'persona.selection.clear': '선택 해제',
+    'persona.selection.current': '현재 대화',
+    'persona.selection.empty': '이 대화에는 선택된 Persona가 없습니다.',
+    'persona.selection.none_conversation': '선택된 대화 없음',
+    'persona.selection.pick_conversation':
+        '대화를 선택하면 그 대화의 Persona를 지정할 수 있습니다.',
+    'persona.selection.revision': '선택 리비전 {revision} · 이후 Persona 편집과 분리된 불변 스냅샷',
+    'persona.selection.title': '현재 대화 Persona',
+    'persona.title': '내 Persona',
+    'preset_history.error.bad_revision': '현재 프롬프트 프리셋 리비전이 올바르지 않습니다.',
+    'preset_history.error.builtin': '앱 내장 프롬프트 프리셋은 롤백할 수 없습니다.',
+    'preset_history.error.generic': '프롬프트 프리셋 이력 작업을 완료하지 못했습니다.',
+    'preset_history.error.inconsistent':
+        'Core가 일관되지 않은 프롬프트 프리셋 이력을 반환했습니다.',
+    'preset_history.error.limit': 'Core가 프롬프트 프리셋 이력 표시 한도를 초과했습니다.',
+    'preset_history.error.missing_current': 'Core 프롬프트 프리셋 이력에 현재 리비전이 없습니다.',
+    'preset_history.error.receipt_inconsistent':
+        'Core가 일관되지 않은 프롬프트 프리셋 롤백 영수증을 반환했습니다.',
+    'preset_history.error.reload_failed':
+        '롤백은 적용되었지만 최신 이력을 다시 불러오지 못했습니다.',
+    'preset_history.error.review_mismatch':
+        '프롬프트 프리셋 롤백 검토와 변경 내역이 일치하지 않습니다.',
+    'preset_history.error.review_unavailable':
+        '이 빌드에서는 프롬프트 프리셋 롤백 검토를 사용할 수 없습니다.',
+    'preset_history.error.unavailable': '이 빌드에서는 프롬프트 프리셋 이력을 사용할 수 없습니다.',
+    'preset_history.notice.applied':
+        '리비전 {source}의 내용이 새 리비전 {target}으로 적용되었습니다.',
+    'preset_history.notice.review_ready': '리비전 {revision} 롤백 검토가 준비되었습니다.',
+    'provider.notice.assistant_ready': '설정 도우미 결과가 검토 대기 상태로 도착했습니다.',
+    'provider.notice.catalog_applied': '검토한 카탈로그 변경을 적용했습니다.',
+    'provider.notice.catalog_discarded': '카탈로그 가져오기 계획을 폐기했습니다.',
+    'provider.notice.catalog_plan': '서명된 카탈로그 변경 계획을 검토해 주세요.',
+    'provider.notice.connection_created': '프로바이더 연결을 만들었습니다.',
+    'provider.notice.connection_deleted': '프로바이더 연결과 연결된 자격증명을 삭제했습니다.',
+    'provider.notice.connection_saved': '검토·승인된 프로바이더 연결을 저장했습니다.',
+    'provider.notice.connection_updated': '프로바이더 연결을 수정했습니다.',
+    'provider.notice.credential_deleted': '저장된 자격증명을 삭제했습니다.',
+    'provider.notice.credential_stored': '운영체제 자격증명 저장소에 저장했습니다.',
+    'provider.notice.curl_added': '캡처한 cURL 근거를 추가했습니다.',
+    'provider.notice.discovery_cancelled': '프로바이더 탐색을 취소했습니다.',
+    'provider.notice.discovery_started': '프로바이더 탐색을 시작했습니다.',
+    'provider.notice.discovery_started_curl': '캡처한 cURL로 프로바이더 탐색을 시작했습니다.',
+    'provider.notice.events_truncated':
+        '탐색 이벤트가 너무 많이 쌓여 일부만 확인했습니다. 다시 확인해 주세요.',
+    'provider.notice.existing_target_saved': '기존 프로바이더를 기본 대상으로 저장했습니다.',
+    'provider.notice.no_default_route': '저장된 기본 모델 라우트가 없습니다.',
+    'provider.notice.no_next_step': '현재 탐색 상태에서 진행할 작업이 없습니다.',
+    'provider.notice.no_recovery': '복구가 필요한 탐색 작업이 없습니다.',
+    'provider.notice.override_deleted': '사용자 capability override를 삭제했습니다.',
+    'provider.notice.override_saved': '사용자 capability override를 저장했습니다.',
+    'provider.notice.partial_saved': '부분 생성 보존 설정을 저장했습니다.',
+    'provider.notice.preset_deleted': '생성 프리셋을 삭제했습니다.',
+    'provider.notice.preset_saved': '생성 프리셋을 저장했습니다.',
+    'provider.notice.preset_valid': '프리셋 후보가 유효합니다.',
+    'provider.notice.recovered': '{count}개 탐색 작업을 복구했습니다.',
+    'provider.notice.rollback_plan': '정확한 롤백 계획을 검토해 주세요.',
+    'provider.notice.rolled_back': '검토한 카탈로그 리비전으로 롤백했습니다.',
+    'provider.notice.route_deleted': '모델 라우트를 삭제했습니다.',
+    'provider.notice.route_saved': '모델 라우트를 저장했습니다.',
+    'provider.notice.sync_applied': '검토한 정확한 모델 동기화 변경을 적용했습니다.',
+    'provider.notice.sync_cancelled': '모델 동기화를 취소했습니다.',
+    'provider.notice.sync_started': '모델 동기화를 시작했습니다. 자동 승인하지 않습니다.',
+    'provider.notice.target_cleared': '기본 생성 대상을 해제했습니다.',
+    'provider.notice.target_saved': '기본 생성 대상을 저장했습니다.',
+    'quick.close': '생성 설정 닫기',
+    'quick.creativity': '창의성',
+    'quick.creator_controls': '제작자 조절 항목',
+    'quick.dirty': '저장하지 않은 변경 있음',
+    'quick.enrichment': '대화 보강',
+    'quick.eyebrow': '이번 대화',
+    'quick.generation_preset': '생성 프리셋',
+    'quick.generation_preset.default': '프로바이더 기본 설정',
+    'quick.knowledge': '세계관 지식 사용',
+    'quick.legend': '이 방의 프롬프트 및 생성 설정',
+    'quick.length': '응답 길이',
+    'quick.length.balanced': '균형',
+    'quick.length.long': '길게',
+    'quick.length.short': '짧게',
+    'quick.loading': '방 설정을 불러오는 중입니다.',
+    'quick.memory': '장기기억 사용',
+    'quick.model': '모델',
+    'quick.model.auto': '모델 자동 선택',
+    'quick.model.hint': '모델을 바꾸면 그 모델에 속한 첫 생성 프리셋을 함께 선택합니다.',
+    'quick.preset': '프롬프트 프리셋',
+    'quick.preset.default': '기본 프롬프트',
+    'quick.reasoning': '추론 강도',
+    'quick.reasoning.extra_high': '매우 높음',
+    'quick.reasoning.high': '높음',
+    'quick.reasoning.low': '낮음',
+    'quick.reasoning.maximum': '최대',
+    'quick.reasoning.medium': '중간',
+    'quick.reasoning.minimal': '최소',
+    'quick.reasoning.provider_default': '모델 기본값',
+    'quick.save': '방 설정 저장',
+    'quick.saving': '저장 중…',
+    'quick.studio': '고급 설정',
+    'quick.title': '프롬프트와 생성',
+    'quick.toggle': '생성 설정',
+} as const;

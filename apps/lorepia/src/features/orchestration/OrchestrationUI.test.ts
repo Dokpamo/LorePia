@@ -504,7 +504,8 @@ function liveStudioClient(
             }
             if (
                 commandName === 'list_branch_messages' ||
-                commandName === 'list_retryable_memory_query_embeddings'
+                commandName === 'list_retryable_memory_query_embeddings' ||
+                commandName === 'list_interrupted_memory_jobs'
             ) {
                 return Promise.resolve([]);
             }

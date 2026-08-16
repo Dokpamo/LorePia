@@ -881,7 +881,7 @@
     .action-block {
         padding: 12px;
         border-radius: 12px;
-        background: var(--surface-muted);
+        background: var(--surface-sunken);
     }
 
     dt {

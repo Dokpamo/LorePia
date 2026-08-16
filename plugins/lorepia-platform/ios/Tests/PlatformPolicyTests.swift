@@ -114,6 +114,42 @@ final class PlatformPolicyTests: XCTestCase {
       + String(repeating: "ab", count: 32)
       + "\nsynthetic-secret"
 
+  func testCredentialConfirmationTextRejectsPromptSpoofingControls() {
+    let invalid = [
+      "",
+      "   ",
+      "connection\nApprove",
+      "connection\u{0000}Approve",
+      "connection\u{2028}Approve",
+      "connection\u{2029}Approve",
+      "connection\u{202E}Approve",
+      "connection\u{2066}Approve",
+      "connection\u{2069}Approve",
+      "connection\u{200B}Approve",
+      "connection\u{200D}Approve",
+      "connection\u{2060}Approve",
+      "connection\u{FEFF}Approve",
+      "connection\u{00AD}Approve",
+      "connection\u{034F}Approve",
+      "connection\u{E0001}Approve",
+    ]
+
+    for value in invalid {
+      XCTAssertThrowsError(
+        try PlatformPolicy.validateCredentialConfirmationText(
+          value,
+          maximumBytes: 256
+        )
+      )
+    }
+    XCTAssertNoThrow(
+      try PlatformPolicy.validateCredentialConfirmationText(
+        "연결 a",
+        maximumBytes: 256
+      )
+    )
+  }
+
   func testBoundReadAcceptsExactProtectedRecordWithoutMutation() throws {
     let backend = RecordingKeychainCredentialBackend(
       protectedRecord: .init(

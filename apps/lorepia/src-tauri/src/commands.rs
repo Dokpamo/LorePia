@@ -9,10 +9,13 @@ use lorepia_shell_api::{
     RemoveMessageInput, RequestPreviewDto, ResolveAssetDeliveryInput, SecretCredential,
     SelectConversationBranchInput, SendMessageInput, SetConversationModeInput, StagedImportFile,
 };
+use sha2::{Digest, Sha256};
 use tauri::{AppHandle, State, ipc::Channel};
 use tauri_plugin_lorepia_platform::{
     BoundCredentialObservation, CredentialAuthority, CredentialStatus, LegacyCredentialObservation,
-    LorepiaPlatformExt, NativeCredential, PlatformErrorCode, PlatformResult,
+    LorepiaPlatformExt, NativeCredential, NativeCredentialEffect,
+    NativeCredentialEffectConfirmation, NativeCredentialEffectContext, PlatformErrorCode,
+    PlatformResult,
 };
 use uuid::Uuid;
 
@@ -632,17 +635,6 @@ pub async fn capture_credential(
     request: CredentialStatusRequest,
 ) -> CommandResult<NativeCaptureStatusDto> {
     let shell = state.shell()?;
-    let legacy_target = matches!(&request.target, CredentialTarget::LegacyProfile { .. });
-    let _legacy_operation = if legacy_target {
-        Some(state.lock_legacy_credential_admission().await)
-    } else {
-        None
-    };
-    let _provider_operation = if legacy_target {
-        None
-    } else {
-        Some(state.lock_provider_credential_operation().await)
-    };
     if let CredentialTarget::DiscoverySession {
         session_id,
         expected_revision,
@@ -653,10 +645,21 @@ pub async fn capture_credential(
     }
     match &request.target {
         CredentialTarget::Connection { connection_id } => {
+            let confirmation = confirm_connection_credential_effect(
+                &app,
+                &shell,
+                connection_id,
+                NativeCredentialEffect::CaptureOrReplace,
+            )
+            .await?;
+            // The trusted modal must never hold the global credential writer:
+            // an abandoned prompt would otherwise block every read/recovery.
+            let _provider_operation = state.lock_provider_credential_operation().await;
             crate::credential_operations::capture_provider_connection_credential(
                 &app,
                 &shell,
                 connection_id,
+                confirmation,
             )
             .await
         }
@@ -665,8 +668,23 @@ pub async fn capture_credential(
         } => {
             let reference = provider_profile_reference(&shell, provider_profile_id)?;
             shell.ensure_legacy_profile_credential_mutation_settled(&reference)?;
+            let confirmation = confirm_legacy_credential_effect(
+                &app,
+                &shell,
+                &reference,
+                NativeCredentialEffect::CaptureOrReplace,
+            )
+            .await?;
+            let _legacy_operation = state.lock_legacy_credential_admission().await;
+            if provider_profile_reference(&shell, provider_profile_id)? != reference {
+                return Err(CommandError::invalid_input());
+            }
+            shell.ensure_legacy_profile_credential_mutation_settled(&reference)?;
             crate::credential_operations::capture_legacy_provider_credential(
-                &app, &shell, &reference,
+                &app,
+                &shell,
+                &reference,
+                confirmation,
             )
             .await
         }
@@ -674,6 +692,7 @@ pub async fn capture_credential(
     }
 }
 
+#[allow(clippy::too_many_lines)] // Keeps the confirmation-to-WAL cutpoint sequence linear.
 async fn capture_discovery_credential(
     app: &AppHandle,
     state: &AppState,
@@ -685,6 +704,27 @@ async fn capture_discovery_credential(
     if session.revision != expected_revision || !session.credential_binding_requested {
         return Err(CommandError::invalid_input());
     }
+    let credential_authority = shell.get_provider_discovery_credential_lease_context(session_id)?;
+    let confirmation = app
+        .lorepia_platform()
+        .confirm_credential_effect(discovery_capture_confirmation_context(
+            &session,
+            &credential_authority,
+        )?)
+        .await?;
+    let latest = shell.get_provider_discovery(session_id)?;
+    let latest_authority = shell.get_provider_discovery_credential_lease_context(session_id)?;
+    if latest != session || latest_authority != credential_authority {
+        return Err(CommandError::invalid_input());
+    }
+    let _provider_operation = state.lock_provider_credential_operation().await;
+    if shell.get_provider_discovery(session_id)? != session
+        || shell.get_provider_discovery_credential_lease_context(session_id)?
+            != credential_authority
+    {
+        return Err(CommandError::invalid_input());
+    }
+    consume_discovery_capture_confirmation(confirmation, &session, &credential_authority)?;
     if session.state != "committing" {
         return crate::provider_commands::capture_precommit_discovery_credential(
             app,
@@ -937,17 +977,6 @@ pub async fn delete_credential(
     request: CredentialStatusRequest,
 ) -> CommandResult<()> {
     let shell = state.shell()?;
-    let legacy_target = matches!(&request.target, CredentialTarget::LegacyProfile { .. });
-    let _legacy_operation = if legacy_target {
-        Some(state.lock_legacy_credential_admission().await)
-    } else {
-        None
-    };
-    let _provider_operation = if legacy_target {
-        None
-    } else {
-        Some(state.lock_provider_credential_operation().await)
-    };
     if matches!(&request.target, CredentialTarget::DiscoverySession { .. }) {
         // A discovery slot is owned by the durable commit/compensation recipe.
         // Direct deletion could race publication and create an untracked
@@ -956,10 +985,19 @@ pub async fn delete_credential(
     }
     match &request.target {
         CredentialTarget::Connection { connection_id } => {
+            let confirmation = confirm_connection_credential_effect(
+                &app,
+                &shell,
+                connection_id,
+                NativeCredentialEffect::Delete,
+            )
+            .await?;
+            let _provider_operation = state.lock_provider_credential_operation().await;
             crate::credential_operations::delete_provider_connection_credential(
                 &app,
                 &shell,
                 connection_id,
+                confirmation,
             )
             .await
         }
@@ -968,13 +1006,151 @@ pub async fn delete_credential(
         } => {
             let reference = provider_profile_reference(&shell, provider_profile_id)?;
             shell.ensure_legacy_profile_credential_mutation_settled(&reference)?;
+            let confirmation = confirm_legacy_credential_effect(
+                &app,
+                &shell,
+                &reference,
+                NativeCredentialEffect::Delete,
+            )
+            .await?;
+            let _legacy_operation = state.lock_legacy_credential_admission().await;
+            if provider_profile_reference(&shell, provider_profile_id)? != reference {
+                return Err(CommandError::invalid_input());
+            }
+            shell.ensure_legacy_profile_credential_mutation_settled(&reference)?;
             crate::credential_operations::delete_legacy_provider_credential(
-                &app, &shell, &reference,
+                &app,
+                &shell,
+                &reference,
+                confirmation,
             )
             .await
         }
         CredentialTarget::DiscoverySession { .. } => Err(CommandError::invalid_input()),
     }
+}
+
+async fn confirm_connection_credential_effect(
+    app: &AppHandle,
+    shell: &lorepia_shell_api::ShellApi,
+    connection_id: &str,
+    effect: NativeCredentialEffect,
+) -> CommandResult<NativeCredentialEffectConfirmation> {
+    let context = crate::credential_operations::provider_connection_credential_effect_context(
+        shell,
+        connection_id,
+        effect,
+    )?;
+    let confirmation = app
+        .lorepia_platform()
+        .confirm_credential_effect(context)
+        .await?;
+    let latest = crate::credential_operations::provider_connection_credential_effect_context(
+        shell,
+        connection_id,
+        effect,
+    )?;
+    if confirmation.context() != &latest {
+        return Err(CommandError::invalid_input());
+    }
+    Ok(confirmation)
+}
+
+pub(crate) async fn confirm_legacy_credential_effect(
+    app: &AppHandle,
+    shell: &lorepia_shell_api::ShellApi,
+    provider_profile_id: &str,
+    effect: NativeCredentialEffect,
+) -> CommandResult<NativeCredentialEffectConfirmation> {
+    let context = legacy_credential_effect_context(app, shell, provider_profile_id, effect).await?;
+    let confirmation = app
+        .lorepia_platform()
+        .confirm_credential_effect(context)
+        .await?;
+    let latest = legacy_credential_effect_context(app, shell, provider_profile_id, effect).await?;
+    if confirmation.context() != &latest {
+        return Err(CommandError::invalid_input());
+    }
+    Ok(confirmation)
+}
+
+async fn legacy_credential_effect_context(
+    app: &AppHandle,
+    shell: &lorepia_shell_api::ShellApi,
+    provider_profile_id: &str,
+    effect: NativeCredentialEffect,
+) -> CommandResult<NativeCredentialEffectContext> {
+    let profile = shell
+        .list_provider_profiles()?
+        .into_iter()
+        .find(|profile| profile.id == provider_profile_id)
+        .ok_or_else(CommandError::invalid_input)?;
+    shell.ensure_legacy_profile_credential_mutation_settled(provider_profile_id)?;
+    let revision = app
+        .lorepia_platform()
+        .legacy_credential_confirmation_revision(provider_profile_id)
+        .await?;
+    NativeCredentialEffectContext::new(effect, profile.id, profile.base_url, revision)
+        .map_err(Into::into)
+}
+
+fn discovery_capture_confirmation_context(
+    session: &lorepia_shell_api::ProviderDiscoverySessionDto,
+    authority: &lorepia_shell_api::ProviderDiscoveryCredentialLeaseContextDto,
+) -> CommandResult<NativeCredentialEffectContext> {
+    if authority.session_id != session.id || authority.connection_id != session.connection_id {
+        return Err(CommandError::invalid_input());
+    }
+    let revision = discovery_credential_confirmation_revision(session, authority);
+    NativeCredentialEffectContext::new(
+        NativeCredentialEffect::CaptureOrReplace,
+        session.connection_id.clone(),
+        authority.credential_api_origin.clone(),
+        revision,
+    )
+    .map_err(Into::into)
+}
+
+fn discovery_credential_confirmation_revision(
+    session: &lorepia_shell_api::ProviderDiscoverySessionDto,
+    authority: &lorepia_shell_api::ProviderDiscoveryCredentialLeaseContextDto,
+) -> String {
+    let mut hasher = Sha256::new();
+    let session_revision = session.revision.to_string();
+    for value in [
+        b"dev.lorepia.discovery-credential-confirmation.v1".as_slice(),
+        session.id.as_bytes(),
+        session_revision.as_bytes(),
+        authority.session_id.as_bytes(),
+        authority.connection_id.as_bytes(),
+        authority.credential_api_origin.as_bytes(),
+        authority.credential_origin_approval_id.as_bytes(),
+        authority.credential_origin_grant_sha256.as_bytes(),
+        authority.connection_binding_sha256.as_bytes(),
+    ] {
+        hasher.update(value);
+        hasher.update([0]);
+    }
+    format!(
+        "session_revision={};credential_authority_sha256={:x}",
+        session.revision,
+        hasher.finalize()
+    )
+}
+
+fn consume_discovery_capture_confirmation(
+    confirmation: NativeCredentialEffectConfirmation,
+    session: &lorepia_shell_api::ProviderDiscoverySessionDto,
+    authority: &lorepia_shell_api::ProviderDiscoveryCredentialLeaseContextDto,
+) -> CommandResult<()> {
+    let expected = discovery_capture_confirmation_context(session, authority)?;
+    confirmation.consume_exact(
+        expected.effect(),
+        expected.target_id(),
+        expected.origin(),
+        expected.revision(),
+    )?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -1158,8 +1334,9 @@ mod credential_status_tests {
 
     use super::{
         LegacyGenerationCredentialReadFuture, LegacyGenerationCredentialReader,
-        StatusOnlyConnectionAccess, discovery_capture_start_is_exact,
-        finish_discovery_credential_capture, finish_discovery_credential_store_with_observation,
+        StatusOnlyConnectionAccess, discovery_capture_confirmation_context,
+        discovery_capture_start_is_exact, finish_discovery_credential_capture,
+        finish_discovery_credential_store_with_observation,
         legacy_credential_for_selection_with_reader, status_only_connection_access,
         status_only_legacy_observation, status_only_unowned_observation,
         validate_reserved_discovery_capture_context,
@@ -1172,6 +1349,99 @@ mod credential_status_tests {
     struct FakeLegacyGenerationCredentialReader {
         value: Mutex<Option<NativeCredential>>,
         calls: Arc<Mutex<Vec<String>>>,
+    }
+
+    #[test]
+    fn discovery_capture_confirmation_displays_backend_credential_api_origin() {
+        let root = tempdir().expect("temporary root");
+        let shell = ShellApi::open_data_root(root.path()).expect("open Shell");
+        let selecting = shell
+            .begin_provider_discovery(lorepia_shell_api::BeginProviderDiscoveryInput {
+                connection_id: "divergent-confirmation-origin".to_owned(),
+                display_name: "Divergent confirmation origin".to_owned(),
+                site_url: "https://docs.example/".to_owned(),
+                docs_url: None,
+                credential_binding_requested: true,
+                preferred_assistant: None,
+                connection_options: lorepia_shell_api::ProviderDiscoveryConnectionOptionsInput {
+                    values: Vec::new(),
+                    api_base_path: None,
+                    timeout_seconds: 30,
+                    network_mode: ProviderNetworkModeInput::Public,
+                    local_network_approval: None,
+                },
+                supplied_evidence_ids: Vec::new(),
+                source: lorepia_shell_api::BeginProviderDiscoverySourceInput::KnownProvider {
+                    template_id: "openrouter-v1".to_owned(),
+                },
+            })
+            .expect("begin known-provider discovery");
+        let candidate = shell
+            .list_provider_discovery_candidates(&selecting.id)
+            .expect("list provider candidates")
+            .into_iter()
+            .find(|candidate| {
+                matches!(
+                    &candidate.summary,
+                    lorepia_shell_api::DiscoveryCandidateSummaryDto::ProviderTemplate {
+                        template_id,
+                        ..
+                    } if template_id == "openrouter-v1"
+                )
+            })
+            .expect("OpenRouter candidate");
+        let session = shell
+            .continue_provider_discovery(
+                lorepia_shell_api::ContinueProviderDiscoveryInput {
+                    session_id: selecting.id,
+                    action_id: "00000000-0000-4000-8000-000000000071".to_owned(),
+                    expected_revision: selecting.revision,
+                    action:
+                        lorepia_shell_api::ContinueProviderDiscoveryActionInput::SelectTemplate {
+                            candidate_id: candidate.id,
+                        },
+                },
+                None,
+            )
+            .expect("select OpenRouter template");
+        let authority = shell
+            .get_provider_discovery_credential_lease_context(&session.id)
+            .expect("load backend credential authority");
+        let context = discovery_capture_confirmation_context(&session, &authority)
+            .expect("build trusted confirmation");
+
+        assert_eq!(session.site_url, "https://docs.example/");
+        assert_eq!(
+            context.origin(),
+            "https://openrouter.ai",
+            "trusted native UI must display the API origin that will receive the credential"
+        );
+        let trusted_revision = context.revision().to_owned();
+        let mut substituted_grant = authority.clone();
+        substituted_grant.credential_origin_grant_sha256 = "f".repeat(64);
+        assert_ne!(
+            discovery_capture_confirmation_context(&session, &substituted_grant)
+                .expect("build substituted-grant context")
+                .revision(),
+            trusted_revision,
+            "a confirmation receipt cannot be replayed with a substituted origin grant"
+        );
+        let mut substituted_binding = authority.clone();
+        substituted_binding.connection_binding_sha256 = "e".repeat(64);
+        assert_ne!(
+            discovery_capture_confirmation_context(&session, &substituted_binding)
+                .expect("build substituted-binding context")
+                .revision(),
+            trusted_revision,
+            "a confirmation receipt cannot be replayed with a substituted connection binding"
+        );
+
+        let mut same_origin_site = session.clone();
+        same_origin_site.site_url = "https://openrouter.ai/".to_owned();
+        let same_origin_context =
+            discovery_capture_confirmation_context(&same_origin_site, &authority)
+                .expect("same-origin capture remains valid");
+        assert_eq!(same_origin_context.origin(), "https://openrouter.ai");
     }
 
     impl LegacyGenerationCredentialReader for FakeLegacyGenerationCredentialReader {

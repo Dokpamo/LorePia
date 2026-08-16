@@ -732,8 +732,12 @@ async fn before_dispatch_primary_revalidation_falls_back_and_commits_summary_wit
     assert_ne!(record.value.source_start_message_id, head);
     assert_eq!(record.value.source_end_message_id, head);
     assert_eq!(
-        core.get_memory_record(&record.value.id)
-            .expect("reload generated memory record"),
+        core.get_memory_record(
+            &record.value.conversation_id,
+            &record.value.branch_id,
+            &record.value.id,
+        )
+        .expect("reload generated memory record"),
         record
     );
     assert_eq!(
@@ -760,7 +764,11 @@ async fn before_dispatch_primary_revalidation_falls_back_and_commits_summary_wit
     let reopened = Core::open(CoreConfig::new(root.path())).expect("reopen completed memory Core");
     assert_eq!(
         reopened
-            .get_memory_record(&record.value.id)
+            .get_memory_record(
+                &record.value.conversation_id,
+                &record.value.branch_id,
+                &record.value.id,
+            )
             .expect("reopen durable generated memory"),
         record
     );

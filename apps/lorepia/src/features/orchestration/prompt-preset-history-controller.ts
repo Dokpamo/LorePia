@@ -1,5 +1,6 @@
 import { get, writable, type Readable } from 'svelte/store';
 
+import { t } from '../../lib/i18n';
 import { normalizeClientError } from '../../lib/ipc/errors';
 import type {
     LorepiaClient,
@@ -55,7 +56,7 @@ function errorLabel(error: unknown): string {
     if (error instanceof PromptPresetHistoryContractError) return error.message;
     const normalized = normalizeClientError(error);
     return normalized.messageKey === 'error.unexpected'
-        ? '프롬프트 프리셋 이력 작업을 완료하지 못했습니다.'
+        ? t('preset_history.error.generic')
         : normalized.messageKey;
 }
 
@@ -69,9 +70,7 @@ function isSha256(value: string): boolean {
 
 function assertHistoryList(value: PromptPresetRevisionListDto): void {
     if (value.revisions.length > MAX_VISIBLE_PROMPT_PRESET_REVISIONS) {
-        throw new PromptPresetHistoryContractError(
-            'Core가 프롬프트 프리셋 이력 표시 한도를 초과했습니다.',
-        );
+        throw new PromptPresetHistoryContractError(t('preset_history.error.limit'));
     }
     let previousRevision = 0;
     for (const revision of value.revisions) {
@@ -82,9 +81,7 @@ function assertHistoryList(value: PromptPresetRevisionListDto): void {
             revision.name.trim() === '' ||
             !isSha256(revision.sha256)
         ) {
-            throw new PromptPresetHistoryContractError(
-                'Core가 일관되지 않은 프롬프트 프리셋 이력을 반환했습니다.',
-            );
+            throw new PromptPresetHistoryContractError(t('preset_history.error.inconsistent'));
         }
         previousRevision = revision.revision;
     }
@@ -95,9 +92,7 @@ function assertHistoryContainsCurrent(
     currentRevision: number,
 ): void {
     if (!value.revisions.some((revision) => revision.revision === currentRevision)) {
-        throw new PromptPresetHistoryContractError(
-            'Core 프롬프트 프리셋 이력에 현재 리비전이 없습니다.',
-        );
+        throw new PromptPresetHistoryContractError(t('preset_history.error.missing_current'));
     }
 }
 
@@ -144,9 +139,7 @@ function assertReviewedDiff(
         review.target_sha256 !== diff.to_sha256 ||
         digests.some((digest) => !isSha256(digest))
     ) {
-        throw new PromptPresetHistoryContractError(
-            '프롬프트 프리셋 롤백 검토와 변경 내역이 일치하지 않습니다.',
-        );
+        throw new PromptPresetHistoryContractError(t('preset_history.error.review_mismatch'));
     }
 }
 
@@ -169,9 +162,7 @@ function assertReceipt(
         !isSha256(receipt.applied_sha256) ||
         !isSha256(receipt.approval_sha256)
     ) {
-        throw new PromptPresetHistoryContractError(
-            'Core가 일관되지 않은 프롬프트 프리셋 롤백 영수증을 반환했습니다.',
-        );
+        throw new PromptPresetHistoryContractError(t('preset_history.error.receipt_inconsistent'));
     }
 }
 
@@ -220,7 +211,7 @@ export class PromptPresetHistoryController {
                 phase: 'error',
                 preset_id: presetId,
                 current_revision: currentRevision,
-                error: '현재 프롬프트 프리셋 리비전이 올바르지 않습니다.',
+                error: t('preset_history.error.bad_revision'),
             });
             return;
         }
@@ -231,7 +222,7 @@ export class PromptPresetHistoryController {
                 phase: 'unavailable',
                 preset_id: presetId,
                 current_revision: currentRevision,
-                error: '이 빌드에서는 프롬프트 프리셋 이력을 사용할 수 없습니다.',
+                error: t('preset_history.error.unavailable'),
             });
             return;
         }
@@ -296,7 +287,7 @@ export class PromptPresetHistoryController {
                 review: null,
                 approval_id: null,
                 receipt: null,
-                error: '앱 내장 프롬프트 프리셋은 롤백할 수 없습니다.',
+                error: t('preset_history.error.builtin'),
                 announcement: '',
             }));
             return false;
@@ -307,7 +298,7 @@ export class PromptPresetHistoryController {
             this.mutable.update((current) => ({
                 ...current,
                 phase: 'unavailable',
-                error: '이 빌드에서는 프롬프트 프리셋 롤백 검토를 사용할 수 없습니다.',
+                error: t('preset_history.error.review_unavailable'),
             }));
             return false;
         }
@@ -352,7 +343,7 @@ export class PromptPresetHistoryController {
                 diff,
                 review,
                 error: null,
-                announcement: `리비전 ${String(targetRevision)} 롤백 검토가 준비되었습니다.`,
+                announcement: t('preset_history.notice.review_ready', { revision: targetRevision }),
             }));
             return true;
         } catch (error: unknown) {
@@ -436,9 +427,10 @@ export class PromptPresetHistoryController {
                 review: null,
                 receipt,
                 error: null,
-                announcement: `리비전 ${String(targetRevision)}의 내용이 새 리비전 ${String(
-                    receipt.applied_revision,
-                )}으로 적용되었습니다.`,
+                announcement: t('preset_history.notice.applied', {
+                    source: targetRevision,
+                    target: receipt.applied_revision,
+                }),
             }));
         } catch (error: unknown) {
             if (
@@ -479,7 +471,7 @@ export class PromptPresetHistoryController {
                 if (!this.operationIsStale(contextEpoch, operationEpoch)) {
                     this.mutable.update((current) => ({
                         ...current,
-                        error: '롤백은 적용되었지만 최신 이력을 다시 불러오지 못했습니다.',
+                        error: t('preset_history.error.reload_failed'),
                     }));
                 }
             }

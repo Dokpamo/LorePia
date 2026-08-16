@@ -187,6 +187,7 @@
     "allow-list-prompt-preset-bindings",
     "allow-list-memory-records",
     "allow-retry-interrupted-memory-job",
+    "allow-list-interrupted-memory-jobs",
     "allow-list-retryable-memory-query-embeddings",
     "allow-retry-memory-query-embedding",
     "allow-simulate-knowledge-activation",

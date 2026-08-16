@@ -5,6 +5,12 @@ use std::{
     path::{Path, PathBuf},
 };
 
+#[cfg(any(target_os = "macos", windows, test))]
+use std::ffi::{OsStr, OsString};
+
+#[cfg(all(unix, any(target_os = "macos", test)))]
+use std::{os::fd::OwnedFd, os::unix::fs::MetadataExt};
+
 #[cfg(all(unix, any(mobile, target_os = "macos", test)))]
 use std::os::unix::fs::OpenOptionsExt;
 
@@ -23,6 +29,35 @@ pub(crate) const MAXIMUM_SENSITIVE_CAPTURE_BYTES: usize = 1024 * 1024;
 pub(crate) const MAXIMUM_EXPORT_NAME_BYTES: usize = 128;
 #[cfg(any(mobile, target_os = "macos", windows, test))]
 pub(crate) const MAXIMUM_RECEIPT_NAME_CHARACTERS: usize = 255;
+
+/// A picker destination whose parent directory remains the exact authority
+/// used by the export. The retained platform handle prevents a later pathname
+/// replacement from redirecting the write into application-owned storage.
+#[cfg(any(target_os = "macos", windows, test))]
+pub(crate) struct ValidatedExportDestination {
+    file_name: OsString,
+    #[cfg(unix)]
+    parent: OwnedFd,
+    #[cfg(windows)]
+    parent: crate::desktop::windows::PinnedExportDirectory,
+}
+
+#[cfg(any(target_os = "macos", windows, test))]
+impl ValidatedExportDestination {
+    pub(crate) fn file_name(&self) -> &OsStr {
+        &self.file_name
+    }
+
+    #[cfg(unix)]
+    pub(crate) fn unix_parent(&self) -> &OwnedFd {
+        &self.parent
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn windows_parent(&self) -> &crate::desktop::windows::PinnedExportDirectory {
+        &self.parent
+    }
+}
 
 pub(crate) fn validate_reference(reference: &str) -> PlatformResult<()> {
     if reference.trim().is_empty() || reference.len() > MAXIMUM_REFERENCE_BYTES {
@@ -189,13 +224,41 @@ pub(crate) fn verify_content_source_for_export(
 pub(crate) fn validate_content_export_destination(
     destination: &Path,
     data_root: &Path,
-) -> PlatformResult<()> {
+) -> PlatformResult<ValidatedExportDestination> {
     if !destination.is_absolute() || destination.file_name().is_none() {
         return Err(PlatformError::new(PlatformErrorCode::InvalidInput));
     }
+    let file_name = destination
+        .file_name()
+        .ok_or_else(|| PlatformError::new(PlatformErrorCode::InvalidInput))?
+        .to_owned();
     let parent = destination
         .parent()
         .ok_or_else(|| PlatformError::new(PlatformErrorCode::InvalidInput))?;
+
+    #[cfg(unix)]
+    {
+        let parent = pin_unix_export_parent(parent, data_root)?;
+        Ok(ValidatedExportDestination { file_name, parent })
+    }
+
+    #[cfg(windows)]
+    {
+        let parent = crate::desktop::windows::pin_export_directory(parent, data_root)?;
+        Ok(ValidatedExportDestination { file_name, parent })
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (file_name, parent, data_root);
+        Err(PlatformError::new(PlatformErrorCode::StorageUnavailable))
+    }
+}
+
+#[cfg(all(unix, any(target_os = "macos", test)))]
+fn pin_unix_export_parent(parent: &Path, data_root: &Path) -> PlatformResult<OwnedFd> {
+    use rustix::fs::{Mode, OFlags, fstat, open, openat};
+
     let canonical_parent = std::fs::canonicalize(parent)
         .map_err(|_| PlatformError::new(PlatformErrorCode::SelectionFailed))?;
     let canonical_data_root = std::fs::canonicalize(data_root)
@@ -203,7 +266,58 @@ pub(crate) fn validate_content_export_destination(
     if canonical_parent.starts_with(&canonical_data_root) {
         return Err(PlatformError::new(PlatformErrorCode::InvalidInput));
     }
-    Ok(())
+
+    let parent_metadata = std::fs::metadata(&canonical_parent)
+        .map_err(|_| PlatformError::new(PlatformErrorCode::SelectionFailed))?;
+    let data_root_metadata = std::fs::metadata(&canonical_data_root)
+        .map_err(|_| PlatformError::new(PlatformErrorCode::StorageUnavailable))?;
+    if !parent_metadata.is_dir() || !data_root_metadata.is_dir() {
+        return Err(PlatformError::new(PlatformErrorCode::InvalidInput));
+    }
+
+    let directory_flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC | OFlags::NOFOLLOW;
+    let parent_fd = open(&canonical_parent, directory_flags, Mode::empty())
+        .map_err(|_| PlatformError::new(PlatformErrorCode::SelectionFailed))?;
+    let data_root_fd = open(&canonical_data_root, directory_flags, Mode::empty())
+        .map_err(|_| PlatformError::new(PlatformErrorCode::StorageUnavailable))?;
+    let parent_stat =
+        fstat(&parent_fd).map_err(|_| PlatformError::new(PlatformErrorCode::SelectionFailed))?;
+    let data_root_stat = fstat(&data_root_fd)
+        .map_err(|_| PlatformError::new(PlatformErrorCode::StorageUnavailable))?;
+    let parent_device = u64::try_from(parent_stat.st_dev)
+        .map_err(|_| PlatformError::new(PlatformErrorCode::SelectionFailed))?;
+    let data_root_device = u64::try_from(data_root_stat.st_dev)
+        .map_err(|_| PlatformError::new(PlatformErrorCode::StorageUnavailable))?;
+    if parent_metadata.dev() != parent_device
+        || parent_metadata.ino() != parent_stat.st_ino as u64
+        || data_root_metadata.dev() != data_root_device
+        || data_root_metadata.ino() != data_root_stat.st_ino as u64
+    {
+        return Err(PlatformError::new(PlatformErrorCode::SelectionFailed));
+    }
+
+    let mut current = openat(&parent_fd, ".", directory_flags, Mode::empty())
+        .map_err(|_| PlatformError::new(PlatformErrorCode::SelectionFailed))?;
+    for _ in 0..1024 {
+        let current_stat =
+            fstat(&current).map_err(|_| PlatformError::new(PlatformErrorCode::SelectionFailed))?;
+        if current_stat.st_dev == data_root_stat.st_dev
+            && current_stat.st_ino == data_root_stat.st_ino
+        {
+            return Err(PlatformError::new(PlatformErrorCode::InvalidInput));
+        }
+        let ancestor = openat(&current, "..", directory_flags, Mode::empty())
+            .map_err(|_| PlatformError::new(PlatformErrorCode::SelectionFailed))?;
+        let ancestor_stat =
+            fstat(&ancestor).map_err(|_| PlatformError::new(PlatformErrorCode::SelectionFailed))?;
+        if ancestor_stat.st_dev == current_stat.st_dev
+            && ancestor_stat.st_ino == current_stat.st_ino
+        {
+            return Ok(parent_fd);
+        }
+        current = ancestor;
+    }
+    Err(PlatformError::new(PlatformErrorCode::SelectionFailed))
 }
 
 #[cfg(any(mobile, target_os = "macos", windows, test))]

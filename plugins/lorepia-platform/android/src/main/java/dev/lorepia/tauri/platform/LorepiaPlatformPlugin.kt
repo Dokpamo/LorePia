@@ -1,6 +1,7 @@
 package dev.lorepia.tauri.platform
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -43,6 +44,14 @@ internal class SensitiveCaptureArgs {
 }
 
 @InvokeArg
+internal class CredentialEffectConfirmationArgs {
+    lateinit var effect: String
+    lateinit var targetId: String
+    lateinit var origin: String
+    lateinit var revision: String
+}
+
+@InvokeArg
 internal class SaveContentSourceArgs {
     lateinit var sourcePath: String
     lateinit var suggestedName: String
@@ -61,6 +70,7 @@ class LorepiaPlatformPlugin(private val activity: Activity) : Plugin(activity) {
     private val workQueues = PlatformWorkQueues()
     private val pickerInFlight = AtomicBoolean(false)
     private val sensitiveCaptureInFlight = AtomicBoolean(false)
+    private val credentialConfirmationInFlight = AtomicBoolean(false)
     private val credentials = AndroidCredentialStore(activity.applicationContext)
     private val clipboard = activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     private val dataRoot = activity.filesDir.resolve(DATA_ROOT_DIRECTORY).absoluteFile
@@ -83,6 +93,46 @@ class LorepiaPlatformPlugin(private val activity: Activity) : Plugin(activity) {
             invoke.resolve(JSObject().put("path", dataRoot.absolutePath))
         } catch (_: Exception) {
             invoke.reject("storage unavailable", "storage_unavailable")
+        }
+    }
+
+    @Command
+    fun confirmCredentialEffect(invoke: Invoke) {
+        activity.runOnUiThread confirm@{
+            if (
+                !activity.hasWindowFocus() ||
+                activity.isFinishing ||
+                activity.isDestroyed ||
+                !credentialConfirmationInFlight.compareAndSet(false, true)
+            ) {
+                invoke.reject("foreground confirmation required", "permission_denied")
+                return@confirm
+            }
+            try {
+                val args = invoke.parseArgs(CredentialEffectConfirmationArgs::class.java)
+                validateCredentialConfirmation(args)
+                AlertDialog.Builder(activity)
+                    .setTitle(credentialConfirmationTitle(args.effect))
+                    .setMessage(credentialConfirmationMessage(args))
+                    .setNegativeButton("Cancel") { _, _ ->
+                        finishCredentialConfirmation(invoke, false)
+                    }
+                    .setPositiveButton("Approve exact action") { dialog, _ ->
+                        val dialogFocused =
+                            (dialog as? AlertDialog)?.window?.decorView?.hasWindowFocus() == true
+                        finishCredentialConfirmation(
+                            invoke,
+                            dialogFocused && !activity.isFinishing && !activity.isDestroyed,
+                        )
+                    }
+                    .setOnCancelListener {
+                        finishCredentialConfirmation(invoke, false)
+                    }
+                    .show()
+            } catch (_: Exception) {
+                credentialConfirmationInFlight.set(false)
+                invoke.reject("foreground confirmation required", "permission_denied")
+            }
         }
     }
 
@@ -498,6 +548,54 @@ class LorepiaPlatformPlugin(private val activity: Activity) : Plugin(activity) {
         workQueues.shutdownNow()
         pickerInFlight.set(false)
         sensitiveCaptureInFlight.set(false)
+        credentialConfirmationInFlight.set(false)
+    }
+
+    private fun finishCredentialConfirmation(invoke: Invoke, approved: Boolean) {
+        if (credentialConfirmationInFlight.compareAndSet(true, false)) {
+            invoke.resolve(JSObject().put("approved", approved))
+        }
+    }
+
+    private fun validateCredentialConfirmation(args: CredentialEffectConfirmationArgs) {
+        require(
+            args.effect in setOf(
+                "capture_or_replace",
+                "delete",
+                "archive",
+                "discovery_compensation",
+            ),
+        )
+        PlatformPolicy.validateCredentialConfirmationText(args.targetId, 256)
+        PlatformPolicy.validateCredentialConfirmationText(args.origin, 2_048)
+        PlatformPolicy.validateCredentialConfirmationText(args.revision, 256)
+    }
+
+    private fun credentialConfirmationTitle(effect: String): String = when (effect) {
+        "capture_or_replace" -> "Allow credential capture?"
+        "delete" -> "Delete stored credential?"
+        "archive" -> "Archive connection and delete credential?"
+        "discovery_compensation" -> "Remove uncommitted credential?"
+        else -> error("invalid credential effect")
+    }
+
+    private fun credentialConfirmationMessage(args: CredentialEffectConfirmationArgs): String {
+        val effect = when (args.effect) {
+            "capture_or_replace" ->
+                "read one credential from the clipboard and store it. " +
+                    "If an older credential exists, it will be deleted only after the replacement is stored"
+            "delete" -> "permanently delete the stored credential"
+            "archive" ->
+                "archive this provider connection and permanently delete its stored credential"
+            "discovery_compensation" ->
+                "permanently delete the credential created by the cancelled or failed discovery"
+            else -> error("invalid credential effect")
+        }
+        return "LorePia will $effect.\n\n" +
+            "Target: ${args.targetId}\n" +
+            "Origin: ${args.origin}\n" +
+            "Revision: ${args.revision}\n\n" +
+            "Approve only if these exact details match your intended action."
     }
 
     private fun beginSensitiveCapture(invoke: Invoke): Boolean {

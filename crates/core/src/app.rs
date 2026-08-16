@@ -79,6 +79,13 @@ use crate::{
 mod model_sync;
 
 const CORE_MAX_OUTPUT_TOKENS: u32 = 4_096;
+// Admission belongs to Core rather than renderer stream registrations so a
+// detached or failed consumer cannot recycle a slot while provider work keeps
+// running. The per-conversation allowance preserves bounded background branch
+// generation while preventing one conversation from consuming the process.
+const MAX_ACTIVE_GENERATIONS_PER_PROCESS: usize = 32;
+const MAX_ACTIVE_GENERATIONS_PER_PROVIDER: usize = 8;
+const MAX_ACTIVE_GENERATIONS_PER_CONVERSATION: usize = 4;
 const GENERATION_SHUTDOWN_GRACE: Duration = Duration::from_millis(750);
 const RUNTIME_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(1);
 const PARTIAL_CHECKPOINT_INTERVAL: Duration = Duration::from_millis(500);
@@ -352,6 +359,14 @@ struct GenerationRoute {
     assistant_message: MessageId,
 }
 
+#[derive(Clone, PartialEq, Eq)]
+enum GenerationProviderAdmissionKey {
+    Connection(ProviderConnectionId),
+    ProviderProfile(String),
+    #[cfg(test)]
+    DirectModel(String),
+}
+
 struct GenerationDeliveryState {
     phase: GenerationDeliveryPhase,
     sequence_watermark: u64,
@@ -403,6 +418,7 @@ impl GenerationLivePrefix {
 struct ActiveGeneration {
     cancel: watch::Sender<bool>,
     route: GenerationRoute,
+    provider_admission_key: GenerationProviderAdmissionKey,
     delivery: Mutex<GenerationDeliveryState>,
     #[cfg(test)]
     subscription_pause: Mutex<Option<GenerationSubscriptionPause>>,
@@ -618,6 +634,7 @@ struct SameBranchGenerationDispatch<'a> {
     credential_authority: Option<ProviderCredentialAccessAuthority>,
     require_exact_credential_authority: bool,
     provider: Arc<dyn Provider>,
+    provider_target: GenerationActionTargetIdentity,
     user_message: Message,
     attempt: PreparedSameBranchGenerationAttempt,
     prepared: crate::orchestration::PreparedGenerationPlan,
@@ -1071,40 +1088,59 @@ impl GenerationRegistry {
     fn register(
         &self,
         generation: &GenerationRecord,
+        provider_admission_key: GenerationProviderAdmissionKey,
         cancel: watch::Sender<bool>,
     ) -> CoreResult<()> {
         let assistant_message_id = generation.assistant_message_id.clone().ok_or_else(|| {
             CoreError::internal("running generation is missing its assistant message route")
         })?;
-        let entry = Arc::new(ActiveGeneration {
-            cancel,
-            route: GenerationRoute {
-                conversation: generation.conversation_id.clone(),
-                branch: generation.branch_id.clone(),
-                assistant_message: assistant_message_id,
-            },
-            delivery: Mutex::new(GenerationDeliveryState {
-                phase: GenerationDeliveryPhase::Preparing,
-                sequence_watermark: 0,
-                live_prefix: Some(GenerationLivePrefix::default()),
-            }),
-            #[cfg(test)]
-            subscription_pause: Mutex::new(None),
-        });
         let mut active = self
             .active
             .lock()
             .map_err(|_| CoreError::internal("generation registry lock was poisoned"))?;
-        match active.entry(generation.id.clone()) {
-            std::collections::hash_map::Entry::Vacant(slot) => {
-                slot.insert(entry);
-            }
-            std::collections::hash_map::Entry::Occupied(_) => {
-                return Err(CoreError::internal(
-                    "generation is already registered for delivery",
-                ));
-            }
+        if active.contains_key(&generation.id) {
+            return Err(CoreError::internal(
+                "generation is already registered for delivery",
+            ));
         }
+        if active.len() >= MAX_ACTIVE_GENERATIONS_PER_PROCESS {
+            return Err(generation_admission_limit_reached("process"));
+        }
+        if active
+            .values()
+            .filter(|entry| entry.route.conversation == generation.conversation_id)
+            .count()
+            >= MAX_ACTIVE_GENERATIONS_PER_CONVERSATION
+        {
+            return Err(generation_admission_limit_reached("conversation"));
+        }
+        if active
+            .values()
+            .filter(|entry| entry.provider_admission_key == provider_admission_key)
+            .count()
+            >= MAX_ACTIVE_GENERATIONS_PER_PROVIDER
+        {
+            return Err(generation_admission_limit_reached("provider"));
+        }
+        active.insert(
+            generation.id.clone(),
+            Arc::new(ActiveGeneration {
+                cancel,
+                route: GenerationRoute {
+                    conversation: generation.conversation_id.clone(),
+                    branch: generation.branch_id.clone(),
+                    assistant_message: assistant_message_id,
+                },
+                provider_admission_key,
+                delivery: Mutex::new(GenerationDeliveryState {
+                    phase: GenerationDeliveryPhase::Preparing,
+                    sequence_watermark: 0,
+                    live_prefix: Some(GenerationLivePrefix::default()),
+                }),
+                #[cfg(test)]
+                subscription_pause: Mutex::new(None),
+            }),
+        );
         Ok(())
     }
 
@@ -1274,6 +1310,14 @@ fn generation_subscription_unavailable() -> CoreError {
         CoreErrorCode::NotFound,
         "generation subscription is unavailable",
         false,
+    )
+}
+
+fn generation_admission_limit_reached(scope: &str) -> CoreError {
+    CoreError::new(
+        CoreErrorCode::ProviderRateLimited,
+        format!("active generation {scope} concurrency limit reached"),
+        true,
     )
 }
 
@@ -2558,8 +2602,11 @@ impl Core {
             provider_request_value,
             assistant_message.created_at,
         )?;
+        let provider_admission_key = self.generation_provider_admission_key_for_model_route(
+            &plan_request.generation_target.model_route_id,
+        )?;
+        let launch = self.prepare_generation_launch(&generation, provider_admission_key)?;
         self.seal_same_branch_generation_attempt(attempt.attempt, &prepared, &prompt_plan)?;
-        let launch = self.prepare_generation_launch(&generation)?;
         self.inner
             .storage
             .append_generation_attempt_with_prompt_plan(
@@ -5663,6 +5710,7 @@ impl Core {
             credential_authority,
             require_exact_credential_authority,
             provider,
+            provider_target: provider_temporal_context.operation_target,
             user_message,
             attempt,
             prepared,
@@ -5686,6 +5734,7 @@ impl Core {
             credential_authority,
             require_exact_credential_authority,
             provider,
+            provider_target,
             user_message,
             attempt,
             mut prepared,
@@ -5747,8 +5796,8 @@ impl Core {
             provider_request_value,
             assistant_message.created_at,
         )?;
+        let launch = self.prepare_generation_launch_for_target(&generation, &provider_target)?;
         self.seal_same_branch_generation_attempt(attempt.attempt, &prepared, &prompt_plan)?;
-        let launch = self.prepare_generation_launch(&generation)?;
         self.inner
             .storage
             .append_generation_attempt_with_prompt_plan(
@@ -5951,8 +6000,11 @@ impl Core {
             provider_request_value,
             assistant_message.created_at,
         )?;
+        let launch = self.prepare_generation_launch_for_target(
+            &generation,
+            &provider_temporal_context.operation_target,
+        )?;
         self.seal_same_branch_generation_attempt(attempt.attempt, &prepared, &prompt_plan)?;
-        let launch = self.prepare_generation_launch(&generation)?;
         self.inner
             .storage
             .append_generation_attempt_with_prompt_plan(
@@ -6458,8 +6510,9 @@ impl Core {
             assistant_message.created_at,
         )?;
         let target_interaction_state_key = attempt.target_interaction_state_key.clone();
+        let launch =
+            self.prepare_generation_launch_for_target(&generation, &action_request.target)?;
         self.seal_same_branch_generation_attempt(attempt.attempt, &prepared, &prompt_plan)?;
-        let launch = self.prepare_generation_launch(&generation)?;
         self.inner
             .storage
             .append_message_generation_action_attempt_with_prompt_plan(
@@ -6499,6 +6552,7 @@ impl Core {
     fn prepare_generation_launch(
         &self,
         generation: &GenerationRecord,
+        provider_admission_key: GenerationProviderAdmissionKey,
     ) -> CoreResult<GenerationLaunchPermit> {
         let preserve_partial = self
             .inner
@@ -6506,15 +6560,58 @@ impl Core {
             .load_settings()?
             .preserve_partial_generations;
         let (cancel_sender, cancel_receiver) = watch::channel(false);
-        self.inner
-            .active_generations
-            .register(generation, cancel_sender)?;
+        self.inner.active_generations.register(
+            generation,
+            provider_admission_key,
+            cancel_sender,
+        )?;
         Ok(GenerationLaunchPermit {
             generation_id: generation.id.clone(),
             active_generations: Arc::clone(&self.inner.active_generations),
             cancel_receiver: Some(cancel_receiver),
             preserve_partial,
         })
+    }
+
+    fn generation_provider_admission_key(
+        &self,
+        target: &GenerationActionTargetIdentity,
+    ) -> CoreResult<GenerationProviderAdmissionKey> {
+        match target {
+            GenerationActionTargetIdentity::GenerationTarget { model_route_id, .. } => {
+                self.generation_provider_admission_key_for_model_route(model_route_id)
+            }
+            GenerationActionTargetIdentity::ProviderProfile {
+                provider_profile_id,
+            } => Ok(GenerationProviderAdmissionKey::ProviderProfile(
+                provider_profile_id.clone(),
+            )),
+            #[cfg(test)]
+            GenerationActionTargetIdentity::DirectModel { model_sha256 } => Ok(
+                GenerationProviderAdmissionKey::DirectModel(model_sha256.clone()),
+            ),
+        }
+    }
+
+    fn prepare_generation_launch_for_target(
+        &self,
+        generation: &GenerationRecord,
+        target: &GenerationActionTargetIdentity,
+    ) -> CoreResult<GenerationLaunchPermit> {
+        let provider_admission_key = self.generation_provider_admission_key(target)?;
+        self.prepare_generation_launch(generation, provider_admission_key)
+    }
+
+    fn generation_provider_admission_key_for_model_route(
+        &self,
+        model_route_id: &ModelRouteId,
+    ) -> CoreResult<GenerationProviderAdmissionKey> {
+        Ok(GenerationProviderAdmissionKey::Connection(
+            self.inner
+                .storage
+                .get_model_route(model_route_id)?
+                .connection_id,
+        ))
     }
 
     fn ensure_interaction_state_available(
@@ -13894,11 +13991,15 @@ mod tests {
     }
 
     fn wait_for_generation_registry_to_drain(core: &Core) {
+        wait_for_active_generation_count(core, 0);
+    }
+
+    fn wait_for_active_generation_count(core: &Core, expected: usize) {
         let deadline = Instant::now() + Duration::from_secs(2);
-        while core.active_generation_count() != 0 {
+        while core.active_generation_count() != expected {
             assert!(
                 Instant::now() < deadline,
-                "generation registry did not drain"
+                "generation registry did not reach {expected} active entries"
             );
             thread::sleep(Duration::from_millis(10));
         }
@@ -15832,6 +15933,76 @@ mod tests {
         assert!(
             template_accepts_empty_preset(openai_chat)
                 .expect("OpenAI-compatible preset requirement")
+        );
+    }
+
+    #[test]
+    fn detached_generations_keep_process_admission_until_terminal() {
+        let (_root, core, character) = imported_core();
+        let mut generation_ids = Vec::with_capacity(MAX_ACTIVE_GENERATIONS_PER_PROCESS);
+
+        for index in 0..MAX_ACTIVE_GENERATIONS_PER_PROCESS {
+            let conversation = core.open_conversation(&character.id).expect("conversation");
+            let (provider, provider_started) =
+                StallingProvider::new(format!("detached partial {index}"));
+            let generation_id = core
+                .send_message_with_provider(
+                    &conversation.id,
+                    "start detached generation",
+                    format!("detached-model-{index}"),
+                    None,
+                    provider,
+                )
+                .expect("start generation within process admission");
+            provider_started
+                .recv_timeout(Duration::from_secs(2))
+                .expect("detached provider started");
+            generation_ids.push(generation_id);
+        }
+        assert_eq!(
+            core.active_generation_count(),
+            MAX_ACTIVE_GENERATIONS_PER_PROCESS
+        );
+
+        let overflow_conversation = core.open_conversation(&character.id).expect("conversation");
+        let (overflow_provider, overflow_started) = StallingProvider::new("must not dispatch");
+        let overflow = core
+            .send_message_with_provider(
+                &overflow_conversation.id,
+                "overflow detached generations",
+                "overflow-model".to_owned(),
+                None,
+                overflow_provider,
+            )
+            .expect_err("a recycled renderer stream must not bypass Core admission");
+        assert_eq!(overflow.code, CoreErrorCode::ProviderRateLimited);
+        assert!(
+            overflow_started
+                .recv_timeout(Duration::from_millis(100))
+                .is_err(),
+            "an over-capacity generation must not reach provider dispatch"
+        );
+
+        core.cancel_generation(&generation_ids[0])
+            .expect("cancel one admitted generation");
+        wait_for_generation_status(&core, &generation_ids[0], GenerationStatus::Cancelled);
+        wait_for_active_generation_count(&core, MAX_ACTIVE_GENERATIONS_PER_PROCESS - 1);
+        let (replacement_provider, replacement_started) =
+            StallingProvider::new("replacement partial");
+        core.send_message_with_provider(
+            &overflow_conversation.id,
+            "overflow detached generations",
+            "overflow-model".to_owned(),
+            None,
+            replacement_provider,
+        )
+        .expect("terminal generation releases Core admission for the exact retry");
+        replacement_started
+            .recv_timeout(Duration::from_secs(2))
+            .expect("replacement provider started");
+        assert_eq!(
+            core.active_generation_count(),
+            MAX_ACTIVE_GENERATIONS_PER_PROCESS
         );
     }
 
@@ -19718,6 +19889,15 @@ mod tests {
         core: &Core,
         conversation: &Conversation,
     ) -> PreparingGenerationFixture {
+        prepare_registered_generation_for_model(core, conversation, "synthetic")
+            .expect("register preparing generation")
+    }
+
+    fn prepare_registered_generation_for_model(
+        core: &Core,
+        conversation: &Conversation,
+        model: &str,
+    ) -> CoreResult<PreparingGenerationFixture> {
         let branch = core
             .get_conversation_state(&conversation.id)
             .expect("conversation state")
@@ -19736,7 +19916,7 @@ mod tests {
             user_message_id: user.id.clone(),
             assistant_message_id: Some(assistant.id.clone()),
             mode: ConversationMode::Chat,
-            model: "synthetic".to_owned(),
+            model: model.to_owned(),
             model_route_id: None,
             generation_preset_id: None,
             provider_family: None,
@@ -19753,15 +19933,86 @@ mod tests {
             started_at: assistant.created_at,
             finished_at: None,
         };
-        let launch = core
-            .prepare_generation_launch(&generation)
-            .expect("register preparing generation");
-        PreparingGenerationFixture {
+        let provider_target = GenerationActionTargetIdentity::DirectModel {
+            model_sha256: model.to_owned(),
+        };
+        let launch = core.prepare_generation_launch_for_target(&generation, &provider_target)?;
+        Ok(PreparingGenerationFixture {
             launch,
             generation,
             user,
             assistant,
+        })
+    }
+
+    #[test]
+    fn generation_admission_scopes_provider_and_conversation() {
+        let (_provider_root, provider_core, provider_character) = imported_core();
+        let mut provider_permits = Vec::with_capacity(MAX_ACTIVE_GENERATIONS_PER_PROVIDER);
+        for _ in 0..MAX_ACTIVE_GENERATIONS_PER_PROVIDER {
+            let conversation = provider_core
+                .open_conversation(&provider_character.id)
+                .expect("provider-scope conversation");
+            provider_permits.push(
+                prepare_registered_generation_for_model(
+                    &provider_core,
+                    &conversation,
+                    "shared-provider-model",
+                )
+                .expect("generation within provider admission"),
+            );
         }
+        let overflow_conversation = provider_core
+            .open_conversation(&provider_character.id)
+            .expect("provider overflow conversation");
+        let provider_error = prepare_registered_generation_for_model(
+            &provider_core,
+            &overflow_conversation,
+            "shared-provider-model",
+        )
+        .err()
+        .expect("provider admission must be bounded");
+        assert_eq!(provider_error.code, CoreErrorCode::ProviderRateLimited);
+        assert!(provider_error.message.contains("provider"));
+        drop(provider_permits.pop());
+        prepare_registered_generation_for_model(
+            &provider_core,
+            &overflow_conversation,
+            "shared-provider-model",
+        )
+        .expect("dropping an unlaunched permit releases provider admission");
+
+        let (_conversation_root, conversation_core, conversation_character) = imported_core();
+        let conversation = conversation_core
+            .open_conversation(&conversation_character.id)
+            .expect("conversation-scope conversation");
+        let mut conversation_permits = Vec::with_capacity(MAX_ACTIVE_GENERATIONS_PER_CONVERSATION);
+        for index in 0..MAX_ACTIVE_GENERATIONS_PER_CONVERSATION {
+            conversation_permits.push(
+                prepare_registered_generation_for_model(
+                    &conversation_core,
+                    &conversation,
+                    &format!("conversation-model-{index}"),
+                )
+                .expect("generation within conversation admission"),
+            );
+        }
+        let conversation_error = prepare_registered_generation_for_model(
+            &conversation_core,
+            &conversation,
+            "conversation-overflow-model",
+        )
+        .err()
+        .expect("conversation admission must be bounded");
+        assert_eq!(conversation_error.code, CoreErrorCode::ProviderRateLimited);
+        assert!(conversation_error.message.contains("conversation"));
+        drop(conversation_permits.pop());
+        prepare_registered_generation_for_model(
+            &conversation_core,
+            &conversation,
+            "conversation-replacement-model",
+        )
+        .expect("dropping an unlaunched permit releases conversation admission");
     }
 
     #[test]

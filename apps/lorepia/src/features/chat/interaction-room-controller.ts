@@ -9,6 +9,7 @@ import type {
     LorepiaClient,
     RoomInteractionClientApi,
 } from '../../lib/ipc/contracts';
+import { t } from '../../lib/i18n';
 import { normalizeClientError } from '../../lib/ipc/errors';
 
 export type InteractionRoomCapableClient = LorepiaClient & Partial<RoomInteractionClientApi>;
@@ -57,7 +58,7 @@ export const INITIAL_INTERACTION_ROOM_STATE: InteractionRoomState = {
 function errorLabel(error: unknown): string {
     const normalized = normalizeClientError(error);
     return normalized.messageKey === 'error.unexpected'
-        ? '대화 상호작용 상태를 불러오지 못했습니다.'
+        ? t('interaction.error.load')
         : normalized.messageKey;
 }
 
@@ -158,7 +159,7 @@ export class InteractionRoomController {
             client.listReopenInteractionEffects === undefined ||
             client.submitInteractionChoice === undefined
         ) {
-            const message = '현재 Core가 안전한 대화 상호작용 API를 제공하지 않습니다.';
+            const message = t('interaction.error.unsupported');
             this.mutable.set({
                 ...structuredClone(INITIAL_INTERACTION_ROOM_STATE),
                 phase: 'unavailable',
@@ -206,8 +207,8 @@ export class InteractionRoomController {
             effects,
             announcement:
                 delivery.effect.kind === 'projection_rejected'
-                    ? '호환되지 않는 저장 상호작용을 안전하게 숨겼습니다.'
-                    : '대화 상호작용 효과를 표시했습니다.',
+                    ? t('interaction.notice.hidden')
+                    : t('interaction.notice.shown'),
         });
         void this.acknowledgeDelivery(delivery);
     }
@@ -229,7 +230,7 @@ export class InteractionRoomController {
             ) {
                 this.mutable.set({
                     ...state,
-                    error: '상호작용 표시 확인에 실패했습니다. Core가 다시 전달합니다.',
+                    error: t('interaction.error.ack_failed'),
                 });
             }
         }
@@ -245,7 +246,7 @@ export class InteractionRoomController {
                 ...(unavailable
                     ? {
                           phase: 'unavailable' as const,
-                          error: '현재 Core가 안전한 대화 상호작용 API를 제공하지 않습니다.',
+                          error: t('interaction.error.unsupported'),
                       }
                     : {}),
             });
@@ -344,9 +345,9 @@ export class InteractionRoomController {
                 error: null,
                 announcement:
                     expiry.expired_proposals.length > 0 || expiry.has_more_expired
-                        ? '만료된 승인 제안을 정리했습니다. 생성을 다시 시도할 수 있습니다.'
+                        ? t('interaction.notice.expired_cleared')
                         : snapshot.items.length > 0 || roomProposals.length > 0
-                          ? '대화 상호작용 상태를 복원했습니다.'
+                          ? t('interaction.notice.restored')
                           : '',
             });
             return true;
@@ -387,7 +388,7 @@ export class InteractionRoomController {
             ...state,
             busy_effect_id: effectId,
             error: null,
-            announcement: '선택을 Core에 반영하고 있습니다.',
+            announcement: t('interaction.notice.selecting'),
         });
         try {
             const receipt = await this.client.submitInteractionChoice({
@@ -406,7 +407,7 @@ export class InteractionRoomController {
                 receipt.choice_effect.selected_choice_id !== choiceId ||
                 receipt.choice_effect.resulting_state_revision !== receipt.resulting_state_revision
             ) {
-                const message = 'Core 선택 결과가 현재 대화 스냅샷과 일치하지 않습니다.';
+                const message = t('interaction.error.snapshot_mismatch');
                 this.mutable.update((current) => ({
                     ...current,
                     phase: 'error',
@@ -426,7 +427,7 @@ export class InteractionRoomController {
                 ),
                 busy_effect_id: null,
                 error: null,
-                announcement: '선택을 반영했습니다.',
+                announcement: t('interaction.notice.selected'),
             });
             return true;
         } catch (error: unknown) {
@@ -461,8 +462,7 @@ export class InteractionRoomController {
         ) {
             this.mutable.set({
                 ...state,
-                announcement:
-                    '안전하게 표시할 수 없는 저장 제안은 내용을 검토할 수 없어 승인할 수 없습니다.',
+                announcement: t('interaction.error.unreviewable'),
             });
             return false;
         }
@@ -472,7 +472,9 @@ export class InteractionRoomController {
             busy_proposal_id: proposalId,
             error: null,
             announcement:
-                decision === 'approve' ? '제안을 승인하고 있습니다.' : '제안을 거절하고 있습니다.',
+                decision === 'approve'
+                    ? t('interaction.notice.approving')
+                    : t('interaction.notice.rejecting'),
         });
         try {
             const receipt = await this.client.decideInteractionProposal({
@@ -503,7 +505,7 @@ export class InteractionRoomController {
                 !isSafeRevision(receipt.state_revision) ||
                 receipt.state_revision < target.state_revision
             ) {
-                const message = 'Core 제안 결정이 현재 대화 스냅샷과 일치하지 않습니다.';
+                const message = t('interaction.error.decision_mismatch');
                 this.mutable.update((current) => ({
                     ...current,
                     phase: 'error',
@@ -523,7 +525,9 @@ export class InteractionRoomController {
                 busy_proposal_id: null,
                 error: null,
                 announcement:
-                    decision === 'approve' ? '제안을 승인했습니다.' : '제안을 거절했습니다.',
+                    decision === 'approve'
+                        ? t('interaction.notice.approved')
+                        : t('interaction.notice.rejected'),
             });
             return true;
         } catch (error: unknown) {

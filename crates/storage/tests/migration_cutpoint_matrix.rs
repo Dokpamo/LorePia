@@ -73,6 +73,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0035_interaction_derived_event_quarantine.sql"),
     include_str!("../migrations/0036_generation_attempt_derived_closure.sql"),
     include_str!("../migrations/0037_provider_credential_operations.sql"),
+    include_str!("../migrations/0038_conversation_speakers.sql"),
 ];
 
 #[test]
@@ -118,7 +119,7 @@ fn schema_thirty_five_active_attempts_fail_closed_and_require_a_fresh_operation(
         storage
             .schema_version()
             .expect("read schema after active-attempt cutover"),
-        37
+        38
     );
     for seeded in &legacy_attempts {
         let migrated = storage

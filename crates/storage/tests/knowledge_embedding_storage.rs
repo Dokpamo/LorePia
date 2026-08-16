@@ -49,7 +49,7 @@ fn active_database_path(root: &Path) -> PathBuf {
 }
 
 struct Fixture {
-    _root: TempDir,
+    root: TempDir,
     storage: Storage,
     task_profile_revision_id: String,
     summary_task_profile_revision_id: String,
@@ -132,6 +132,79 @@ fn exact_knowledge_embedding_storage_contract_fails_closed_across_spaces_and_tas
     assert_eq!(wrong_task.code, CoreErrorCode::NotFound);
 }
 
+#[test]
+fn bounded_embedding_query_rejects_insufficient_remaining_work() {
+    let fixture = fixture();
+    let write = required_embedding_write(&fixture);
+    fixture
+        .storage
+        .save_knowledge_embedding(&write)
+        .expect("save required embedding");
+
+    let error = fixture
+        .storage
+        .query_required_knowledge_embeddings_cosine_bounded(
+            &query(
+                &fixture,
+                &fixture.task_profile_revision_id,
+                3,
+                VECTOR_SPACE_A,
+                vec![1.0, 0.0, 0.0],
+            ),
+            std::slice::from_ref(&write.entry_id),
+            1,
+        )
+        .expect_err("one remaining work byte must fail closed before vector work");
+    assert_eq!(error.code, CoreErrorCode::InvalidInput);
+}
+
+#[test]
+fn required_entry_queries_ignore_large_unrelated_exact_space() {
+    const ENTRY_COUNT: usize = 1_025;
+
+    let fixture = fixture_with_entry_count(ENTRY_COUNT);
+    let write = required_embedding_write(&fixture);
+    fixture
+        .storage
+        .save_knowledge_embedding(&write)
+        .expect("save required embedding");
+    let required = [write.entry_id.clone()];
+    let score_query = query(
+        &fixture,
+        &fixture.task_profile_revision_id,
+        3,
+        VECTOR_SPACE_A,
+        vec![1.0, 0.0, 0.0],
+    );
+    let coverage = coverage_query(&fixture, VECTOR_SPACE_A, required.to_vec());
+    let baseline_scores = fixture
+        .storage
+        .query_required_knowledge_embeddings_cosine_bounded(&score_query, &required, 8 * 1_024)
+        .expect("score the required entry before unrelated rows");
+    let baseline_coverage = fixture
+        .storage
+        .knowledge_embedding_space_covers_entries_bounded(&coverage, 8 * 1_024)
+        .expect("cover the required entry before unrelated rows");
+
+    seed_unrelated_embeddings(&fixture, ENTRY_COUNT);
+
+    let scores = fixture
+        .storage
+        .query_required_knowledge_embeddings_cosine_bounded(&score_query, &required, 8 * 1_024)
+        .expect("unrelated vectors must not consume required-entry query work");
+    let covered = fixture
+        .storage
+        .knowledge_embedding_space_covers_entries_bounded(&coverage, 8 * 1_024)
+        .expect("unrelated vectors must not consume coverage work");
+    assert_eq!(scores, baseline_scores);
+    assert_eq!(covered, baseline_coverage);
+    assert!(scores.work_bytes > 0, "provider scoring must be charged");
+    assert!(covered.work_bytes > 0, "coverage preflight must be charged");
+    assert!(covered.covered);
+    assert_eq!(scores.matches.len(), 1);
+    assert_eq!(scores.matches[0].entry_id, write.entry_id);
+}
+
 fn assert_exact_embedding_and_coverage(fixture: &Fixture, write: &KnowledgeEmbeddingWrite) {
     let exact = fixture
         .storage
@@ -177,6 +250,12 @@ fn assert_exact_embedding_and_coverage(fixture: &Fixture, write: &KnowledgeEmbed
 }
 
 fn fixture() -> Fixture {
+    fixture_with_entry_count(1)
+}
+
+#[allow(clippy::too_many_lines)]
+fn fixture_with_entry_count(entry_count: usize) -> Fixture {
+    assert!(entry_count > 0);
     let root = tempdir().expect("temporary storage root");
     let storage = Storage::open(root.path()).expect("open storage");
     seed_provider_graph(root.path());
@@ -223,15 +302,16 @@ fn fixture() -> Fixture {
 
     let book_id = KnowledgeBookId::from("book:knowledge-storage");
     let provenance = fixture_provenance();
-    let book = KnowledgeBook {
-        id: book_id.clone(),
-        name: "Knowledge embedding storage fixture".to_owned(),
-        schema_version: 1,
-        entries: vec![KnowledgeEntry {
-            id: KnowledgeEntryId::from(ENTRY_ID),
-            book_id,
-            name: "Exact vector entry".to_owned(),
-            content: "Project-owned synthetic exact-vector content.".to_owned(),
+    let entries = (0..entry_count)
+        .map(|index| KnowledgeEntry {
+            id: if index == 0 {
+                KnowledgeEntryId::from(ENTRY_ID)
+            } else {
+                KnowledgeEntryId::from(format!("entry:knowledge-storage-unrelated-{index:04}"))
+            },
+            book_id: book_id.clone(),
+            name: format!("Exact vector entry {index}"),
+            content: format!("Project-owned synthetic exact-vector content {index}."),
             enabled: true,
             activation: ActivationRule::Always,
             priority: 1,
@@ -246,7 +326,13 @@ fn fixture() -> Fixture {
             parent_id: None,
             activation_probability_basis_points: 10_000,
             provenance: provenance.clone(),
-        }],
+        })
+        .collect();
+    let book = KnowledgeBook {
+        id: book_id.clone(),
+        name: "Knowledge embedding storage fixture".to_owned(),
+        schema_version: 1,
+        entries,
         scan_depth: 8,
         token_budget: TokenBudget { max_tokens: 256 },
         recursive: false,
@@ -260,12 +346,66 @@ fn fixture() -> Fixture {
         .expect("knowledge book revision id");
 
     Fixture {
-        _root: root,
+        root,
         storage,
         task_profile_revision_id,
         summary_task_profile_revision_id,
         book_revision_id,
     }
+}
+
+fn required_embedding_write(fixture: &Fixture) -> KnowledgeEmbeddingWrite {
+    KnowledgeEmbeddingWrite {
+        id: "embedding:knowledge-storage-required".to_owned(),
+        book_revision_id: fixture.book_revision_id.clone(),
+        entry_id: KnowledgeEntryId::from(ENTRY_ID),
+        task_profile_revision_id: fixture.task_profile_revision_id.clone(),
+        model_route_id: ModelRouteId::from(MODEL_ROUTE_ID),
+        dimensions: 3,
+        vector_space_sha256: VECTOR_SPACE_A.to_owned(),
+        values: vec![1.0, 0.0, 0.0],
+        created_at: timestamp(),
+    }
+}
+
+fn seed_unrelated_embeddings(fixture: &Fixture, entry_count: usize) {
+    let mut connection = Connection::open(active_database_path(fixture.root.path()))
+        .expect("open unrelated embedding fixture database");
+    connection
+        .pragma_update(None, "foreign_keys", true)
+        .expect("enable foreign keys");
+    let transaction = connection.transaction().expect("begin embedding fixture");
+    let bytes = encode_vector(&[0.0, 1.0, 0.0]);
+    let vector_sha256 = format!("{:x}", Sha256::digest(&bytes));
+    {
+        let mut statement = transaction
+            .prepare(
+                "INSERT INTO knowledge_embeddings
+                 (id, book_revision_id, entry_id, task_profile_revision_id,
+                  model_route_id, dimensions, vector_space_sha256, encoding,
+                  vector_blob, vector_sha256, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 3, ?6, 'f32le', ?7, ?8, ?9)",
+            )
+            .expect("prepare unrelated embedding insert");
+        for index in 1..entry_count {
+            statement
+                .execute(params![
+                    format!("embedding:knowledge-storage-unrelated-{index:04}"),
+                    fixture.book_revision_id,
+                    format!("entry:knowledge-storage-unrelated-{index:04}"),
+                    fixture.task_profile_revision_id,
+                    MODEL_ROUTE_ID,
+                    VECTOR_SPACE_A,
+                    bytes,
+                    vector_sha256,
+                    NOW,
+                ])
+                .expect("insert unrelated exact-space embedding");
+        }
+    }
+    transaction
+        .commit()
+        .expect("commit unrelated embedding fixture");
 }
 
 fn seed_provider_graph(root: &Path) {

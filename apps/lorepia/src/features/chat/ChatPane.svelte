@@ -1,4 +1,5 @@
 <script lang="ts">
+    import MarkdownText from './MarkdownText.svelte';
     import { onMount, tick } from 'svelte';
     import type { KeyboardEventHandler } from 'svelte/elements';
     import { SvelteMap, SvelteSet } from 'svelte/reactivity';
@@ -45,6 +46,7 @@
         client?: InteractionRoomCapableClient;
         messageFocusRequest?: (MemoryRecordSourceNavigationDto & { request_id: number }) | null;
         onOpenOrchestrationStudio?: () => void;
+        onOpenSidebar?: () => void;
     }
 
     interface MessageMeasurementInput {
@@ -75,6 +77,7 @@
         client,
         messageFocusRequest = null,
         onOpenOrchestrationStudio = () => undefined,
+        onOpenSidebar = () => undefined,
     }: Props = $props();
     let draft = $state('');
     let compositionActive = $state(false);
@@ -810,12 +813,30 @@
             <span class="large-mark" aria-hidden="true">✦</span>
             <strong>대화를 선택하세요.</strong>
             <p>메시지와 생성 상태는 로컬 Core에서 복원됩니다.</p>
+            <button class="sidebar-toggle" type="button" onclick={onOpenSidebar}>
+                대화 목록 열기
+            </button>
         </div>
     {:else}
         <header class="chat-header">
-            <div>
-                <p class="eyebrow">{appState.selected_character?.name ?? 'Character'}</p>
-                <h2 id="chat-title">{appState.selected_conversation.title}</h2>
+            <div class="chat-identity">
+                <button
+                    class="icon-button ghost sidebar-toggle"
+                    type="button"
+                    aria-label="탐색 열기"
+                    onclick={onOpenSidebar}
+                >
+                    <span aria-hidden="true">☰</span>
+                </button>
+                <span class="avatar" aria-hidden="true"
+                    >{(appState.selected_character?.name ?? '?').slice(0, 1)}</span
+                >
+                <div>
+                    <h2 id="chat-title">{appState.selected_conversation.title}</h2>
+                    <p class="chat-subtitle">
+                        {appState.selected_character?.name ?? 'Character'}
+                    </p>
+                </div>
             </div>
             <div class="chat-controls">
                 {#if orchestrationState && orchestrationController}
@@ -1105,6 +1126,12 @@
                     ) + 'px'}
                 >
                     {#each visibleMessages as message, localIndex (message.id)}
+                        {@const turnLabel =
+                            message.role === 'user'
+                                ? '내 메시지'
+                                : message.role === 'assistant'
+                                  ? '캐릭터 메시지'
+                                  : '시스템 메시지'}
                         <li
                             class:from-user={message.role === 'user'}
                             class:memory-source-boundary={messageFocusRequest !== null &&
@@ -1117,15 +1144,20 @@
                             aria-setsize={messageCollection.items.length}
                             aria-posinset={virtualWindow.start + localIndex + 1}
                         >
-                            <article
-                                class="message-bubble"
-                                aria-label={message.role === 'user'
-                                    ? '내 메시지'
-                                    : message.role === 'assistant'
-                                      ? '캐릭터 메시지'
-                                      : '시스템 메시지'}
+                            <span class="message-avatar" aria-hidden="true"
+                                >{message.role === 'user'
+                                    ? '나'
+                                    : (appState.selected_character?.name ?? '?').slice(0, 1)}</span
                             >
-                                {#if editingMessageId === message.id}
+                            <p class="message-role">
+                                {message.role === 'user'
+                                    ? '나'
+                                    : message.role === 'assistant'
+                                      ? (appState.selected_character?.name ?? '캐릭터')
+                                      : '시스템'}
+                            </p>
+                            {#if editingMessageId === message.id}
+                                <article class="message-body" aria-label={turnLabel}>
                                     <form
                                         class="inline-editor"
                                         aria-label="메시지 편집"
@@ -1160,77 +1192,73 @@
                                             </button>
                                         </div>
                                     </form>
-                                {:else}
-                                    <p>{message.content}</p>
+                                </article>
+                            {:else}
+                                <article class="message-body" aria-label={turnLabel}>
+                                    <MarkdownText text={message.content} />
                                     {#if message.status !== 'complete'}
                                         <span class="message-status">{message.status}</span>
                                     {/if}
-                                    <div class="message-actions" aria-label="메시지 작업">
-                                        <button
-                                            type="button"
-                                            onclick={() => void copyMessage(message)}
-                                        >
-                                            복사
-                                        </button>
+                                </article>
+                                <div class="message-actions" aria-label="메시지 작업">
+                                    <button type="button" onclick={() => void copyMessage(message)}>
+                                        복사
+                                    </button>
+                                    <button
+                                        type="button"
+                                        disabled={appState.chat.active_generation_id !== null}
+                                        onclick={() => void controller.createBranch(message.id)}
+                                    >
+                                        여기서 분기
+                                    </button>
+                                    {#if message.role === 'user'}
                                         <button
                                             type="button"
                                             disabled={appState.chat.active_generation_id !== null}
-                                            onclick={() => void controller.createBranch(message.id)}
+                                            onclick={() => beginEdit(message)}
                                         >
-                                            여기서 분기
+                                            편집
                                         </button>
-                                        {#if message.role === 'user'}
-                                            <button
-                                                type="button"
-                                                disabled={appState.chat.active_generation_id !==
-                                                    null}
-                                                onclick={() => beginEdit(message)}
-                                            >
-                                                편집
-                                            </button>
-                                        {:else if message.role === 'assistant'}
-                                            <button
-                                                type="button"
-                                                disabled={appState.chat.active_generation_id !==
-                                                    null}
-                                                onclick={() =>
-                                                    void controller.regenerateAssistantMessage(
-                                                        message.id,
-                                                    )}
-                                            >
-                                                재생성
-                                            </button>
-                                        {/if}
-                                        {#if pendingRemoveId === message.id}
-                                            <button
-                                                class="danger"
-                                                type="button"
-                                                onclick={() => {
-                                                    pendingRemoveId = null;
-                                                    void controller.removeMessage(message.id);
-                                                }}
-                                            >
-                                                제거 확인
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onclick={() => (pendingRemoveId = null)}
-                                            >
-                                                취소
-                                            </button>
-                                        {:else}
-                                            <button
-                                                type="button"
-                                                disabled={appState.chat.active_generation_id !==
-                                                    null}
-                                                onclick={() => (pendingRemoveId = message.id)}
-                                            >
-                                                여기부터 제거
-                                            </button>
-                                        {/if}
-                                    </div>
-                                {/if}
-                            </article>
+                                    {:else if message.role === 'assistant'}
+                                        <button
+                                            type="button"
+                                            disabled={appState.chat.active_generation_id !== null}
+                                            onclick={() =>
+                                                void controller.regenerateAssistantMessage(
+                                                    message.id,
+                                                )}
+                                        >
+                                            재생성
+                                        </button>
+                                    {/if}
+                                    {#if pendingRemoveId === message.id}
+                                        <button
+                                            class="danger"
+                                            type="button"
+                                            onclick={() => {
+                                                pendingRemoveId = null;
+                                                void controller.removeMessage(message.id);
+                                            }}
+                                        >
+                                            제거 확인
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onclick={() => (pendingRemoveId = null)}
+                                        >
+                                            취소
+                                        </button>
+                                    {:else}
+                                        <button
+                                            type="button"
+                                            disabled={appState.chat.active_generation_id !== null}
+                                            onclick={() => (pendingRemoveId = message.id)}
+                                        >
+                                            여기부터 제거
+                                        </button>
+                                    {/if}
+                                </div>
+                            {/if}
                         </li>
                     {/each}
                     {#if hasLiveResponse}
@@ -1238,7 +1266,13 @@
                             class="message-item streaming-message"
                             style:margin-top={`${String(virtualWindow.bottomSpacer)}px`}
                         >
-                            <article class="message-bubble streaming" aria-label="생성 중인 응답">
+                            <span class="message-avatar" aria-hidden="true"
+                                >{(appState.selected_character?.name ?? '?').slice(0, 1)}</span
+                            >
+                            <p class="message-role">
+                                {appState.selected_character?.name ?? '캐릭터'}
+                            </p>
+                            <article class="message-body streaming" aria-label="생성 중인 응답">
                                 {#if appState.chat.reasoning_text !== ''}
                                     <details class="stream-reasoning" open>
                                         <summary>추론 과정</summary>
@@ -1247,7 +1281,7 @@
                                 {/if}
                                 {#if appState.chat.streaming_text !== ''}
                                     <section class="stream-answer" aria-label="생성 중인 답변">
-                                        <p>{appState.chat.streaming_text}</p>
+                                        <MarkdownText text={appState.chat.streaming_text} />
                                     </section>
                                 {/if}
                                 <span class="stream-caret" aria-hidden="true"></span>
@@ -1351,7 +1385,8 @@
 <style>
     .interaction-status,
     .interaction-surface {
-        margin: 8px clamp(12px, 3vw, 34px) 0;
+        width: min(100% - 2 * clamp(16px, 5vw, 32px), var(--reading));
+        margin: 8px auto 0;
     }
 
     .interaction-status {
@@ -1369,7 +1404,7 @@
         overflow-y: auto;
         border: 1px solid var(--line);
         border-radius: 14px;
-        background: var(--surface-muted);
+        background: var(--surface-sunken);
     }
 
     .interaction-surface > header,
@@ -1429,13 +1464,15 @@
     }
 
     .memory-query-retry-slot {
-        margin: 8px clamp(12px, 3vw, 34px) 0;
+        width: min(100% - 2 * clamp(16px, 5vw, 32px), var(--reading));
+        margin: 8px auto 0;
     }
 
     .generation-operation-actions {
         display: flex;
         justify-content: flex-end;
-        margin: 8px clamp(12px, 3vw, 34px) 0;
+        width: min(100% - 2 * clamp(16px, 5vw, 32px), var(--reading));
+        margin: 8px auto 0;
     }
 
     .stream-reasoning {

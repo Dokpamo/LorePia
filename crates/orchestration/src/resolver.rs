@@ -216,6 +216,20 @@ pub fn reseal_resolved_prompt_plan_with_estimator<E: TokenEstimator>(
             "resolved prompt transform must preserve the exact message count".to_owned(),
         ));
     }
+    if original
+        .effective_messages
+        .iter()
+        .zip(transformed_contents)
+        .any(|(message, content)| {
+            content != &message.content
+                && (message.authority == InstructionAuthority::Application
+                    || message.block_kind == PromptBlockKind::LatestUserTurn)
+        })
+    {
+        return Err(OrchestrationError::Invalid(
+            "resolved prompt transform cannot change application or latest-user content".to_owned(),
+        ));
+    }
 
     let mut plan = original.clone();
     for (message, content) in plan.effective_messages.iter_mut().zip(transformed_contents) {
@@ -424,12 +438,12 @@ where
         for block in &blocks {
             for draft in &block.messages {
                 let (effective_role, explanation) =
-                    map_role(draft.requested_role, &request.provider).map_err(|role| {
-                        OrchestrationError::UnsupportedRole {
+                    map_role(draft.requested_role, draft.authority, &request.provider).map_err(
+                        |role| OrchestrationError::UnsupportedRole {
                             block_id: block.block.id.0.clone(),
                             role,
-                        }
-                    })?;
+                        },
+                    )?;
                 role_mappings.push(RoleMappingTrace {
                     block_id: block.block.id.clone(),
                     requested_role: draft.requested_role,
@@ -444,7 +458,7 @@ where
                     block_kind: block.block.kind,
                     requested_role: draft.requested_role,
                     effective_role,
-                    authority: block.block.authority,
+                    authority: draft.authority,
                     content: draft.content.clone(),
                     estimated_tokens: self.estimate_message(&draft.content),
                     source_message_ids: draft.source_message_ids.clone(),
@@ -566,6 +580,7 @@ where
         let default = |content: String| {
             vec![DraftMessage {
                 requested_role: role_for_block(block),
+                authority: block.authority,
                 content,
                 source_message_ids: Vec::new(),
                 source_memory_record_ids: Vec::new(),
@@ -598,6 +613,7 @@ where
                     })?;
                 Ok(vec![DraftMessage {
                     requested_role: RoleHint::User,
+                    authority: block.authority,
                     content: latest.content.clone(),
                     source_message_ids: vec![latest.id.clone()],
                     source_memory_record_ids: Vec::new(),
@@ -631,6 +647,7 @@ where
                     .into_iter()
                     .map(|entry| DraftMessage {
                         requested_role: role_for_block(block),
+                        authority: authority_for_provenance(block.authority, &entry.provenance),
                         content: entry.content.clone(),
                         source_message_ids: Vec::new(),
                         source_memory_record_ids: Vec::new(),
@@ -680,6 +697,7 @@ where
                     .into_iter()
                     .map(|record| DraftMessage {
                         requested_role: role_for_block(block),
+                        authority: authority_for_provenance(block.authority, &record.provenance),
                         content: record.content.clone(),
                         source_message_ids: Vec::new(),
                         source_memory_record_ids: vec![record.record_id.clone()],
@@ -757,6 +775,7 @@ where
                     PromptMessageRole::User => RoleHint::User,
                     PromptMessageRole::Assistant => RoleHint::Assistant,
                 },
+                authority: block.authority,
                 content: message.content.clone(),
                 source_message_ids: vec![message.id.clone()],
                 source_memory_record_ids: Vec::new(),
@@ -956,6 +975,7 @@ where
                 }
                 block.messages = vec![DraftMessage {
                     requested_role: role_for_block(&block.block),
+                    authority: block.block.authority,
                     content: summary.clone(),
                     source_message_ids: block
                         .messages
@@ -1161,6 +1181,7 @@ fn merge_same_role_messages(messages: &mut Vec<DraftMessage>) {
     for message in messages.drain(..) {
         if let Some(previous) = merged.last_mut()
             && previous.requested_role == message.requested_role
+            && previous.authority == message.authority
             && previous.provenance == message.provenance
         {
             previous.content.push_str("\n\n");
@@ -1180,8 +1201,23 @@ fn merge_same_role_messages(messages: &mut Vec<DraftMessage>) {
 
 fn map_role(
     requested: RoleHint,
+    authority: InstructionAuthority,
     contract: &lorepia_domain::ProviderPromptContract,
 ) -> Result<(ProviderMessageRole, String), RoleHint> {
+    if authority == InstructionAuthority::ImportedContent
+        && matches!(requested, RoleHint::System | RoleHint::Developer)
+    {
+        return contract
+            .supported_roles
+            .contains(&ProviderMessageRole::User)
+            .then(|| {
+                (
+                    ProviderMessageRole::User,
+                    "imported content privileged role downgraded to user".into(),
+                )
+            })
+            .ok_or(requested);
+    }
     let desired = match requested {
         RoleHint::System => ProviderMessageRole::System,
         RoleHint::Developer => ProviderMessageRole::Developer,
@@ -1309,10 +1345,25 @@ fn total_tokens<E: TokenEstimator>(blocks: &[MaterializedBlock], estimator: &E) 
 #[derive(Debug, Clone)]
 struct DraftMessage {
     requested_role: RoleHint,
+    authority: InstructionAuthority,
     content: String,
     source_message_ids: Vec<lorepia_domain::MessageId>,
     source_memory_record_ids: Vec<lorepia_domain::MemoryRecordId>,
     provenance: Provenance,
+}
+
+fn authority_for_provenance(
+    block_authority: InstructionAuthority,
+    provenance: &Provenance,
+) -> InstructionAuthority {
+    if matches!(
+        provenance.source_kind,
+        SourceKind::ImportedStandard | SourceKind::ImportedPackage
+    ) {
+        InstructionAuthority::ImportedContent
+    } else {
+        block_authority
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1791,6 +1842,34 @@ mod tests {
     }
 
     #[test]
+    fn imported_content_cannot_resolve_to_a_privileged_provider_role() {
+        for requested_role in [
+            lorepia_domain::RoleHint::System,
+            lorepia_domain::RoleHint::Developer,
+        ] {
+            let mut request = request(512, "hello");
+            request.preset.blocks[0].authority =
+                lorepia_domain::InstructionAuthority::ImportedContent;
+            request.preset.blocks[0].role_hint = requested_role;
+            let block_id = request.preset.blocks[0].id.clone();
+
+            let plan = resolve_prompt_plan(&request).expect("imported content is downgraded");
+            let message = plan
+                .effective_messages
+                .iter()
+                .find(|message| message.block_id == block_id)
+                .expect("imported block is materialized");
+
+            assert_eq!(message.requested_role, requested_role);
+            assert_eq!(message.effective_role, ProviderMessageRole::User);
+            assert_eq!(
+                message.authority,
+                lorepia_domain::InstructionAuthority::ImportedContent
+            );
+        }
+    }
+
+    #[test]
     fn canonical_verifier_rejects_tampered_materialization() {
         let request = request(512, "hello");
         let mut plan = resolve_prompt_plan(&request).expect("plan");
@@ -1890,6 +1969,50 @@ mod tests {
         assert!(matches!(
             super::reseal_resolved_prompt_plan(&original, &oversized),
             Err(OrchestrationError::OverflowRejected { .. })
+        ));
+    }
+
+    #[test]
+    fn resolved_prompt_reseal_rejects_changes_to_protected_authority_content() {
+        let latest_original = resolve_prompt_plan(&request(512, "hello")).expect("latest plan");
+        let mut latest_contents = latest_original
+            .effective_messages
+            .iter()
+            .map(|message| message.content.clone())
+            .collect::<Vec<_>>();
+        let latest_index = latest_original
+            .effective_messages
+            .iter()
+            .position(|message| message.block_kind == PromptBlockKind::LatestUserTurn)
+            .expect("latest-user message");
+        latest_contents[latest_index].push_str(" transformed");
+        assert!(matches!(
+            super::reseal_resolved_prompt_plan(&latest_original, &latest_contents),
+            Err(OrchestrationError::Invalid(_))
+        ));
+
+        let mut application_request = request(512, "hello");
+        application_request.preset.blocks[0].authority =
+            lorepia_domain::InstructionAuthority::Application;
+        application_request.preset.blocks[0].placement_zone = PlacementZone::ApplicationPolicy;
+        let application_original =
+            resolve_prompt_plan(&application_request).expect("application plan");
+        let mut application_contents = application_original
+            .effective_messages
+            .iter()
+            .map(|message| message.content.clone())
+            .collect::<Vec<_>>();
+        let application_index = application_original
+            .effective_messages
+            .iter()
+            .position(|message| {
+                message.authority == lorepia_domain::InstructionAuthority::Application
+            })
+            .expect("application message");
+        application_contents[application_index].push_str(" transformed");
+        assert!(matches!(
+            super::reseal_resolved_prompt_plan(&application_original, &application_contents),
+            Err(OrchestrationError::Invalid(_))
         ));
     }
 

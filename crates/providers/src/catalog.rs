@@ -15,9 +15,9 @@ use std::{
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use chrono::{DateTime, Duration, Utc};
 use lorepia_domain::{
-    ApiFamily, AuthBinding, DecoderId, EndpointPath, EndpointSpec, HttpMethod, HttpUrl,
-    ManifestDecoders, ManifestEndpoints, ParameterSpec, ProviderManifest, ProviderTemplate,
-    ProviderTemplateId, TemplateSource,
+    ApiFamily, AuthBinding, CanonicalOrigin, DecoderId, EndpointPath, EndpointSpec, HttpMethod,
+    HttpUrl, ManifestDecoders, ManifestEndpoints, ParameterSpec, ProviderManifest,
+    ProviderParameterMapping, ProviderTemplate, ProviderTemplateId, TemplateSource,
 };
 use ring::{digest, signature};
 use serde::{Deserialize, Serialize};
@@ -37,6 +37,13 @@ pub const CATALOG_ROLLBACK_PLAN_VERSION: u32 = 1;
 pub const CATALOG_ID: &str = "lorepia-provider-model-catalog";
 pub const BUNDLED_CATALOG_REVISION: u64 = 1;
 pub const BUNDLED_CATALOG_VERIFIED_AT: &str = "2026-07-31T00:00:00Z";
+/// Schema v1 uses only the low 48 bits for its monotonic sequence. The high
+/// 16 bits stay reserved for an explicit future epoch/schema transition rather
+/// than allowing one signed value to consume `SQLite`'s complete integer range.
+pub const CATALOG_REVISION_V1_MAX: u64 = (1_u64 << 48) - 1;
+/// Reviews may skip releases, but one import cannot burn an unbounded portion
+/// of the remaining schema-v1 revision namespace.
+pub const CATALOG_REVISION_MAX_ADVANCE: u64 = 1_000_000;
 
 const SIGNATURE_DOMAIN: &[u8] = b"LorePia/provider-model-catalog/update\0";
 const BUNDLED_CATALOG_LAYER_ID: &str = "bundled:compiled:1";
@@ -439,6 +446,7 @@ pub fn prepare_catalog_signing(
 ) -> Result<CatalogSigningRequest, CatalogError> {
     validate_key_id(signing_key_id)?;
     validate_payload_structure(payload, CatalogPayloadSource::Signed)?;
+    validate_new_revision_namespace(payload.revision)?;
     let payload_bytes = canonical_json(payload)?;
     if payload_bytes.len() > MAX_PAYLOAD_BYTES {
         return Err(CatalogError::new(CatalogErrorKind::PayloadTooLarge));
@@ -468,11 +476,59 @@ pub fn verify_manual_catalog_import(
     )
 }
 
+/// Re-verify an update that was already accepted by an earlier `LorePia`
+/// release. Stored history predates the schema-v1 namespace reservation, so
+/// replay preserves the old positive, monotonic revision contract while still
+/// rechecking the exact signature, canonical payload, and acceptance window.
+pub fn verify_stored_catalog_update(
+    envelope_json: &[u8],
+    revision_guard: &CatalogRevisionGuard,
+    accepted_at: DateTime<Utc>,
+) -> Result<VerifiedCatalogUpdate, CatalogError> {
+    verify_stored_catalog_update_with_trust(
+        envelope_json,
+        &CatalogTrustStore::bundled(),
+        revision_guard,
+        accepted_at,
+    )
+}
+
 fn verify_catalog_import_with_trust(
     envelope_json: &[u8],
     trust_store: &CatalogTrustStore,
     revision_guard: &CatalogRevisionGuard,
     now: DateTime<Utc>,
+) -> Result<VerifiedCatalogUpdate, CatalogError> {
+    verify_catalog_update_with_trust(
+        envelope_json,
+        trust_store,
+        revision_guard,
+        now,
+        CatalogRevisionPolicy::NewImport,
+    )
+}
+
+fn verify_stored_catalog_update_with_trust(
+    envelope_json: &[u8],
+    trust_store: &CatalogTrustStore,
+    revision_guard: &CatalogRevisionGuard,
+    accepted_at: DateTime<Utc>,
+) -> Result<VerifiedCatalogUpdate, CatalogError> {
+    verify_catalog_update_with_trust(
+        envelope_json,
+        trust_store,
+        revision_guard,
+        accepted_at,
+        CatalogRevisionPolicy::StoredReplay,
+    )
+}
+
+fn verify_catalog_update_with_trust(
+    envelope_json: &[u8],
+    trust_store: &CatalogTrustStore,
+    revision_guard: &CatalogRevisionGuard,
+    now: DateTime<Utc>,
+    revision_policy: CatalogRevisionPolicy,
 ) -> Result<VerifiedCatalogUpdate, CatalogError> {
     if envelope_json.len() > MAX_ENVELOPE_BYTES {
         return Err(CatalogError::new(CatalogErrorKind::InputTooLarge));
@@ -520,7 +576,7 @@ fn verify_catalog_import_with_trust(
     }
     validate_payload_structure(&payload, CatalogPayloadSource::Signed)?;
     validate_signed_time_window(&payload, now)?;
-    validate_revision(&payload, revision_guard)?;
+    validate_revision(&payload, revision_guard, revision_policy)?;
 
     Ok(VerifiedCatalogUpdate {
         signing_key_id: envelope.signing_key_id,
@@ -581,6 +637,12 @@ fn validate_key_id(value: &str) -> Result<(), CatalogError> {
 enum CatalogPayloadSource {
     Bundled,
     Signed,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CatalogRevisionPolicy {
+    NewImport,
+    StoredReplay,
 }
 
 fn validate_payload_structure(
@@ -660,6 +722,7 @@ fn validate_signed_time_window(
 fn validate_revision(
     payload: &CatalogPayload,
     guard: &CatalogRevisionGuard,
+    policy: CatalogRevisionPolicy,
 ) -> Result<(), CatalogError> {
     if payload.revision <= guard.highest_accepted_revision
         || guard
@@ -667,6 +730,20 @@ fn validate_revision(
             .is_some_and(|issued_at| payload.issued_at < issued_at)
     {
         return Err(CatalogError::new(CatalogErrorKind::RevisionRollback));
+    }
+    if policy == CatalogRevisionPolicy::NewImport
+        && (payload.revision > CATALOG_REVISION_V1_MAX
+            || guard.highest_accepted_revision > CATALOG_REVISION_V1_MAX
+            || payload.revision - guard.highest_accepted_revision > CATALOG_REVISION_MAX_ADVANCE)
+    {
+        return Err(CatalogError::new(CatalogErrorKind::InvalidRevision));
+    }
+    Ok(())
+}
+
+fn validate_new_revision_namespace(revision: u64) -> Result<(), CatalogError> {
+    if revision > CATALOG_REVISION_V1_MAX {
+        return Err(CatalogError::new(CatalogErrorKind::InvalidRevision));
     }
     Ok(())
 }
@@ -1622,6 +1699,31 @@ pub struct ManifestDiffDto {
     pub previous_sha256: Option<String>,
     pub next_sha256: Option<String>,
     pub changed_sections: Vec<ManifestChangedSection>,
+    /// Secret-free authority surface shown before activation. This additive
+    /// optional field keeps persisted schema-v1 diffs readable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub security_review: Option<ManifestSecurityReviewDto>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManifestSecurityReviewDto {
+    pub before: Option<ManifestSecuritySurfaceDto>,
+    pub after: Option<ManifestSecuritySurfaceDto>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManifestSecuritySurfaceDto {
+    pub origin: Option<CanonicalOrigin>,
+    pub authentication: AuthBinding,
+    pub endpoints: ManifestEndpoints,
+    pub decoders: ManifestDecoders,
+    pub parameter_mappings: Vec<ManifestParameterMappingDto>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManifestParameterMappingDto {
+    pub parameter_id: String,
+    pub mapping: ProviderParameterMapping,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1735,8 +1837,48 @@ fn manifest_diff(
         next_manifest_version: next.map(|entry| entry.template.manifest_version),
         previous_sha256: previous.map(canonical_hash).transpose()?,
         next_sha256: next.map(canonical_hash).transpose()?,
+        security_review: security_review(previous, next, &changed_sections),
         changed_sections,
     })
+}
+
+fn security_review(
+    previous: Option<&CatalogManifestEntry>,
+    next: Option<&CatalogManifestEntry>,
+    changed_sections: &[ManifestChangedSection],
+) -> Option<ManifestSecurityReviewDto> {
+    let security_authority_changed = changed_sections.iter().any(|section| {
+        matches!(
+            section,
+            ManifestChangedSection::Origin
+                | ManifestChangedSection::Authentication
+                | ManifestChangedSection::Endpoints
+                | ManifestChangedSection::Decoders
+                | ManifestChangedSection::Parameters
+        )
+    });
+    security_authority_changed.then(|| ManifestSecurityReviewDto {
+        before: previous.map(manifest_security_surface),
+        after: next.map(manifest_security_surface),
+    })
+}
+
+fn manifest_security_surface(entry: &CatalogManifestEntry) -> ManifestSecuritySurfaceDto {
+    let manifest = &entry.template.default_manifest;
+    ManifestSecuritySurfaceDto {
+        origin: manifest.default_api_origin.clone(),
+        authentication: manifest.auth.clone(),
+        endpoints: manifest.endpoints.clone(),
+        decoders: manifest.decoders.clone(),
+        parameter_mappings: manifest
+            .parameters
+            .iter()
+            .map(|parameter| ManifestParameterMappingDto {
+                parameter_id: parameter.id.as_str().to_owned(),
+                mapping: parameter.provider_mapping.clone(),
+            })
+            .collect(),
+    }
 }
 
 fn changed_manifest_sections(
@@ -2323,6 +2465,19 @@ mod tests {
         serde_json::to_vec(&envelope).unwrap()
     }
 
+    fn signed_document_without_preflight(payload: &CatalogPayload) -> Vec<u8> {
+        let key_pair = test_key_pair();
+        let payload_bytes = canonical_json(payload).unwrap();
+        let frame = signature_frame(CATALOG_ENVELOPE_VERSION, TEST_KEY_ID, &payload_bytes).unwrap();
+        let envelope = SignedCatalogEnvelope {
+            envelope_version: CATALOG_ENVELOPE_VERSION,
+            signing_key_id: TEST_KEY_ID.to_owned(),
+            payload_base64: BASE64.encode(payload_bytes),
+            signature_base64: BASE64.encode(key_pair.sign(&frame).as_ref()),
+        };
+        serde_json::to_vec(&envelope).unwrap()
+    }
+
     fn signed_bundled_overlay() -> VerifiedCatalogUpdate {
         let baseline = bundled_catalog_baseline().unwrap();
         let bundled = baseline
@@ -2558,6 +2713,79 @@ mod tests {
         assert_eq!(verified.payload.revision, 7);
         assert_eq!(verified.next_revision_guard.highest_accepted_revision, 7);
         assert_eq!(verified.payload_sha256.len(), 64);
+    }
+
+    #[test]
+    fn rejects_revision_values_that_consume_the_reserved_epoch_namespace() {
+        let mut exhausting = payload(7);
+        exhausting.revision = i64::MAX as u64;
+        let document = signed_document_without_preflight(&exhausting);
+
+        assert_eq!(
+            verify_catalog_import_with_trust(
+                &document,
+                &trust_store(),
+                &CatalogRevisionGuard {
+                    highest_accepted_revision: 6,
+                    latest_issued_at: None,
+                },
+                now(),
+            )
+            .unwrap_err()
+            .kind(),
+            CatalogErrorKind::InvalidRevision
+        );
+
+        let mut jumping = payload(7);
+        jumping.revision = 6 + CATALOG_REVISION_MAX_ADVANCE + 1;
+        let document = signed_document_without_preflight(&jumping);
+        assert_eq!(
+            verify_catalog_import_with_trust(
+                &document,
+                &trust_store(),
+                &CatalogRevisionGuard {
+                    highest_accepted_revision: 6,
+                    latest_issued_at: None,
+                },
+                now(),
+            )
+            .unwrap_err()
+            .kind(),
+            CatalogErrorKind::InvalidRevision
+        );
+    }
+
+    #[test]
+    fn stored_replay_preserves_pre_bound_high_revision_catalogs() {
+        let mut legacy = payload(7);
+        legacy.revision = i64::MAX as u64;
+        let document = signed_document_without_preflight(&legacy);
+
+        assert_eq!(
+            verify_catalog_import_with_trust(
+                &document,
+                &trust_store(),
+                &CatalogRevisionGuard::default(),
+                now(),
+            )
+            .expect_err("the same high revision must remain blocked for a new import")
+            .kind(),
+            CatalogErrorKind::InvalidRevision
+        );
+
+        let verified = verify_stored_catalog_update_with_trust(
+            &document,
+            &trust_store(),
+            &CatalogRevisionGuard::default(),
+            now(),
+        )
+        .expect("catalog accepted before revision bounds must remain replayable");
+
+        assert_eq!(verified.payload().revision, i64::MAX as u64);
+        assert_eq!(
+            verified.next_revision_guard().highest_accepted_revision,
+            i64::MAX as u64
+        );
     }
 
     #[test]
@@ -2852,6 +3080,73 @@ mod tests {
             latest_issued_at: Some(now()),
         };
         assert_eq!(revision_guard.highest_accepted_revision, 2);
+    }
+
+    #[test]
+    fn manifest_diff_exposes_bounded_security_authority_before_and_after_values() {
+        let mut before = manifest(TemplateSource::SignedCatalog, 1);
+        let mut after = before.clone();
+        before.template.default_manifest.default_api_origin =
+            Some(lorepia_domain::CanonicalOrigin::parse("https://old.example.test").unwrap());
+        after.template.default_manifest.default_api_origin =
+            Some(lorepia_domain::CanonicalOrigin::parse("https://new.example.test").unwrap());
+        after.template.default_manifest.auth = AuthBinding::HeaderApiKey {
+            header_name: lorepia_domain::HeaderName::parse("x-provider-key").unwrap(),
+        };
+        after.template.default_manifest.endpoints.generate.path =
+            EndpointPath::parse("/v2/chat/completions").unwrap();
+        after.template.default_manifest.decoders.streaming = None;
+        let mut parameter =
+            AdapterRegistry::built_in_template(BuiltInTemplateId::OpenAiChatCompatible)
+                .unwrap()
+                .default_manifest
+                .parameters
+                .into_iter()
+                .next()
+                .unwrap();
+        before.template.default_manifest.parameters = vec![parameter.clone()];
+        parameter.provider_mapping.field_name = "renamed_parameter".to_owned();
+        after.template.default_manifest.parameters = vec![parameter];
+
+        let previous = CatalogRevisionSnapshot {
+            snapshot_schema_version: CATALOG_HISTORY_SCHEMA_VERSION,
+            revision: 1,
+            captured_at: now() - Duration::minutes(1),
+            manifests: vec![before],
+            models: Vec::new(),
+        };
+        let next = CatalogRevisionSnapshot {
+            snapshot_schema_version: CATALOG_HISTORY_SCHEMA_VERSION,
+            revision: 2,
+            captured_at: now(),
+            manifests: vec![after],
+            models: Vec::new(),
+        };
+
+        let value = serde_json::to_value(previous.diff(&next).unwrap()).unwrap();
+        let review = &value["manifest_changes"][0]["security_review"];
+        assert_eq!(
+            review["before"]["origin"],
+            Value::String("https://old.example.test".to_owned())
+        );
+        assert_eq!(
+            review["after"]["origin"],
+            Value::String("https://new.example.test".to_owned())
+        );
+        assert_eq!(
+            review["after"]["authentication"]["kind"],
+            Value::String("header_api_key".to_owned())
+        );
+        assert_eq!(
+            review["after"]["endpoints"]["generate"]["path"],
+            Value::String("/v2/chat/completions".to_owned())
+        );
+        assert_eq!(review["after"]["decoders"]["streaming"], Value::Null);
+        assert_eq!(
+            review["after"]["parameter_mappings"][0]["mapping"]["field_name"],
+            Value::String("renamed_parameter".to_owned())
+        );
+        assert!(review.get("sources").is_none());
     }
 
     #[test]

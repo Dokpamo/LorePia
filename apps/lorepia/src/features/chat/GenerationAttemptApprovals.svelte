@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { t, tr } from '../../lib/i18n';
     import { onMount, untrack } from 'svelte';
 
     import {
@@ -27,7 +28,7 @@
         headingId = 'generation-attempt-approvals-title',
         refreshEpoch = 0,
         onRetry,
-        retryLabel = '원래 작업으로 돌아가기',
+        retryLabel = t('attempt_approval.retry_label'),
     }: Props = $props();
     const ownsController = untrack(() => providedController === undefined);
     const approvalController = untrack(
@@ -71,18 +72,19 @@
     }
 
     function expiryLabel(epochSeconds: number | null): string {
-        if (epochSeconds === null) return '자동 만료 없음';
-        return `${new Date(epochSeconds * 1_000).toLocaleString()} 만료`;
+        if (epochSeconds === null) return t('attempt_approval.no_expiry');
+        return t('attempt_approval.expires_at', {
+            time: new Date(epochSeconds * 1_000).toLocaleString(),
+        });
     }
 </script>
 
 <section class="attempt-approvals" aria-labelledby={headingId}>
     <header>
         <div>
-            <h3 id={headingId}>생성 시도 승인</h3>
+            <h3 id={headingId}>{$tr('attempt_approval.title')}</h3>
             <p>
-                이 생성 시도에 고정된 제안만 승인하거나 거절합니다. 결정 뒤 생성은 자동으로 다시
-                제출되지 않습니다.
+                {$tr('attempt_approval.hint')}
             </p>
         </div>
         <button
@@ -90,7 +92,7 @@
             disabled={busy || conversationId === null || sourceBranchId === null}
             onclick={() => void approvalController.reload()}
         >
-            승인 목록 다시 불러오기
+            {$tr('attempt_approval.reload')}
         </button>
     </header>
 
@@ -98,30 +100,29 @@
 
     {#if conversationId === null || sourceBranchId === null}
         <p class="attempt-note" role="note">
-            대화와 소스 브랜치를 선택하면 중단된 생성 시도의 승인 제안을 확인할 수 있습니다.
+            {$tr('attempt_approval.pick_room')}
         </p>
     {:else if approvalState.phase === 'loading'}
-        <p role="status">만료 제안을 정리한 뒤 승인 목록을 불러오는 중입니다.</p>
+        <p role="status">{$tr('attempt_approval.loading')}</p>
     {:else if approvalState.phase === 'unavailable'}
         <p class="attempt-note" role="note">{approvalState.error}</p>
     {:else if approvalState.error !== null}
         <div class="attempt-error" role="alert">
             <p>{approvalState.error}</p>
             <button type="button" disabled={busy} onclick={() => void approvalController.reload()}>
-                최신 승인 목록 다시 불러오기
+                {$tr('attempt_approval.reload_latest')}
             </button>
         </div>
     {/if}
 
     {#if approvalState.has_more_due}
         <p class="attempt-note" role="note">
-            한 번에 정리할 수 있는 100개보다 많은 만료 제안이 있습니다. 결정을 계속하기 전에 목록을
-            다시 불러오세요.
+            {$tr('attempt_approval.too_many')}
         </p>
     {/if}
 
     {#if approvalState.proposals.length > 0}
-        <ol class="proposal-list" aria-label="대기 중인 생성 시도 승인 제안">
+        <ol class="proposal-list" aria-label={$tr('attempt_approval.list.label')}>
             {#each approvalState.proposals as item, index (itemKey(item.generation_id, item.proposal.id))}
                 {@const key = itemKey(item.generation_id, item.proposal.id)}
                 {@const summaryId = `${headingId}-proposal-${String(index)}`}
@@ -132,10 +133,11 @@
                     >
                         <div class="proposal-copy">
                             {#if item.proposal.projection_rejection_reason === 'unsafe_native_text'}
-                                <h4 id={`${summaryId}-title`}>저장 제안 내용을 표시할 수 없음</h4>
+                                <h4 id={`${summaryId}-title`}>
+                                    {$tr('attempt_approval.unrenderable.title')}
+                                </h4>
                                 <p id={`${summaryId}-body`}>
-                                    안전한 표시 범위를 벗어난 원문은 숨겼습니다. 이 제안은 거절만 할
-                                    수 있습니다.
+                                    {$tr('attempt_approval.unrenderable.hint')}
                                 </p>
                             {:else}
                                 <h4 id={`${summaryId}-title`}>{item.proposal.title}</h4>
@@ -144,19 +146,23 @@
                         </div>
                         <dl id={`${summaryId}-authority`}>
                             <div>
-                                <dt>생성 시도</dt>
+                                <dt>{$tr('attempt_approval.field.attempt')}</dt>
                                 <dd><code>{shortId(item.generation_id)}</code></dd>
                             </div>
                             <div>
-                                <dt>제안 브랜치</dt>
+                                <dt>{$tr('attempt_approval.field.branch')}</dt>
                                 <dd><code>{shortId(item.proposed_branch_id)}</code></dd>
                             </div>
                             <div>
-                                <dt>남은 승인</dt>
-                                <dd>{item.pending_proposal_count}개</dd>
+                                <dt>{$tr('attempt_approval.field.pending')}</dt>
+                                <dd>
+                                    {$tr('attempt_approval.field.pending_count', {
+                                        count: item.pending_proposal_count,
+                                    })}
+                                </dd>
                             </div>
                             <div>
-                                <dt>만료</dt>
+                                <dt>{$tr('attempt_approval.field.expiry')}</dt>
                                 <dd>{expiryLabel(item.proposal.expires_at_epoch_seconds)}</dd>
                             </div>
                         </dl>
@@ -169,7 +175,9 @@
                                     approvalState.error !== null ||
                                     item.proposal.projection_rejection_reason ===
                                         'unsafe_native_text'}
-                                aria-label={`제안 ${String(index + 1)} 승인`}
+                                aria-label={$tr('attempt_approval.approve.label', {
+                                    index: index + 1,
+                                })}
                                 aria-describedby={`${summaryId}-body ${summaryId}-authority`}
                                 onclick={() =>
                                     void approvalController.decideProposal(
@@ -178,7 +186,9 @@
                                         'approve',
                                     )}
                             >
-                                {approvalState.busy_proposal_key === key ? '반영 중…' : '승인'}
+                                {approvalState.busy_proposal_key === key
+                                    ? $tr('attempt_approval.busy')
+                                    : $tr('attempt_approval.approve')}
                             </button>
                             <button
                                 class="reject"
@@ -186,7 +196,9 @@
                                 disabled={busy ||
                                     approvalState.has_more_due ||
                                     approvalState.error !== null}
-                                aria-label={`제안 ${String(index + 1)} 거절`}
+                                aria-label={$tr('attempt_approval.reject.label', {
+                                    index: index + 1,
+                                })}
                                 aria-describedby={`${summaryId}-body ${summaryId}-authority`}
                                 onclick={() =>
                                     void approvalController.decideProposal(
@@ -195,7 +207,7 @@
                                         'reject',
                                     )}
                             >
-                                거절
+                                {$tr('attempt_approval.reject')}
                             </button>
                         </div>
                     </article>
@@ -203,21 +215,27 @@
             {/each}
         </ol>
     {:else if approvalState.phase === 'ready' && approvalState.retry_generation_ids.length === 0}
-        <p class="attempt-note">대기 중인 생성 시도 승인 제안이 없습니다.</p>
+        <p class="attempt-note">{$tr('attempt_approval.empty')}</p>
     {/if}
 
     {#if approvalState.retry_available && approvalState.retry_generation_ids.length > 0}
         <div class="retry-generation">
             <p role="status">{approvalState.announcement}</p>
             {#if onRetry !== undefined}
-                <ol class="retry-list" aria-label="다시 시도할 재개 가능한 생성 시도">
+                <ol class="retry-list" aria-label={$tr('attempt_approval.retry_list.label')}>
                     {#each approvalState.retry_generation_ids as generationId (generationId)}
                         <li class="retry-item">
-                            <span>생성 시도 <code>{generationId}</code></span>
+                            <span
+                                >{$tr('attempt_approval.retry_item')}
+                                <code>{generationId}</code></span
+                            >
                             <button
                                 type="button"
                                 disabled={busy}
-                                aria-label={`${retryLabel}: 생성 시도 ${generationId}`}
+                                aria-label={$tr('attempt_approval.retry_item.label', {
+                                    label: retryLabel,
+                                    id: generationId,
+                                })}
                                 onclick={() => void onRetry(generationId)}
                             >
                                 {retryLabel}
@@ -237,7 +255,7 @@
         padding: 14px;
         border: 1px solid var(--line);
         border-radius: 16px;
-        background: var(--surface-muted);
+        background: var(--surface-sunken);
     }
 
     header,
@@ -298,7 +316,7 @@
     }
 
     dt {
-        color: var(--text-muted);
+        color: var(--ink-muted);
     }
 
     dd,
@@ -311,7 +329,7 @@
     }
 
     .approve {
-        color: var(--accent-contrast);
+        color: var(--ink-inverse);
         background: var(--accent);
     }
 
@@ -321,7 +339,7 @@
     }
 
     .attempt-note {
-        color: var(--text-muted);
+        color: var(--ink-muted);
     }
 
     .retry-generation {

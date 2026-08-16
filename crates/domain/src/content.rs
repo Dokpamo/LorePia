@@ -151,6 +151,7 @@ impl Default for InspectionId {
 #[serde(rename_all = "snake_case")]
 pub enum ContentKind {
     CharacterCardV3,
+    CharacterCardPng,
     CharxPackage,
 }
 

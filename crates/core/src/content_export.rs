@@ -94,7 +94,9 @@ impl Core {
                 }
                 let (kind, extension) = match inspection.kind {
                     ContentKind::CharxPackage => (ContentSourceExportKind::CharxPackage, "charx"),
-                    ContentKind::CharacterCardV3 => (
+                    // Both card sources export as V3 content; the helper picks
+                    // `png` or `json` from the committed source signature.
+                    ContentKind::CharacterCardV3 | ContentKind::CharacterCardPng => (
                         ContentSourceExportKind::CharacterCardV3,
                         character_card_extension(source.path())?,
                     ),

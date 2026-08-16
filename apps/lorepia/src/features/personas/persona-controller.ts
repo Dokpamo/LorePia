@@ -1,5 +1,6 @@
 import { get, writable, type Readable } from 'svelte/store';
 
+import { t } from '../../lib/i18n';
 import { normalizeClientError } from '../../lib/ipc/errors';
 import type {
     ConversationPersonaSelectionDto,
@@ -37,14 +38,14 @@ function errorLabel(error: unknown): string {
     const normalized = normalizeClientError(error);
     switch (normalized.code) {
         case 'invalid_input':
-            return '다른 화면에서 Persona가 변경되었습니다. 최신 상태를 다시 불러와 주세요.';
+            return t('persona.error.conflict');
         case 'not_found':
-            return 'Persona 또는 대화를 찾을 수 없습니다.';
+            return t('persona.error.not_found');
         case 'permission_denied':
-            return '현재 로컬 사용자가 소유한 Persona만 수정할 수 있습니다.';
+            return t('persona.error.not_owner');
         default:
             return normalized.messageKey === 'error.unexpected'
-                ? 'Persona 작업을 완료하지 못했습니다.'
+                ? t('persona.error.generic')
                 : normalized.messageKey;
     }
 }
@@ -73,7 +74,7 @@ export class PersonaController {
     constructor(private readonly client: Partial<PersonaClientApi>) {
         this.available = hasPersonaApi(client);
         if (!this.available) {
-            const message = '현재 Core가 안전한 Persona 관리 API를 제공하지 않습니다.';
+            const message = t('persona.error.unsupported');
             this.mutable.set({
                 ...structuredClone(INITIAL_PERSONA_STATE),
                 phase: 'unavailable',
@@ -177,7 +178,7 @@ export class PersonaController {
                     next_cursor: page.next_cursor,
                     selection,
                     error: null,
-                    announcement: 'Persona 목록이 변경되어 최신 첫 페이지부터 다시 불러왔습니다.',
+                    announcement: t('persona.notice.reloaded'),
                 }));
                 return true;
             }
@@ -221,7 +222,7 @@ export class PersonaController {
                 personas: refreshed.items,
                 next_cursor: refreshed.next_cursor,
                 error: null,
-                announcement: `${created.value.name} Persona를 만들었습니다.`,
+                announcement: t('persona.notice.created', { name: created.value.name }),
             }));
             return true;
         } catch (error: unknown) {
@@ -250,8 +251,8 @@ export class PersonaController {
                 error: null,
                 announcement:
                     state.selection?.selected_persona?.value.id === updated.value.id
-                        ? `${updated.value.name} Persona를 수정했습니다. 현재 대화는 선택 당시 리비전을 계속 사용합니다.`
-                        : `${updated.value.name} Persona를 수정했습니다.`,
+                        ? t('persona.notice.updated_pinned', { name: updated.value.name })
+                        : t('persona.notice.updated', { name: updated.value.name }),
             }));
             return true;
         } catch (error: unknown) {
@@ -285,7 +286,7 @@ export class PersonaController {
                 next_cursor: refreshed.next_cursor,
                 selection,
                 error: null,
-                announcement: `${persona.value.name} Persona를 삭제했습니다.`,
+                announcement: t('persona.notice.deleted', { name: persona.value.name }),
             }));
             return true;
         } catch (error: unknown) {
@@ -311,7 +312,9 @@ export class PersonaController {
                 phase: 'ready',
                 selection,
                 error: null,
-                announcement: `${selection.selected_persona?.value.name ?? persona.value.name} Persona를 이 대화에 선택했습니다.`,
+                announcement: t('persona.notice.selected', {
+                    name: selection.selected_persona?.value.name ?? persona.value.name,
+                }),
             }));
             return true;
         } catch (error: unknown) {
@@ -343,7 +346,7 @@ export class PersonaController {
                 phase: 'ready',
                 selection,
                 error: null,
-                announcement: '이 대화의 Persona 선택을 해제했습니다.',
+                announcement: t('persona.notice.cleared'),
             }));
             return true;
         } catch (error: unknown) {

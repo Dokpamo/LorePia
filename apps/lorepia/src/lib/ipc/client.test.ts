@@ -1292,10 +1292,14 @@ describe('LiveLorepiaClient transport boundary', () => {
             expected_revision: 4,
         });
         await client.deleteMemoryRecord({
+            conversation_id: 'conversation-1',
+            branch_id: 'branch-1',
             memory_record_id: 'memory-delete',
             expected_revision: 9,
         });
         await client.getMemoryRecord({
+            conversation_id: 'conversation-1',
+            branch_id: 'branch-1',
             memory_record_id: 'memory-1',
         });
         await client.listPromptPresetBindings({
@@ -1439,6 +1443,8 @@ describe('LiveLorepiaClient transport boundary', () => {
                 commandName: 'delete_memory_record',
                 args: {
                     request: {
+                        conversation_id: 'conversation-1',
+                        branch_id: 'branch-1',
                         memory_record_id: 'memory-delete',
                         expected_revision: 9,
                     },
@@ -1448,6 +1454,8 @@ describe('LiveLorepiaClient transport boundary', () => {
                 commandName: 'get_memory_record',
                 args: {
                     request: {
+                        conversation_id: 'conversation-1',
+                        branch_id: 'branch-1',
                         memory_record_id: 'memory-1',
                     },
                 },
@@ -1518,6 +1526,8 @@ describe('LiveLorepiaClient transport boundary', () => {
             limit: 32,
         });
         await client.retryMemoryQueryEmbedding({
+            conversation_id: 'conversation-1',
+            branch_id: 'branch-1',
             id: 'query-embedding-1',
             expected_revision: 4,
             acknowledge_unknown_outcome: true,
@@ -1538,6 +1548,8 @@ describe('LiveLorepiaClient transport boundary', () => {
                 commandName: 'retry_memory_query_embedding',
                 args: {
                     request: {
+                        conversation_id: 'conversation-1',
+                        branch_id: 'branch-1',
                         id: 'query-embedding-1',
                         expected_revision: 4,
                         acknowledge_unknown_outcome: true,

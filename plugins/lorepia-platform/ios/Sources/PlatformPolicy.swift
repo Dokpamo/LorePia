@@ -68,6 +68,22 @@ enum PlatformPolicy {
     return data
   }
 
+  static func validateCredentialConfirmationText(
+    _ value: String,
+    maximumBytes: Int
+  ) throws {
+    guard
+      !value.isEmpty,
+      value.utf8.count <= maximumBytes,
+      value.unicodeScalars.contains(where: { $0.value != 0x20 }),
+      value.unicodeScalars.allSatisfy({ scalar in
+        !isCredentialConfirmationSpoofingCodePoint(scalar.value)
+      })
+    else {
+      throw PlatformPolicyError.invalidCredential
+    }
+  }
+
   static func validateExportSha256(_ value: String) throws {
     guard
       value.utf8.count == 64,
@@ -180,4 +196,38 @@ enum PlatformPolicy {
     }
     return values
   }()
+
+  private static func isCredentialConfirmationSpoofingCodePoint(
+    _ codePoint: UInt32
+  ) -> Bool {
+    (0x0000...0x001F).contains(codePoint)
+      || (0x007F...0x00A0).contains(codePoint)
+      || codePoint == 0x00AD
+      || codePoint == 0x034F
+      || (0x0600...0x0605).contains(codePoint)
+      || codePoint == 0x061C
+      || codePoint == 0x06DD
+      || codePoint == 0x070F
+      || (0x0890...0x0891).contains(codePoint)
+      || codePoint == 0x08E2
+      || (0x115F...0x1160).contains(codePoint)
+      || codePoint == 0x1680
+      || (0x17B4...0x17B5).contains(codePoint)
+      || (0x180B...0x180F).contains(codePoint)
+      || (0x2000...0x200F).contains(codePoint)
+      || (0x2028...0x202F).contains(codePoint)
+      || (0x205F...0x206F).contains(codePoint)
+      || codePoint == 0x3000
+      || codePoint == 0x3164
+      || (0xFE00...0xFE0F).contains(codePoint)
+      || codePoint == 0xFEFF
+      || codePoint == 0xFFA0
+      || (0xFFF0...0xFFFB).contains(codePoint)
+      || codePoint == 0x110BD
+      || codePoint == 0x110CD
+      || (0x13430...0x13455).contains(codePoint)
+      || (0x1BCA0...0x1BCA3).contains(codePoint)
+      || (0x1D173...0x1D17A).contains(codePoint)
+      || (0xE0000...0xE0FFF).contains(codePoint)
+  }
 }

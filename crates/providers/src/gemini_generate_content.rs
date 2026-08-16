@@ -29,6 +29,7 @@ use crate::{
     },
     prompt_contract::ProviderPromptAdapterContract,
     request_plan::planned_json_payload,
+    sse::SseEventBuffer,
 };
 
 const MAX_SSE_EVENT_BYTES: usize = 1024 * 1024;
@@ -647,7 +648,7 @@ async fn consume_sse(
     cancellation_open: &mut bool,
 ) -> CoreResult<GenerationUsage> {
     let mut bytes = response.bytes_stream();
-    let mut pending = Vec::<u8>::new();
+    let mut pending = SseEventBuffer::default();
     let mut response_bytes = 0_usize;
     let mut state = ResponseState::default();
     loop {
@@ -668,18 +669,12 @@ async fn consume_sse(
                 if response_bytes > MAX_RESPONSE_BYTES {
                     return Err(response_too_large());
                 }
-                pending.extend_from_slice(&chunk);
-                if chunk
-                    .iter()
-                    .any(|byte| matches!(*byte, b'\r' | b'\n'))
-                {
-                    while let Some((boundary, separator_len)) =
-                        find_event_boundary(&pending, false)
-                    {
+                let mut next_boundary = pending
+                    .extend_chunk_and_find_boundary(&chunk, &SSE_EVENT_SEPARATORS);
+                while let Some(boundary) = next_boundary {
                         ensure_not_cancelled(cancelled)?;
-                        ensure_event_size(boundary)?;
-                        let event = pending.drain(..boundary).collect::<Vec<_>>();
-                        pending.drain(..separator_len);
+                        ensure_event_size(boundary.event_len())?;
+                        let event = pending.take_event(boundary);
                         process_sse_event(
                             &event,
                             sink,
@@ -688,20 +683,19 @@ async fn consume_sse(
                             &mut state,
                         )
                         .await?;
-                    }
+                        next_boundary = pending.next_boundary(&SSE_EVENT_SEPARATORS, false);
                 }
-                ensure_pending_size(&pending, false)?;
+                ensure_pending_size(pending.active_bytes(), false)?;
             }
         }
     }
     ensure_not_cancelled(cancelled)?;
-    while let Some((boundary, separator_len)) = find_event_boundary(&pending, true) {
-        ensure_event_size(boundary)?;
-        let event = pending.drain(..boundary).collect::<Vec<_>>();
-        pending.drain(..separator_len);
+    while let Some(boundary) = pending.next_boundary(&SSE_EVENT_SEPARATORS, true) {
+        ensure_event_size(boundary.event_len())?;
+        let event = pending.take_event(boundary);
         process_sse_event(&event, sink, cancelled, cancellation_open, &mut state).await?;
     }
-    ensure_pending_size(&pending, true)?;
+    ensure_pending_size(pending.active_bytes(), true)?;
     if !pending.is_empty() {
         return Err(streaming_error(
             "Gemini stream ended with an incomplete SSE event",
@@ -1202,23 +1196,6 @@ fn ensure_not_cancelled(cancelled: &watch::Receiver<bool>) -> CoreResult<()> {
     }
 }
 
-fn find_event_boundary(bytes: &[u8], end_of_stream: bool) -> Option<(usize, usize)> {
-    for position in 0..bytes.len() {
-        for separator in SSE_EVENT_SEPARATORS {
-            let ends_at_buffer_edge = position + separator.len() == bytes.len();
-            if bytes[position..].starts_with(separator)
-                && (end_of_stream
-                    || !separator.ends_with(b"\r")
-                    || separator == b"\r\r"
-                    || !ends_at_buffer_edge)
-            {
-                return Some((position, separator.len()));
-            }
-        }
-    }
-    None
-}
-
 fn ensure_event_size(size: usize) -> CoreResult<()> {
     if size > MAX_SSE_EVENT_BYTES {
         Err(streaming_error("Gemini SSE event exceeded 1 MiB"))
@@ -1558,6 +1535,22 @@ mod tests {
             value["generationConfig"]["thinkingConfig"]["includeThoughts"],
             true
         );
+    }
+
+    #[tokio::test]
+    async fn accepts_terminal_event_when_crcrlf_separator_is_split_before_lf() {
+        let body = b"data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"done\"}]},\"finishReason\":\"STOP\",\"index\":0}]}\r\r\n";
+
+        let (result, events, _) = run(
+            GeminiResponseMode::Streaming,
+            body,
+            "text/event-stream",
+            body.len() - 1,
+        )
+        .await;
+
+        result.expect("CRCRLF split before LF must complete the terminal event");
+        assert_eq!(events, vec![ProviderEvent::TextDelta("done".to_owned())]);
     }
 
     #[tokio::test]
@@ -2003,6 +1996,23 @@ mod tests {
         assert!(ensure_pending_size(&pending, true).is_err());
         assert!(ensure_event_size(MAX_SSE_EVENT_BYTES).is_ok());
         assert!(ensure_event_size(MAX_SSE_EVENT_BYTES + 1).is_err());
+    }
+
+    #[test]
+    fn sse_framing_work_is_linear_for_dense_and_fragmented_input() {
+        crate::sse::assert_sse_framing_work_is_linear(&SSE_EVENT_SEPARATORS);
+    }
+
+    #[test]
+    fn rescans_edge_deferred_separator_after_newline_free_chunk() {
+        crate::sse::assert_edge_deferred_separator_is_rescanned_after_newline_free_chunk(
+            &SSE_EVENT_SEPARATORS,
+        );
+    }
+
+    #[test]
+    fn crcrlf_separator_split_before_lf_leaves_no_gemini_trailer() {
+        crate::sse::assert_crcrlf_split_consumes_the_continuation_lf(&SSE_EVENT_SEPARATORS);
     }
 
     #[test]

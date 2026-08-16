@@ -2,6 +2,8 @@
     import { onMount } from 'svelte';
 
     import type { LorepiaAppState, LorepiaAppController } from '../../app/app-controller';
+    import { t, tr } from '../../lib/i18n';
+    import type { ImportInspectionDto } from '../../lib/ipc/contracts';
 
     interface Props {
         state: LorepiaAppState;
@@ -37,6 +39,12 @@
             maximumFractionDigits: 1,
         }).format(value >= 1_048_576 ? value / 1_048_576 : value / 1_024);
     }
+
+    function kindLabel(kind: ImportInspectionDto['kind']): string {
+        if (kind === 'charx_package') return 'CHARX';
+        if (kind === 'character_card_png') return t('import.kind.png');
+        return 'CCv3 JSON';
+    }
 </script>
 
 <div class="modal-backdrop">
@@ -54,12 +62,12 @@
         <header class="modal-header">
             <div>
                 <p class="eyebrow">Import review</p>
-                <h2 id="import-review-title">가져오기 검토</h2>
+                <h2 id="import-review-title">{$tr('import.title')}</h2>
             </div>
             <button
                 class="icon-button"
                 type="button"
-                aria-label="가져오기 검토 닫기"
+                aria-label={$tr('import.dialog.close')}
                 onclick={() => void controller.discardImport()}
             >
                 ×
@@ -67,11 +75,13 @@
         </header>
 
         {#if state.import_flow.phase === 'loading'}
-            <div class="state-panel" role="status">로컬 파일을 안전하게 검사하는 중입니다.</div>
+            <div class="state-panel" role="status">{$tr('import.inspecting')}</div>
         {:else if state.import_flow.phase === 'error'}
             <div class="state-panel error" role="alert">
                 <p>{state.import_flow.error}</p>
-                <button type="button" onclick={() => void controller.discardImport()}>닫기</button>
+                <button type="button" onclick={() => void controller.discardImport()}
+                    >{$tr('import.close')}</button
+                >
             </div>
         {:else if state.import_flow.inspection}
             {@const inspection = state.import_flow.inspection}
@@ -81,32 +91,36 @@
                 >
                 <div>
                     <h3>{inspection.display_name}</h3>
-                    <p>{inspection.description || '설명이 없습니다.'}</p>
+                    <p>{inspection.description || $tr('import.description.empty')}</p>
                 </div>
             </div>
 
             <dl class="metadata-grid">
                 <div>
-                    <dt>형식</dt>
-                    <dd>{inspection.kind === 'charx_package' ? 'CHARX' : 'CCv3 JSON'}</dd>
+                    <dt>{$tr('import.kind')}</dt>
+                    <dd>{kindLabel(inspection.kind)}</dd>
                 </div>
                 <div>
-                    <dt>원본 크기</dt>
+                    <dt>{$tr('import.source_size')}</dt>
                     <dd>{formatBytes(inspection.source_size)}</dd>
                 </div>
                 <div>
-                    <dt>예상 저장 크기</dt>
+                    <dt>{$tr('import.estimated_size')}</dt>
                     <dd>{formatBytes(inspection.estimated_stored_size)}</dd>
                 </div>
                 <div>
-                    <dt>에셋</dt>
-                    <dd>{inspection.asset_count.toLocaleString()}개</dd>
+                    <dt>{$tr('import.assets')}</dt>
+                    <dd>
+                        {$tr('import.assets.count', {
+                            count: inspection.asset_count.toLocaleString(),
+                        })}
+                    </dd>
                 </div>
             </dl>
 
             {#if inspection.blocked_reasons.length > 0}
                 <section class="issue-box blocked" aria-labelledby="blocked-title">
-                    <h3 id="blocked-title">가져올 수 없음</h3>
+                    <h3 id="blocked-title">{$tr('import.blocked')}</h3>
                     <ul>
                         {#each inspection.blocked_reasons as reason (reason)}
                             <li>{reason}</li>
@@ -117,7 +131,7 @@
 
             {#if inspection.warnings.length > 0}
                 <section class="issue-box warning" aria-labelledby="warning-title">
-                    <h3 id="warning-title">확인할 내용</h3>
+                    <h3 id="warning-title">{$tr('import.warnings')}</h3>
                     <ul>
                         {#each inspection.warnings as warning (warning.code)}
                             <li>{warning.message}</li>
@@ -128,20 +142,22 @@
 
             {#if inspection.unsupported_optional_fields.length > 0}
                 <details>
-                    <summary>아직 지원하지 않는 선택 필드</summary>
+                    <summary>{$tr('import.unsupported_fields')}</summary>
                     <p>{inspection.unsupported_optional_fields.join(', ')}</p>
                 </details>
             {/if}
 
             <footer class="modal-actions">
-                <button type="button" onclick={() => void controller.discardImport()}>취소</button>
+                <button type="button" onclick={() => void controller.discardImport()}
+                    >{$tr('import.cancel')}</button
+                >
                 <button
                     class="primary"
                     type="button"
                     disabled={!inspection.allowed}
                     onclick={() => void controller.commitImport()}
                 >
-                    서재에 추가
+                    {$tr('import.commit')}
                 </button>
             </footer>
         {/if}

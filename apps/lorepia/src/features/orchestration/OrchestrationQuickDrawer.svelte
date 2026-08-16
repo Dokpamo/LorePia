@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { tr } from '../../lib/i18n';
     import { tick } from 'svelte';
 
     import type { LorepiaAppState } from '../../app/app-controller';
@@ -113,9 +114,9 @@
         aria-controls="orchestration-quick-drawer"
         onclick={() => void setOpen(!open)}
     >
-        생성 설정
+        {$tr('quick.toggle')}
         {#if orchestrationState.dirty_room_config}
-            <span class="dirty-dot" aria-label="저장하지 않은 변경 있음"></span>
+            <span class="dirty-dot" aria-label={$tr('quick.dirty')}></span>
         {/if}
     </button>
 
@@ -127,14 +128,14 @@
         >
             <header>
                 <div>
-                    <p class="eyebrow">이번 대화</p>
-                    <h3 id="orchestration-quick-title">프롬프트와 생성</h3>
+                    <p class="eyebrow">{$tr('quick.eyebrow')}</p>
+                    <h3 id="orchestration-quick-title">{$tr('quick.title')}</h3>
                 </div>
                 <button
                     class="icon-button"
                     type="button"
                     bind:this={closeButton}
-                    aria-label="생성 설정 닫기"
+                    aria-label={$tr('quick.close')}
                     onclick={() => void setOpen(false)}
                 >
                     ×
@@ -142,7 +143,7 @@
             </header>
 
             {#if orchestrationState.phase === 'loading'}
-                <p class="drawer-status" role="status">방 설정을 불러오는 중입니다.</p>
+                <p class="drawer-status" role="status">{$tr('quick.loading')}</p>
             {:else if orchestrationState.phase === 'unavailable'}
                 <p class="drawer-status warning" role="note">{orchestrationState.error}</p>
             {:else if orchestrationState.error !== null}
@@ -153,9 +154,9 @@
                 class="drawer-scroll drawer-fields"
                 disabled={orchestrationState.phase !== 'ready'}
             >
-                <legend class="sr-only">이 방의 프롬프트 및 생성 설정</legend>
+                <legend class="sr-only">{$tr('quick.legend')}</legend>
                 <label>
-                    <span>프롬프트 프리셋</span>
+                    <span>{$tr('quick.preset')}</span>
                     <select
                         value={roomConfig.prompt_preset_id ?? ''}
                         disabled={orchestrationState.workspace.prompt_presets.length === 0}
@@ -164,7 +165,7 @@
                                 prompt_preset_id: event.currentTarget.value || null,
                             })}
                     >
-                        <option value="">기본 프롬프트</option>
+                        <option value="">{$tr('quick.preset.default')}</option>
                         {#each orchestrationState.workspace.prompt_presets.slice(0, 100) as preset (preset.id)}
                             <option value={preset.id}>{preset.name}</option>
                         {/each}
@@ -172,15 +173,15 @@
                 </label>
 
                 <label>
-                    <span>모델</span>
+                    <span>{$tr('quick.model')}</span>
                     <select
-                        aria-label="모델"
+                        aria-label={$tr('quick.model')}
                         aria-describedby="orchestration-model-route-help"
                         value={selectedModelRouteId ?? ''}
                         disabled={modelRoutes.length === 0}
                         onchange={(event) => selectModelRoute(event.currentTarget.value)}
                     >
-                        <option value="">모델 자동 선택</option>
+                        <option value="">{$tr('quick.model.auto')}</option>
                         {#each modelRoutes as route (route.id)}
                             <option
                                 value={route.id}
@@ -193,12 +194,12 @@
                         {/each}
                     </select>
                     <small id="orchestration-model-route-help">
-                        모델을 바꾸면 그 모델에 속한 첫 생성 프리셋을 함께 선택합니다.
+                        {$tr('quick.model.hint')}
                     </small>
                 </label>
 
                 <label>
-                    <span>생성 프리셋</span>
+                    <span>{$tr('quick.generation_preset')}</span>
                     <select
                         value={roomConfig.generation_preset_id ?? ''}
                         onchange={(event) =>
@@ -206,7 +207,7 @@
                                 generation_preset_id: event.currentTarget.value || null,
                             })}
                     >
-                        <option value="">프로바이더 기본 설정</option>
+                        <option value="">{$tr('quick.generation_preset.default')}</option>
                         {#each visibleGenerationPresets as preset (preset.id)}
                             <option value={preset.id}>{preset.display_name}</option>
                         {/each}
@@ -214,7 +215,7 @@
                 </label>
 
                 <fieldset>
-                    <legend>응답 길이</legend>
+                    <legend>{$tr('quick.length')}</legend>
                     <div class="choice-row">
                         {#each ['short', 'balanced', 'long'] as length (length)}
                             <label>
@@ -232,10 +233,10 @@
                                 />
                                 <span>
                                     {length === 'short'
-                                        ? '짧게'
+                                        ? $tr('quick.length.short')
                                         : length === 'balanced'
-                                          ? '균형'
-                                          : '길게'}
+                                          ? $tr('quick.length.balanced')
+                                          : $tr('quick.length.long')}
                                 </span>
                             </label>
                         {/each}
@@ -243,10 +244,10 @@
                 </fieldset>
 
                 <label>
-                    <span>창의성 <output>{roomConfig.creativity}</output></span>
+                    <span>{$tr('quick.creativity')} <output>{roomConfig.creativity}</output></span>
                     <input
                         type="range"
-                        aria-label="창의성"
+                        aria-label={$tr('quick.creativity')}
                         min="0"
                         max="100"
                         step="1"
@@ -260,7 +261,7 @@
                 </label>
 
                 <label>
-                    <span>추론 강도</span>
+                    <span>{$tr('quick.reasoning')}</span>
                     <select
                         value={roomConfig.reasoning_effort}
                         disabled={!roomConfig.supported_fields.reasoning_effort}
@@ -270,18 +271,20 @@
                                     .value as RoomOrchestrationConfigDto['reasoning_effort'],
                             })}
                     >
-                        <option value="provider_default">모델 기본값</option>
-                        <option value="minimal">최소</option>
-                        <option value="low">낮음</option>
-                        <option value="medium">중간</option>
-                        <option value="high">높음</option>
-                        <option value="extra_high">매우 높음</option>
-                        <option value="maximum">최대</option>
+                        <option value="provider_default"
+                            >{$tr('quick.reasoning.provider_default')}</option
+                        >
+                        <option value="minimal">{$tr('quick.reasoning.minimal')}</option>
+                        <option value="low">{$tr('quick.reasoning.low')}</option>
+                        <option value="medium">{$tr('quick.reasoning.medium')}</option>
+                        <option value="high">{$tr('quick.reasoning.high')}</option>
+                        <option value="extra_high">{$tr('quick.reasoning.extra_high')}</option>
+                        <option value="maximum">{$tr('quick.reasoning.maximum')}</option>
                     </select>
                 </label>
 
                 <fieldset>
-                    <legend>대화 보강</legend>
+                    <legend>{$tr('quick.enrichment')}</legend>
                     <label class="toggle-row">
                         <input
                             type="checkbox"
@@ -292,7 +295,7 @@
                                     memory_enabled: event.currentTarget.checked,
                                 })}
                         />
-                        <span>장기기억 사용</span>
+                        <span>{$tr('quick.memory')}</span>
                     </label>
                     <label class="toggle-row">
                         <input
@@ -304,13 +307,13 @@
                                     knowledge_enabled: event.currentTarget.checked,
                                 })}
                         />
-                        <span>세계관 지식 사용</span>
+                        <span>{$tr('quick.knowledge')}</span>
                     </label>
                 </fieldset>
 
                 {#if orchestrationState.workspace.creator_controls.length > 0}
                     <fieldset>
-                        <legend>제작자 조절 항목</legend>
+                        <legend>{$tr('quick.creator_controls')}</legend>
                         <div class="creator-controls">
                             {#each orchestrationState.workspace.creator_controls.slice(0, 80) as control (control.id)}
                                 {#if control.kind === 'toggle'}
@@ -404,14 +407,14 @@
             </fieldset>
 
             <footer>
-                <button type="button" onclick={onOpenStudio}>고급 설정</button>
+                <button type="button" onclick={onOpenStudio}>{$tr('quick.studio')}</button>
                 <button
                     class="primary"
                     type="button"
                     disabled={!orchestrationState.dirty_room_config || orchestrationState.saving}
                     onclick={() => void controller.saveRoomConfig()}
                 >
-                    {orchestrationState.saving ? '저장 중…' : '방 설정 저장'}
+                    {orchestrationState.saving ? $tr('quick.saving') : $tr('quick.save')}
                 </button>
             </footer>
         </aside>
@@ -516,7 +519,7 @@
     }
 
     .nested-fieldset {
-        background: var(--surface-muted);
+        background: var(--surface-sunken);
     }
 
     .choice-row {
@@ -532,7 +535,7 @@
         justify-content: center;
         padding: 8px;
         border-radius: 9px;
-        background: var(--surface-muted);
+        background: var(--surface-sunken);
     }
 
     .toggle-row {
@@ -553,11 +556,11 @@
 
     .drawer-status {
         padding: 10px 16px;
-        background: var(--surface-muted);
+        background: var(--surface-sunken);
     }
 
     .drawer-status.warning {
-        color: var(--warning-ink, #7a4b00);
+        color: var(--warning);
     }
 
     .drawer-status.error {

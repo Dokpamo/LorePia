@@ -17,7 +17,8 @@ use uuid::Uuid;
 use crate::{
     AuthBinding, CanonicalOrigin, ConnectionConfigEntry, ConnectionConfigValue, CredentialRef,
     DiscoverySessionId, EndpointPath, EvidenceId, GenerationPresetId, HttpUrl, ModelRouteId,
-    ProviderConnectionId, ProviderLocalNetworkApproval, ProviderNetworkMode, ProviderTemplateId,
+    ProviderConnectionId, ProviderLocalNetworkApproval, ProviderNetworkMode, ProviderTemplate,
+    ProviderTemplateId, TemplateSource,
 };
 
 pub const PROVIDER_DISCOVERY_EVENT_VERSION: u32 = 2;
@@ -131,6 +132,11 @@ pub struct ProviderDiscoveryConnectionOptions {
     pub network_mode: ProviderNetworkMode,
     #[serde(default)]
     pub local_network_approval: Option<ProviderLocalNetworkApproval>,
+    /// Server-issued timestamp for the immutable LAN approval carried by this
+    /// discovery session. Missing timestamps remain readable for legacy
+    /// records, but cannot authorize a network effect or commit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_network_approved_at: Option<DateTime<Utc>>,
 }
 
 impl Default for ProviderDiscoveryConnectionOptions {
@@ -141,6 +147,7 @@ impl Default for ProviderDiscoveryConnectionOptions {
             timeout_seconds: DEFAULT_PROVIDER_DISCOVERY_TIMEOUT_SECONDS,
             network_mode: ProviderNetworkMode::Public,
             local_network_approval: None,
+            local_network_approved_at: None,
         }
     }
 }
@@ -173,26 +180,78 @@ impl ProviderDiscoveryConnectionOptions {
             }
         }
 
-        match (self.network_mode, &self.local_network_approval) {
-            (ProviderNetworkMode::ApprovedLocalNetwork, Some(approval)) => {
+        match (
+            self.network_mode,
+            &self.local_network_approval,
+            self.local_network_approved_at,
+        ) {
+            (ProviderNetworkMode::ApprovedLocalNetwork, Some(approval), _) => {
                 validate_local_network_approval(approval)?;
             }
-            (ProviderNetworkMode::ApprovedLocalNetwork, None) => {
+            (ProviderNetworkMode::ApprovedLocalNetwork, None, _) => {
                 return Err(DiscoveryContractError::InvalidField {
                     field: "connection_options.local_network_approval".to_owned(),
                     reason: "is required for approved_local_network mode".to_owned(),
                 });
             }
-            (ProviderNetworkMode::Public | ProviderNetworkMode::LocalLoopback, Some(_)) => {
+            (ProviderNetworkMode::Public | ProviderNetworkMode::LocalLoopback, Some(_), _) => {
                 return Err(DiscoveryContractError::InvalidField {
                     field: "connection_options.local_network_approval".to_owned(),
                     reason: "must be absent unless network_mode is approved_local_network"
                         .to_owned(),
                 });
             }
-            (ProviderNetworkMode::Public | ProviderNetworkMode::LocalLoopback, None) => {}
+            (ProviderNetworkMode::Public | ProviderNetworkMode::LocalLoopback, None, Some(_)) => {
+                return Err(DiscoveryContractError::InvalidField {
+                    field: "connection_options.local_network_approved_at".to_owned(),
+                    reason: "must be absent unless network_mode is approved_local_network"
+                        .to_owned(),
+                });
+            }
+            (ProviderNetworkMode::Public | ProviderNetworkMode::LocalLoopback, None, None) => {}
         }
 
+        Ok(())
+    }
+
+    /// Issues a fresh immutable approval timestamp at the trusted session
+    /// creation boundary. Caller-supplied timestamps are overwritten.
+    pub fn issue_local_network_approval_at(
+        &mut self,
+        approved_at: DateTime<Utc>,
+    ) -> Result<(), DiscoveryContractError> {
+        self.validate()?;
+        if self.network_mode == ProviderNetworkMode::ApprovedLocalNetwork {
+            self.local_network_approved_at = Some(approved_at);
+        }
+        Ok(())
+    }
+
+    /// Requires a currently active approval before a LAN network effect or
+    /// commit. Timestamp-less legacy sessions fail closed and must restart.
+    pub fn require_active_local_network_approval_at(
+        &self,
+        observed_at: DateTime<Utc>,
+    ) -> Result<(), DiscoveryContractError> {
+        self.validate()?;
+        if self.network_mode != ProviderNetworkMode::ApprovedLocalNetwork {
+            return Ok(());
+        }
+        let approved_at =
+            self.local_network_approved_at
+                .ok_or_else(|| DiscoveryContractError::InvalidField {
+                    field: "connection_options.local_network_approved_at".to_owned(),
+                    reason: "is missing; restart provider discovery to approve LAN access again"
+                        .to_owned(),
+                })?;
+        if !crate::provider::provider_local_network_approval_is_active_at(approved_at, observed_at)
+        {
+            return Err(DiscoveryContractError::InvalidField {
+                field: "connection_options.local_network_approved_at".to_owned(),
+                reason: "is expired or future-dated; restart provider discovery to approve LAN access again"
+                    .to_owned(),
+            });
+        }
         Ok(())
     }
 }
@@ -2587,6 +2646,89 @@ fn discovery_review_sha256(
     Ok(hex::encode(Sha256::digest(canonical)))
 }
 
+/// Exact operational catalog authority captured when discovery adopts a
+/// signed template. The state version closes rollback/replacement races, the
+/// expiry closes time-of-check/time-of-use races, and the digest binds every
+/// template field used for endpoint and credential routing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DiscoveryCatalogAuthorityBinding {
+    pub catalog_state_version: u64,
+    pub template_id: ProviderTemplateId,
+    pub template_version: u32,
+    pub template_sha256: String,
+    pub expires_at: DateTime<Utc>,
+}
+
+impl DiscoveryCatalogAuthorityBinding {
+    pub fn new(
+        catalog_state_version: u64,
+        template: &ProviderTemplate,
+        expires_at: DateTime<Utc>,
+    ) -> Result<Self, DiscoveryContractError> {
+        if template.source != TemplateSource::SignedCatalog {
+            return Err(DiscoveryContractError::InvalidField {
+                field: "catalog_authority.template_id".to_owned(),
+                reason: "authority binding is valid only for a signed catalog template".to_owned(),
+            });
+        }
+        let binding = Self {
+            catalog_state_version,
+            template_id: template.id.clone(),
+            template_version: template.manifest_version,
+            template_sha256: discovery_provider_template_sha256(template)?,
+            expires_at,
+        };
+        binding.validate()?;
+        Ok(binding)
+    }
+
+    pub fn validate(&self) -> Result<(), DiscoveryContractError> {
+        if self.catalog_state_version == 0 {
+            return Err(DiscoveryContractError::InvalidField {
+                field: "catalog_authority.catalog_state_version".to_owned(),
+                reason: "must be positive for signed catalog authority".to_owned(),
+            });
+        }
+        if self.template_version == 0 {
+            return Err(DiscoveryContractError::InvalidField {
+                field: "catalog_authority.template_version".to_owned(),
+                reason: "must be positive".to_owned(),
+            });
+        }
+        validate_sha256("catalog_authority.template_sha256", &self.template_sha256)
+    }
+
+    pub fn validate_template(
+        &self,
+        template: &ProviderTemplate,
+    ) -> Result<(), DiscoveryContractError> {
+        self.validate()?;
+        if template.source != TemplateSource::SignedCatalog
+            || self.template_id != template.id
+            || self.template_version != template.manifest_version
+            || self.template_sha256 != discovery_provider_template_sha256(template)?
+        {
+            return Err(DiscoveryContractError::InvalidField {
+                field: "catalog_authority.template_sha256".to_owned(),
+                reason: "does not match the exact signed provider template".to_owned(),
+            });
+        }
+        Ok(())
+    }
+}
+
+pub fn discovery_provider_template_sha256(
+    template: &ProviderTemplate,
+) -> Result<String, DiscoveryContractError> {
+    let encoded =
+        serde_json::to_vec(template).map_err(|error| DiscoveryContractError::InvalidField {
+            field: "catalog_authority.template".to_owned(),
+            reason: format!("could not encode canonical template: {error}"),
+        })?;
+    Ok(hex::encode(Sha256::digest(encoded)))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DiscoveryCommitPlan {
@@ -2604,6 +2746,10 @@ pub struct DiscoveryCommitPlan {
     pub credential_ref: Option<CredentialRef>,
     pub credential_approval_id: Option<DiscoveryApprovalId>,
     pub review_sha256: String,
+    /// Absent for built-in/user-discovered templates and legacy non-signed
+    /// plans. Legacy signed plans fail closed when publication revalidates.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog_authority: Option<DiscoveryCatalogAuthorityBinding>,
     /// Exact application selection that must be restored if commit
     /// compensation reaches the settings phase.
     pub previous_selection: DiscoveryPreviousSelection,
@@ -2614,6 +2760,17 @@ impl DiscoveryCommitPlan {
         validate_sha256("commit.manifest_sha256", &self.manifest_sha256)?;
         validate_sha256("commit.graph_sha256", &self.graph_sha256)?;
         validate_sha256("commit.review_sha256", &self.review_sha256)?;
+        if let Some(authority) = &self.catalog_authority {
+            authority.validate()?;
+            if authority.template_id != self.template_id
+                || authority.template_version != self.template_version
+            {
+                return Err(DiscoveryContractError::InvalidField {
+                    field: "commit.catalog_authority".to_owned(),
+                    reason: "must identify the exact committed template".to_owned(),
+                });
+            }
+        }
         if self.template_version == 0 {
             return Err(DiscoveryContractError::InvalidField {
                 field: "commit.template_version".to_owned(),
@@ -2896,6 +3053,7 @@ mod tests {
             credential_ref: Some(CredentialRef("connection-1".to_owned())),
             credential_approval_id: Some(DiscoveryApprovalId::parse("approval-1").unwrap()),
             review_sha256: HASH.to_owned(),
+            catalog_authority: None,
             previous_selection: DiscoveryPreviousSelection::RouteAndPreset {
                 selected_provider_profile_id: None,
                 model_route_id: ModelRouteId::from("prior-route"),
@@ -3029,6 +3187,17 @@ mod tests {
 
         review.warning_count = 1;
         assert!(review.validate().is_err());
+    }
+
+    #[test]
+    fn legacy_commit_plan_without_catalog_authority_remains_readable() {
+        let plan = commit_plan();
+        let json = serde_json::to_string(&plan).unwrap();
+        assert!(!json.contains("catalog_authority"));
+
+        let decoded: DiscoveryCommitPlan = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, plan);
+        assert!(decoded.catalog_authority.is_none());
     }
 
     #[test]
@@ -3836,6 +4005,7 @@ mod tests {
             timeout_seconds: 90,
             network_mode: ProviderNetworkMode::Public,
             local_network_approval: None,
+            local_network_approved_at: None,
         };
         ProviderDiscoverySession::new(
             DiscoverySessionId::from("session-typed-options"),
@@ -3978,6 +4148,32 @@ mod tests {
             ],
         });
         approved.validate().unwrap();
+        assert!(
+            approved
+                .connection_options
+                .require_active_local_network_approval_at(Utc::now())
+                .is_err(),
+            "timestamp-less legacy LAN records remain readable but inactive"
+        );
+        let approved_at = Utc::now();
+        approved
+            .connection_options
+            .issue_local_network_approval_at(approved_at)
+            .unwrap();
+        approved
+            .connection_options
+            .require_active_local_network_approval_at(approved_at)
+            .unwrap();
+        assert!(
+            approved
+                .connection_options
+                .require_active_local_network_approval_at(approved_at + chrono::Duration::hours(25))
+                .is_err()
+        );
+        assert_eq!(
+            serde_json::to_value(&approved).unwrap()["connection_options"]["local_network_approved_at"],
+            serde_json::to_value(approved_at).unwrap()
+        );
 
         let mut missing_grant = input();
         missing_grant.connection_options.network_mode = ProviderNetworkMode::ApprovedLocalNetwork;

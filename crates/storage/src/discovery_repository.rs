@@ -1228,7 +1228,9 @@ impl Storage {
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(database_error)?;
-        let result = persist_transition_in_transaction(&transaction, write)?;
+        let authority_observed_at = Utc::now();
+        let result =
+            persist_transition_in_transaction(&transaction, write, Some(authority_observed_at))?;
         transaction.commit().map_err(database_error)?;
         Ok(result)
     }
@@ -1247,7 +1249,7 @@ impl Storage {
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(database_error)?;
         insert_or_validate_native_no_effect_attestation(&transaction, write, attestation)?;
-        let result = persist_transition_in_transaction(&transaction, write)?;
+        let result = persist_transition_in_transaction(&transaction, write, None)?;
         transaction.commit().map_err(database_error)?;
         Ok(result)
     }
@@ -1651,7 +1653,7 @@ impl Storage {
             }
             insert_session_in_transaction(&transaction, initial_session, write.occurred_at)?;
         }
-        let result = persist_transition_in_transaction(&transaction, write)?;
+        let result = persist_transition_in_transaction(&transaction, write, None)?;
         transaction.commit().map_err(database_error)?;
         Ok(result)
     }
@@ -1766,6 +1768,7 @@ impl Storage {
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(database_error)?;
+        let authority_observed_at = Utc::now();
         let receipt_exists = transaction
             .query_row(
                 "SELECT EXISTS(
@@ -1782,6 +1785,7 @@ impl Storage {
                 graph,
                 transition.previous_revision,
                 write.occurred_at,
+                authority_observed_at,
             )?;
             let changed = transaction
                 .execute(
@@ -1808,7 +1812,7 @@ impl Storage {
             }
         }
 
-        let result = persist_transition_in_transaction(&transaction, &transition_only)?;
+        let result = persist_transition_in_transaction(&transaction, &transition_only, None)?;
         let stored = transaction
             .query_row(
                 "SELECT session.state, session.revision,
@@ -2534,7 +2538,7 @@ impl Storage {
             }
         }
 
-        let result = persist_transition_in_transaction(&transaction, write)?;
+        let result = persist_transition_in_transaction(&transaction, write, None)?;
         let stored = transaction
             .query_row(
                 "SELECT step.status, step.last_failure_json, attempt.session_id,
@@ -2706,7 +2710,7 @@ impl Storage {
             }
         }
 
-        let result = persist_transition_in_transaction(&transaction, write)?;
+        let result = persist_transition_in_transaction(&transaction, write, None)?;
         let stored = transaction
             .query_row(
                 "SELECT step.status, attempt.phase, session.state,
@@ -3238,6 +3242,7 @@ fn load_discovery_selection_restore_revision(
 fn persist_transition_in_transaction(
     transaction: &Transaction<'_>,
     write: &DiscoveryTransitionWrite,
+    publication_authority_observed_at: Option<DateTime<Utc>>,
 ) -> CoreResult<PersistDiscoveryTransition> {
     let transition = &write.transition;
     let session_id = transition.session.id.as_str();
@@ -3535,11 +3540,17 @@ fn persist_transition_in_transaction(
         validate_prepared_commit_session_binding(transaction, commit)?;
     }
     if let Some(graph) = &write.provider_graph {
+        let authority_observed_at = publication_authority_observed_at.ok_or_else(|| {
+            CoreError::internal(
+                "provider graph publication has no transaction-scoped authority observation",
+            )
+        })?;
         apply_provider_graph_in_transaction(
             transaction,
             graph,
             transition.previous_revision,
             write.occurred_at,
+            authority_observed_at,
         )?;
     }
     finalize_commit_failed_before_apply(transaction, write)?;
@@ -6687,13 +6698,13 @@ fn validate_prepared_commit_session_binding(
     transaction: &Transaction<'_>,
     commit: &PreparedDiscoveryCommit,
 ) -> CoreResult<()> {
-    let input_json = transaction
+    let (input_json, created_at) = transaction
         .query_row(
-            "SELECT sanitized_input_json
+            "SELECT sanitized_input_json, created_at
              FROM provider_discovery_sessions
              WHERE id = ?1",
             [commit.plan.session_id.as_str()],
-            |row| row.get::<_, String>(0),
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
         )
         .optional()
         .map_err(database_error)?
@@ -6705,6 +6716,8 @@ fn validate_prepared_commit_session_binding(
         .map_err(|_| corrupted("stored discovery input violates its contract"))?;
     validate_sanitized_input(&input)
         .map_err(|_| corrupted("stored discovery input contains forbidden data"))?;
+    let created_at = parse_timestamp(&created_at, "discovery session creation time")?;
+    validate_discovery_local_network_approval_binding(&input, created_at, Utc::now())?;
     if commit.plan.connection_id != input.connection_id
         || commit.plan.credential_ref != input.credential_ref
     {
@@ -6726,6 +6739,7 @@ fn insert_session_in_transaction(
     session: &ProviderDiscoverySession,
     created_at: DateTime<Utc>,
 ) -> CoreResult<()> {
+    validate_discovery_local_network_approval_binding(&session.input, created_at, created_at)?;
     let input_json = canonical_json_result(
         serde_json::to_value(&session.input),
         "sanitized discovery input",
@@ -6749,6 +6763,35 @@ fn insert_session_in_transaction(
         "discovery.audit.session_created",
         created_at,
     )
+}
+
+fn validate_discovery_local_network_approval_binding(
+    input: &SanitizedDiscoveryInput,
+    session_created_at: DateTime<Utc>,
+    observed_at: DateTime<Utc>,
+) -> CoreResult<()> {
+    input
+        .connection_options
+        .require_active_local_network_approval_at(observed_at)
+        .map_err(|error| {
+            CoreError::new(
+                CoreErrorCode::InvalidInput,
+                format!(
+                    "provider discovery LAN approval is inactive; restart provider discovery: {error}"
+                ),
+                true,
+            )
+        })?;
+    if input.connection_options.network_mode == ProviderNetworkMode::ApprovedLocalNetwork
+        && input.connection_options.local_network_approved_at != Some(session_created_at)
+    {
+        return Err(CoreError::new(
+            CoreErrorCode::InvalidInput,
+            "provider discovery LAN approval is not bound to its immutable session creation time; restart provider discovery",
+            true,
+        ));
+    }
+    Ok(())
 }
 
 fn insert_evidence_in_transaction(
@@ -7016,6 +7059,7 @@ fn apply_provider_graph_in_transaction(
     graph: &DiscoveredProviderGraph,
     expected_session_revision: u64,
     applied_at: DateTime<Utc>,
+    authority_observed_at: DateTime<Utc>,
 ) -> CoreResult<()> {
     validate_provider_graph(graph)?;
     let plan_json = encode_commit_plan_json(&graph.plan)?;
@@ -7027,7 +7071,7 @@ fn apply_provider_graph_in_transaction(
     let session = transaction
         .query_row(
             "SELECT state, revision, commit_attempt_id, commit_plan_sha256,
-                    sanitized_input_json
+                    sanitized_input_json, created_at
              FROM provider_discovery_sessions
              WHERE id = ?1",
             [graph.plan.session_id.as_str()],
@@ -7038,6 +7082,7 @@ fn apply_provider_graph_in_transaction(
                     row.get::<_, Option<String>>(2)?,
                     row.get::<_, Option<String>>(3)?,
                     row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
                 ))
             },
         )
@@ -7067,6 +7112,13 @@ fn apply_provider_graph_in_transaction(
         .map_err(|_| corrupted("committing discovery input violates its contract"))?;
     validate_sanitized_input(&input)
         .map_err(|_| corrupted("committing discovery input contains forbidden data"))?;
+    let session_created_at =
+        parse_timestamp(&session.5, "committing discovery session creation time")?;
+    validate_discovery_local_network_approval_binding(
+        &input,
+        session_created_at,
+        authority_observed_at,
+    )?;
     if graph.connection.id != input.connection_id
         || graph.connection.display_name != input.display_name
         || graph.connection.credential_ref != input.credential_ref
@@ -7074,6 +7126,28 @@ fn apply_provider_graph_in_transaction(
         return Err(CoreError::invalid(
             "provider graph connection differs from the user-selected identity",
         ));
+    }
+    if graph.connection.config.network_mode != input.connection_options.network_mode
+        || graph.connection.config.local_network_approval
+            != input.connection_options.local_network_approval
+    {
+        return Err(CoreError::invalid(
+            "provider graph network authority differs from its discovery session",
+        ));
+    }
+    if input.connection_options.network_mode == ProviderNetworkMode::ApprovedLocalNetwork {
+        let approval = input
+            .connection_options
+            .local_network_approval
+            .as_ref()
+            .ok_or_else(|| corrupted("committing LAN discovery approval is missing"))?;
+        if graph.connection.created_at != session_created_at
+            || graph.connection.api_origin != approval.origin
+        {
+            return Err(CoreError::invalid(
+                "provider graph laundered its immutable LAN approval authority",
+            ));
+        }
     }
     require_started_session_operation(transaction, &graph.plan.session_id, "atomic_commit")?;
     let attempt = transaction
@@ -7139,6 +7213,7 @@ fn apply_provider_graph_in_transaction(
         }
         return Ok(());
     }
+    validate_catalog_authority_in_transaction(transaction, graph, authority_observed_at)?;
     ensure_provider_graph_ids_vacant(transaction, graph)?;
     let template_existed = transaction
         .query_row(
@@ -7207,6 +7282,53 @@ fn apply_provider_graph_in_transaction(
         ));
     }
     Ok(())
+}
+
+fn validate_catalog_authority_in_transaction(
+    transaction: &Transaction<'_>,
+    graph: &DiscoveredProviderGraph,
+    authority_observed_at: DateTime<Utc>,
+) -> CoreResult<()> {
+    match (&graph.template.source, &graph.plan.catalog_authority) {
+        (TemplateSource::SignedCatalog, Some(authority)) => {
+            authority
+                .validate_template(&graph.template)
+                .map_err(contract_error)?;
+            if authority_observed_at >= authority.expires_at {
+                return Err(CoreError::new(
+                    CoreErrorCode::InvalidInput,
+                    "signed catalog authority expired before provider graph publication",
+                    true,
+                ));
+            }
+            let stored_state_version = transaction
+                .query_row(
+                    "SELECT state_version FROM provider_catalog_state WHERE singleton = 1",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map_err(database_error)?;
+            let current_state_version = u64::try_from(stored_state_version)
+                .map_err(|_| corrupted("provider catalog state version is negative"))?;
+            if current_state_version != authority.catalog_state_version {
+                return Err(CoreError::new(
+                    CoreErrorCode::InvalidInput,
+                    "signed catalog authority changed before provider graph publication",
+                    true,
+                ));
+            }
+            Ok(())
+        }
+        (TemplateSource::SignedCatalog, None) => Err(CoreError::new(
+            CoreErrorCode::InvalidInput,
+            "legacy signed discovery plan has no catalog authority; restart provider discovery",
+            true,
+        )),
+        (_, Some(_)) => Err(CoreError::invalid(
+            "non-catalog provider graph cannot carry signed catalog authority",
+        )),
+        (_, None) => Ok(()),
+    }
 }
 
 fn validate_graph_evidence_references(
@@ -12702,7 +12824,8 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use lorepia_domain::{
         CanonicalOrigin, CoreErrorCode, CredentialRef, DiscoverySessionId, EvidenceId, HttpUrl,
-        ModelRouteId, ProviderConnectionId, ProviderProfile, ProviderTemplateId,
+        ModelRouteId, ProviderConnectionId, ProviderLocalNetworkApproval, ProviderNetworkMode,
+        ProviderProfile, ProviderTemplateId,
         discovery::{
             DiscoveryActionEnvelope, DiscoveryActionId, DiscoveryApprovalBinding,
             DiscoveryApprovalDecision, DiscoveryApprovalGrant, DiscoveryApprovalId,
@@ -12731,6 +12854,7 @@ mod tests {
         provider_graph_ownership_hash, sha256_hex,
         validate_archived_discovery_credential_ownership_authority_for_slot_gc,
         validate_discovery_credential_ownership_authority,
+        validate_discovery_local_network_approval_binding,
     };
 
     fn now() -> chrono::DateTime<Utc> {
@@ -12774,6 +12898,47 @@ mod tests {
             },
         )
         .expect("draft discovery session")
+    }
+
+    #[test]
+    fn lan_session_authority_requires_an_active_immutable_creation_time_binding() {
+        let mut input = draft_session("lan-authority-binding").input;
+        input.connection_options.network_mode = ProviderNetworkMode::ApprovedLocalNetwork;
+        input.connection_options.local_network_approval = Some(ProviderLocalNetworkApproval {
+            origin: CanonicalOrigin::parse("http://models.lan:8080").unwrap(),
+            addresses: vec!["192.168.10.20".parse().unwrap()],
+        });
+        let approved_at = now();
+
+        assert!(
+            validate_discovery_local_network_approval_binding(&input, approved_at, approved_at)
+                .is_err(),
+            "timestamp-less legacy LAN session must restart"
+        );
+        input
+            .connection_options
+            .issue_local_network_approval_at(approved_at)
+            .unwrap();
+        validate_discovery_local_network_approval_binding(&input, approved_at, approved_at)
+            .unwrap();
+        assert!(
+            validate_discovery_local_network_approval_binding(
+                &input,
+                approved_at + chrono::Duration::seconds(1),
+                approved_at + chrono::Duration::seconds(1),
+            )
+            .is_err(),
+            "session creation time mismatch must fail closed"
+        );
+        assert!(
+            validate_discovery_local_network_approval_binding(
+                &input,
+                approved_at,
+                approved_at + chrono::Duration::hours(25),
+            )
+            .is_err(),
+            "expired session authority must fail closed"
+        );
     }
 
     fn archive_credential_bound_connection(
@@ -13111,6 +13276,7 @@ mod tests {
             credential_ref: awaiting_review.input.credential_ref.clone(),
             credential_approval_id: Some(credential_approval_id.clone()),
             review_sha256: review.sha256.clone(),
+            catalog_authority: None,
             previous_selection: DiscoveryPreviousSelection::None,
         };
         let plan_json = encode_commit_plan_json(&plan).expect("authority plan JSON");
@@ -15484,6 +15650,7 @@ mod tests {
             credential_ref: session.input.credential_ref.clone(),
             credential_approval_id: Some(credential_approval_id),
             review_sha256: "3".repeat(64),
+            catalog_authority: None,
             previous_selection: DiscoveryPreviousSelection::None,
         }
     }
@@ -19714,6 +19881,7 @@ mod tests {
             credential_ref: None,
             credential_approval_id: None,
             review_sha256: "3".repeat(64),
+            catalog_authority: None,
             previous_selection: DiscoveryPreviousSelection::None,
         };
         plan.validate().expect("valid keyless commit plan");
@@ -19970,6 +20138,7 @@ mod tests {
             credential_ref: None,
             credential_approval_id: None,
             review_sha256: "3".repeat(64),
+            catalog_authority: None,
             previous_selection: DiscoveryPreviousSelection::None,
         };
         plan.validate().expect("valid commit plan");
@@ -20069,6 +20238,7 @@ mod tests {
             credential_ref: None,
             credential_approval_id: None,
             review_sha256: "a".repeat(64),
+            catalog_authority: None,
             previous_selection: DiscoveryPreviousSelection::None,
         };
         plan.validate().expect("valid commit plan");

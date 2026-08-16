@@ -6,6 +6,8 @@ publish.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+base64.workspace = true
+flate2 = "1.1"
 hex.workspace = true
 lorepia-domain = { path = "../domain" }
 serde.workspace = true
@@ -16,6 +18,8 @@ unicode-normalization.workspace = true
 zip.workspace = true
 
 [dev-dependencies]
+base64.workspace = true
+flate2 = "1.1"
 tempfile.workspace = true
 
 [lints]

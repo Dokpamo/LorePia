@@ -12,7 +12,7 @@ use uuid::Uuid;
 use zeroize::Zeroizing;
 
 #[cfg(any(target_os = "macos", windows, test))]
-use crate::validation::sanitize_display_name;
+use crate::validation::{ValidatedExportDestination, sanitize_display_name};
 use crate::{PlatformError, PlatformErrorCode, PlatformResult, StagedImport};
 #[cfg(any(target_os = "macos", windows, test))]
 use sha2::{Digest, Sha256};
@@ -111,32 +111,14 @@ pub(crate) fn read_staged_file(
 #[cfg(any(target_os = "macos", windows, test))]
 pub(crate) fn atomic_export_to_destination(
     source_path: &Path,
-    destination: &Path,
+    destination: &ValidatedExportDestination,
     expected_size_bytes: u64,
     expected_sha256: &str,
 ) -> PlatformResult<()> {
-    if !source_path.is_absolute() || !destination.is_absolute() || source_path == destination {
+    if !source_path.is_absolute() {
         return Err(PlatformError::new(PlatformErrorCode::InvalidInput));
     }
-    let parent = destination
-        .parent()
-        .filter(|parent| parent.is_absolute())
-        .ok_or_else(|| PlatformError::new(PlatformErrorCode::InvalidInput))?;
-    let parent_metadata = std::fs::metadata(parent)
-        .map_err(|_| PlatformError::new(PlatformErrorCode::StorageUnavailable))?;
-    if !parent_metadata.is_dir() || destination.file_name().is_none() {
-        return Err(PlatformError::new(PlatformErrorCode::InvalidInput));
-    }
-    if destination.exists()
-        && std::fs::canonicalize(destination)
-            .ok()
-            .zip(std::fs::canonicalize(source_path).ok())
-            .is_some_and(|(destination, source)| destination == source)
-    {
-        return Err(PlatformError::new(PlatformErrorCode::InvalidInput));
-    }
-
-    let partial = parent.join(format!(
+    let partial = std::ffi::OsString::from(format!(
         "{CONTENT_EXPORT_TEMP_PREFIX}{}.partial",
         Uuid::new_v4()
     ));
@@ -155,15 +137,7 @@ pub(crate) fn atomic_export_to_destination(
             return Err(PlatformError::new(PlatformErrorCode::InvalidInput));
         }
 
-        let mut destination_options = OpenOptions::new();
-        destination_options.write(true).create_new(true);
-        #[cfg(unix)]
-        destination_options
-            .mode(0o600)
-            .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW);
-        let mut temporary = destination_options
-            .open(&partial)
-            .map_err(|_| PlatformError::new(PlatformErrorCode::StorageUnavailable))?;
+        let mut temporary = create_export_partial(destination, &partial)?;
 
         let mut hasher = Sha256::new();
         let mut buffer = vec![0_u8; COPY_BUFFER_BYTES].into_boxed_slice();
@@ -190,41 +164,102 @@ pub(crate) fn atomic_export_to_destination(
             .flush()
             .and_then(|()| temporary.sync_all())
             .map_err(|_| PlatformError::new(PlatformErrorCode::StorageUnavailable))?;
-        drop(temporary);
-
         let actual_sha256 = format!("{:x}", hasher.finalize());
-        let partial_metadata = std::fs::symlink_metadata(&partial)
+        let partial_metadata = temporary
+            .metadata()
             .map_err(|_| PlatformError::new(PlatformErrorCode::StorageUnavailable))?;
         if copied != expected_size_bytes
             || actual_sha256 != expected_sha256
-            || !partial_metadata.file_type().is_file()
+            || !partial_metadata.is_file()
             || partial_metadata.len() != expected_size_bytes
         {
             return Err(PlatformError::new(PlatformErrorCode::InvalidInput));
         }
-
-        atomic_replace(&partial, destination)?;
-        #[cfg(unix)]
-        std::fs::File::open(parent)
-            .and_then(|directory| directory.sync_all())
-            .map_err(|_| PlatformError::new(PlatformErrorCode::StorageUnavailable))?;
+        atomic_replace(destination, &temporary, &partial)?;
+        drop(temporary);
+        sync_export_parent(destination)?;
         Ok(())
     })();
     if result.is_err() {
-        let _ = std::fs::remove_file(&partial);
+        remove_export_partial(destination, &partial);
     }
     result
 }
 
-#[cfg(any(target_os = "macos", all(test, not(windows))))]
-fn atomic_replace(source: &Path, destination: &Path) -> PlatformResult<()> {
-    std::fs::rename(source, destination)
+#[cfg(unix)]
+fn create_export_partial(
+    destination: &ValidatedExportDestination,
+    partial: &std::ffi::OsStr,
+) -> PlatformResult<std::fs::File> {
+    use rustix::fs::{Mode, OFlags, openat};
+
+    let file = openat(
+        destination.unix_parent(),
+        partial,
+        OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+        Mode::from_raw_mode(0o600),
+    )
+    .map_err(|_| PlatformError::new(PlatformErrorCode::StorageUnavailable))?;
+    Ok(std::fs::File::from(file))
+}
+
+#[cfg(windows)]
+fn create_export_partial(
+    destination: &ValidatedExportDestination,
+    partial: &std::ffi::OsStr,
+) -> PlatformResult<std::fs::File> {
+    destination.windows_parent().create_partial(partial)
+}
+
+#[cfg(unix)]
+fn atomic_replace(
+    destination: &ValidatedExportDestination,
+    _temporary: &std::fs::File,
+    partial: &std::ffi::OsStr,
+) -> PlatformResult<()> {
+    rustix::fs::renameat(
+        destination.unix_parent(),
+        partial,
+        destination.unix_parent(),
+        destination.file_name(),
+    )
+    .map_err(|_| PlatformError::new(PlatformErrorCode::StorageUnavailable))
+}
+
+#[cfg(windows)]
+fn atomic_replace(
+    destination: &ValidatedExportDestination,
+    temporary: &std::fs::File,
+    _partial: &std::ffi::OsStr,
+) -> PlatformResult<()> {
+    destination
+        .windows_parent()
+        .atomic_replace(temporary, destination.file_name())
+}
+
+#[cfg(unix)]
+fn sync_export_parent(destination: &ValidatedExportDestination) -> PlatformResult<()> {
+    rustix::fs::fsync(destination.unix_parent())
         .map_err(|_| PlatformError::new(PlatformErrorCode::StorageUnavailable))
 }
 
 #[cfg(windows)]
-fn atomic_replace(source: &Path, destination: &Path) -> PlatformResult<()> {
-    crate::desktop::windows::atomic_replace_file(source, destination)
+fn sync_export_parent(destination: &ValidatedExportDestination) -> PlatformResult<()> {
+    destination.windows_parent().verify_identity()
+}
+
+#[cfg(unix)]
+fn remove_export_partial(destination: &ValidatedExportDestination, partial: &std::ffi::OsStr) {
+    let _ = rustix::fs::unlinkat(
+        destination.unix_parent(),
+        partial,
+        rustix::fs::AtFlags::empty(),
+    );
+}
+
+#[cfg(windows)]
+fn remove_export_partial(destination: &ValidatedExportDestination, partial: &std::ffi::OsStr) {
+    destination.windows_parent().remove_partial(partial);
 }
 
 #[cfg(any(target_os = "android", test))]
@@ -428,18 +463,26 @@ mod tests {
     #[test]
     fn content_export_verifies_before_atomic_replacement_and_cleans_temporary_files() {
         let root = tempdir().expect("root");
+        let data_root = root.path().join("data");
+        std::fs::create_dir(&data_root).expect("data root");
         let source = root.path().join("source");
-        let destination = root.path().join("character.json");
+        let destination_path = root.path().join("character.json");
+        let destination =
+            crate::validation::validate_content_export_destination(&destination_path, &data_root)
+                .expect("validated destination");
         let bytes = b"lossless synthetic source";
         let digest = format!("{:x}", Sha256::digest(bytes));
         std::fs::write(&source, bytes).expect("source");
-        std::fs::write(&destination, b"previous bytes").expect("previous destination");
+        std::fs::write(&destination_path, b"previous bytes").expect("previous destination");
 
         atomic_export_to_destination(&source, &destination, bytes.len() as u64, &digest)
             .expect("export");
-        assert_eq!(std::fs::read(&destination).expect("destination"), bytes);
+        assert_eq!(
+            std::fs::read(&destination_path).expect("destination"),
+            bytes
+        );
 
-        std::fs::write(&destination, b"keep me").expect("reset destination");
+        std::fs::write(&destination_path, b"keep me").expect("reset destination");
         assert!(
             atomic_export_to_destination(
                 &source,
@@ -450,7 +493,7 @@ mod tests {
             .is_err()
         );
         assert_eq!(
-            std::fs::read(&destination).expect("preserved destination"),
+            std::fs::read(&destination_path).expect("preserved destination"),
             b"keep me"
         );
         let leaked = std::fs::read_dir(root.path())
@@ -465,6 +508,112 @@ mod tests {
         assert!(
             !leaked,
             "failed exports must clean same-directory temporary files"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn content_export_pins_parent_across_data_root_symlink_swap_after_validation() {
+        let root = tempdir().expect("root");
+        let data_root = root.path().join("data");
+        let export_parent = root.path().join("exports");
+        let displaced_parent = root.path().join("exports-before-swap");
+        std::fs::create_dir(&data_root).expect("data root");
+        std::fs::create_dir(&export_parent).expect("export parent");
+
+        let source = root.path().join("source");
+        let destination = export_parent.join("database.sqlite3");
+        let protected = data_root.join("database.sqlite3");
+        let bytes = b"verified export bytes";
+        let digest = format!("{:x}", Sha256::digest(bytes));
+        std::fs::write(&source, bytes).expect("source");
+        std::fs::write(&protected, b"protected database").expect("protected database");
+
+        let destination =
+            crate::validation::validate_content_export_destination(&destination, &data_root)
+                .expect("initial external destination");
+        std::fs::rename(&export_parent, &displaced_parent).expect("displace checked parent");
+        std::os::unix::fs::symlink(&data_root, &export_parent)
+            .expect("replace checked parent with data-root symlink");
+
+        atomic_export_to_destination(&source, &destination, bytes.len() as u64, &digest)
+            .expect("export through pinned checked parent");
+        assert_eq!(
+            std::fs::read(&protected).expect("protected database remains"),
+            b"protected database"
+        );
+        assert_eq!(
+            std::fs::read(displaced_parent.join("database.sqlite3"))
+                .expect("pinned export destination"),
+            bytes
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn content_export_retains_windows_ancestor_handles_after_validation() {
+        let root = tempdir().expect("root");
+        let data_root = root.path().join("data");
+        let export_ancestor = root.path().join("external");
+        let export_parent = export_ancestor.join("exports");
+        let displaced_ancestor = root.path().join("external-before-swap");
+        std::fs::create_dir(&data_root).expect("data root");
+        std::fs::create_dir_all(&export_parent).expect("export parent");
+
+        let destination_path = export_parent.join("database.sqlite3");
+        let _destination =
+            crate::validation::validate_content_export_destination(&destination_path, &data_root)
+                .expect("validated destination");
+
+        assert!(
+            std::fs::rename(&export_ancestor, &displaced_ancestor).is_err(),
+            "retained Windows ancestor handles must deny the rename needed for a junction swap"
+        );
+        assert!(
+            export_parent.is_dir(),
+            "the validated parent must stay named"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn content_export_replaces_final_reparse_entry_without_following_it() {
+        let root = tempdir().expect("root");
+        let data_root = root.path().join("data");
+        let export_parent = root.path().join("exports");
+        std::fs::create_dir(&data_root).expect("data root");
+        std::fs::create_dir(&export_parent).expect("export parent");
+
+        let source = root.path().join("source");
+        let protected = data_root.join("database.sqlite3");
+        let destination_path = export_parent.join("database.sqlite3");
+        let bytes = b"verified export bytes";
+        let digest = format!("{:x}", Sha256::digest(bytes));
+        std::fs::write(&source, bytes).expect("source");
+        std::fs::write(&protected, b"protected database").expect("protected database");
+        std::os::windows::fs::symlink_file(&protected, &destination_path)
+            .expect("create final reparse fixture");
+
+        let destination =
+            crate::validation::validate_content_export_destination(&destination_path, &data_root)
+                .expect("validated external destination");
+        atomic_export_to_destination(&source, &destination, bytes.len() as u64, &digest)
+            .expect("replace the reparse entry itself");
+
+        assert_eq!(
+            std::fs::read(&protected).expect("protected database remains"),
+            b"protected database"
+        );
+        assert!(
+            !std::fs::symlink_metadata(&destination_path)
+                .expect("destination metadata")
+                .file_type()
+                .is_symlink(),
+            "the final reparse entry must be replaced, not followed"
+        );
+        assert_eq!(
+            std::fs::read(&destination_path).expect("export destination"),
+            bytes
         );
     }
 }

@@ -1,6 +1,7 @@
 use std::{collections::HashSet, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
+use chrono::Utc;
 use futures_util::StreamExt;
 use lorepia_domain::{
     ApiFamily, AuthBinding, CanonicalOrigin, ConnectionFieldSpec, ConnectionFieldType, CoreError,
@@ -13,7 +14,10 @@ use lorepia_domain::{
 };
 use reqwest::{RequestBuilder, Response, StatusCode, header::ACCEPT};
 use serde::{Deserialize, Serialize};
-use tokio::sync::watch;
+use tokio::{
+    sync::watch,
+    time::{Instant, sleep_until},
+};
 use url::Url;
 
 use crate::{
@@ -26,7 +30,9 @@ use crate::{
     },
     gemini_generate_content::{GeminiGenerateContentProvider, GeminiResponseMode},
     manifest_validator::{validate_connection_fields, validate_manifest},
-    network_transport::{ProviderHttpTarget, authorize_request, validate_credential_for_auth},
+    network_transport::{
+        PreparedHttpTarget, ProviderHttpTarget, authorize_request, validate_credential_for_auth,
+    },
     ollama_native::OllamaNativeProvider,
     openai_compatible::OpenAiCompatibleProvider,
     openai_responses::OpenAiResponsesProvider,
@@ -43,6 +49,7 @@ const HARD_MAX_MODEL_PAGES: usize = 32;
 const HARD_MAX_MODELS: usize = 10_000;
 const HARD_MAX_PAGE_BYTES: usize = 4 * 1024 * 1024;
 const HARD_MAX_TOTAL_BYTES: usize = 32 * 1024 * 1024;
+const HARD_MAX_MODEL_LIST_WALL_CLOCK_SECONDS: u64 = 60;
 const MAX_MODEL_ID_BYTES: usize = 512;
 const MAX_GEMINI_MODEL_ID_BYTES: usize = 256;
 const MAX_DISPLAY_NAME_BYTES: usize = 1_024;
@@ -1130,6 +1137,8 @@ impl AdapterRegistry {
             },
             endpoint,
             target,
+            operation_timeout: timeout
+                .min(Duration::from_secs(HARD_MAX_MODEL_LIST_WALL_CLOCK_SECONDS)),
             auth: template.default_manifest.auth.clone(),
             provenance: ModelListProvenance {
                 source: ModelRecordSource::ProviderApi,
@@ -1146,6 +1155,7 @@ struct HttpModelListing {
     response_schema: ModelListResponseSchema,
     endpoint: Url,
     target: ProviderHttpTarget,
+    operation_timeout: Duration,
     auth: AuthBinding,
     provenance: ModelListProvenance,
 }
@@ -1188,6 +1198,7 @@ impl ModelListing for HttpModelListing {
             mut cancelled,
             budget,
         } = request;
+        let deadline = Instant::now() + self.operation_timeout;
         validate_credential_for_auth(&self.auth, credential)?;
         let mut cursor = None;
         let mut seen_cursors = HashSet::new();
@@ -1197,6 +1208,7 @@ impl ModelListing for HttpModelListing {
         let mut response_bytes = 0_usize;
 
         loop {
+            ensure_before_model_list_deadline(deadline)?;
             if pages_fetched == budget.pages {
                 return Err(provider_unavailable(
                     "provider model list exceeded the page budget",
@@ -1204,10 +1216,12 @@ impl ModelListing for HttpModelListing {
             }
             let request_url =
                 page_url(&self.endpoint, self.family, cursor.as_ref(), budget.models)?;
-            let prepared = self.target.prepare().await?;
+            let prepared =
+                prepare_with_cancellation(&self.target, &mut cancelled, deadline).await?;
             ensure_not_cancelled(&cancelled)?;
             let request_builder = self.authorize(prepared.client().get(request_url), credential)?;
-            let response = send_with_cancellation(request_builder, &mut cancelled).await?;
+            let response =
+                send_with_cancellation(request_builder, &mut cancelled, deadline).await?;
             prepared.validate_response_peer(&response)?;
             ensure_success(response.status())?;
 
@@ -1216,6 +1230,7 @@ impl ModelListing for HttpModelListing {
                 budget.page_bytes,
                 budget.total_bytes.saturating_sub(response_bytes),
                 &mut cancelled,
+                deadline,
             )
             .await?;
             response_bytes = response_bytes
@@ -1909,6 +1924,7 @@ fn validate_cursor(cursor: &str) -> CoreResult<()> {
 async fn send_with_cancellation(
     request: RequestBuilder,
     cancelled: &mut watch::Receiver<bool>,
+    deadline: Instant,
 ) -> CoreResult<Response> {
     ensure_not_cancelled(cancelled)?;
     let mut response = Box::pin(request.send());
@@ -1923,6 +1939,9 @@ async fn send_with_cancellation(
                     ensure_not_cancelled(cancelled)?;
                 }
             }
+            () = sleep_until(deadline) => {
+                return Err(model_list_deadline_error());
+            }
             result = &mut response => {
                 return result.map_err(network_error);
             }
@@ -1935,6 +1954,7 @@ async fn collect_limited_body(
     page_limit: usize,
     total_remaining: usize,
     cancelled: &mut watch::Receiver<bool>,
+    deadline: Instant,
 ) -> CoreResult<Vec<u8>> {
     if total_remaining == 0 {
         return Err(provider_unavailable(
@@ -1964,6 +1984,9 @@ async fn collect_limited_body(
                     ensure_not_cancelled(cancelled)?;
                 }
             }
+            () = sleep_until(deadline) => {
+                return Err(model_list_deadline_error());
+            }
             chunk = stream.next() => {
                 let Some(chunk) = chunk else { break };
                 let chunk = chunk.map_err(network_error)?;
@@ -1983,6 +2006,47 @@ async fn collect_limited_body(
         }
     }
     Ok(body)
+}
+
+async fn prepare_with_cancellation(
+    target: &ProviderHttpTarget,
+    cancelled: &mut watch::Receiver<bool>,
+    deadline: Instant,
+) -> CoreResult<PreparedHttpTarget> {
+    ensure_not_cancelled(cancelled)?;
+    ensure_before_model_list_deadline(deadline)?;
+    let mut preparation = Box::pin(target.prepare());
+    let mut cancellation_open = true;
+    loop {
+        tokio::select! {
+            biased;
+            change = cancelled.changed(), if cancellation_open => {
+                if change.is_err() {
+                    cancellation_open = false;
+                } else {
+                    ensure_not_cancelled(cancelled)?;
+                }
+            }
+            () = sleep_until(deadline) => {
+                return Err(model_list_deadline_error());
+            }
+            result = &mut preparation => {
+                return result;
+            }
+        }
+    }
+}
+
+fn ensure_before_model_list_deadline(deadline: Instant) -> CoreResult<()> {
+    if Instant::now() >= deadline {
+        Err(model_list_deadline_error())
+    } else {
+        Ok(())
+    }
+}
+
+fn model_list_deadline_error() -> CoreError {
+    provider_unavailable("provider model list exceeded the operation wall-clock budget")
 }
 
 fn ensure_not_cancelled(cancelled: &watch::Receiver<bool>) -> CoreResult<()> {
@@ -2050,7 +2114,25 @@ fn validate_template_and_connection(
         )));
     }
     validate_network_policy(connection, policy)?;
+    validate_lan_credential_transport(connection, &template.default_manifest.auth)?;
     validate_credential_scope(connection, &template.default_manifest.auth)
+}
+
+fn validate_lan_credential_transport(
+    connection: &ProviderConnection,
+    auth: &AuthBinding,
+) -> CoreResult<()> {
+    if connection.config.network_mode == ProviderNetworkMode::ApprovedLocalNetwork
+        && !matches!(auth, AuthBinding::None)
+        && Url::parse(connection.api_origin.as_str()).is_ok_and(|origin| origin.scheme() != "https")
+    {
+        return Err(CoreError::new(
+            CoreErrorCode::PermissionDenied,
+            "credential-bearing local-network providers require an https API origin",
+            false,
+        ));
+    }
+    Ok(())
 }
 
 fn validate_connection_target_material(connection: &ProviderConnection) -> CoreResult<()> {
@@ -2310,6 +2392,16 @@ fn validate_network_policy(connection: &ProviderConnection, policy: &UrlPolicy) 
         UrlNetworkBoundary::Public
         | UrlNetworkBoundary::LocalLoopback
         | UrlNetworkBoundary::ApprovedLocalNetwork => {}
+    }
+
+    if policy.network_boundary() == UrlNetworkBoundary::ApprovedLocalNetwork
+        && !connection.local_network_approval_is_active_at(Utc::now())
+    {
+        return Err(CoreError::new(
+            CoreErrorCode::PermissionDenied,
+            "provider local-network approval expired and must be approved again",
+            false,
+        ));
     }
 
     let origin_url = format!("{}/", connection.api_origin.as_str());
@@ -2783,9 +2875,10 @@ mod tests {
         net::{TcpListener, TcpStream},
         sync::mpsc,
         thread,
-        time::Duration,
+        time::{Duration, Instant},
     };
 
+    use chrono::{TimeDelta, Utc};
     use lorepia_domain::{
         ApiFamily, CanonicalOrigin, ConnectionConfig, ConnectionStatus, ConversationId,
         CredentialRef, CredentialScope, GenerationId, GenerationPresetId,
@@ -2867,6 +2960,43 @@ mod tests {
                 stream
                     .write_all(response.body.as_bytes())
                     .expect("write fixture body");
+            }
+        });
+        (format!("http://{address}"), request_receiver, handle)
+    }
+
+    fn delayed_fixture_server(
+        responses: Vec<(Duration, FixtureResponse)>,
+    ) -> (String, mpsc::Receiver<String>, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind delayed fixture server");
+        let address = listener.local_addr().expect("delayed fixture address");
+        let (request_sender, request_receiver) = mpsc::channel();
+        let handle = thread::spawn(move || {
+            for (delay, response) in responses {
+                let (mut stream, _) = listener.accept().expect("accept delayed fixture request");
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .expect("delayed request read timeout");
+                let request = read_request(&mut stream);
+                request_sender
+                    .send(request)
+                    .expect("record delayed fixture request");
+                thread::sleep(delay);
+                let mut headers = format!(
+                    "HTTP/1.1 {}\r\nContent-Length: {}\r\nConnection: close\r\n",
+                    response.status,
+                    response.body.len()
+                );
+                for (name, value) in response.headers {
+                    headers.push_str(name);
+                    headers.push_str(": ");
+                    headers.push_str(value);
+                    headers.push_str("\r\n");
+                }
+                headers.push_str("\r\n");
+                if stream.write_all(headers.as_bytes()).is_ok() {
+                    let _ = stream.write_all(response.body.as_bytes());
+                }
             }
         });
         (format!("http://{address}"), request_receiver, handle)
@@ -4400,6 +4530,8 @@ mod tests {
             origin: connection.api_origin.clone(),
             addresses: vec![address],
         });
+        connection.created_at = Utc::now();
+        connection.updated_at = connection.created_at;
         let registry = AdapterRegistry::new();
         registry
             .build_provider(&template, &connection)
@@ -4479,7 +4611,7 @@ mod tests {
     }
 
     #[test]
-    fn approved_lan_constructs_openai_wire_adapters_without_policy_downgrade() {
+    fn approved_lan_rejects_cleartext_credential_wire_adapters() {
         let registry = AdapterRegistry::new();
         let origin = "http://192.168.10.20:8080";
         let address = "192.168.10.20".parse().expect("fixture LAN address");
@@ -4497,11 +4629,77 @@ mod tests {
                 origin: connection.api_origin.clone(),
                 addresses: vec![address],
             });
+            connection.created_at = Utc::now();
+            connection.updated_at = connection.created_at;
+
+            let error = registry
+                .build_provider(&template, &connection)
+                .err()
+                .expect("credential-bearing LAN adapters require authenticated transport");
+            assert_eq!(error.code, CoreErrorCode::PermissionDenied);
+        }
+    }
+
+    #[test]
+    fn approved_lan_accepts_https_credential_wire_adapters() {
+        let registry = AdapterRegistry::new();
+        let origin = "https://192.168.10.20:8443";
+        let address = "192.168.10.20".parse().expect("fixture LAN address");
+
+        for template_id in [
+            BuiltInTemplateId::OpenAiResponses,
+            BuiltInTemplateId::OpenAiChatCompatible,
+            BuiltInTemplateId::OpenRouter,
+        ] {
+            let template =
+                AdapterRegistry::built_in_template(template_id).expect("built-in template");
+            let mut connection = connection_for(&template, origin);
+            connection.config.network_mode = ProviderNetworkMode::ApprovedLocalNetwork;
+            connection.config.local_network_approval = Some(ProviderLocalNetworkApproval {
+                origin: connection.api_origin.clone(),
+                addresses: vec![address],
+            });
+            connection.created_at = Utc::now();
+            connection.updated_at = connection.created_at;
 
             registry
                 .build_provider(&template, &connection)
-                .expect("exact approved LAN policy must reach the compiled adapter");
+                .expect("HTTPS and exact addresses bind the credential-bearing LAN endpoint");
         }
+    }
+
+    #[test]
+    fn expired_approved_lan_grant_is_rejected_for_default_and_explicit_policies() {
+        let template = AdapterRegistry::built_in_template(BuiltInTemplateId::OllamaNative)
+            .expect("Ollama template");
+        let mut connection = connection_for(&template, "http://192.168.10.20:11434");
+        let address = "192.168.10.20".parse().expect("fixture LAN address");
+        connection.config.network_mode = ProviderNetworkMode::ApprovedLocalNetwork;
+        connection.config.local_network_approval = Some(ProviderLocalNetworkApproval {
+            origin: connection.api_origin.clone(),
+            addresses: vec![address],
+        });
+        connection.created_at = Utc::now() - TimeDelta::days(365);
+        connection.updated_at = connection.created_at;
+
+        let registry = AdapterRegistry::new();
+        let default_error = registry
+            .build_provider(&template, &connection)
+            .err()
+            .expect("stale persisted LAN grant must fail closed");
+        assert_eq!(default_error.code, CoreErrorCode::PermissionDenied);
+
+        let approval = ApprovedLocalNetworkOrigin::new(connection.api_origin.as_str(), &[address])
+            .expect("exact LAN approval");
+        let explicit_error = registry
+            .build_provider_with_network_policy(
+                &template,
+                &connection,
+                &UrlPolicy::approved_local_network(approval),
+            )
+            .err()
+            .expect("an explicit policy must not revive a stale persisted grant");
+        assert_eq!(explicit_error.code, CoreErrorCode::PermissionDenied);
     }
 
     #[test]
@@ -5114,6 +5312,52 @@ mod tests {
             assert!(request.contains("anthropic-version: 2023-06-01\r\n"));
         }
         server.join().expect("Anthropic fixture server");
+    }
+
+    #[tokio::test]
+    async fn model_listing_uses_one_wall_clock_deadline_across_pages() {
+        let delay = Duration::from_millis(700);
+        let (origin, requests, server) = delayed_fixture_server(vec![
+            (
+                delay,
+                json_response(
+                    r#"{"data":[{"id":"claude-a"}],"has_more":true,"last_id":"claude-a"}"#,
+                ),
+            ),
+            (
+                delay,
+                json_response(
+                    r#"{"data":[{"id":"claude-b"}],"has_more":false,"last_id":"claude-b"}"#,
+                ),
+            ),
+        ]);
+        let template = AdapterRegistry::built_in_template(BuiltInTemplateId::AnthropicMessages)
+            .expect("Anthropic template");
+        let mut connection = connection_for(&template, &origin);
+        connection.timeout_seconds = 1;
+        let listing = AdapterRegistry::new()
+            .build_model_listing(&template, &connection)
+            .expect("model listing");
+        let (_cancel_sender, cancelled) = watch::channel(false);
+
+        let started = Instant::now();
+        let result = listing
+            .list_models(ModelListRequest::new(Some(SYNTHETIC_CREDENTIAL), cancelled))
+            .await;
+        let elapsed = started.elapsed();
+        server.join().expect("delayed Anthropic fixture server");
+
+        let error = result.expect_err("all pages must share one operation deadline");
+        assert_eq!(error.code, CoreErrorCode::ProviderUnavailable);
+        assert!(
+            elapsed < Duration::from_millis(1_250),
+            "operation deadline must not reset for each page: {elapsed:?}"
+        );
+        assert_eq!(
+            requests.iter().take(2).count(),
+            2,
+            "the deadline regression requires a second page request"
+        );
     }
 
     #[tokio::test]

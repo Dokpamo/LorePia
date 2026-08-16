@@ -348,24 +348,37 @@ mod interrupted_memory_job_retry_contract_tests {
     #[test]
     fn retry_request_keeps_exact_acknowledged_cas_shape() {
         let expected = json!({
+            "conversation_id": "conversation-contract",
+            "branch_id": "branch-contract",
             "memory_job_id": "memory-job-contract",
             "expected_revision": 7,
             "acknowledge_unknown_outcome": true
         });
         let decoded: RetryInterruptedMemoryJobInput =
             serde_json::from_value(expected.clone()).expect("retry request must decode");
+        assert_eq!(decoded.conversation_id, "conversation-contract");
+        assert_eq!(decoded.branch_id, "branch-contract");
         assert_eq!(
-            serde_json::to_value(decoded).expect("retry request must encode"),
+            serde_json::to_value(&decoded).expect("retry request must encode"),
             expected
         );
+        for missing_owner_field in ["conversation_id", "branch_id"] {
+            let mut missing_owner = expected.clone();
+            missing_owner
+                .as_object_mut()
+                .expect("retry request fixture must be an object")
+                .remove(missing_owner_field);
+            assert!(
+                serde_json::from_value::<RetryInterruptedMemoryJobInput>(missing_owner).is_err(),
+                "retry request must reject missing {missing_owner_field}"
+            );
+        }
+
+        let mut unknown_owner = expected;
+        unknown_owner["conversation_owner_id"] = json!("forbidden-owner-alias");
         assert!(
-            serde_json::from_value::<RetryInterruptedMemoryJobInput>(json!({
-                "memory_job_id": "memory-job-contract",
-                "expected_revision": 7,
-                "acknowledge_unknown_outcome": true,
-                "generic_execute": "forbidden"
-            }))
-            .is_err()
+            serde_json::from_value::<RetryInterruptedMemoryJobInput>(unknown_owner).is_err(),
+            "retry request must reject unknown owner fields"
         );
     }
 

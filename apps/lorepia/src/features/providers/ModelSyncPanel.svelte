@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { tr } from '../../lib/i18n';
     import type { LorepiaAppController, LorepiaAppState } from '../../app/app-controller';
 
     interface Props {
@@ -47,39 +48,39 @@
     <header class="workflow-heading">
         <div>
             <p class="eyebrow">Durable model metadata job</p>
-            <h2 id="model-sync-title">모델 동기화</h2>
+            <h2 id="model-sync-title">{$tr('model_sync.title')}</h2>
             <p>
-                자격증명이 필요한 요청은 자동 재실행하지 않고, diff digest를 검토한 뒤 적용합니다.
+                {$tr('model_sync.hint')}
             </p>
         </div>
     </header>
 
     <form
         class="start-row"
-        aria-label="모델 동기화 시작"
+        aria-label={$tr('model_sync.start.label')}
         onsubmit={(event) => {
             event.preventDefault();
             void startSync();
         }}
     >
         <label>
-            <span>프로바이더 연결</span>
+            <span>{$tr('model_sync.connection')}</span>
             <select bind:value={selectedConnectionId} required>
-                <option value="">선택</option>
+                <option value="">{$tr('model_sync.select')}</option>
                 {#each workspace.connections as connection (connection.id)}
                     <option value={connection.id}>{connection.display_name}</option>
                 {/each}
             </select>
         </label>
         <button class="primary" type="submit" disabled={busy || selectedConnectionId === ''}>
-            모델 동기화 시작
+            {$tr('model_sync.start.label')}
         </button>
     </form>
 
     {#if workspace.model_sync_jobs.length > 0}
         <div class="job-picker">
             <label>
-                <span>저장된 동기화 작업</span>
+                <span>{$tr('model_sync.saved_jobs')}</span>
                 <select
                     value={workspace.selected_model_sync_job_id ?? ''}
                     onchange={(event) => {
@@ -87,7 +88,7 @@
                         if (id !== '') void refresh(id);
                     }}
                 >
-                    <option value="">선택</option>
+                    <option value="">{$tr('model_sync.select')}</option>
                     {#each workspace.model_sync_jobs as job (job.id)}
                         <option value={job.id}>
                             {job.connection_id} · {job.state} · r{job.revision}
@@ -102,7 +103,7 @@
                     if (selectedJob) void refresh(selectedJob.id);
                 }}
             >
-                이벤트 확인·새로고침
+                {$tr('model_sync.refresh_events')}
             </button>
         </div>
     {/if}
@@ -120,7 +121,7 @@
                     disabled={busy || terminal(selectedJob.state)}
                     onclick={() => void controller.cancelProviderModelSync(selectedJob.id)}
                 >
-                    동기화 취소
+                    {$tr('model_sync.cancel')}
                 </button>
             </header>
 
@@ -147,27 +148,43 @@
             {#if selectedJob.review}
                 {@const review = selectedJob.review}
                 <section class="review-card" aria-labelledby="model-sync-review-title">
-                    <h4 id="model-sync-review-title">동기화 변경 검토</h4>
+                    <h4 id="model-sync-review-title">{$tr('model_sync.review.title')}</h4>
                     <dl>
                         <div>
-                            <dt>새 모델</dt>
-                            <dd>{review.diff.newly_seen_model_route_ids.length}개</dd>
+                            <dt>{$tr('model_sync.review.new')}</dt>
+                            <dd>
+                                {$tr('model_sync.review.count', {
+                                    count: review.diff.newly_seen_model_route_ids.length,
+                                })}
+                            </dd>
                         </div>
                         <div>
-                            <dt>일시 누락</dt>
-                            <dd>{review.diff.missing_model_route_ids.length}개</dd>
+                            <dt>{$tr('model_sync.review.missing')}</dt>
+                            <dd>
+                                {$tr('model_sync.review.count', {
+                                    count: review.diff.missing_model_route_ids.length,
+                                })}
+                            </dd>
                         </div>
                         <div>
-                            <dt>초기 프리셋</dt>
-                            <dd>{review.diff.initial_presets.length}개</dd>
+                            <dt>{$tr('model_sync.review.initial_presets')}</dt>
+                            <dd>
+                                {$tr('model_sync.review.count', {
+                                    count: review.diff.initial_presets.length,
+                                })}
+                            </dd>
                         </div>
                         <div>
-                            <dt>프리셋 설정 필요</dt>
-                            <dd>{review.diff.routes_requiring_preset_configuration.length}개</dd>
+                            <dt>{$tr('model_sync.review.needs_preset')}</dt>
+                            <dd>
+                                {$tr('model_sync.review.count', {
+                                    count: review.diff.routes_requiring_preset_configuration.length,
+                                })}
+                            </dd>
                         </div>
                     </dl>
                     <p>
-                        출처: {review.diff.provenance.source} ·
+                        {$tr('model_sync.review.source', { source: review.diff.provenance.source })}
                         {review.diff.provenance.endpoint_path} ·
                         {review.diff.provenance.pages_fetched} page
                     </p>
@@ -178,15 +195,14 @@
                         disabled={busy || selectedJob.state !== 'diff-ready-awaiting-review'}
                         onclick={() => void controller.approveProviderModelSync(selectedJob.id)}
                     >
-                        검토한 정확한 diff 적용
+                        {$tr('model_sync.review.apply')}
                     </button>
                 </section>
             {/if}
 
             {#if selectedJob.state === 'interrupted'}
                 <p class="notice">
-                    중단된 credential-bearing 작업은 자동 재개하지 않습니다. 저장 상태를 확인한 뒤
-                    새 동기화를 명시적으로 시작하세요.
+                    {$tr('model_sync.interrupted')}
                 </p>
             {/if}
         </article>
@@ -265,7 +281,7 @@
         margin-top: 14px;
         padding: 12px;
         border-radius: 12px;
-        background: var(--surface-muted);
+        background: var(--surface-sunken);
     }
 
     .failure {

@@ -17,6 +17,7 @@ pub(crate) const MAX_OPTIONAL_FIELD_KEY_CHARS: usize = 128;
 const MAX_ALTERNATE_GREETINGS: usize = 128;
 const MAX_EXAMPLE_DIALOGS: usize = 128;
 const CHARACTER_CARD_V3_SPEC: &str = "chara_card_v3";
+const CHARACTER_CARD_V2_SPEC: &str = "chara_card_v2";
 
 #[derive(Debug, Clone)]
 pub(crate) struct CardMetadata {
@@ -25,6 +26,9 @@ pub(crate) struct CardMetadata {
     pub(crate) content: CharacterContentV1,
     pub(crate) unsupported_optional_fields: Vec<String>,
     pub(crate) len_bytes: u64,
+    /// True when the source declared the V2 spec and was promoted to the
+    /// canonical V3 shape. The reviewer is told before anything is committed.
+    pub(crate) promoted_from_v2: bool,
 }
 
 #[cfg(test)]
@@ -53,9 +57,15 @@ pub(crate) fn parse_card_json_with_source(
         .get("spec")
         .and_then(Value::as_str)
         .ok_or_else(|| unsupported("character metadata must declare a string spec"))?;
-    if spec != CHARACTER_CARD_V3_SPEC {
-        return Err(unsupported(format!("unsupported character spec: {spec}")));
-    }
+    // V2 and V3 share the `data` field names this adapter consumes, so a V2
+    // card is promoted by parsing it through the same canonical path. Fields
+    // that only V3 defines are optional and simply stay empty; anything the
+    // adapter does not consume still lands in the unknown-extension quarantine.
+    let promoted_from_v2 = match spec {
+        CHARACTER_CARD_V3_SPEC => false,
+        CHARACTER_CARD_V2_SPEC => true,
+        _ => return Err(unsupported(format!("unsupported character spec: {spec}"))),
+    };
 
     let data = object
         .get("data")
@@ -100,6 +110,7 @@ pub(crate) fn parse_card_json_with_source(
         content,
         unsupported_optional_fields,
         len_bytes: bytes.len() as u64,
+        promoted_from_v2,
     })
 }
 
@@ -493,7 +504,6 @@ mod tests {
             br"[]".as_slice(),
             br"{}".as_slice(),
             br#"{"spec":3,"data":{"name":"Segu"}}"#.as_slice(),
-            br#"{"spec":"chara_card_v2","data":{"name":"Segu"}}"#.as_slice(),
             br#"{"spec":"chara_card_v3"}"#.as_slice(),
             br#"{"spec":"chara_card_v3","data":[]}"#.as_slice(),
             br#"{"spec":"chara_card_v3","data":{}}"#.as_slice(),

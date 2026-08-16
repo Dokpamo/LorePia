@@ -1,12 +1,19 @@
-use std::{future::Future, pin::Pin};
+use std::{
+    collections::HashMap,
+    future::Future,
+    pin::Pin,
+    sync::{Mutex, OnceLock},
+};
 
 use lorepia_shell_api as shell;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tauri::{AppHandle, State};
 use tauri_plugin_lorepia_platform::{
     BoundCredentialObservation, CredentialAuthority, CredentialStatus, LorepiaPlatformExt,
-    NativeCaptureStatus, NativeCredential, PlatformErrorCode, PlatformResult,
-    PreparedBoundCredentialStore,
+    NativeCaptureStatus, NativeCredential, NativeCredentialEffect,
+    NativeCredentialEffectConfirmation, NativeCredentialEffectContext, PlatformErrorCode,
+    PlatformResult, PreparedBoundCredentialStore,
 };
 use uuid::Uuid;
 
@@ -17,6 +24,70 @@ use crate::{
 
 const MAXIMUM_PROVIDER_CURL_BYTES: usize = 1024 * 1024;
 const MAXIMUM_SIGNED_CATALOG_BYTES: u64 = 4 * 1024 * 1024;
+
+struct ActiveDiscoveryRequest {
+    request_id: Uuid,
+    cancel: tokio::sync::watch::Sender<bool>,
+}
+
+struct ActiveDiscoveryRequestRegistration {
+    session_id: String,
+    request_id: Uuid,
+}
+
+impl Drop for ActiveDiscoveryRequestRegistration {
+    fn drop(&mut self) {
+        if let Ok(mut requests) = active_discovery_requests().lock()
+            && requests
+                .get(&self.session_id)
+                .is_some_and(|request| request.request_id == self.request_id)
+        {
+            requests.remove(&self.session_id);
+        }
+    }
+}
+
+fn active_discovery_requests() -> &'static Mutex<HashMap<String, ActiveDiscoveryRequest>> {
+    static REQUESTS: OnceLock<Mutex<HashMap<String, ActiveDiscoveryRequest>>> = OnceLock::new();
+    REQUESTS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn register_active_discovery_request(
+    session_id: &str,
+) -> CommandResult<(
+    ActiveDiscoveryRequestRegistration,
+    tokio::sync::watch::Receiver<bool>,
+)> {
+    let mut requests = active_discovery_requests()
+        .lock()
+        .map_err(|_| CommandError::internal())?;
+    if requests.contains_key(session_id) {
+        return Err(CommandError::busy());
+    }
+    let request_id = Uuid::new_v4();
+    let (cancel, cancelled) = tokio::sync::watch::channel(false);
+    requests.insert(
+        session_id.to_owned(),
+        ActiveDiscoveryRequest { request_id, cancel },
+    );
+    Ok((
+        ActiveDiscoveryRequestRegistration {
+            session_id: session_id.to_owned(),
+            request_id,
+        },
+        cancelled,
+    ))
+}
+
+fn signal_active_discovery_request_cancellation(session_id: &str) -> CommandResult<()> {
+    let requests = active_discovery_requests()
+        .lock()
+        .map_err(|_| CommandError::internal())?;
+    if let Some(request) = requests.get(session_id) {
+        let _ = request.cancel.send(true);
+    }
+    Ok(())
+}
 
 type DiscoveryVaultFuture<'a, T> = Pin<Box<dyn Future<Output = PlatformResult<T>> + Send + 'a>>;
 type ConnectionSlotGuardFuture<'a> = Pin<Box<dyn Future<Output = CommandResult<()>> + Send + 'a>>;
@@ -44,6 +115,52 @@ enum PreparedDiscoveryCredentialStore {
         value: NativeCredential,
         authority: CredentialAuthority,
     },
+}
+
+/// Rust-only one-use approval carried across the prompt-without-lock boundary.
+/// The platform receipt cannot be cloned or serialized; the fake variant is
+/// compiled only into this module's tests.
+enum DiscoveryCompensationConfirmation {
+    Platform(NativeCredentialEffectConfirmation),
+    #[cfg(test)]
+    Fake {
+        effect: NativeCredentialEffect,
+        target_id: String,
+        origin: String,
+        revision: String,
+    },
+}
+
+impl DiscoveryCompensationConfirmation {
+    fn consume_exact(self, context: &NativeCredentialEffectContext) -> PlatformResult<()> {
+        match self {
+            Self::Platform(confirmation) => confirmation.consume_exact(
+                context.effect(),
+                context.target_id(),
+                context.origin(),
+                context.revision(),
+            ),
+            #[cfg(test)]
+            Self::Fake {
+                effect,
+                target_id,
+                origin,
+                revision,
+            } => {
+                if effect == context.effect()
+                    && target_id == context.target_id()
+                    && origin == context.origin()
+                    && revision == context.revision()
+                {
+                    Ok(())
+                } else {
+                    Err(tauri_plugin_lorepia_platform::PlatformError::new(
+                        PlatformErrorCode::InvalidInput,
+                    ))
+                }
+            }
+        }
+    }
 }
 
 impl PreparedDiscoveryCredentialStore {
@@ -104,6 +221,11 @@ trait DiscoveryCredentialVault: Send + Sync {
         reference: &'a str,
         authority: CredentialAuthority,
     ) -> DiscoveryVaultFuture<'a, ()>;
+
+    fn confirm_compensation(
+        &self,
+        context: NativeCredentialEffectContext,
+    ) -> DiscoveryVaultFuture<'_, DiscoveryCompensationConfirmation>;
 }
 
 struct PlatformDiscoveryCredentialVault<'a> {
@@ -188,6 +310,20 @@ impl DiscoveryCredentialVault for PlatformDiscoveryCredentialVault<'_> {
                 .await
         })
     }
+
+    fn confirm_compensation(
+        &self,
+        context: NativeCredentialEffectContext,
+    ) -> DiscoveryVaultFuture<'_, DiscoveryCompensationConfirmation> {
+        Box::pin(async move {
+            let confirmation = self
+                .app
+                .lorepia_platform()
+                .confirm_credential_effect(context)
+                .await?;
+            Ok(DiscoveryCompensationConfirmation::Platform(confirmation))
+        })
+    }
 }
 
 trait NewConnectionSlotGuard: Send + Sync {
@@ -256,6 +392,21 @@ enum CredentialCompensationDeleteOutcome {
 enum CompensationObserveErrorPolicy {
     Propagate,
     Defer,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CompensationCredentialEffectPolicy {
+    RequireNativeConfirmation,
+    ObserveOnly,
+}
+
+#[derive(Debug)]
+enum DiscoveryCompensationDriveResult {
+    Finished(shell::ProviderDiscoverySessionDto),
+    NativeConfirmationRequired {
+        session: shell::ProviderDiscoverySessionDto,
+        context: NativeCredentialEffectContext,
+    },
 }
 
 #[derive(Clone)]
@@ -777,6 +928,49 @@ pub async fn delete_provider_connection(
     let connection = find_connection(&shell, &request.connection_id)?;
     let legacy_raw =
         shell.provider_connection_uses_legacy_raw_credential(&request.connection_id)?;
+    let confirmation = if connection.credential_binding_required {
+        let confirmation = if legacy_raw {
+            crate::commands::confirm_legacy_credential_effect(
+                &app,
+                &shell,
+                &request.connection_id,
+                NativeCredentialEffect::Archive,
+            )
+            .await?
+        } else {
+            let context =
+                crate::credential_operations::provider_connection_credential_effect_context(
+                    &shell,
+                    &request.connection_id,
+                    NativeCredentialEffect::Archive,
+                )?;
+            let confirmation = app
+                .lorepia_platform()
+                .confirm_credential_effect(context)
+                .await?;
+            let latest =
+                crate::credential_operations::provider_connection_credential_effect_context(
+                    &shell,
+                    &request.connection_id,
+                    NativeCredentialEffect::Archive,
+                )?;
+            if confirmation.context() != &latest {
+                return Err(CommandError::invalid_input());
+            }
+            confirmation
+        };
+        if find_connection(&shell, &request.connection_id)? != connection
+            || shell.provider_connection_uses_legacy_raw_credential(&request.connection_id)?
+                != legacy_raw
+        {
+            return Err(CommandError::invalid_input());
+        }
+        Some(confirmation)
+    } else {
+        None
+    };
+    // Never let a renderer-triggered native modal hold either global
+    // credential lock. Reacquire only after the one-use approval exists.
     let _legacy_archive_operation = if legacy_raw {
         Some(state.lock_legacy_provider_credential_archive().await)
     } else {
@@ -787,11 +981,19 @@ pub async fn delete_provider_connection(
     } else {
         Some(state.lock_provider_credential_operation().await)
     };
+    if find_connection(&shell, &request.connection_id)? != connection
+        || shell.provider_connection_uses_legacy_raw_credential(&request.connection_id)?
+            != legacy_raw
+    {
+        return Err(CommandError::invalid_input());
+    }
     crate::credential_operations::archive_provider_connection(
         &app,
         &shell,
         &request.connection_id,
         connection.credential_binding_required,
+        legacy_raw,
+        confirmation,
     )
     .await
 }
@@ -1266,19 +1468,46 @@ pub async fn continue_provider_discovery(
     state: State<'_, AppState>,
     request: ContinueProviderDiscoveryRequest,
 ) -> CommandResult<shell::ProviderDiscoverySessionDto> {
-    let _operation = state.lock_provider_credential_operation().await;
     let shell = state.shell()?;
-    let session = shell.get_provider_discovery(&request.input.session_id)?;
+    let input = request.input;
+    // Keep the repository-wide provider credential read lease for the entire
+    // dispatch, not merely while copying the secret. A native replacement or
+    // removal therefore cannot race an authenticated discovery request.
+    let dispatch_lease = state.lease_provider_credential_operation().await;
+    let session = shell.get_provider_discovery(&input.session_id)?;
     let credential = credential_for_discovery_action(
         &state,
         &shell,
         &session,
-        request.input.expected_revision,
-        &request.input.action,
+        input.expected_revision,
+        &input.action,
     )?;
-    let next = continue_provider_discovery_off_runtime(&shell, request.input, credential).await?;
+    let mut next = if let Some(credential) = credential {
+        let (registration, cancelled) = register_active_discovery_request(&input.session_id)?;
+        continue_provider_discovery_with_credential_dispatch_off_runtime(
+            &shell,
+            input,
+            credential,
+            shell::TaskCredentialLease::new(dispatch_lease),
+            cancelled,
+            registration,
+        )
+        .await?
+    } else {
+        drop(dispatch_lease);
+        continue_provider_discovery_off_runtime(&shell, input, None).await?
+    };
     if next.state == "committing" {
-        let _ = promote_discovery_credential_lease(&app, &state, &shell, &next).await?;
+        let _operation = state.lock_provider_credential_operation().await;
+        let latest = shell.get_provider_discovery(&next.id)?;
+        if latest.state == "committing"
+            && !latest.cancellation_pending
+            && latest.revision == next.revision
+        {
+            let _ = promote_discovery_credential_lease(&app, &state, &shell, &latest).await?;
+        } else {
+            next = latest;
+        }
     }
     if next.cancellation_pending
         || matches!(
@@ -1336,24 +1565,33 @@ pub async fn cancel_provider_discovery(
     state: State<'_, AppState>,
     request: CancelProviderDiscoveryRequest,
 ) -> CommandResult<shell::ProviderDiscoverySessionDto> {
-    let _operation = state.lock_provider_credential_operation().await;
     let shell = state.shell()?;
-    let cancelled =
-        shell.cancel_provider_discovery(&request.session_id, request.expected_revision)?;
-    state.clear_discovery_credential_lease(&request.session_id);
+    let cancelled = request_provider_discovery_cancellation(&state, &shell, &request)?;
     if cancelled.state != "committing" || !cancelled.cancellation_pending {
         return Ok(cancelled);
     }
 
-    // A discovery credential install marks the atomic operation started before
-    // the native vault write. Route cancellation back through Core's existing
-    // commit-cancellation transition so its durable compensation recipe owns
-    // removal of the slot; never delete an unjournaled reference here.
-    let _ = shell.commit_provider_discovery(&request.session_id, None);
-    let latest = shell.get_provider_discovery(&request.session_id)?;
+    // Only credential compensation remains under the global writer. The
+    // durable cancellation request above stays prompt even while another task
+    // is resolving or reading provider model pages.
+    let latest = {
+        let _operation = state.lock_provider_credential_operation().await;
+        let latest = shell.get_provider_discovery(&request.session_id)?;
+        if latest.state != "committing" || !latest.cancellation_pending {
+            return Ok(latest);
+        }
+
+        // A discovery credential install marks the atomic operation started before
+        // the native vault write. Route cancellation back through Core's existing
+        // commit-cancellation transition so its durable compensation recipe owns
+        // removal of the slot; never delete an unjournaled reference here.
+        let _ = shell.commit_provider_discovery(&request.session_id, None);
+        shell.get_provider_discovery(&request.session_id)?
+    };
     if latest.state == "compensating" {
-        return drive_provider_discovery_compensation(
+        return drive_provider_discovery_compensation_explicit(
             &app,
+            &state,
             &shell,
             latest,
             false,
@@ -1364,63 +1602,85 @@ pub async fn cancel_provider_discovery(
     Ok(latest)
 }
 
+fn request_provider_discovery_cancellation(
+    state: &AppState,
+    shell: &shell::ShellApi,
+    request: &CancelProviderDiscoveryRequest,
+) -> CommandResult<shell::ProviderDiscoverySessionDto> {
+    let current = shell.get_provider_discovery(&request.session_id)?;
+    if current.revision != request.expected_revision {
+        return shell
+            .cancel_provider_discovery(&request.session_id, request.expected_revision)
+            .map_err(Into::into);
+    }
+    // Revoke the backend-owned dispatch token before the durable cancellation
+    // transition can be accepted. The active registration remains owned by
+    // the blocking worker even if the invoking async task is dropped.
+    signal_active_discovery_request_cancellation(&request.session_id)?;
+    let cancelled =
+        shell.cancel_provider_discovery(&request.session_id, request.expected_revision)?;
+    state.clear_discovery_credential_lease(&request.session_id);
+    Ok(cancelled)
+}
+
 #[tauri::command]
 pub async fn commit_provider_discovery(
     app: AppHandle,
     state: State<'_, AppState>,
     request: CommitProviderDiscoveryRequest,
 ) -> CommandResult<shell::ProviderConnectionDto> {
-    let _operation = state.lock_provider_credential_operation().await;
     let shell = state.shell()?;
     let CommitProviderDiscoveryRequest { session_id } = request;
-    let session = shell.get_provider_discovery(&session_id)?;
-    let _ = promote_discovery_credential_lease(&app, &state, &shell, &session).await?;
-    let credential_confirmation = if session.credential_binding_requested {
-        let context = shell.get_provider_discovery_credential_install_context(&session_id)?;
-        require_started_discovery_credential_install(&context)?;
-        let observation = app
-            .lorepia_platform()
-            .observe_bound_credential(
-                &context.connection_id,
-                &discovery_credential_authority(&context)?,
+    let (error, latest) = {
+        let _operation = state.lock_provider_credential_operation().await;
+        let session = shell.get_provider_discovery(&session_id)?;
+        let _ = promote_discovery_credential_lease(&app, &state, &shell, &session).await?;
+        let credential_confirmation = if session.credential_binding_requested {
+            let context = shell.get_provider_discovery_credential_install_context(&session_id)?;
+            require_started_discovery_credential_install(&context)?;
+            let observation = app
+                .lorepia_platform()
+                .observe_bound_credential(
+                    &context.connection_id,
+                    &discovery_credential_authority(&context)?,
+                )
+                .await?;
+            if observation != BoundCredentialObservation::Match {
+                return Err(CommandError::invalid_input());
+            }
+            Some(shell::ProviderDiscoveryCredentialCommitConfirmationDto::try_from(&context)?)
+        } else {
+            None
+        };
+
+        match shell.commit_provider_discovery(&session_id, credential_confirmation.as_ref()) {
+            Ok(connection) => {
+                state.clear_discovery_credential_lease(&session_id);
+                return Ok(connection);
+            }
+            Err(error) => (error, shell.get_provider_discovery(&session_id).ok()),
+        }
+    };
+    match latest {
+        Some(latest) if latest.state == "compensating" => {
+            state.clear_discovery_credential_lease(&session_id);
+            drive_provider_discovery_compensation_explicit(
+                &app,
+                &state,
+                &shell,
+                latest,
+                false,
+                CompensationObserveErrorPolicy::Propagate,
             )
             .await?;
-        if observation != BoundCredentialObservation::Match {
-            return Err(CommandError::invalid_input());
         }
-        Some(shell::ProviderDiscoveryCredentialCommitConfirmationDto::try_from(&context)?)
-    } else {
-        None
-    };
-
-    match shell.commit_provider_discovery(&session_id, credential_confirmation.as_ref()) {
-        Ok(connection) => {
+        Some(latest) if latest.state == "ready" => {
             state.clear_discovery_credential_lease(&session_id);
-            Ok(connection)
         }
-        Err(error) => {
-            let latest = shell.get_provider_discovery(&session_id).ok();
-            match latest {
-                Some(latest) if latest.state == "compensating" => {
-                    state.clear_discovery_credential_lease(&session_id);
-                    drive_provider_discovery_compensation(
-                        &app,
-                        &shell,
-                        latest,
-                        false,
-                        CompensationObserveErrorPolicy::Propagate,
-                    )
-                    .await?;
-                }
-                Some(latest) if latest.state == "ready" => {
-                    state.clear_discovery_credential_lease(&session_id);
-                }
-                Some(latest) if latest.state == "unknown_outcome" => {}
-                _ => {}
-            }
-            Err(error.into())
-        }
+        Some(latest) if latest.state == "unknown_outcome" => {}
+        _ => {}
     }
+    Err(error.into())
 }
 
 fn require_started_discovery_credential_install(
@@ -1497,7 +1757,7 @@ pub(crate) async fn recover_provider_discovery_with_shell(
 
     for session in shell.list_unfinished_provider_discovery_recovery_candidates()? {
         if session.state == "compensating" {
-            drive_provider_discovery_compensation(
+            drive_provider_discovery_compensation_observe_only(
                 app,
                 shell,
                 session,
@@ -1627,13 +1887,16 @@ pub async fn continue_provider_discovery_compensation(
     state: State<'_, AppState>,
     request: ProviderDiscoverySessionRequest,
 ) -> CommandResult<shell::ProviderDiscoverySessionDto> {
-    let _operation = state.lock_provider_credential_operation().await;
     let shell = state.shell()?;
-    let session = shell
-        .continue_provider_discovery_compensation(&request.session_id)
-        .map_err(CommandError::from)?;
-    drive_provider_discovery_compensation(
+    let session = {
+        let _operation = state.lock_provider_credential_operation().await;
+        shell
+            .continue_provider_discovery_compensation(&request.session_id)
+            .map_err(CommandError::from)?
+    };
+    drive_provider_discovery_compensation_explicit(
         &app,
+        &state,
         &shell,
         session,
         false,
@@ -1648,13 +1911,16 @@ pub async fn resume_provider_discovery_compensation(
     state: State<'_, AppState>,
     request: ProviderDiscoverySessionRequest,
 ) -> CommandResult<shell::ProviderDiscoverySessionDto> {
-    let _operation = state.lock_provider_credential_operation().await;
     let shell = state.shell()?;
-    let session = shell
-        .resume_provider_discovery_compensation(&request.session_id)
-        .map_err(CommandError::from)?;
-    drive_provider_discovery_compensation(
+    let session = {
+        let _operation = state.lock_provider_credential_operation().await;
+        shell
+            .resume_provider_discovery_compensation(&request.session_id)
+            .map_err(CommandError::from)?
+    };
+    drive_provider_discovery_compensation_explicit(
         &app,
+        &state,
         &shell,
         session,
         true,
@@ -1881,6 +2147,27 @@ async fn continue_provider_discovery_off_runtime(
     let shell = shell.clone();
     run_shell_discovery_off_runtime(move || shell.continue_provider_discovery(input, credential))
         .await
+}
+
+async fn continue_provider_discovery_with_credential_dispatch_off_runtime(
+    shell: &shell::ShellApi,
+    input: shell::ContinueProviderDiscoveryInput,
+    credential: shell::SecretCredential,
+    dispatch_lease: shell::TaskCredentialLease,
+    cancelled: tokio::sync::watch::Receiver<bool>,
+    registration: ActiveDiscoveryRequestRegistration,
+) -> CommandResult<shell::ProviderDiscoverySessionDto> {
+    let shell = shell.clone();
+    run_shell_discovery_off_runtime(move || {
+        let _registration = registration;
+        shell.continue_provider_discovery_with_credential_dispatch(
+            input,
+            credential,
+            dispatch_lease,
+            cancelled,
+        )
+    })
+    .await
 }
 
 async fn supply_provider_discovery_curl_evidence_off_runtime(
@@ -2364,6 +2651,44 @@ fn discovery_compensation_credential_authority(
     .map_err(Into::into)
 }
 
+fn discovery_compensation_confirmation_context(
+    session: &shell::ProviderDiscoverySessionDto,
+    authority: &shell::ProviderDiscoveryCredentialAuthorityDto,
+) -> CommandResult<NativeCredentialEffectContext> {
+    if authority.connection_id != session.connection_id {
+        return Err(CommandError::invalid_input());
+    }
+    let mut state_hasher = Sha256::new();
+    let session_revision = session.revision.to_string();
+    state_hasher.update(b"dev.lorepia.discovery-compensation-confirmation.v1\0");
+    for value in [
+        session.id.as_bytes(),
+        session_revision.as_bytes(),
+        authority.operation_id.as_bytes(),
+        authority.native_execution_id.as_bytes(),
+        authority.commit_attempt_id.as_bytes(),
+        authority.connection_id.as_bytes(),
+        authority.credential_api_origin.as_bytes(),
+        authority.credential_origin_approval_id.as_bytes(),
+        authority.credential_origin_grant_sha256.as_bytes(),
+        authority.connection_binding_sha256.as_bytes(),
+    ] {
+        state_hasher.update(value);
+        state_hasher.update([0]);
+    }
+    let state_sha256 = format!("{:x}", state_hasher.finalize());
+    NativeCredentialEffectContext::new(
+        NativeCredentialEffect::DiscoveryCompensation,
+        session.connection_id.clone(),
+        authority.credential_api_origin.clone(),
+        format!(
+            "compensation_state_sha256={state_sha256};session_revision={}",
+            session.revision
+        ),
+    )
+    .map_err(Into::into)
+}
+
 const fn bound_observation_status(observation: BoundCredentialObservation) -> CredentialStatus {
     match observation {
         BoundCredentialObservation::Missing => CredentialStatus::Missing,
@@ -2387,32 +2712,106 @@ fn native_credential_to_shell(value: Option<NativeCredential>) -> Option<shell::
     value.map(|value| shell::SecretCredential::new(value.into_secret_string()))
 }
 
-async fn drive_provider_discovery_compensation(
+async fn drive_provider_discovery_compensation_observe_only(
     app: &AppHandle,
     shell: &shell::ShellApi,
     session: shell::ProviderDiscoverySessionDto,
     allow_failed_retry: bool,
     observe_error_policy: CompensationObserveErrorPolicy,
 ) -> CommandResult<shell::ProviderDiscoverySessionDto> {
-    drive_provider_discovery_compensation_with(
+    match drive_provider_discovery_compensation_with(
         &PlatformDiscoveryCredentialVault { app },
         shell,
         session,
         allow_failed_retry,
+        CompensationCredentialEffectPolicy::ObserveOnly,
         observe_error_policy,
+        None,
     )
-    .await
+    .await?
+    {
+        DiscoveryCompensationDriveResult::Finished(session) => Ok(session),
+        DiscoveryCompensationDriveResult::NativeConfirmationRequired { .. } => {
+            Err(CommandError::internal())
+        }
+    }
 }
 
+/// Runs the observation pass under the writer, presents the trusted modal
+/// with no credential lock held, then reacquires and repeats every durable and
+/// native precondition before consuming the one-use receipt and deleting.
+async fn drive_provider_discovery_compensation_explicit(
+    app: &AppHandle,
+    state: &AppState,
+    shell: &shell::ShellApi,
+    expected_session: shell::ProviderDiscoverySessionDto,
+    allow_failed_retry: bool,
+    observe_error_policy: CompensationObserveErrorPolicy,
+) -> CommandResult<shell::ProviderDiscoverySessionDto> {
+    let vault = PlatformDiscoveryCredentialVault { app };
+    let initial = {
+        let _operation = state.lock_provider_credential_operation().await;
+        let latest = shell.get_provider_discovery(&expected_session.id)?;
+        if latest != expected_session {
+            return Err(CommandError::invalid_input());
+        }
+        drive_provider_discovery_compensation_with(
+            &vault,
+            shell,
+            latest,
+            allow_failed_retry,
+            CompensationCredentialEffectPolicy::RequireNativeConfirmation,
+            observe_error_policy,
+            None,
+        )
+        .await?
+    };
+    let (prompted_session, prompt_context) = match initial {
+        DiscoveryCompensationDriveResult::Finished(session) => return Ok(session),
+        DiscoveryCompensationDriveResult::NativeConfirmationRequired { session, context } => {
+            (session, context)
+        }
+    };
+
+    // Deliberately outside the global writer. Cancel, focus loss, and native
+    // presentation failure all return here without starting the durable step.
+    let confirmation = vault.confirm_compensation(prompt_context).await?;
+
+    let _operation = state.lock_provider_credential_operation().await;
+    let latest = shell.get_provider_discovery(&prompted_session.id)?;
+    if latest != prompted_session {
+        return Err(CommandError::invalid_input());
+    }
+    match drive_provider_discovery_compensation_with(
+        &vault,
+        shell,
+        latest,
+        allow_failed_retry,
+        CompensationCredentialEffectPolicy::RequireNativeConfirmation,
+        observe_error_policy,
+        Some(confirmation),
+    )
+    .await?
+    {
+        DiscoveryCompensationDriveResult::Finished(session) => Ok(session),
+        DiscoveryCompensationDriveResult::NativeConfirmationRequired { .. } => {
+            Err(CommandError::invalid_input())
+        }
+    }
+}
+
+#[allow(clippy::too_many_lines)] // Keeps the observe-confirm-reobserve-delete state machine linear.
 async fn drive_provider_discovery_compensation_with(
     vault: &dyn DiscoveryCredentialVault,
     shell: &shell::ShellApi,
     session: shell::ProviderDiscoverySessionDto,
     allow_failed_retry: bool,
+    effect_policy: CompensationCredentialEffectPolicy,
     observe_error_policy: CompensationObserveErrorPolicy,
-) -> CommandResult<shell::ProviderDiscoverySessionDto> {
+    confirmation: Option<DiscoveryCompensationConfirmation>,
+) -> CommandResult<DiscoveryCompensationDriveResult> {
     if session.state != "compensating" {
-        return Ok(session);
+        return Ok(DiscoveryCompensationDriveResult::Finished(session));
     }
     let attempt_id = session
         .commit_attempt_id
@@ -2438,6 +2837,7 @@ async fn drive_provider_discovery_compensation_with(
         }
         return shell
             .continue_provider_discovery_compensation(&session.id)
+            .map(DiscoveryCompensationDriveResult::Finished)
             .map_err(Into::into);
     };
 
@@ -2445,11 +2845,14 @@ async fn drive_provider_discovery_compensation_with(
         "completed" => {
             return shell
                 .continue_provider_discovery_compensation(&session.id)
+                .map(DiscoveryCompensationDriveResult::Finished)
                 .map_err(Into::into);
         }
         "pending" if step.attempt_count == 0 => {}
         "failed" if allow_failed_retry => {}
-        "pending" | "in_progress" | "failed" | "outcome_unknown" => return Ok(session),
+        "pending" | "in_progress" | "failed" | "outcome_unknown" => {
+            return Ok(DiscoveryCompensationDriveResult::Finished(session));
+        }
         _ => return Err(CommandError::internal()),
     }
 
@@ -2473,8 +2876,24 @@ async fn drive_provider_discovery_compensation_with(
         // A status/read backend outage is not evidence that this exact slot
         // is absent. Leave the pending step untouched so startup can publish
         // and a later recovery pass can retry it.
-        return Ok(session);
+        return Ok(DiscoveryCompensationDriveResult::Finished(session));
     };
+    if preflight == BoundCredentialObservation::Match {
+        if effect_policy == CompensationCredentialEffectPolicy::ObserveOnly {
+            // Startup may observe and publish non-effect progress, but a
+            // database-derived target never gains unattended delete authority.
+            return Ok(DiscoveryCompensationDriveResult::Finished(session));
+        }
+        let Some(confirmation) = confirmation else {
+            let context =
+                discovery_compensation_confirmation_context(&session, &authority_context)?;
+            return Ok(
+                DiscoveryCompensationDriveResult::NativeConfirmationRequired { session, context },
+            );
+        };
+        let context = discovery_compensation_confirmation_context(&session, &authority_context)?;
+        confirmation.consume_exact(&context)?;
+    }
     let started = shell.start_provider_discovery_credential_compensation(&session.id, &step.id)?;
     if started.id != step.id
         || started.commit_attempt_id != attempt_id
@@ -2484,7 +2903,7 @@ async fn drive_provider_discovery_compensation_with(
         return Err(CommandError::internal());
     }
 
-    match preflight {
+    let result = match preflight {
         BoundCredentialObservation::Missing => {
             complete_provider_discovery_credential_compensation(shell, &session, &step.id)
         }
@@ -2516,7 +2935,8 @@ async fn drive_provider_discovery_compensation_with(
                     .map_err(Into::into),
             }
         }
-    }
+    }?;
+    Ok(DiscoveryCompensationDriveResult::Finished(result))
 }
 
 fn credential_compensation_delete_outcome(
@@ -2622,6 +3042,7 @@ mod tests {
         collections::{BTreeMap, BTreeSet},
         io::{Read, Write},
         net::{TcpListener, TcpStream},
+        path::Path,
         sync::{Arc, Mutex, mpsc},
         thread,
         time::Duration,
@@ -2631,17 +3052,21 @@ mod tests {
     use serde_json::json;
     use tauri_plugin_lorepia_platform::{
         BoundCredentialObservation, ClipboardCleanupStatus, CredentialAuthority, CredentialStatus,
-        NativeCaptureStatus, NativeCredential, PlatformError, PlatformErrorCode, PlatformResult,
+        NativeCaptureStatus, NativeCredential, NativeCredentialEffect,
+        NativeCredentialEffectContext, PlatformError, PlatformErrorCode, PlatformResult,
     };
     use tempfile::tempdir;
     use uuid::Uuid;
 
     use super::{
-        CapturedDiscoveryCredential, CompensationObserveErrorPolicy, ConnectionSlotGuardFuture,
-        CredentialCompensationDeleteOutcome, CredentialInstallRecoveryAction,
-        DiscoveryCredentialCommitCandidate, DiscoveryCredentialInstallJournal,
-        DiscoveryCredentialVault, DiscoveryVaultFuture, ExistingConnectionCredentialReadFuture,
-        ExistingConnectionCredentialReader, MAXIMUM_PROVIDER_CURL_BYTES, NewConnectionSlotGuard,
+        CancelProviderDiscoveryRequest, CapturedDiscoveryCredential,
+        CompensationCredentialEffectPolicy, CompensationObserveErrorPolicy,
+        ConnectionSlotGuardFuture, CredentialCompensationDeleteOutcome,
+        CredentialInstallRecoveryAction, DiscoveryCompensationConfirmation,
+        DiscoveryCompensationDriveResult, DiscoveryCredentialCommitCandidate,
+        DiscoveryCredentialInstallJournal, DiscoveryCredentialVault, DiscoveryVaultFuture,
+        ExistingConnectionCredentialReadFuture, ExistingConnectionCredentialReader,
+        MAXIMUM_PROVIDER_CURL_BYTES, NewConnectionSlotGuard,
         PollProviderDiscoveryEventsForSessionRequest, PreparedDiscoveryCredentialStore,
         ProviderDiscoverySessionRequest, begin_provider_discovery_curl_with_reader,
         begin_provider_discovery_with_reader, bounded_secret_curl,
@@ -2650,13 +3075,14 @@ mod tests {
         create_provider_connection_with_slot_guard, credential_compensation_delete_outcome,
         credential_for_discovery_action, credential_install_recovery_action,
         delete_and_observe_discovery_bound_slot, discovery_committing_credential_status_with,
-        discovery_compensation_credential_authority, discovery_credential_authority,
+        discovery_compensation_confirmation_context, discovery_compensation_credential_authority,
+        discovery_credential_authority, drive_provider_discovery_compensation_with,
         observe_discovery_compensation_slot, promote_discovery_credential_lease_with,
-        recover_provider_discovery_credential_installs,
-        require_started_discovery_credential_install, run_provider_discovery_assistant_turn,
-        run_shell_discovery_off_runtime, settle_started_discovery_credential_recovery,
-        start_provider_model_sync_with_reader, status_only_bound_observation,
-        supply_provider_discovery_curl_evidence_off_runtime,
+        recover_provider_discovery_credential_installs, register_active_discovery_request,
+        request_provider_discovery_cancellation, require_started_discovery_credential_install,
+        run_provider_discovery_assistant_turn, run_shell_discovery_off_runtime,
+        settle_started_discovery_credential_recovery, start_provider_model_sync_with_reader,
+        status_only_bound_observation, supply_provider_discovery_curl_evidence_off_runtime,
     };
     use crate::{
         error::{CommandError, CommandResult},
@@ -3052,6 +3478,24 @@ mod tests {
                 Ok(())
             })
         }
+
+        fn confirm_compensation(
+            &self,
+            context: NativeCredentialEffectContext,
+        ) -> DiscoveryVaultFuture<'_, DiscoveryCompensationConfirmation> {
+            Box::pin(async move {
+                self.calls
+                    .lock()
+                    .expect("fake calls")
+                    .push("vault_confirm_compensation");
+                Ok(DiscoveryCompensationConfirmation::Fake {
+                    effect: context.effect(),
+                    target_id: context.target_id().to_owned(),
+                    origin: context.origin().to_owned(),
+                    revision: context.revision().to_owned(),
+                })
+            })
+        }
     }
 
     struct FakeDiscoveryJournal {
@@ -3117,6 +3561,84 @@ mod tests {
                 .lock()
                 .expect("fake started mismatch") = true;
         }
+    }
+
+    fn compensating_started_discovery_fixture(
+        root: &Path,
+    ) -> (
+        shell::ShellApi,
+        shell::ProviderDiscoverySessionDto,
+        CredentialAuthority,
+    ) {
+        let fixture =
+            shell::test_support::seed_synthetic_started_discovery_credential_install(root)
+                .expect("seed exact Started discovery");
+        let shell = fixture.shell;
+        let started = shell
+            .get_provider_discovery(&fixture.install.session_id)
+            .expect("load Started session");
+        let cancelled = shell
+            .cancel_provider_discovery(&started.id, started.revision)
+            .expect("request cancellation while commit is in flight");
+        assert_eq!(cancelled.state, "committing");
+        assert!(cancelled.cancellation_pending);
+        shell
+            .commit_provider_discovery(&cancelled.id, None)
+            .expect_err("missing credential confirmation enters compensation");
+        let compensating = shell
+            .get_provider_discovery(&cancelled.id)
+            .expect("reload compensating session");
+        assert_eq!(compensating.state, "compensating");
+        let authority_context = shell
+            .get_provider_discovery_credential_compensation_authority(&compensating.id)
+            .expect("load exact producing operation authority");
+        let authority = discovery_compensation_credential_authority(&authority_context)
+            .expect("validate exact compensation authority");
+        (shell, compensating, authority)
+    }
+
+    #[test]
+    fn discovery_compensation_confirmation_displays_backend_credential_api_origin() {
+        let root = tempdir().expect("temporary root");
+        let (shell, session, _authority) = compensating_started_discovery_fixture(root.path());
+        let authority = shell
+            .get_provider_discovery_credential_compensation_authority(&session.id)
+            .expect("load compensation credential authority");
+        let context = discovery_compensation_confirmation_context(&session, &authority)
+            .expect("build compensation confirmation");
+
+        assert_eq!(session.site_url, "https://docs.openrouter.example/");
+        assert_eq!(
+            context.origin(),
+            "https://openrouter.ai",
+            "credential deletion prompt must display the API origin bound to the slot"
+        );
+        let trusted_revision = context.revision().to_owned();
+        let mut substituted_grant = authority.clone();
+        substituted_grant.credential_origin_grant_sha256 = "f".repeat(64);
+        assert_ne!(
+            discovery_compensation_confirmation_context(&session, &substituted_grant)
+                .expect("build substituted-grant compensation context")
+                .revision(),
+            trusted_revision,
+            "compensation confirmation cannot be replayed with a substituted origin grant"
+        );
+        let mut substituted_binding = authority.clone();
+        substituted_binding.connection_binding_sha256 = "e".repeat(64);
+        assert_ne!(
+            discovery_compensation_confirmation_context(&session, &substituted_binding)
+                .expect("build substituted-binding compensation context")
+                .revision(),
+            trusted_revision,
+            "compensation confirmation cannot be replayed with a substituted slot binding"
+        );
+
+        let mut same_origin_site = session.clone();
+        same_origin_site.site_url = "https://openrouter.ai/".to_owned();
+        let same_origin_context =
+            discovery_compensation_confirmation_context(&same_origin_site, &authority)
+                .expect("same-origin compensation remains valid");
+        assert_eq!(same_origin_context.origin(), "https://openrouter.ai");
     }
 
     impl DiscoveryCredentialInstallJournal for FakeDiscoveryJournal {
@@ -4521,6 +5043,185 @@ mod tests {
         );
     }
 
+    #[test]
+    fn startup_observe_only_leaves_matching_compensation_durable_without_native_effect() {
+        let root = tempdir().expect("temporary root");
+        let (shell, session, authority) = compensating_started_discovery_fixture(root.path());
+        let attempt_id = session
+            .commit_attempt_id
+            .clone()
+            .expect("compensation attempt");
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let vault = FakeDiscoveryVault::new(Arc::clone(&calls));
+        vault.insert_bound(&session.connection_id, &authority);
+        let steps_before = shell
+            .list_provider_discovery_compensation_steps(&attempt_id)
+            .expect("pending compensation steps");
+
+        tauri::async_runtime::block_on(async {
+            let result = drive_provider_discovery_compensation_with(
+                &vault,
+                &shell,
+                session.clone(),
+                false,
+                CompensationCredentialEffectPolicy::ObserveOnly,
+                CompensationObserveErrorPolicy::Defer,
+                None,
+            )
+            .await
+            .expect("startup observation is non-mutating");
+
+            match result {
+                DiscoveryCompensationDriveResult::Finished(returned) => {
+                    assert_eq!(returned, session);
+                }
+                DiscoveryCompensationDriveResult::NativeConfirmationRequired { .. } => {
+                    panic!("bootstrap must never request or synthesize delete authority");
+                }
+            }
+            assert_eq!(*calls.lock().expect("fake calls"), vec!["vault_observe"]);
+            assert_eq!(
+                vault.bound_status(&session.connection_id, &authority),
+                CredentialStatus::Available
+            );
+            assert_eq!(
+                shell
+                    .list_provider_discovery_compensation_steps(&attempt_id)
+                    .expect("unchanged compensation steps"),
+                steps_before
+            );
+            assert_eq!(
+                shell
+                    .get_provider_discovery(&session.id)
+                    .expect("unchanged compensating session"),
+                session
+            );
+        });
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)] // One end-to-end assertion chain pins both denial and success.
+    fn explicit_compensation_rejects_stale_receipt_before_native_delete() {
+        let root = tempdir().expect("temporary root");
+        let (shell, session, authority) = compensating_started_discovery_fixture(root.path());
+        let attempt_id = session
+            .commit_attempt_id
+            .clone()
+            .expect("compensation attempt");
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let vault = FakeDiscoveryVault::new(Arc::clone(&calls));
+        vault.insert_bound(&session.connection_id, &authority);
+        let steps_before = shell
+            .list_provider_discovery_compensation_steps(&attempt_id)
+            .expect("pending compensation steps");
+
+        tauri::async_runtime::block_on(async {
+            let initial = drive_provider_discovery_compensation_with(
+                &vault,
+                &shell,
+                session.clone(),
+                false,
+                CompensationCredentialEffectPolicy::RequireNativeConfirmation,
+                CompensationObserveErrorPolicy::Propagate,
+                None,
+            )
+            .await
+            .expect("preflight requests a native receipt without starting");
+            let (prompted, exact_context) = match initial {
+                DiscoveryCompensationDriveResult::NativeConfirmationRequired {
+                    session,
+                    context,
+                } => (session, context),
+                DiscoveryCompensationDriveResult::Finished(_) => {
+                    panic!("matching slot must require fresh confirmation")
+                }
+            };
+            assert_eq!(
+                shell
+                    .list_provider_discovery_compensation_steps(&attempt_id)
+                    .expect("pre-prompt step remains pending"),
+                steps_before
+            );
+            assert!(!calls.lock().expect("fake calls").contains(&"vault_delete"));
+
+            let stale_context = NativeCredentialEffectContext::new(
+                NativeCredentialEffect::DiscoveryCompensation,
+                exact_context.target_id().to_owned(),
+                exact_context.origin().to_owned(),
+                format!("stale:{}", exact_context.revision()),
+            )
+            .expect("bounded stale authority context");
+            let stale_receipt = vault
+                .confirm_compensation(stale_context)
+                .await
+                .expect("simulate stale native approval");
+            drive_provider_discovery_compensation_with(
+                &vault,
+                &shell,
+                prompted.clone(),
+                false,
+                CompensationCredentialEffectPolicy::RequireNativeConfirmation,
+                CompensationObserveErrorPolicy::Propagate,
+                Some(stale_receipt),
+            )
+            .await
+            .expect_err("stale authority receipt must fail before durable start or delete");
+            assert_eq!(
+                shell
+                    .list_provider_discovery_compensation_steps(&attempt_id)
+                    .expect("stale receipt leaves step pending"),
+                steps_before
+            );
+            assert!(!calls.lock().expect("fake calls").contains(&"vault_delete"));
+            assert_eq!(
+                vault.bound_status(&session.connection_id, &authority),
+                CredentialStatus::Available
+            );
+
+            let exact_receipt = vault
+                .confirm_compensation(exact_context)
+                .await
+                .expect("fresh exact native approval");
+            let completed = drive_provider_discovery_compensation_with(
+                &vault,
+                &shell,
+                prompted,
+                false,
+                CompensationCredentialEffectPolicy::RequireNativeConfirmation,
+                CompensationObserveErrorPolicy::Propagate,
+                Some(exact_receipt),
+            )
+            .await
+            .expect("fresh exact receipt permits one exact delete");
+            assert!(matches!(
+                completed,
+                DiscoveryCompensationDriveResult::Finished(_)
+            ));
+            assert_eq!(
+                vault.bound_status(&session.connection_id, &authority),
+                CredentialStatus::Missing
+            );
+            assert_eq!(
+                calls
+                    .lock()
+                    .expect("fake calls")
+                    .iter()
+                    .filter(|call| **call == "vault_delete")
+                    .count(),
+                1
+            );
+            let steps_after = shell
+                .list_provider_discovery_compensation_steps(&attempt_id)
+                .expect("completed compensation steps");
+            assert!(
+                steps_after
+                    .iter()
+                    .find(|step| step.kind == "remove_credential_slot")
+                    .is_some_and(|step| step.status == "completed")
+            );
+        });
+    }
+
     #[tokio::test]
     async fn compensation_deletes_only_the_producing_operation_slot() {
         let mut prior = install_context("started");
@@ -4543,6 +5244,9 @@ mod tests {
                 .expect("producing native execution authority"),
             commit_attempt_id: producing.commit_attempt_id.clone(),
             connection_id: producing.connection_id.clone(),
+            credential_api_origin: "https://api.example".to_owned(),
+            credential_origin_approval_id: "00000000-0000-4000-8000-000000000053".to_owned(),
+            credential_origin_grant_sha256: "c".repeat(64),
             connection_binding_sha256: producing.connection_binding_sha256.clone(),
         };
         let producing_authority =
@@ -4892,6 +5596,54 @@ mod tests {
             .expect("select credential-bound template");
         assert_eq!(approval.state, "awaiting_credential_origin_approval");
         approval
+    }
+
+    #[test]
+    fn discovery_cancellation_transition_does_not_wait_for_global_credential_lock() {
+        let root = tempdir().expect("temporary root");
+        let shell = shell::ShellApi::open_data_root(root.path()).expect("open Shell");
+        let awaiting = prepare_precommit_discovery(&shell, "prompt-cancellation");
+        let state = AppState::new(root.path().to_path_buf());
+        let _operation = tauri::async_runtime::block_on(state.lock_provider_credential_operation());
+
+        let cancelled = request_provider_discovery_cancellation(
+            &state,
+            &shell,
+            &CancelProviderDiscoveryRequest {
+                session_id: awaiting.id,
+                expected_revision: awaiting.revision,
+            },
+        )
+        .expect("durable cancellation transition must not wait for the credential gate");
+
+        assert_eq!(cancelled.state, "cancelled");
+    }
+
+    #[test]
+    fn accepted_discovery_cancellation_revokes_the_registered_authenticated_request() {
+        let root = tempdir().expect("temporary root");
+        let shell = shell::ShellApi::open_data_root(root.path()).expect("open Shell");
+        let awaiting = prepare_precommit_discovery(&shell, "registered-cancellation");
+        let state = AppState::new(root.path().to_path_buf());
+        let (_registration, cancelled) =
+            register_active_discovery_request(&awaiting.id).expect("register active request");
+        assert!(!*cancelled.borrow());
+
+        let session = request_provider_discovery_cancellation(
+            &state,
+            &shell,
+            &CancelProviderDiscoveryRequest {
+                session_id: awaiting.id,
+                expected_revision: awaiting.revision,
+            },
+        )
+        .expect("accept cancellation");
+
+        assert_eq!(session.state, "cancelled");
+        assert!(
+            *cancelled.borrow(),
+            "an accepted cancellation must revoke the authenticated dispatch token"
+        );
     }
 
     fn credential_connection_input(

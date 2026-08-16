@@ -1118,7 +1118,7 @@
         display: grid;
         gap: 1rem;
         padding: 1rem;
-        border: 1px solid var(--line, #d8d6d0);
+        border: 1px solid var(--line);
         border-radius: 0.9rem;
     }
 
@@ -1165,9 +1165,9 @@
         display: grid;
         gap: 0.75rem;
         padding: 0.9rem;
-        border: 1px solid var(--line, #d8d6d0);
+        border: 1px solid var(--line);
         border-radius: 0.7rem;
-        background: var(--surface-raised, #fff);
+        background: var(--surface-raised);
     }
 
     .candidate-card header div,
@@ -1203,7 +1203,7 @@
     }
 
     dt {
-        color: var(--text-muted, #625f68);
+        color: var(--ink-muted);
         font-size: 0.85rem;
     }
 
@@ -1213,7 +1213,7 @@
     }
 
     dd.allowed {
-        color: var(--success, #246b3c);
+        color: var(--success);
     }
 
     .draft-grid,
@@ -1269,27 +1269,27 @@
         justify-content: space-between;
         gap: 0.75rem;
         padding-block: 0.45rem;
-        border-top: 1px solid var(--line, #d8d6d0);
+        border-top: 1px solid var(--line);
     }
 
     .current-badge {
         padding: 0.2rem 0.55rem;
         border-radius: 999px;
-        background: var(--surface-muted, #f2f0f5);
+        background: var(--surface-sunken);
         font-size: 0.82rem;
     }
 
     .lifecycle-note {
-        color: var(--text-muted, #625f68);
+        color: var(--ink-muted);
     }
 
     .lifecycle-error,
     .blocker-list {
-        color: var(--danger, #9f1d20);
+        color: var(--danger);
     }
 
     .receipt {
-        border-color: var(--success, #246b3c);
+        border-color: var(--success);
     }
 
     code {

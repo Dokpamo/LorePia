@@ -724,6 +724,17 @@ pub(crate) fn execute_list_memory_records(
 }
 
 #[tauri::command]
+pub fn list_interrupted_memory_jobs(
+    state: State<'_, AppState>,
+    request: shell::ListInterruptedMemoryJobsInput,
+) -> CommandResult<Vec<shell::InterruptedMemoryJobDto>> {
+    state
+        .shell()?
+        .list_interrupted_memory_jobs(request)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
 pub fn retry_interrupted_memory_job(
     state: State<'_, AppState>,
     request: shell::RetryInterruptedMemoryJobInput,
@@ -858,6 +869,8 @@ mod tests {
         let error = execute_retry_interrupted_memory_job(
             &shell_api,
             shell::RetryInterruptedMemoryJobInput {
+                conversation_id: "conversation:synthetic".to_owned(),
+                branch_id: "branch:synthetic".to_owned(),
                 memory_job_id: "synthetic.interrupted-memory-job".to_owned(),
                 expected_revision: 2,
                 acknowledge_unknown_outcome: false,
@@ -888,6 +901,102 @@ mod tests {
         }
     }
 
+    fn assert_handler_memory_owner_mismatch(
+        shell_api: &shell::ShellApi,
+        fixture: &MemoryCommandFixture,
+        conversation_id: &str,
+        branch_id: &str,
+        expected_revision: u64,
+        mismatch: &str,
+    ) {
+        let get = execute_get_memory_record(
+            shell_api,
+            shell::GetMemoryRecordInput {
+                conversation_id: conversation_id.to_owned(),
+                branch_id: branch_id.to_owned(),
+                memory_record_id: fixture.record.clone(),
+            },
+        )
+        .unwrap_err();
+        assert_eq!(get.code, "not_found", "{mismatch} get");
+
+        let patch = execute_patch_memory_record(
+            shell_api,
+            shell::PatchMemoryRecordInput {
+                conversation_id: conversation_id.to_owned(),
+                branch_id: branch_id.to_owned(),
+                memory_record_id: fixture.record.clone(),
+                patch: shell::MemoryRecordPatchDto {
+                    title: Some("foreign handler overwrite".to_owned()),
+                    ..shell::MemoryRecordPatchDto::default()
+                },
+                expected_revision,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(patch.code, "not_found", "{mismatch} patch");
+
+        let exclusion = execute_set_memory_record_exclusion(
+            shell_api,
+            shell::SetMemoryRecordExclusionInput {
+                conversation_id: conversation_id.to_owned(),
+                branch_id: branch_id.to_owned(),
+                memory_record_id: fixture.record.clone(),
+                scope: shell::MemoryRecordExclusionScopeDto::Conversation,
+                excluded: true,
+                expected_revision,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(exclusion.code, "not_found", "{mismatch} exclusion");
+
+        let delete = execute_delete_memory_record(
+            shell_api,
+            shell::DeleteMemoryRecordInput {
+                conversation_id: conversation_id.to_owned(),
+                branch_id: branch_id.to_owned(),
+                memory_record_id: fixture.record.clone(),
+                expected_revision,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(delete.code, "not_found", "{mismatch} delete");
+    }
+
+    fn assert_stale_memory_patch_is_rejected(
+        shell_api: &shell::ShellApi,
+        fixture: &MemoryCommandFixture,
+        stale_revision: u64,
+        expected: &shell::MemoryRecordProjectionDto,
+    ) {
+        let stale = execute_patch_memory_record(
+            shell_api,
+            shell::PatchMemoryRecordInput {
+                conversation_id: fixture.conversation.clone(),
+                branch_id: fixture.branch.clone(),
+                memory_record_id: fixture.record.clone(),
+                patch: shell::MemoryRecordPatchDto {
+                    title: Some("Rejected stale overwrite".to_owned()),
+                    ..shell::MemoryRecordPatchDto::default()
+                },
+                expected_revision: stale_revision,
+            },
+        )
+        .expect_err("stale handler mutation must fail");
+        assert_eq!(stale.code, "invalid_input");
+        assert!(stale.recoverable);
+        let after_stale = execute_get_memory_record(
+            shell_api,
+            shell::GetMemoryRecordInput {
+                conversation_id: fixture.conversation.clone(),
+                branch_id: fixture.branch.clone(),
+                memory_record_id: fixture.record.clone(),
+            },
+        )
+        .expect("read after stale rejection");
+        assert_eq!(&after_stale, expected);
+    }
+
     fn mutate_memory_through_handlers(
         shell_api: &shell::ShellApi,
         fixture: &MemoryCommandFixture,
@@ -895,6 +1004,8 @@ mod tests {
         let initial = execute_get_memory_record(
             shell_api,
             shell::GetMemoryRecordInput {
+                conversation_id: fixture.conversation.clone(),
+                branch_id: fixture.branch.clone(),
                 memory_record_id: fixture.record.clone(),
             },
         )
@@ -903,6 +1014,8 @@ mod tests {
         let edited = execute_patch_memory_record(
             shell_api,
             shell::PatchMemoryRecordInput {
+                conversation_id: fixture.conversation.clone(),
+                branch_id: fixture.branch.clone(),
                 memory_record_id: fixture.record.clone(),
                 patch: shell::MemoryRecordPatchDto {
                     title: Some("Handler-edited memory".to_owned()),
@@ -924,6 +1037,8 @@ mod tests {
         let pinned = execute_patch_memory_record(
             shell_api,
             shell::PatchMemoryRecordInput {
+                conversation_id: fixture.conversation.clone(),
+                branch_id: fixture.branch.clone(),
                 memory_record_id: fixture.record.clone(),
                 patch: shell::MemoryRecordPatchDto {
                     pinned: Some(true),
@@ -938,6 +1053,8 @@ mod tests {
         let conversation_excluded = execute_set_memory_record_exclusion(
             shell_api,
             shell::SetMemoryRecordExclusionInput {
+                conversation_id: fixture.conversation.clone(),
+                branch_id: fixture.branch.clone(),
                 memory_record_id: fixture.record.clone(),
                 scope: shell::MemoryRecordExclusionScopeDto::Conversation,
                 excluded: true,
@@ -949,6 +1066,8 @@ mod tests {
         let character_excluded = execute_set_memory_record_exclusion(
             shell_api,
             shell::SetMemoryRecordExclusionInput {
+                conversation_id: fixture.conversation.clone(),
+                branch_id: fixture.branch.clone(),
                 memory_record_id: fixture.record.clone(),
                 scope: shell::MemoryRecordExclusionScopeDto::Character,
                 excluded: true,
@@ -959,29 +1078,12 @@ mod tests {
         assert_eq!(character_excluded.revision, 5);
         assert!(character_excluded.excluded_from_conversation);
         assert!(character_excluded.excluded_from_character);
-
-        let stale = execute_patch_memory_record(
+        assert_stale_memory_patch_is_rejected(
             shell_api,
-            shell::PatchMemoryRecordInput {
-                memory_record_id: fixture.record.clone(),
-                patch: shell::MemoryRecordPatchDto {
-                    title: Some("Rejected stale overwrite".to_owned()),
-                    ..shell::MemoryRecordPatchDto::default()
-                },
-                expected_revision: initial.revision,
-            },
-        )
-        .expect_err("stale handler mutation must fail");
-        assert_eq!(stale.code, "invalid_input");
-        assert!(stale.recoverable);
-        let after_stale = execute_get_memory_record(
-            shell_api,
-            shell::GetMemoryRecordInput {
-                memory_record_id: fixture.record.clone(),
-            },
-        )
-        .expect("read after stale rejection");
-        assert_eq!(after_stale, character_excluded);
+            fixture,
+            initial.revision,
+            &character_excluded,
+        );
         character_excluded
     }
 
@@ -1011,6 +1113,8 @@ mod tests {
         let readback = execute_get_memory_record(
             &reopened,
             shell::GetMemoryRecordInput {
+                conversation_id: fixture.conversation.clone(),
+                branch_id: fixture.branch.clone(),
                 memory_record_id: fixture.record.clone(),
             },
         )
@@ -1019,6 +1123,8 @@ mod tests {
         execute_delete_memory_record(
             &reopened,
             shell::DeleteMemoryRecordInput {
+                conversation_id: fixture.conversation.clone(),
+                branch_id: fixture.branch.clone(),
                 memory_record_id: fixture.record.clone(),
                 expected_revision: final_projection.revision,
             },
@@ -1031,6 +1137,8 @@ mod tests {
         let error = execute_get_memory_record(
             &deleted,
             shell::GetMemoryRecordInput {
+                conversation_id: fixture.conversation.clone(),
+                branch_id: fixture.branch.clone(),
                 memory_record_id: fixture.record.clone(),
             },
         )
@@ -1046,5 +1154,54 @@ mod tests {
         )
         .expect("handler list after delete and reopen");
         assert!(listed.records.is_empty());
+    }
+
+    #[test]
+    fn memory_command_handlers_reject_each_partial_owner_mismatch() {
+        let fixture = memory_command_fixture();
+        let shell_api = shell::test_support::open_data_root_after_drop(fixture.root.path())
+            .expect("open command fixture Shell");
+        let initial = execute_get_memory_record(
+            &shell_api,
+            shell::GetMemoryRecordInput {
+                conversation_id: fixture.conversation.clone(),
+                branch_id: fixture.branch.clone(),
+                memory_record_id: fixture.record.clone(),
+            },
+        )
+        .expect("initial owner-bound read");
+
+        for (conversation_id, branch_id, mismatch) in [
+            (
+                "synthetic.foreign.conversation",
+                fixture.branch.as_str(),
+                "conversation",
+            ),
+            (
+                fixture.conversation.as_str(),
+                "synthetic.foreign.branch",
+                "branch",
+            ),
+        ] {
+            assert_handler_memory_owner_mismatch(
+                &shell_api,
+                &fixture,
+                conversation_id,
+                branch_id,
+                initial.revision,
+                mismatch,
+            );
+        }
+
+        let unchanged = execute_get_memory_record(
+            &shell_api,
+            shell::GetMemoryRecordInput {
+                conversation_id: fixture.conversation.clone(),
+                branch_id: fixture.branch.clone(),
+                memory_record_id: fixture.record.clone(),
+            },
+        )
+        .expect("read after rejected owner mismatches");
+        assert_eq!(unchanged, initial);
     }
 }

@@ -59,6 +59,30 @@ internal object PlatformPolicy {
         }
     }
 
+    fun validateCredentialConfirmationText(value: String, maximumBytes: Int) {
+        val encoded = value.toByteArray(Charsets.UTF_8)
+        try {
+            require(encoded.isNotEmpty() && encoded.size <= maximumBytes) {
+                "invalid credential confirmation text"
+            }
+            var hasNonSpace = false
+            var index = 0
+            while (index < value.length) {
+                val codePoint = value.codePointAt(index)
+                require(!isCredentialConfirmationSpoofingCodePoint(codePoint)) {
+                    "invalid credential confirmation text"
+                }
+                if (codePoint != 0x20) {
+                    hasNonSpace = true
+                }
+                index += Character.charCount(codePoint)
+            }
+            require(hasNonSpace) { "invalid credential confirmation text" }
+        } finally {
+            encoded.fill(0)
+        }
+    }
+
     fun validateContentSourceExport(
         dataRoot: File,
         sourcePath: String,
@@ -243,6 +267,38 @@ internal object PlatformPolicy {
 
     private fun Char.isAsciiLetterOrDigit(): Boolean =
         this in 'a'..'z' || this in 'A'..'Z' || this in '0'..'9'
+
+    private fun isCredentialConfirmationSpoofingCodePoint(codePoint: Int): Boolean =
+        codePoint in 0x0000..0x001f ||
+            codePoint in 0x007f..0x00a0 ||
+            codePoint == 0x00ad ||
+            codePoint == 0x034f ||
+            codePoint in 0x0600..0x0605 ||
+            codePoint == 0x061c ||
+            codePoint == 0x06dd ||
+            codePoint == 0x070f ||
+            codePoint in 0x0890..0x0891 ||
+            codePoint == 0x08e2 ||
+            codePoint in 0x115f..0x1160 ||
+            codePoint == 0x1680 ||
+            codePoint in 0x17b4..0x17b5 ||
+            codePoint in 0x180b..0x180f ||
+            codePoint in 0x2000..0x200f ||
+            codePoint in 0x2028..0x202f ||
+            codePoint in 0x205f..0x206f ||
+            codePoint == 0x3000 ||
+            codePoint == 0x3164 ||
+            codePoint in 0xd800..0xdfff ||
+            codePoint in 0xfe00..0xfe0f ||
+            codePoint == 0xfeff ||
+            codePoint == 0xffa0 ||
+            codePoint in 0xfff0..0xfffb ||
+            codePoint == 0x110bd ||
+            codePoint == 0x110cd ||
+            codePoint in 0x13430..0x13455 ||
+            codePoint in 0x1bca0..0x1bca3 ||
+            codePoint in 0x1d173..0x1d17a ||
+            codePoint in 0xe0000..0xe0fff
 
     private fun hashFile(file: File): Pair<String, Long> {
         val digest = MessageDigest.getInstance("SHA-256")

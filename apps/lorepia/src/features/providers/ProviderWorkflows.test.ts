@@ -10,6 +10,7 @@ import type {
     LorepiaClient,
     ModelRouteDto,
     ModelSyncJobDto,
+    ProviderCatalogDiffDto,
     ProviderCatalogImportTicketDto,
     ProviderCatalogRollbackPlanDto,
     ProviderDiscoverySessionDto,
@@ -544,13 +545,65 @@ describe('model sync workflow', () => {
 describe('signed catalog workflow', () => {
     it('supports exact import apply/discard and explicit rollback review/apply', async () => {
         const appState = providerState();
-        const emptyDiff = {
+        const securityDiff = {
             diff_schema_version: 1,
             from_revision: 3,
             to_revision: 4,
-            manifest_changes: [],
+            manifest_changes: [
+                {
+                    provider_template_id: 'provider-1',
+                    change: 'updated',
+                    previous_manifest_version: 3,
+                    next_manifest_version: 4,
+                    previous_sha256: 'before-sha',
+                    next_sha256: 'after-sha',
+                    changed_sections: [
+                        'origin',
+                        'authentication',
+                        'endpoints',
+                        'decoders',
+                        'parameters',
+                    ],
+                    security_review: {
+                        before: {
+                            origin: 'https://old.example.test',
+                            authentication: { kind: 'bearer_header' },
+                            endpoints: {
+                                models: { method: 'GET', path: '/v1/models' },
+                                generate: { method: 'POST', path: '/v1/chat/completions' },
+                            },
+                            decoders: {
+                                response: 'open_ai_json_v1',
+                                streaming: 'open_ai_sse_v1',
+                            },
+                            parameter_mappings: [],
+                        },
+                        after: {
+                            origin: 'https://new.example.test',
+                            authentication: {
+                                kind: 'header_api_key',
+                                header_name: 'x-provider-key',
+                            },
+                            endpoints: {
+                                models: { method: 'GET', path: '/v1/models' },
+                                generate: { method: 'POST', path: '/v2/chat/completions' },
+                            },
+                            decoders: { response: 'open_ai_json_v1', streaming: null },
+                            parameter_mappings: [
+                                {
+                                    parameter_id: 'temperature',
+                                    mapping: {
+                                        target: 'request_body',
+                                        field_name: 'renamed_parameter',
+                                    },
+                                },
+                            ],
+                        },
+                    },
+                },
+            ],
             model_changes: [],
-        };
+        } satisfies ProviderCatalogDiffDto;
         const importTicket = {
             ticket_id: 'ticket-1',
             plan: {
@@ -570,7 +623,7 @@ describe('signed catalog workflow', () => {
                     candidate_snapshot_sha256: 'candidate-sha',
                     prepared_at: '2026-08-02T00:00:00Z',
                     expires_at: '2026-08-02T01:00:00Z',
-                    diff: emptyDiff,
+                    diff: securityDiff,
                 },
                 plan_sha256: 'import-plan-sha',
             },
@@ -588,7 +641,7 @@ describe('signed catalog workflow', () => {
                 target_sha256: 'target-sha',
                 created_at: '2026-08-02T00:00:00Z',
                 expires_at: '2026-08-02T01:00:00Z',
-                diff: { ...emptyDiff, from_revision: 3, to_revision: 2 },
+                diff: { ...securityDiff, from_revision: 3, to_revision: 2 },
             },
         } satisfies ProviderCatalogRollbackPlanDto;
         appState.providers.workspace.catalog_status = {
@@ -635,6 +688,12 @@ describe('signed catalog workflow', () => {
             .spyOn(controller, 'activateProviderCatalogRollback')
             .mockResolvedValue();
         render(CatalogPanel, { appState, controller });
+
+        expect(screen.getAllByText('https://old.example.test').length).toBeGreaterThanOrEqual(2);
+        expect(screen.getAllByText('https://new.example.test').length).toBeGreaterThanOrEqual(2);
+        expect(screen.getAllByText(/x-provider-key/).length).toBeGreaterThanOrEqual(2);
+        expect(screen.getAllByText(/\/v2\/chat\/completions/).length).toBeGreaterThanOrEqual(2);
+        expect(screen.getAllByText(/renamed_parameter/).length).toBeGreaterThanOrEqual(2);
 
         await fireEvent.click(
             screen.getByRole('button', {

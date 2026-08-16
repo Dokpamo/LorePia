@@ -48,7 +48,7 @@ fn fresh_install_from_previous_release_is_copy_forwarded_on_the_next_schema() {
     assert!(current_schema > FROZEN_SCHEMA_VERSION + 1);
 
     let seed_canonical = seed.path().join("db/lorepia.sqlite3");
-    downgrade_schema_thirty_seven_to_thirty_six(&seed_canonical, current_schema);
+    downgrade_latest_schema_by_one(&seed_canonical, current_schema);
     let previous_schema = database_schema_version(&seed_canonical);
     assert_eq!(previous_schema + 1, current_schema);
 
@@ -1016,7 +1016,7 @@ fn install_previous_release_cas_fixture(root: &Path, namespace: &str) -> (String
         .expect("read current CAS seed schema");
     drop(current);
     let seed_canonical = seed.path().join("db/lorepia.sqlite3");
-    downgrade_schema_thirty_seven_to_thirty_six(&seed_canonical, current_schema);
+    downgrade_latest_schema_by_one(&seed_canonical, current_schema);
 
     let bytes: &[u8] = match namespace {
         "sources" => b"previous-release rollback source",
@@ -1078,7 +1078,7 @@ fn install_previous_release_journal_cas_fixture(root: &Path, namespace: &str) ->
         .expect("read current journal CAS seed schema");
     drop(current);
     let seed_canonical = seed.path().join("db/lorepia.sqlite3");
-    downgrade_schema_thirty_seven_to_thirty_six(&seed_canonical, current_schema);
+    downgrade_latest_schema_by_one(&seed_canonical, current_schema);
 
     let bytes: &[u8] = match namespace {
         "source" => b"previous-release journal-only source",
@@ -1136,40 +1136,20 @@ fn checkpoint_and_close(connection: Connection) {
     drop(connection);
 }
 
-fn downgrade_schema_thirty_seven_to_thirty_six(path: &Path, current_schema: u32) {
-    const MIGRATION_0027: &str =
-        include_str!("../migrations/0027_provider_discovery_native_attestations.sql");
-    const MIGRATION_0037: &str =
-        include_str!("../migrations/0037_provider_credential_operations.sql");
+/// Strips exactly the newest migration so a fixture sits one schema behind.
+///
+/// Update the migration constant and the expected version together whenever a
+/// migration is added; the assertion below is what forces that.
+fn downgrade_latest_schema_by_one(path: &Path, current_schema: u32) {
+    const LATEST_MIGRATION: &str = include_str!("../migrations/0038_conversation_speakers.sql");
+    const LATEST_SCHEMA: u32 = 38;
 
     assert_eq!(
-        current_schema, 37,
+        current_schema, LATEST_SCHEMA,
         "update this deterministic previous-release fixture for the new latest migration"
     );
     let connection = Connection::open(path).expect("open current database for fixture downgrade");
-    restore_previous_release_trigger(
-        &connection,
-        MIGRATION_0027,
-        "provider_discovery_native_no_effect_attestation_binding",
-    );
-    restore_previous_release_trigger(
-        &connection,
-        MIGRATION_0027,
-        "provider_discovery_operation_legal_transition",
-    );
-    let replaced_objects = MIGRATION_0037
-        .lines()
-        .filter_map(|line| {
-            let mut tokens = line.split_ascii_whitespace();
-            if tokens.next() != Some("DROP") {
-                return None;
-            }
-            let object_type = tokens.next()?;
-            let name = tokens.next()?.trim_end_matches(';');
-            Some((object_type, name))
-        })
-        .collect::<Vec<_>>();
-    let created_objects = MIGRATION_0037
+    let created_objects = LATEST_MIGRATION
         .lines()
         .filter_map(|line| {
             let mut tokens = line.split_ascii_whitespace();
@@ -1182,13 +1162,12 @@ fn downgrade_schema_thirty_seven_to_thirty_six(path: &Path, current_schema: u32)
             } else {
                 (object_type, tokens.next()?)
             };
-            let name = name.trim_end_matches(';');
-            (!replaced_objects.contains(&(object_type, name))).then_some((object_type, name))
+            Some((object_type, name.trim_end_matches(';')))
         })
         .collect::<Vec<_>>();
     assert!(
-        created_objects.contains(&("TABLE", "provider_credential_ownership_events")),
-        "schema-37 inverse must track every additive credential-journal object"
+        created_objects.contains(&("TABLE", "conversation_characters")),
+        "schema-38 inverse must track every additive speaker-roster object"
     );
     connection
         .execute_batch("PRAGMA foreign_keys = OFF;")
@@ -1201,34 +1180,19 @@ fn downgrade_schema_thirty_seven_to_thirty_six(path: &Path, current_schema: u32)
         {
             connection
                 .execute(&format!("DROP {object_type} \"{name}\""), [])
-                .unwrap_or_else(|error| panic!("drop schema-37 {object_type} {name}: {error}"));
+                .unwrap_or_else(|error| panic!("drop schema-38 {object_type} {name}: {error}"));
         }
     }
     connection
-        .execute("DELETE FROM schema_migrations WHERE version = 37", [])
-        .expect("remove schema-37 migration registry row");
+        .execute(
+            "DELETE FROM schema_migrations WHERE version = ?1",
+            [LATEST_SCHEMA],
+        )
+        .expect("remove schema-38 migration registry row");
     connection
         .execute_batch("PRAGMA foreign_keys = ON;")
         .expect("reenable foreign keys after the previous-release fixture downgrade");
     checkpoint_and_close(connection);
-}
-
-fn restore_previous_release_trigger(connection: &Connection, migration: &str, trigger_name: &str) {
-    connection
-        .execute_batch(&format!("DROP TRIGGER {trigger_name};"))
-        .unwrap_or_else(|error| panic!("drop schema-37 trigger {trigger_name}: {error}"));
-    let marker = format!("CREATE TRIGGER {trigger_name}\n");
-    let start = migration
-        .find(&marker)
-        .unwrap_or_else(|| panic!("find previous-release trigger {trigger_name}"));
-    let tail = &migration[start..];
-    let end = tail.find("\nEND;").map_or_else(
-        || panic!("find end of previous-release trigger {trigger_name}"),
-        |offset| offset + "\nEND;".len(),
-    );
-    connection
-        .execute_batch(&tail[..end])
-        .unwrap_or_else(|error| panic!("restore previous-release trigger {trigger_name}: {error}"));
 }
 
 fn database_schema_version(path: &Path) -> u32 {

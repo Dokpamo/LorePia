@@ -1,3 +1,5 @@
+import org.gradle.api.artifacts.dsl.LockMode
+
 plugins {
     `kotlin-dsl`
 }
@@ -14,6 +16,11 @@ gradlePlugin {
 repositories {
     google()
     mavenCentral()
+}
+
+dependencyLocking {
+    lockAllConfigurations()
+    lockMode.set(LockMode.STRICT)
 }
 
 dependencies {

@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { tr } from '../../lib/i18n';
     import type { LorepiaAppController, LorepiaAppState } from '../../app/app-controller';
     import type { ProviderCatalogDiffDto } from '../../lib/ipc/contracts';
 
@@ -20,6 +21,16 @@
         return diff.manifest_changes.length + diff.model_changes.length;
     }
 
+    function securityChanges(
+        diff: ProviderCatalogDiffDto,
+    ): ProviderCatalogDiffDto['manifest_changes'] {
+        return diff.manifest_changes.filter((change) => change.security_review != null);
+    }
+
+    function reviewJson(value: unknown): string {
+        return value === undefined ? '—' : JSON.stringify(value);
+    }
+
     async function run(action: () => Promise<void>): Promise<void> {
         busy = true;
         try {
@@ -34,8 +45,8 @@
     <header class="workflow-heading">
         <div>
             <p class="eyebrow">Signed local catalog</p>
-            <h2 id="catalog-title">프로바이더 카탈로그</h2>
-            <p>서명·상태 버전·정확한 계획 해시를 검토한 뒤 가져오기나 롤백을 적용합니다.</p>
+            <h2 id="catalog-title">{$tr('catalog.title')}</h2>
+            <p>{$tr('catalog.hint')}</p>
         </div>
         <button
             class="primary"
@@ -43,62 +54,121 @@
             disabled={busy}
             onclick={() => void run(() => controller.pickProviderCatalogImport())}
         >
-            서명 카탈로그 가져오기
+            {$tr('catalog.import')}
         </button>
     </header>
 
     {#if status}
         <dl class="status-grid">
             <div>
-                <dt>활성 리비전</dt>
+                <dt>{$tr('catalog.active_revision')}</dt>
                 <dd>{status.active_revision}</dd>
             </div>
             <div>
-                <dt>상태 버전</dt>
+                <dt>{$tr('catalog.state_version')}</dt>
                 <dd>{status.state_version}</dd>
             </div>
             <div>
-                <dt>최고 승인 리비전</dt>
+                <dt>{$tr('catalog.highest_revision')}</dt>
                 <dd>{status.highest_accepted_revision}</dd>
             </div>
             <div>
-                <dt>저장 스냅샷</dt>
-                <dd>{status.snapshot_count}개</dd>
+                <dt>{$tr('catalog.snapshots')}</dt>
+                <dd>{$tr('catalog.count', { count: status.snapshot_count })}</dd>
             </div>
         </dl>
-        <p class="hash-line">활성 스냅샷 <code>{status.active_snapshot_sha256}</code></p>
+        <p class="hash-line">
+            {$tr('catalog.active_snapshot')} <code>{status.active_snapshot_sha256}</code>
+        </p>
     {:else}
-        <p class="notice">카탈로그 상태를 아직 불러오지 못했습니다.</p>
+        <p class="notice">{$tr('catalog.status_unavailable')}</p>
     {/if}
 
     {#if pendingImport}
         {@const review = pendingImport.plan.review}
         <article class="review-card" aria-labelledby="catalog-import-review-title">
-            <h3 id="catalog-import-review-title">가져오기 계획 검토</h3>
+            <h3 id="catalog-import-review-title">{$tr('catalog.review.title')}</h3>
             <p>
-                활성 r{review.expected_active_revision} → 후보 r{review.candidate_revision} · 변경
-                {changeCount(review.diff)}개
+                {$tr('catalog.review.transition', {
+                    from: review.expected_active_revision,
+                    to: review.candidate_revision,
+                    count: changeCount(review.diff),
+                })}
             </p>
             <dl class="review-grid">
                 <div>
-                    <dt>서명 키</dt>
+                    <dt>{$tr('catalog.review.signing_key')}</dt>
                     <dd>{review.signing_key_id}</dd>
                 </div>
                 <div>
-                    <dt>서명 카탈로그 리비전</dt>
+                    <dt>{$tr('catalog.review.signed_revision')}</dt>
                     <dd>{review.signed_catalog_revision}</dd>
                 </div>
                 <div>
-                    <dt>Manifest 변경</dt>
-                    <dd>{review.diff.manifest_changes.length}개</dd>
+                    <dt>{$tr('catalog.review.manifest_changes')}</dt>
+                    <dd>{$tr('catalog.count', { count: review.diff.manifest_changes.length })}</dd>
                 </div>
                 <div>
-                    <dt>모델 변경</dt>
-                    <dd>{review.diff.model_changes.length}개</dd>
+                    <dt>{$tr('catalog.review.model_changes')}</dt>
+                    <dd>{$tr('catalog.count', { count: review.diff.model_changes.length })}</dd>
                 </div>
             </dl>
             <p class="hash-line">Payload <code>{review.payload_sha256}</code></p>
-            <p class="hash-line">정확한 계획 <code>{pendingImport.plan.plan_sha256}</code></p>
+            <p class="hash-line">
+                {$tr('catalog.review.exact_plan')} <code>{pendingImport.plan.plan_sha256}</code>
+            </p>
+            {#each securityChanges(review.diff) as change (change.provider_template_id)}
+                {@const authority = change.security_review}
+                {#if authority}
+                    <section class="security-review" aria-label="Catalog security authority change">
+                        <h4>{change.provider_template_id} · security authority</h4>
+                        <div class="security-surfaces">
+                            {#each [{ label: 'Before', surface: authority.before }, { label: 'After', surface: authority.after }] as { label, surface } (label)}
+                                <div>
+                                    <strong>{label}</strong>
+                                    {#if surface}
+                                        <dl>
+                                            <div>
+                                                <dt>Origin</dt>
+                                                <dd><code>{surface.origin ?? '—'}</code></dd>
+                                            </div>
+                                            <div>
+                                                <dt>Auth</dt>
+                                                <dd>
+                                                    <code>{reviewJson(surface.authentication)}</code
+                                                    >
+                                                </dd>
+                                            </div>
+                                            <div>
+                                                <dt>Endpoints</dt>
+                                                <dd>
+                                                    <code>{reviewJson(surface.endpoints)}</code>
+                                                </dd>
+                                            </div>
+                                            <div>
+                                                <dt>Decoders</dt>
+                                                <dd><code>{reviewJson(surface.decoders)}</code></dd>
+                                            </div>
+                                            <div>
+                                                <dt>Mappings</dt>
+                                                <dd>
+                                                    <code
+                                                        >{reviewJson(
+                                                            surface.parameter_mappings,
+                                                        )}</code
+                                                    >
+                                                </dd>
+                                            </div>
+                                        </dl>
+                                    {:else}
+                                        <p>없음</p>
+                                    {/if}
+                                </div>
+                            {/each}
+                        </div>
+                    </section>
+                {/if}
+            {/each}
             <div class="actions">
                 <button
                     class="primary"
@@ -106,7 +176,7 @@
                     disabled={busy}
                     onclick={() => void run(() => controller.activateProviderCatalogImport())}
                 >
-                    검토한 정확한 가져오기 계획 적용
+                    {$tr('catalog.review.apply')}
                 </button>
                 <button
                     class="danger"
@@ -114,7 +184,7 @@
                     disabled={busy}
                     onclick={() => void run(() => controller.discardProviderCatalogImport())}
                 >
-                    가져오기 계획 폐기
+                    {$tr('catalog.review.discard')}
                 </button>
             </div>
         </article>
@@ -123,15 +193,17 @@
     {#if history && history.revisions.length > 0}
         <section class="history" aria-labelledby="catalog-history-title">
             <header>
-                <h3 id="catalog-history-title">로컬 리비전 이력</h3>
-                <span>{history.revisions.length}개</span>
+                <h3 id="catalog-history-title">{$tr('catalog.history.title')}</h3>
+                <span>{$tr('catalog.count', { count: history.revisions.length })}</span>
             </header>
             <ul>
                 {#each history.revisions as revision (revision.revision)}
                     <li>
                         <div>
                             <strong>r{revision.revision}</strong>
-                            {#if revision.active}<span class="active-badge">활성</span>{/if}
+                            {#if revision.active}<span class="active-badge"
+                                    >{$tr('catalog.history.active')}</span
+                                >{/if}
                             <small>{revision.captured_at}</small>
                             <code>{revision.snapshot_sha256}</code>
                         </div>
@@ -147,7 +219,7 @@
                                         ),
                                     )}
                             >
-                                활성 버전과 비교
+                                {$tr('catalog.history.compare')}
                             </button>
                             <button
                                 type="button"
@@ -159,7 +231,7 @@
                                         ),
                                     )}
                             >
-                                이 리비전으로 롤백 준비
+                                {$tr('catalog.history.prepare_rollback')}
                             </button>
                         </div>
                     </li>
@@ -171,13 +243,78 @@
     {#if pendingRollback}
         {@const plan = pendingRollback.catalog_plan}
         <article class="review-card rollback" aria-labelledby="catalog-rollback-review-title">
-            <h3 id="catalog-rollback-review-title">롤백 계획 검토</h3>
+            <h3 id="catalog-rollback-review-title">{$tr('catalog.rollback.title')}</h3>
             <p>
-                r{plan.from_revision} → r{plan.to_revision} · 변경 {changeCount(plan.diff)}개
+                {$tr('catalog.rollback.transition', {
+                    from: plan.from_revision,
+                    to: plan.to_revision,
+                    count: changeCount(plan.diff),
+                })}
             </p>
-            <p class="hash-line">현재 해시 <code>{plan.expected_active_sha256}</code></p>
-            <p class="hash-line">대상 해시 <code>{plan.target_sha256}</code></p>
-            <p class="hash-line">정확한 계획 <code>{pendingRollback.plan_sha256}</code></p>
+            <p class="hash-line">
+                {$tr('catalog.rollback.current_hash')} <code>{plan.expected_active_sha256}</code>
+            </p>
+            <p class="hash-line">
+                {$tr('catalog.rollback.target_hash')} <code>{plan.target_sha256}</code>
+            </p>
+            <p class="hash-line">
+                {$tr('catalog.review.exact_plan')} <code>{pendingRollback.plan_sha256}</code>
+            </p>
+            {#each securityChanges(plan.diff) as change (change.provider_template_id)}
+                {@const authority = change.security_review}
+                {#if authority}
+                    <section
+                        class="security-review"
+                        aria-label="Catalog rollback security authority change"
+                    >
+                        <h4>{change.provider_template_id} · security authority</h4>
+                        <div class="security-surfaces">
+                            {#each [{ label: 'Before', surface: authority.before }, { label: 'After', surface: authority.after }] as { label, surface } (label)}
+                                <div>
+                                    <strong>{label}</strong>
+                                    {#if surface}
+                                        <dl>
+                                            <div>
+                                                <dt>Origin</dt>
+                                                <dd><code>{surface.origin ?? '—'}</code></dd>
+                                            </div>
+                                            <div>
+                                                <dt>Auth</dt>
+                                                <dd>
+                                                    <code>{reviewJson(surface.authentication)}</code
+                                                    >
+                                                </dd>
+                                            </div>
+                                            <div>
+                                                <dt>Endpoints</dt>
+                                                <dd>
+                                                    <code>{reviewJson(surface.endpoints)}</code>
+                                                </dd>
+                                            </div>
+                                            <div>
+                                                <dt>Decoders</dt>
+                                                <dd><code>{reviewJson(surface.decoders)}</code></dd>
+                                            </div>
+                                            <div>
+                                                <dt>Mappings</dt>
+                                                <dd>
+                                                    <code
+                                                        >{reviewJson(
+                                                            surface.parameter_mappings,
+                                                        )}</code
+                                                    >
+                                                </dd>
+                                            </div>
+                                        </dl>
+                                    {:else}
+                                        <p>없음</p>
+                                    {/if}
+                                </div>
+                            {/each}
+                        </div>
+                    </section>
+                {/if}
+            {/each}
             <button
                 class="danger"
                 type="button"
@@ -185,7 +322,7 @@
                 onclick={() =>
                     void run(() => controller.activateProviderCatalogRollback(pendingRollback))}
             >
-                검토한 정확한 롤백 계획 적용
+                {$tr('catalog.rollback.apply')}
             </button>
         </article>
     {/if}
@@ -194,8 +331,11 @@
         {@const diff = workspace.catalog_diff}
         <details class="diff-detail" open>
             <summary>
-                r{diff.from_revision} → r{diff.to_revision} 변경
-                {changeCount(diff)}개
+                {$tr('catalog.diff.transition', {
+                    from: diff.from_revision,
+                    to: diff.to_revision,
+                    count: changeCount(diff),
+                })}
             </summary>
             <ul>
                 {#each diff.manifest_changes as change (change.provider_template_id)}
@@ -262,7 +402,7 @@
     .review-grid > div {
         padding: 10px;
         border-radius: 10px;
-        background: var(--surface-muted);
+        background: var(--surface-sunken);
     }
 
     dt {
@@ -298,6 +438,43 @@
         border-color: color-mix(in srgb, var(--danger), transparent 55%);
     }
 
+    .security-review {
+        margin: 12px 0;
+        padding: 12px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--surface-sunken);
+    }
+
+    .security-review h4 {
+        margin: 0 0 8px;
+    }
+
+    .security-surfaces {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+    }
+
+    .security-surfaces > div {
+        min-width: 0;
+        padding: 8px;
+        border-radius: 8px;
+        background: var(--surface);
+    }
+
+    .security-surfaces dl {
+        display: grid;
+        gap: 6px;
+        margin: 8px 0 0;
+    }
+
+    .security-surfaces dd,
+    .security-surfaces code {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+    }
+
     .actions {
         display: flex;
         gap: 8px;
@@ -318,7 +495,7 @@
     .diff-detail li {
         padding: 10px;
         border-radius: 10px;
-        background: var(--surface-muted);
+        background: var(--surface-sunken);
     }
 
     .history li > div:first-child,
@@ -351,6 +528,10 @@
         .status-grid,
         .review-grid {
             grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .security-surfaces {
+            grid-template-columns: 1fr;
         }
     }
 </style>

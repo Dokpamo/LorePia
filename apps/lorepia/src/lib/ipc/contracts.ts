@@ -404,7 +404,7 @@ export interface ImportImagePreviewDto {
 
 export interface ImportInspectionDto {
     inspection_id: string;
-    kind: 'character_card_v3' | 'charx_package';
+    kind: 'character_card_v3' | 'character_card_png' | 'charx_package';
     display_name: string;
     description: string;
     source_sha256: string;
@@ -1984,12 +1984,16 @@ export interface ReorderPromptBlocksResult {
 }
 
 export interface PatchMemoryRecordRequest {
+    conversation_id: string;
+    branch_id: string;
     memory_record_id: string;
     patch: MemoryRecordPatchInput;
     expected_revision: number;
 }
 
 export interface DeleteMemoryRecordRequest {
+    conversation_id: string;
+    branch_id: string;
     memory_record_id: string;
     expected_revision: number;
 }
@@ -1997,6 +2001,8 @@ export interface DeleteMemoryRecordRequest {
 export type MemoryRecordExclusionScope = 'conversation' | 'character';
 
 export interface SetMemoryRecordExclusionRequest {
+    conversation_id: string;
+    branch_id: string;
     memory_record_id: string;
     scope: MemoryRecordExclusionScope;
     excluded: boolean;
@@ -2500,6 +2506,8 @@ export interface ListMemoryRecordsInput {
 }
 
 export interface GetMemoryRecordInput {
+    conversation_id: string;
+    branch_id: string;
     memory_record_id: string;
 }
 
@@ -2515,6 +2523,8 @@ export interface ListRetryableMemoryQueryEmbeddingsInput {
 }
 
 export interface RetryMemoryQueryEmbeddingInput {
+    conversation_id: string;
+    branch_id: string;
     id: string;
     expected_revision: number;
     acknowledge_unknown_outcome: boolean;
@@ -2530,6 +2540,50 @@ export interface MemoryQueryEmbeddingRetryCandidateDto {
     branch_id: string;
     error_code: string | null;
     requires_unknown_outcome_acknowledgement: boolean;
+}
+
+export interface ListInterruptedMemoryJobsInput {
+    conversation_id: string;
+    branch_id: string;
+    limit: number;
+}
+
+export type MemoryJobRetryKind = 'summary' | 'embedding';
+
+export interface InterruptedMemoryJobDto {
+    memory_job_id: string;
+    kind: MemoryJobRetryKind;
+    revision: number;
+    conversation_id: string;
+    branch_id: string;
+    source_start_message_id: string;
+    source_end_message_id: string;
+    attempt: number;
+    interruption_count: number;
+    last_interrupted_at: string | null;
+    last_error_code: string | null;
+}
+
+export interface RetryInterruptedMemoryJobInput {
+    conversation_id: string;
+    branch_id: string;
+    memory_job_id: string;
+    expected_revision: number;
+    acknowledge_unknown_outcome: boolean;
+}
+
+export type MemoryJobRetryStatus = 'queued';
+
+export interface MemoryJobRetryReceiptDto {
+    memory_job_id: string;
+    kind: MemoryJobRetryKind;
+    status: MemoryJobRetryStatus;
+    revision: number;
+    conversation_id: string;
+    branch_id: string;
+    source_start_message_id: string;
+    source_end_message_id: string;
+    attempt: number;
 }
 
 export interface RetrieveMemoryInput {
@@ -2858,6 +2912,12 @@ export interface OrchestrationDocumentClientApi {
         input: ListPromptPresetBindingsInput,
     ): Promise<RevisionedDto<PromptPresetBindingDocumentDto>[]>;
     listMemoryRecords(input: ListMemoryRecordsInput): Promise<MemoryRecordListResultDto>;
+    listInterruptedMemoryJobs(
+        input: ListInterruptedMemoryJobsInput,
+    ): Promise<InterruptedMemoryJobDto[]>;
+    retryInterruptedMemoryJob(
+        input: RetryInterruptedMemoryJobInput,
+    ): Promise<MemoryJobRetryReceiptDto>;
     listRetryableMemoryQueryEmbeddings(
         input: ListRetryableMemoryQueryEmbeddingsInput,
     ): Promise<MemoryQueryEmbeddingRetryCandidateDto[]>;
@@ -3491,6 +3551,55 @@ export interface DiscoveryCompensationRecordDto {
 
 export type CatalogChangeKind = 'added' | 'updated' | 'removed';
 
+export type CatalogHttpMethodDto = 'GET' | 'POST';
+
+export interface CatalogEndpointDto {
+    method: CatalogHttpMethodDto;
+    path: string;
+}
+
+export interface CatalogManifestEndpointsDto {
+    models: CatalogEndpointDto | null;
+    generate: CatalogEndpointDto;
+    embeddings?: CatalogEndpointDto;
+}
+
+export type CatalogDecoderIdDto =
+    | 'open_ai_json_v1'
+    | 'open_ai_sse_v1'
+    | 'anthropic_json_v1'
+    | 'anthropic_sse_v1'
+    | 'gemini_json_v1'
+    | 'gemini_sse_v1'
+    | 'ollama_json_v1'
+    | 'ollama_jsonl_v1';
+
+export interface CatalogManifestDecodersDto {
+    response: CatalogDecoderIdDto;
+    streaming: CatalogDecoderIdDto | null;
+}
+
+export interface CatalogManifestParameterMappingDto {
+    parameter_id: string;
+    mapping: {
+        target: 'request_body' | 'request_header';
+        field_name: string;
+    };
+}
+
+export interface CatalogManifestSecuritySurfaceDto {
+    origin: string | null;
+    authentication: AuthBindingDto;
+    endpoints: CatalogManifestEndpointsDto;
+    decoders: CatalogManifestDecodersDto;
+    parameter_mappings: CatalogManifestParameterMappingDto[];
+}
+
+export interface CatalogManifestSecurityReviewDto {
+    before: CatalogManifestSecuritySurfaceDto | null;
+    after: CatalogManifestSecuritySurfaceDto | null;
+}
+
 export interface CatalogManifestDiffDto {
     provider_template_id: string;
     change: CatalogChangeKind;
@@ -3499,6 +3608,7 @@ export interface CatalogManifestDiffDto {
     previous_sha256: string | null;
     next_sha256: string | null;
     changed_sections: string[];
+    security_review?: CatalogManifestSecurityReviewDto;
 }
 
 export interface CatalogModelMetadataDiffDto {
@@ -3712,6 +3822,12 @@ export interface LorepiaClient {
     ): Promise<ConversationStateDto>;
     listBranchMessages(branchId: string): Promise<MessageDto[]>;
     listMessages(conversationId: string): Promise<MessageDto[]>;
+    listInterruptedMemoryJobs(
+        input: ListInterruptedMemoryJobsInput,
+    ): Promise<InterruptedMemoryJobDto[]>;
+    retryInterruptedMemoryJob(
+        input: RetryInterruptedMemoryJobInput,
+    ): Promise<MemoryJobRetryReceiptDto>;
     listRetryableMemoryQueryEmbeddings(
         input: ListRetryableMemoryQueryEmbeddingsInput,
     ): Promise<MemoryQueryEmbeddingRetryCandidateDto[]>;

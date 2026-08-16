@@ -32,6 +32,7 @@ use crate::{
         ProviderPromptAdapterContract, ProviderPromptPlacement,
     },
     request_plan::planned_json_payload,
+    sse::SseEventBuffer,
 };
 
 const ANTHROPIC_VERSION: &str = "2023-06-01";
@@ -251,7 +252,7 @@ impl Provider for AnthropicMessagesProvider {
         ensure_event_stream_content_type(response.headers())?;
 
         let mut bytes = response.bytes_stream();
-        let mut pending = Vec::<u8>::new();
+        let mut pending = SseEventBuffer::default();
         let mut total_stream_bytes = 0_usize;
         let mut usage = GenerationUsage::default();
         let mut state = StreamState::default();
@@ -274,19 +275,12 @@ impl Provider for AnthropicMessagesProvider {
                         .ok_or_else(|| streaming_error(
                             "provider stream exceeded 64 MiB",
                         ))?;
-                    pending.extend_from_slice(&chunk);
-
-                    if chunk
-                        .iter()
-                        .any(|byte| matches!(*byte, b'\r' | b'\n'))
-                    {
-                        while let Some((boundary, separator_len)) =
-                            find_event_boundary(&pending, false)
-                        {
+                    let mut next_boundary = pending
+                        .extend_chunk_and_find_boundary(&chunk, &SSE_EVENT_SEPARATORS);
+                    while let Some(boundary) = next_boundary {
                             ensure_not_cancelled(&cancelled)?;
-                            ensure_event_size(boundary)?;
-                            let event = pending.drain(..boundary).collect::<Vec<_>>();
-                            pending.drain(..separator_len);
+                            ensure_event_size(boundary.event_len())?;
+                            let event = pending.take_event(boundary);
                             if process_event(
                                 &event,
                                 &sink,
@@ -302,18 +296,18 @@ impl Provider for AnthropicMessagesProvider {
                                 ensure_not_cancelled(&cancelled)?;
                                 return Ok(usage);
                             }
-                        }
+                            next_boundary =
+                                pending.next_boundary(&SSE_EVENT_SEPARATORS, false);
                     }
-                    ensure_pending_size(&pending, false)?;
+                    ensure_pending_size(pending.active_bytes(), false)?;
                 }
             }
         }
 
-        while let Some((boundary, separator_len)) = find_event_boundary(&pending, true) {
+        while let Some(boundary) = pending.next_boundary(&SSE_EVENT_SEPARATORS, true) {
             ensure_not_cancelled(&cancelled)?;
-            ensure_event_size(boundary)?;
-            let event = pending.drain(..boundary).collect::<Vec<_>>();
-            pending.drain(..separator_len);
+            ensure_event_size(boundary.event_len())?;
+            let event = pending.take_event(boundary);
             if process_event(
                 &event,
                 &sink,
@@ -330,7 +324,7 @@ impl Provider for AnthropicMessagesProvider {
                 return Ok(usage);
             }
         }
-        ensure_pending_size(&pending, true)?;
+        ensure_pending_size(pending.active_bytes(), true)?;
         if !pending.is_empty() {
             return Err(streaming_error(
                 "provider stream ended with an incomplete event",
@@ -1709,23 +1703,6 @@ fn ensure_event_stream_content_type(headers: &reqwest::header::HeaderMap) -> Cor
     }
 }
 
-fn find_event_boundary(bytes: &[u8], end_of_stream: bool) -> Option<(usize, usize)> {
-    for position in 0..bytes.len() {
-        for separator in SSE_EVENT_SEPARATORS {
-            let ends_at_buffer_edge = position + separator.len() == bytes.len();
-            if bytes[position..].starts_with(separator)
-                && (end_of_stream
-                    || !separator.ends_with(b"\r")
-                    || separator == b"\r\r"
-                    || !ends_at_buffer_edge)
-            {
-                return Some((position, separator.len()));
-            }
-        }
-    }
-    None
-}
-
 fn ensure_event_size(size: usize) -> CoreResult<()> {
     if size > MAX_SSE_EVENT_BYTES {
         Err(streaming_error("provider streaming event exceeded 1 MiB"))
@@ -3022,6 +2999,18 @@ mod tests {
             ProviderEvent::TextDelta("first".to_owned())
         );
         assert!(events.try_recv().is_err());
+    }
+
+    #[test]
+    fn sse_framing_work_is_linear_for_dense_and_fragmented_input() {
+        crate::sse::assert_sse_framing_work_is_linear(&SSE_EVENT_SEPARATORS);
+    }
+
+    #[test]
+    fn rescans_edge_deferred_separator_after_newline_free_chunk() {
+        crate::sse::assert_edge_deferred_separator_is_rescanned_after_newline_free_chunk(
+            &SSE_EVENT_SEPARATORS,
+        );
     }
 
     #[tokio::test]

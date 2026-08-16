@@ -23,12 +23,14 @@ mod desktop;
 mod mobile;
 
 use std::path::Path;
-use zeroize::Zeroize;
+use uuid::Uuid;
+use zeroize::{Zeroize, Zeroizing};
 
 pub use error::{PlatformError, PlatformErrorCode, PlatformResult};
 pub use model::{
     BoundCredentialObservation, ClipboardCleanupStatus, CredentialAuthority, CredentialStatus,
-    LegacyCredentialObservation, NativeCaptureStatus, NativeCredential, NativeSavedContentSource,
+    LegacyCredentialObservation, NativeCaptureStatus, NativeCredential, NativeCredentialEffect,
+    NativeCredentialEffectConfirmation, NativeCredentialEffectContext, NativeSavedContentSource,
     NativeSensitiveText, PreparedBoundCredentialStore, StagedImport,
 };
 use tauri::{Manager, Runtime, plugin::TauriPlugin};
@@ -38,6 +40,16 @@ pub struct LorepiaPlatform<R: Runtime> {
     inner: desktop::DesktopPlatform<R>,
     #[cfg(mobile)]
     inner: mobile::MobilePlatform<R>,
+    legacy_confirmation_process_key: Zeroizing<[u8; 32]>,
+}
+
+fn new_legacy_confirmation_process_key() -> Zeroizing<[u8; 32]> {
+    let first = Uuid::new_v4();
+    let second = Uuid::new_v4();
+    let mut key = Zeroizing::new([0_u8; 32]);
+    key[..16].copy_from_slice(first.as_bytes());
+    key[16..].copy_from_slice(second.as_bytes());
+    key
 }
 
 fn prepare_bound_credential_store_with(
@@ -127,6 +139,16 @@ impl<R: Runtime> LorepiaPlatform<R> {
         {
             self.inner.credential_status(reference)
         }
+    }
+
+    /// Presents one OS-owned modal and returns a non-reusable Rust-only proof
+    /// only when the foreground user accepts the exact effect context.
+    pub async fn confirm_credential_effect(
+        &self,
+        context: NativeCredentialEffectContext,
+    ) -> PlatformResult<NativeCredentialEffectConfirmation> {
+        self.inner.confirm_credential_effect(&context).await?;
+        Ok(NativeCredentialEffectConfirmation::new(context))
     }
 
     pub fn read_credential<'a>(
@@ -307,6 +329,19 @@ impl<R: Runtime> LorepiaPlatform<R> {
         }
     }
 
+    /// Binds one native confirmation to the exact current legacy slot without
+    /// returning credential contents or a renderer-reusable secret hash.
+    pub async fn legacy_credential_confirmation_revision(
+        &self,
+        reference: &str,
+    ) -> PlatformResult<String> {
+        credential_envelope::legacy_confirmation_revision(
+            reference,
+            self.read_credential(reference).await?,
+            &self.legacy_confirmation_process_key,
+        )
+    }
+
     /// Reads one legacy raw credential while rejecting every envelope-shaped
     /// item before any bytes can reach a provider request.
     pub async fn read_legacy_credential(
@@ -395,7 +430,10 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             let inner = desktop::DesktopPlatform::new(app.app_handle().clone())
                 .map_err(|error| Box::new(error) as Box<dyn std::error::Error>)?;
 
-            app.manage(LorepiaPlatform { inner });
+            app.manage(LorepiaPlatform {
+                inner,
+                legacy_confirmation_process_key: new_legacy_confirmation_process_key(),
+            });
             Ok(())
         })
         .build()
@@ -408,13 +446,16 @@ tauri::ios_plugin_binding!(init_plugin_lorepia_platform);
 mod tests {
     use super::{
         BoundCredentialObservation, ClipboardCleanupStatus, CredentialAuthority,
-        NativeCaptureStatus, NativeCredential, NativeSavedContentSource, NativeSensitiveText,
-        PlatformError, PlatformErrorCode, PreparedBoundCredentialStore, StagedImport,
-        credential_envelope, prepare_bound_credential_store_with,
+        NativeCaptureStatus, NativeCredential, NativeCredentialEffect,
+        NativeCredentialEffectConfirmation, NativeCredentialEffectContext,
+        NativeSavedContentSource, NativeSensitiveText, PlatformError, PlatformErrorCode,
+        PreparedBoundCredentialStore, StagedImport, credential_envelope,
+        prepare_bound_credential_store_with,
     };
     use std::cell::Cell;
     use std::marker::PhantomData;
     use std::path::PathBuf;
+    use std::time::{Duration, Instant};
 
     trait AmbiguousIfSerialize<Marker> {
         fn marker() {}
@@ -473,6 +514,197 @@ mod tests {
         let _ = <SerializeCheck<PreparedBoundCredentialStore> as AmbiguousIfSerialize<_>>::marker;
         let _ = <DebugCheck<PreparedBoundCredentialStore> as AmbiguousIfDebug<_>>::marker;
         let _ = <CloneCheck<PreparedBoundCredentialStore> as AmbiguousIfClone<_>>::marker;
+        let _ =
+            <SerializeCheck<NativeCredentialEffectConfirmation> as AmbiguousIfSerialize<_>>::marker;
+        let _ = <DebugCheck<NativeCredentialEffectConfirmation> as AmbiguousIfDebug<_>>::marker;
+        let _ = <CloneCheck<NativeCredentialEffectConfirmation> as AmbiguousIfClone<_>>::marker;
+    }
+
+    #[test]
+    fn macos_and_windows_confirmation_policy_rejects_prompt_spoofing_controls() {
+        let valid = NativeCredentialEffectContext::new(
+            NativeCredentialEffect::Delete,
+            "connection-a".to_owned(),
+            "https://api.example.test".to_owned(),
+            "revision-7".to_owned(),
+        )
+        .expect("bounded exact context");
+        assert_eq!(valid.target_id(), "connection-a");
+
+        for invalid in [
+            "",
+            "   ",
+            "connection\nApprove",
+            "connection\u{0000}Approve",
+            "connection\u{2028}Approve",
+            "connection\u{2029}Approve",
+            "connection\u{202e}Approve",
+            "connection\u{2066}Approve",
+            "connection\u{2069}Approve",
+            "connection\u{200b}Approve",
+            "connection\u{200d}Approve",
+            "connection\u{2060}Approve",
+            "connection\u{feff}Approve",
+            "connection\u{00ad}Approve",
+            "connection\u{034f}Approve",
+            "connection\u{e0001}Approve",
+        ] {
+            assert!(
+                NativeCredentialEffectContext::new(
+                    NativeCredentialEffect::Delete,
+                    invalid.to_owned(),
+                    "https://api.example.test".to_owned(),
+                    "revision-7".to_owned(),
+                )
+                .is_err()
+            );
+        }
+
+        NativeCredentialEffectContext::new(
+            NativeCredentialEffect::Delete,
+            "연결 a".to_owned(),
+            "https://예시.test".to_owned(),
+            "revision-8".to_owned(),
+        )
+        .expect("visible Unicode and ASCII spaces remain valid");
+    }
+
+    #[test]
+    fn stale_credential_confirmation_cannot_reach_native_mutation() {
+        let confirmation = NativeCredentialEffectConfirmation::new(
+            NativeCredentialEffectContext::new(
+                NativeCredentialEffect::Delete,
+                "connection-a".to_owned(),
+                "https://api.example.test".to_owned(),
+                "revision-7".to_owned(),
+            )
+            .expect("prompt context"),
+        );
+        let native_mutations = Cell::new(0_u32);
+
+        let result = confirmation.consume_exact(
+            NativeCredentialEffect::Delete,
+            "connection-a",
+            "https://changed.example.test",
+            "revision-8",
+        );
+        if result.is_ok() {
+            native_mutations.set(native_mutations.get() + 1);
+        }
+
+        assert!(result.is_err());
+        assert_eq!(native_mutations.get(), 0);
+    }
+
+    #[test]
+    fn stale_credential_authority_confirmation_cannot_reach_native_mutation() {
+        let confirmation = NativeCredentialEffectConfirmation::new(
+            NativeCredentialEffectContext::new(
+                NativeCredentialEffect::Delete,
+                "connection-a".to_owned(),
+                "https://api.example.test".to_owned(),
+                "row=2026-08-16T00:00:00Z;authority=authority-a:aaaaaaaa".to_owned(),
+            )
+            .expect("authority-a prompt context"),
+        );
+        let native_mutations = Cell::new(0_u32);
+
+        let result = confirmation.consume_exact(
+            NativeCredentialEffect::Delete,
+            "connection-a",
+            "https://api.example.test",
+            "row=2026-08-16T00:00:00Z;authority=authority-b:bbbbbbbb",
+        );
+        if result.is_ok() {
+            native_mutations.set(native_mutations.get() + 1);
+        }
+
+        assert!(result.is_err());
+        assert_eq!(native_mutations.get(), 0);
+    }
+
+    #[test]
+    fn expired_credential_confirmation_cannot_reach_native_mutation() {
+        let confirmation = NativeCredentialEffectConfirmation::new_with_deadline_for_test(
+            NativeCredentialEffectContext::new(
+                NativeCredentialEffect::Delete,
+                "connection-a".to_owned(),
+                "https://api.example.test".to_owned(),
+                "revision-7".to_owned(),
+            )
+            .expect("prompt context"),
+            Instant::now()
+                .checked_sub(Duration::from_secs(1))
+                .expect("past monotonic instant"),
+        );
+        let native_mutations = Cell::new(0_u32);
+
+        let result = confirmation.consume_exact(
+            NativeCredentialEffect::Delete,
+            "connection-a",
+            "https://api.example.test",
+            "revision-7",
+        );
+        if result.is_ok() {
+            native_mutations.set(native_mutations.get() + 1);
+        }
+
+        assert_eq!(
+            result.expect_err("expired confirmation must fail").code(),
+            PlatformErrorCode::PermissionDenied
+        );
+        assert_eq!(native_mutations.get(), 0);
+    }
+
+    #[test]
+    fn legacy_raw_replacement_invalidates_confirmation_before_native_mutation() {
+        let process_key = [0x5a; 32];
+        let revision_a = credential_envelope::legacy_confirmation_revision(
+            "legacy-profile-a",
+            Some(NativeCredential::new("legacy-secret-a".to_owned())),
+            &process_key,
+        )
+        .expect("raw A revision");
+        let revision_a_reobserved = credential_envelope::legacy_confirmation_revision(
+            "legacy-profile-a",
+            Some(NativeCredential::new("legacy-secret-a".to_owned())),
+            &process_key,
+        )
+        .expect("stable raw A revision");
+        let revision_b = credential_envelope::legacy_confirmation_revision(
+            "legacy-profile-a",
+            Some(NativeCredential::new("legacy-secret-b".to_owned())),
+            &process_key,
+        )
+        .expect("raw B revision");
+
+        assert_eq!(revision_a, revision_a_reobserved);
+        assert_ne!(revision_a, revision_b);
+        assert!(!revision_a.contains("legacy-secret-a"));
+        assert!(!revision_b.contains("legacy-secret-b"));
+
+        let confirmation = NativeCredentialEffectConfirmation::new(
+            NativeCredentialEffectContext::new(
+                NativeCredentialEffect::Delete,
+                "legacy-profile-a".to_owned(),
+                "https://api.example.test".to_owned(),
+                revision_a,
+            )
+            .expect("raw A prompt context"),
+        );
+        let native_mutations = Cell::new(0_u32);
+        let result = confirmation.consume_exact(
+            NativeCredentialEffect::Delete,
+            "legacy-profile-a",
+            "https://api.example.test",
+            &revision_b,
+        );
+        if result.is_ok() {
+            native_mutations.set(native_mutations.get() + 1);
+        }
+
+        assert!(result.is_err());
+        assert_eq!(native_mutations.get(), 0);
     }
 
     #[test]

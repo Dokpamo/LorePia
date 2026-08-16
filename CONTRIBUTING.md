@@ -1,0 +1,60 @@
+# LorePia에 기여하기
+
+## 브랜치와 커밋
+
+- `main`에 직접 커밋하지 않는다. 작업은 항상 브랜치에서 시작한다.
+- 커밋 메시지는 `type: 요약` 형태를 쓴다 (`feat`, `fix`, `refactor`, `test`, `docs`, `chore`).
+- 하나의 커밋은 하나의 변경 의도만 담는다. 대규모 기계적 치환(예: 문자열 이관)은
+  기능 영역 단위로 쪼개고, 각 커밋이 독립적으로 검사를 통과해야 한다.
+
+## 제출 전 확인
+
+두 검사가 모두 통과해야 한다. CI가 같은 명령을 돌린다.
+
+```bash
+cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace
+```
+
+```bash
+npm run check --prefix apps/lorepia && npm run test --prefix apps/lorepia
+```
+
+## 계층 규칙
+
+`README.md`의 저장소 구조 표에 있는 의존 방향을 지킨다. 특히:
+
+- `crates/domain`은 다른 워크스페이스 crate에 의존하지 않는다.
+- `crates/orchestration`은 I/O를 하지 않는다. 시계를 읽지 않고, 네트워크를 쓰지 않는다.
+  시간과 난수 시드는 호출자가 주입한다.
+- `crates/shell-api`의 DTO는 크리덴셜과 호스트 경로를 담지 않는다. 대화 내용은
+  필요한 사용 사례의 타입화된 DTO로만 노출하고, 권한 영수증·진단·로그에는 복사하지 않는다.
+
+## 새 IPC 커맨드를 추가할 때
+
+빠뜨리면 빌드가 실패하는 지점이 여러 곳이다. 순서대로 처리한다.
+
+1. `crates/shell-api`에 입력·출력 DTO와 메서드를 추가하고 `lib.rs`에서 re-export.
+2. `apps/lorepia/src-tauri/src/*_commands.rs`에 `#[tauri::command]` 함수 추가.
+3. `apps/lorepia/src-tauri/src/lib.rs`의 invoke 핸들러에 등록.
+4. `apps/lorepia/src-tauri/build.rs`의 `APP_COMMANDS`에 추가.
+5. `capabilities/main-development.json`과 `main-release.json` **양쪽**에
+   `allow-<kebab-case-이름>` 부여. `build.rs`가 등록된 커맨드와 부여 목록이 정확히
+   일치하는지 검증하므로 한쪽만 넣으면 빌드가 실패한다.
+6. 프론트엔드 `lib/ipc/contracts.ts`와 `client.ts`에 배선.
+   `client.test.ts`가 백엔드 등록 목록과 클라이언트 노출 목록의 일치를 검사한다.
+
+## 스키마 변경
+
+- 마이그레이션 0001–0011은 동결돼 있다. 편집하지 않는다.
+- 새 마이그레이션을 추가하고 `crates/storage/src/database.rs`의 `SCHEMA_VERSION`을 올린다.
+- `schema_registry_integrity`, `migration_cutpoint_matrix` 테스트를 함께 갱신한다.
+
+## 골든 픽스처
+
+프롬프트 플랜은 결정론적이라 골든 해시로 고정돼 있다. 플랜 출력이 의도적으로 바뀌었다면:
+
+```bash
+LOREPIA_UPDATE_CROSS_PLATFORM_GOLDEN=1 cargo test -p lorepia-orchestration cross_platform_golden
+```
+
+재생성된 픽스처는 반드시 사람이 diff를 검토한 뒤 커밋한다.

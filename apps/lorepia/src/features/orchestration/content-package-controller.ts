@@ -18,6 +18,7 @@ import type {
     CommitContentPackageImportReceiptDto,
     LorepiaClient,
 } from '../../lib/ipc/contracts';
+import { t } from '../../lib/i18n';
 import { normalizeClientError } from '../../lib/ipc/errors';
 
 export type ContentPackagePhase =
@@ -119,7 +120,7 @@ const MAX_U32 = 0xffff_ffff;
 function errorLabel(error: unknown): string {
     const normalized = normalizeClientError(error);
     return normalized.messageKey === 'error.unexpected'
-        ? '콘텐츠 패키지 작업을 완료하지 못했습니다.'
+        ? t('content_package.error.generic')
         : normalized.messageKey;
 }
 
@@ -440,8 +441,7 @@ export class ContentPackageController {
             client.commitContentPackageImport === undefined ||
             client.discardContentPackageImport === undefined
         ) {
-            const message =
-                '현재 Core가 안전한 콘텐츠 패키지 선택·검토·승인·확정 API를 제공하지 않습니다.';
+            const message = t('content_package.error.unsupported_flow');
             this.mutable.set({
                 ...structuredClone(INITIAL_CONTENT_PACKAGE_STATE),
                 phase: 'unavailable',
@@ -483,7 +483,7 @@ export class ContentPackageController {
 
     private markSnapshotMismatch(epoch: number): false {
         if (!this.isCurrent(epoch)) return false;
-        const message = 'Core 검토 결과가 현재 패키지 스냅샷과 일치하지 않습니다.';
+        const message = t('content_package.error.review_mismatch');
         this.update((state) => ({
             ...state,
             phase: 'error',
@@ -496,7 +496,7 @@ export class ContentPackageController {
     async loadCompletedPackageExports(): Promise<boolean> {
         const list = this.client.listCompletedContentPackageExports;
         if (list === undefined) {
-            const message = '현재 Core가 완료된 패키지 내보내기 목록 API를 제공하지 않습니다.';
+            const message = t('content_package.error.unsupported_exports');
             this.update((state) => ({
                 ...state,
                 completed_exports_loading: false,
@@ -518,7 +518,7 @@ export class ContentPackageController {
             if (epoch !== this.catalogEpoch) return false;
             const projected = projectCompletedPackageExports(descriptors);
             if (projected === null) {
-                const message = 'Core 완료 패키지 내보내기 목록이 안전한 스냅샷이 아닙니다.';
+                const message = t('content_package.error.unsafe_exports');
                 this.update((state) => ({
                     ...state,
                     completed_exports_loading: false,
@@ -552,9 +552,7 @@ export class ContentPackageController {
         const list = this.client.listPendingContentPackageImports;
         if (list === undefined) {
             await completedExportsLoad;
-            return this.markUnavailable(
-                '현재 Core가 중단된 콘텐츠 패키지 검토 목록 API를 제공하지 않습니다.',
-            );
+            return this.markUnavailable(t('content_package.error.unsupported_pending'));
         }
         const epoch = ++this.operationEpoch;
         const previous = get(this.mutable);
@@ -581,9 +579,7 @@ export class ContentPackageController {
     async pickAndInspect(): Promise<boolean> {
         const picker = this.client.pickContentPackageImport;
         if (picker === undefined) {
-            return this.markUnavailable(
-                '현재 Core가 안전한 콘텐츠 패키지 선택 및 검토 API를 제공하지 않습니다.',
-            );
+            return this.markUnavailable(t('content_package.error.unsupported_select'));
         }
         const epoch = ++this.operationEpoch;
         const previous = get(this.mutable);
@@ -604,7 +600,7 @@ export class ContentPackageController {
                     ...structuredClone(INITIAL_CONTENT_PACKAGE_STATE),
                     ...completedExportCatalog,
                     pending_imports: pendingImports,
-                    announcement: '콘텐츠 패키지 선택을 취소했습니다.',
+                    announcement: t('content_package.notice.selection_cancelled'),
                 });
                 return false;
             }
@@ -616,7 +612,7 @@ export class ContentPackageController {
                 status: 'inspected',
                 revision: inspection.revision,
                 pending_imports: pendingImports,
-                announcement: '콘텐츠 패키지 검토가 준비되었습니다.',
+                announcement: t('content_package.notice.review_ready'),
             });
             return true;
         } catch (error: unknown) {
@@ -627,9 +623,7 @@ export class ContentPackageController {
     async resume(importId: string): Promise<boolean> {
         const reopen = this.client.reopenContentPackageImport;
         if (reopen === undefined) {
-            return this.markUnavailable(
-                '현재 Core가 중단된 콘텐츠 패키지 검토 재개 API를 제공하지 않습니다.',
-            );
+            return this.markUnavailable(t('content_package.error.unsupported_reopen'));
         }
         const epoch = ++this.operationEpoch;
         const previous = get(this.mutable);
@@ -639,7 +633,7 @@ export class ContentPackageController {
             ...state,
             phase: 'resuming',
             error: null,
-            announcement: '중단된 콘텐츠 패키지 검토를 다시 열고 있습니다.',
+            announcement: t('content_package.notice.reopening'),
         }));
         try {
             const workspace = await reopen.call(this.client, { import_id: importId });
@@ -682,7 +676,7 @@ export class ContentPackageController {
                 required_capabilities: capabilities,
                 approved_capabilities: lifecycle.approval?.approved_capabilities ?? [],
                 confirmed_update_targets: [],
-                announcement: '중단된 콘텐츠 패키지 검토를 다시 열었습니다.',
+                announcement: t('content_package.notice.reopened'),
             });
             return true;
         } catch (error: unknown) {
@@ -704,8 +698,8 @@ export class ContentPackageController {
                 : sortedUnique([...current.selected_component_ids, componentId]),
             error: null,
             announcement: isSelected
-                ? '가져올 구성 요소에서 제외했습니다.'
-                : '가져올 구성 요소로 선택했습니다.',
+                ? t('content_package.notice.excluded')
+                : t('content_package.notice.included'),
         }));
         return true;
     }
@@ -713,9 +707,7 @@ export class ContentPackageController {
     async reviewSelection(): Promise<boolean> {
         const select = this.client.selectContentPackageImport;
         if (select === undefined) {
-            return this.markUnavailable(
-                '현재 Core가 콘텐츠 패키지 선택 검토 API를 제공하지 않습니다.',
-            );
+            return this.markUnavailable(t('content_package.error.unsupported_selection_review'));
         }
         const state = get(this.mutable);
         if (
@@ -733,7 +725,7 @@ export class ContentPackageController {
             ...current,
             phase: 'selecting',
             error: null,
-            announcement: '선택한 구성 요소, 비활성 정규화, 대상 쓰기를 검토하고 있습니다.',
+            announcement: t('content_package.notice.reviewing_selection'),
         }));
 
         try {
@@ -770,8 +762,7 @@ export class ContentPackageController {
                 approved_capabilities: [],
                 confirmed_update_targets: [],
                 error: null,
-                announcement:
-                    '정규화와 대상 쓰기 근거가 준비되었습니다. 기존 대상 업데이트를 각각 확인한 뒤 별도로 승인하세요.',
+                announcement: t('content_package.notice.evidence_ready'),
             }));
             return true;
         } catch (error: unknown) {
@@ -794,8 +785,8 @@ export class ContentPackageController {
                 ? current.enabled_component_ids.filter((id) => id !== componentId)
                 : sortedUnique([...current.enabled_component_ids, componentId]),
             announcement: isEnabled
-                ? '구성 요소를 비활성 상태로 가져옵니다.'
-                : '구성 요소를 활성 상태로 가져오도록 선택했습니다.',
+                ? t('content_package.notice.import_inactive')
+                : t('content_package.notice.import_active'),
         }));
         return true;
     }
@@ -815,8 +806,8 @@ export class ContentPackageController {
                 ? current.approved_capabilities.filter((value) => value !== capability)
                 : sortedUnique([...current.approved_capabilities, capability]),
             announcement: isApproved
-                ? '패키지 기능 승인을 취소했습니다.'
-                : '패키지 기능을 명시적으로 승인했습니다.',
+                ? t('content_package.notice.capability_revoked')
+                : t('content_package.notice.capability_approved'),
         }));
         return true;
     }
@@ -847,8 +838,8 @@ export class ContentPackageController {
             confirmed_update_targets: confirmedUpdateTargets,
             error: null,
             announcement: confirmedKeys.has(key)
-                ? '기존 대상 업데이트를 명시적으로 확인했습니다.'
-                : '기존 대상 업데이트 확인을 취소했습니다.',
+                ? t('content_package.notice.target_confirmed')
+                : t('content_package.notice.target_unconfirmed'),
         }));
         return true;
     }
@@ -856,9 +847,7 @@ export class ContentPackageController {
     async approve(): Promise<boolean> {
         const approve = this.client.approveContentPackageImport;
         if (approve === undefined) {
-            return this.markUnavailable(
-                '현재 Core가 콘텐츠 패키지 명시적 승인 API를 제공하지 않습니다.',
-            );
+            return this.markUnavailable(t('content_package.error.unsupported_approval'));
         }
         const state = get(this.mutable);
         if (
@@ -890,7 +879,7 @@ export class ContentPackageController {
             ...current,
             phase: 'approving',
             error: null,
-            announcement: '표시된 정규화·대상 쓰기 근거와 기능 승인을 고정하고 있습니다.',
+            announcement: t('content_package.notice.pinning'),
         }));
         try {
             const receipt = await approve.call(this.client, {
@@ -937,8 +926,7 @@ export class ContentPackageController {
                     approved_capabilities: receipt.approved_capabilities,
                 },
                 error: null,
-                announcement:
-                    '정규화·대상 쓰기 근거와 기능 승인이 고정되었습니다. 이제 가져오기를 확정할 수 있습니다.',
+                announcement: t('content_package.notice.pinned'),
             }));
             return true;
         } catch (error: unknown) {
@@ -949,9 +937,7 @@ export class ContentPackageController {
     async commit(): Promise<boolean> {
         const commit = this.client.commitContentPackageImport;
         if (commit === undefined) {
-            return this.markUnavailable(
-                '현재 Core가 콘텐츠 패키지 가져오기 확정 API를 제공하지 않습니다.',
-            );
+            return this.markUnavailable(t('content_package.error.unsupported_commit'));
         }
         const state = get(this.mutable);
         if (
@@ -969,7 +955,7 @@ export class ContentPackageController {
             ...current,
             phase: 'committing',
             error: null,
-            announcement: '승인된 콘텐츠 패키지를 가져오고 있습니다.',
+            announcement: t('content_package.notice.importing'),
         }));
         try {
             const result = await commit.call(this.client, {
@@ -998,7 +984,7 @@ export class ContentPackageController {
                 ...retainedCompletedExportCatalog(state),
                 result,
                 pending_imports: pendingImports,
-                announcement: '콘텐츠 패키지를 안전하게 가져왔습니다.',
+                announcement: t('content_package.notice.imported'),
             });
             return true;
         } catch (error: unknown) {
@@ -1029,7 +1015,7 @@ export class ContentPackageController {
         const state = get(this.mutable);
         if (state.exporting_import_id !== null) return false;
         if (exportContentSource === undefined) {
-            const message = '현재 Core가 안전한 콘텐츠 소스 내보내기 API를 제공하지 않습니다.';
+            const message = t('content_package.error.unsupported_export');
             this.update((current) => ({
                 ...current,
                 export_error: message,
@@ -1043,7 +1029,7 @@ export class ContentPackageController {
             ...current,
             exporting_import_id: importId,
             export_error: null,
-            announcement: '완료된 콘텐츠 패키지의 저장 위치를 선택하고 있습니다.',
+            announcement: t('content_package.notice.export_picking'),
         }));
         try {
             const receipt = await exportContentSource.call(this.client, {
@@ -1067,7 +1053,7 @@ export class ContentPackageController {
                     (projected.sha256 !== expectedDescriptor.sha256 ||
                         projected.size_bytes !== expectedDescriptor.size_bytes))
             ) {
-                const message = 'Core 내보내기 영수증이 완료된 패키지와 일치하지 않습니다.';
+                const message = t('content_package.error.export_mismatch');
                 this.update((current) => ({
                     ...current,
                     exporting_import_id: null,
@@ -1081,7 +1067,7 @@ export class ContentPackageController {
                 exporting_import_id: null,
                 export_receipt: projected,
                 export_error: null,
-                announcement: `${projected.file_name} 파일로 콘텐츠 패키지를 내보냈습니다.`,
+                announcement: t('content_package.notice.exported', { name: projected.file_name }),
             }));
             return true;
         } catch (error: unknown) {
@@ -1100,9 +1086,7 @@ export class ContentPackageController {
     async discard(): Promise<boolean> {
         const discard = this.client.discardContentPackageImport;
         if (discard === undefined) {
-            return this.markUnavailable(
-                '현재 Core가 콘텐츠 패키지 검토 폐기 API를 제공하지 않습니다.',
-            );
+            return this.markUnavailable(t('content_package.error.unsupported_discard'));
         }
         const state = get(this.mutable);
         if (state.inspection === null || state.revision === null) return false;
@@ -1111,7 +1095,7 @@ export class ContentPackageController {
         this.update((current) => ({
             ...current,
             error: null,
-            announcement: '콘텐츠 패키지 검토를 폐기하고 있습니다.',
+            announcement: t('content_package.notice.discarding'),
         }));
         try {
             await discard.call(this.client, {
@@ -1129,7 +1113,7 @@ export class ContentPackageController {
                 ...structuredClone(INITIAL_CONTENT_PACKAGE_STATE),
                 ...retainedCompletedExportCatalog(state),
                 pending_imports: pendingImports,
-                announcement: '콘텐츠 패키지 검토를 폐기했습니다.',
+                announcement: t('content_package.notice.discarded'),
             });
             return true;
         } catch (error: unknown) {

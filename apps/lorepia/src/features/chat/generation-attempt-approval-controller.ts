@@ -6,6 +6,7 @@ import type {
     LorepiaClient,
     RetryableGenerationAttemptDto,
 } from '../../lib/ipc/contracts';
+import { t } from '../../lib/i18n';
 import { normalizeClientError } from '../../lib/ipc/errors';
 
 export const MAX_GENERATION_ATTEMPT_PROPOSALS = 100;
@@ -335,7 +336,7 @@ function mergeRetryGenerationIds(
 function errorLabel(error: unknown): string {
     const normalized = normalizeClientError(error);
     return normalized.messageKey === 'error.unexpected'
-        ? '생성 시도의 승인 제안을 불러오거나 결정하지 못했습니다.'
+        ? t('attempt_approval.error.generic')
         : normalized.messageKey;
 }
 
@@ -361,7 +362,7 @@ export class GenerationAttemptApprovalController {
 
     constructor(private readonly client: GenerationAttemptApprovalCapableClient) {
         if (!hasApprovalApi(client)) {
-            const message = '현재 Core가 생성 시도 단위 승인 API를 제공하지 않습니다.';
+            const message = t('attempt_approval.error.unsupported');
             this.mutable.set({
                 ...structuredClone(INITIAL_GENERATION_ATTEMPT_APPROVAL_STATE),
                 phase: 'unavailable',
@@ -381,7 +382,7 @@ export class GenerationAttemptApprovalController {
                 ...(unavailable
                     ? {
                           phase: 'unavailable' as const,
-                          error: '현재 Core가 생성 시도 단위 승인 API를 제공하지 않습니다.',
+                          error: t('attempt_approval.error.unsupported'),
                       }
                     : {}),
             });
@@ -459,16 +460,16 @@ export class GenerationAttemptApprovalController {
                 announcement:
                     expiry.decisions.length > 0
                         ? expiry.has_more_due
-                            ? '만료된 승인 제안을 정리했습니다. 남은 만료 제안을 다시 불러오세요.'
+                            ? t('attempt_approval.notice.expired_more')
                             : expiry.decisions.some(
                                     (receipt) => receipt.pending_proposal_count === 0,
                                 )
-                              ? '만료된 승인 제안을 정리했습니다. 생성을 다시 시도하세요.'
-                              : '만료된 승인 제안을 정리했습니다. 남은 승인 제안을 검토하세요.'
+                              ? t('attempt_approval.notice.expired_retry')
+                              : t('attempt_approval.notice.expired_review')
                         : retryAvailable
-                          ? '재개 가능한 생성 시도를 정확한 시도 ID로 다시 시도할 수 있습니다.'
+                          ? t('attempt_approval.notice.resumable')
                           : proposals.length > 0
-                            ? '생성 시도의 승인 제안을 복원했습니다.'
+                            ? t('attempt_approval.notice.restored')
                             : '',
             });
             return true;
@@ -517,8 +518,7 @@ export class GenerationAttemptApprovalController {
         ) {
             this.mutable.set({
                 ...state,
-                announcement:
-                    '안전하게 표시할 수 없는 저장 제안은 내용을 검토할 수 없어 승인할 수 없습니다.',
+                announcement: t('interaction.error.unreviewable'),
             });
             return false;
         }
@@ -531,8 +531,8 @@ export class GenerationAttemptApprovalController {
             error: null,
             announcement:
                 decision === 'approve'
-                    ? '생성 시도의 제안을 승인하고 있습니다.'
-                    : '생성 시도의 제안을 거절하고 있습니다.',
+                    ? t('attempt_approval.notice.approving')
+                    : t('attempt_approval.notice.rejecting'),
         });
         try {
             const receipt = await this.client.decideGenerationAttemptProposal({
@@ -551,9 +551,13 @@ export class GenerationAttemptApprovalController {
                     'Core attempt decision receipt did not match the reviewed proposal.',
                 );
             }
-            const replayPrefix = receipt.exact_replay ? '이미 반영된 결정을 확인했습니다. ' : '';
+            const replayPrefix = receipt.exact_replay
+                ? t('attempt_approval.notice.replay_prefix')
+                : '';
             const actionLabel =
-                decision === 'approve' ? '제안을 승인했습니다.' : '제안을 거절했습니다.';
+                decision === 'approve'
+                    ? t('interaction.notice.approved')
+                    : t('interaction.notice.rejected');
             if (receipt.exact_replay) {
                 const restored = await this.loadRoom(
                     target.conversation_id,
@@ -577,10 +581,19 @@ export class GenerationAttemptApprovalController {
                     retry_generation_ids: retryGenerationIds,
                     retry_available: retryAvailable,
                     announcement: refreshed.has_more_due
-                        ? `${replayPrefix}${actionLabel} 최신 승인 목록에 남은 만료 제안이 있어 다시 불러와야 합니다.`
+                        ? t('attempt_approval.notice.after.more', {
+                              prefix: replayPrefix,
+                              action: actionLabel,
+                          })
                         : receipt.pending_proposal_count === 0
-                          ? `${replayPrefix}${actionLabel} 최신 승인 목록을 복원했습니다. 생성을 다시 시도하세요.`
-                          : `${replayPrefix}${actionLabel} 최신 승인 목록을 복원했습니다. 남은 승인 제안을 검토하세요.`,
+                          ? t('attempt_approval.notice.after.retry', {
+                                prefix: replayPrefix,
+                                action: actionLabel,
+                            })
+                          : t('attempt_approval.notice.after.review', {
+                                prefix: replayPrefix,
+                                action: actionLabel,
+                            }),
                 });
                 return true;
             }
@@ -617,8 +630,14 @@ export class GenerationAttemptApprovalController {
                 error: null,
                 announcement:
                     receipt.pending_proposal_count === 0
-                        ? `${replayPrefix}${actionLabel} 생성을 다시 시도하세요.`
-                        : `${replayPrefix}${actionLabel} 남은 승인 제안을 검토한 뒤 생성을 다시 시도하세요.`,
+                        ? t('attempt_approval.notice.local.retry', {
+                              prefix: replayPrefix,
+                              action: actionLabel,
+                          })
+                        : t('attempt_approval.notice.local.review', {
+                              prefix: replayPrefix,
+                              action: actionLabel,
+                          }),
             });
             return true;
         } catch (error: unknown) {
@@ -629,7 +648,7 @@ export class GenerationAttemptApprovalController {
                 phase: 'ready',
                 busy_proposal_key: null,
                 error: message,
-                announcement: `${message} 제안 목록을 다시 불러오세요.`,
+                announcement: t('attempt_approval.notice.reload', { message }),
             }));
             return false;
         }

@@ -249,6 +249,7 @@ const APP_COMMANDS: &[&str] = &[
     "list_prompt_preset_bindings",
     "list_memory_records",
     "retry_interrupted_memory_job",
+    "list_interrupted_memory_jobs",
     "list_retryable_memory_query_embeddings",
     "retry_memory_query_embedding",
     "simulate_knowledge_activation",

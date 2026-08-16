@@ -5,6 +5,7 @@ mod archive;
 mod hashing;
 mod package;
 mod path;
+mod png;
 
 use std::{
     fs::File,
@@ -13,8 +14,8 @@ use std::{
 };
 
 use lorepia_domain::{
-    CharacterContentV1, ContentKind, CoreError, CoreErrorCode, CoreResult, ImportInspection,
-    ImportLimits, ImportWarning, InspectionId,
+    CharacterContentV1, ContentKind, CoreError, CoreErrorCode, CoreResult, ImportImagePreview,
+    ImportInspection, ImportLimits, ImportWarning, InspectionId,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -107,11 +108,34 @@ pub fn inspect_character_file(
             inspected.warnings,
             inspected.blocked_reasons,
         )
+    } else if read == magic.len() && png::has_png_magic(&magic) {
+        // The signature check only reads the first four bytes, so re-read the
+        // file and let the extractor validate the full eight-byte signature.
+        let bytes = std::fs::read(path).map_err(storage_error)?;
+        let card = png::extract_card_metadata(&bytes)?;
+        let metadata = adapters::parse_card_json_with_source(&card, &source_sha256)?;
+        let mut warnings = inspected_extension_warning(&extension, "PNG");
+        warnings.extend(promoted_card_warning(&metadata));
+        let source_size = source_metadata.len();
+        (
+            ContentKind::CharacterCardPng,
+            metadata,
+            Some(ImportImagePreview {
+                logical_asset_id: PNG_AVATAR_ASSET_ID.to_owned(),
+                media_type: PNG_MEDIA_TYPE.to_owned(),
+                size_bytes: source_size,
+            }),
+            1,
+            source_size,
+            warnings,
+            Vec::new(),
+        )
     } else {
         let bytes = std::fs::read(path).map_err(storage_error)?;
         let metadata = adapters::parse_card_json_with_source(&bytes, &source_sha256)?;
         let estimated_size = metadata.len_bytes;
-        let warnings = inspected_extension_warning(&extension, "JSON");
+        let mut warnings = inspected_extension_warning(&extension, "JSON");
+        warnings.extend(promoted_card_warning(&metadata));
         (
             ContentKind::CharacterCardV3,
             metadata,
@@ -204,6 +228,21 @@ pub fn prepare_import(
 ) -> CoreResult<PreparedImport> {
     let plan = inspect_character_file(path, limits)?;
     let inspection = plan.inspection;
+    if inspection.is_allowed() && inspection.kind == ContentKind::CharacterCardPng {
+        let staged_assets = stage_png_avatar(
+            path,
+            asset_staging_directory,
+            &inspection.id.0,
+            &inspection.source_sha256,
+            inspection.source_size,
+        )?;
+        return Ok(PreparedImport {
+            inspection,
+            character_content: plan.character_content,
+            plan_hash: plan.plan_hash,
+            staged_assets,
+        });
+    }
     let staged_assets = if inspection.is_allowed() && inspection.kind == ContentKind::CharxPackage {
         let assets =
             archive::stage_archive_assets(path, limits, asset_staging_directory, &inspection.id.0)?;
@@ -239,6 +278,52 @@ pub fn prepare_import(
         plan_hash: plan.plan_hash,
         staged_assets,
     })
+}
+
+/// Stages the PNG source itself as the card avatar.
+///
+/// A PNG card carries exactly one asset: the image it is embedded in. The
+/// source digest and size are re-verified after the copy so a file swapped
+/// during staging is rejected, matching the CHARX staging contract.
+fn stage_png_avatar(
+    path: &Path,
+    staging_directory: &Path,
+    inspection_id: &str,
+    expected_sha256: &str,
+    expected_size: u64,
+) -> CoreResult<Vec<StagedAsset>> {
+    std::fs::create_dir_all(staging_directory).map_err(storage_error)?;
+    let staged_path = staging_directory.join(format!("inspection-{inspection_id}-asset-0.partial"));
+    std::fs::copy(path, &staged_path).map_err(|error| {
+        let _ = std::fs::remove_file(&staged_path);
+        storage_error(error)
+    })?;
+
+    let staged_sha256 = sha256_file(&staged_path)?;
+    let staged_size = staged_path.metadata().map_err(storage_error)?.len();
+    let current_sha256 = sha256_file(path)?;
+    let current_size = path.metadata().map_err(storage_error)?.len();
+    if staged_sha256 != expected_sha256
+        || staged_size != expected_size
+        || current_sha256 != expected_sha256
+        || current_size != expected_size
+    {
+        let _ = std::fs::remove_file(&staged_path);
+        return Err(CoreError::new(
+            CoreErrorCode::UnsafeArchive,
+            "import source changed while the card image was being staged",
+            false,
+        ));
+    }
+
+    Ok(vec![StagedAsset {
+        original_path: PNG_AVATAR_ASSET_ID.to_owned(),
+        staged_path,
+        sha256: staged_sha256,
+        media_type: PNG_MEDIA_TYPE.to_owned(),
+        size_bytes: staged_size,
+        signature_valid: true,
+    }])
 }
 
 fn character_plan_hash(
@@ -290,9 +375,28 @@ fn is_zip_signature(magic: [u8; 4]) -> bool {
     )
 }
 
+/// Logical id given to the PNG source when it is staged as the card avatar.
+pub(crate) const PNG_AVATAR_ASSET_ID: &str = "card.png";
+pub(crate) const PNG_MEDIA_TYPE: &str = "image/png";
+
+/// Tells the reviewer that a V2 card was promoted before anything is committed.
+fn promoted_card_warning(metadata: &adapters::CardMetadata) -> Vec<ImportWarning> {
+    if metadata.promoted_from_v2 {
+        vec![ImportWarning {
+            code: "character_card_v2_promoted".to_owned(),
+            message: "Card declares the V2 specification and was promoted to V3. \
+                      Fields that only V3 defines are empty."
+                .to_owned(),
+        }]
+    } else {
+        Vec::new()
+    }
+}
+
 fn inspected_extension_warning(extension: &str, detected: &str) -> Vec<ImportWarning> {
     let expected = match detected {
         "JSON" => extension == "json",
+        "PNG" => extension == "png",
         _ => matches!(extension, "charx" | "zip"),
     };
     if expected {

@@ -40,7 +40,7 @@ use crate::interaction_repository::{
     validate_generation_attempt_identity_migration_legacy_rows,
 };
 
-pub(crate) const SCHEMA_VERSION: u32 = 37;
+pub(crate) const SCHEMA_VERSION: u32 = 38;
 const MIGRATION_0001: &str = include_str!("../migrations/0001_initial.sql");
 const MIGRATION_0002: &str = include_str!("../migrations/0002_import_asset_recovery.sql");
 const MIGRATION_0003: &str = include_str!("../migrations/0003_conversation_branches.sql");
@@ -101,6 +101,7 @@ const MIGRATION_0035: &str =
 const MIGRATION_0036: &str =
     include_str!("../migrations/0036_generation_attempt_derived_closure.sql");
 const MIGRATION_0037: &str = include_str!("../migrations/0037_provider_credential_operations.sql");
+const MIGRATION_0038: &str = include_str!("../migrations/0038_conversation_speakers.sql");
 const LEGACY_PROVIDER_TEMPLATE_ID: &str = "custom-openai-chat-v1";
 const LEGACY_PROVIDER_TEMPLATE_VERSION: u32 = 1;
 const LEGACY_BASE_URL_CONFIG_KEY: &str = "api_base_url";
@@ -5407,6 +5408,13 @@ pub(crate) fn apply_migrations(connection: &mut Connection) -> CoreResult<()> {
         MIGRATION_0037,
         "provider credential operation journal",
     )?;
+    apply_checked_migration(
+        connection,
+        current_version,
+        38,
+        MIGRATION_0038,
+        "conversation speaker roster and message attribution",
+    )?;
     read_current_schema_version(connection)?;
     Ok(())
 }
@@ -6719,6 +6727,16 @@ fn validate_connection_against_template(
     connection: &ProviderConnection,
     template: &ProviderTemplate,
 ) -> CoreResult<()> {
+    if connection.config.network_mode == ProviderNetworkMode::ApprovedLocalNetwork
+        && !matches!(template.default_manifest.auth, AuthBinding::None)
+        && Url::parse(connection.api_origin.as_str()).is_ok_and(|origin| origin.scheme() != "https")
+    {
+        return Err(CoreError::new(
+            CoreErrorCode::PermissionDenied,
+            "credential-bearing local-network providers require an https API origin",
+            false,
+        ));
+    }
     for entry in &connection.config.values {
         let field = template
             .connection_fields
@@ -8700,113 +8718,36 @@ fn legacy_branch_migration_count(connection: &Connection, query: &str) -> CoreRe
 }
 
 fn recover_interrupted_work(root: &Path, connection: &mut Connection) -> CoreResult<()> {
+    // A package commit is atomic in current implementations. Seeing this state
+    // durably therefore indicates legacy or logically corrupted data; reject it
+    // before any startup recovery mutates the database.
+    reject_durable_committing_package_imports(connection)?;
     let jobs = load_interrupted_imports(connection)?;
     validate_and_cleanup_imports(root, connection, &jobs)?;
     let settings = load_recovery_settings(connection)?;
     apply_recovery_transaction(connection, &jobs, &settings)?;
-    recover_interrupted_package_imports(connection)?;
     recover_package_cas_promotions(root, connection)?;
     remove_partial_files(&root.join("sources/sha256"))?;
     remove_partial_files(&root.join("assets/sha256"))?;
     Ok(())
 }
 
-fn recover_interrupted_package_imports(connection: &mut Connection) -> CoreResult<()> {
-    let recovered_at = Utc::now().to_rfc3339();
-    let failure_json = serde_json::to_string(&serde_json::json!({
-        "code": "process_restarted",
-    }))
-    .map_err(|error| {
-        CoreError::internal(format!(
-            "package recovery failure cannot be encoded: {error}"
-        ))
-    })?;
-    let audit_payload_json = serde_json::to_string(&serde_json::json!({
-        "schema_version": 1,
-        "value": {
-            "code": "process_restarted",
-            "interrupted_state": "committing",
-        },
-    }))
-    .map_err(|error| {
-        CoreError::internal(format!("package recovery audit cannot be encoded: {error}"))
-    })?;
-    let audit_payload_sha256 = hex::encode(Sha256::digest(audit_payload_json.as_bytes()));
-    let transaction = connection
-        .transaction_with_behavior(TransactionBehavior::Immediate)
+fn reject_durable_committing_package_imports(connection: &Connection) -> CoreResult<()> {
+    let exists = connection
+        .query_row(
+            "SELECT EXISTS(
+                 SELECT 1 FROM package_imports WHERE state = 'committing'
+             )",
+            [],
+            |row| row.get::<_, bool>(0),
+        )
         .map_err(storage_db_error)?;
-    let interrupted = {
-        let mut statement = transaction
-            .prepare(
-                "SELECT id, revision
-                 FROM package_imports
-                 WHERE state = 'committing'
-                 ORDER BY updated_at, id",
-            )
-            .map_err(storage_db_error)?;
-        statement
-            .query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .map_err(storage_db_error)?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(storage_db_error)?
-    };
-    for (import_id, revision) in interrupted {
-        let recovered_revision = revision
-            .checked_add(1)
-            .ok_or_else(|| storage_corrupted("package import revision overflow during recovery"))?;
-        let previous_sequence = transaction
-            .query_row(
-                "SELECT MAX(sequence)
-                 FROM package_import_audit_events
-                 WHERE import_id = ?1",
-                [import_id.as_str()],
-                |row| row.get::<_, Option<i64>>(0),
-            )
-            .map_err(storage_db_error)?
-            .unwrap_or(0);
-        let recovery_sequence = previous_sequence.checked_add(1).ok_or_else(|| {
-            storage_corrupted("package import audit sequence overflow during recovery")
-        })?;
-        transaction
-            .execute(
-                "INSERT INTO package_import_audit_events (
-                     import_id, sequence, import_revision, event_kind,
-                     payload_json, payload_sha256, created_at
-                 ) VALUES (?1, ?2, ?3, 'failed', ?4, ?5, ?6)",
-                params![
-                    import_id,
-                    recovery_sequence,
-                    recovered_revision,
-                    audit_payload_json,
-                    audit_payload_sha256,
-                    recovered_at,
-                ],
-            )
-            .map_err(storage_db_error)?;
-        let changed = transaction
-            .execute(
-                "UPDATE package_imports
-                 SET state = 'failed', revision = ?2, failure_json = ?3,
-                     completed_at = ?4, updated_at = ?4
-                 WHERE id = ?1 AND state = 'committing' AND revision = ?5",
-                params![
-                    import_id,
-                    recovered_revision,
-                    failure_json,
-                    recovered_at,
-                    revision,
-                ],
-            )
-            .map_err(storage_db_error)?;
-        if changed != 1 {
-            return Err(storage_corrupted(
-                "interrupted package import changed during startup recovery",
-            ));
-        }
+    if exists {
+        return Err(storage_corrupted(
+            "durable package import remained in the impossible committing state",
+        ));
     }
-    transaction.commit().map_err(storage_db_error)
+    Ok(())
 }
 
 fn recover_package_cas_promotions(root: &Path, connection: &mut Connection) -> CoreResult<()> {
@@ -12306,7 +12247,7 @@ mod tests {
         template.display_name = "Approved LAN test template".to_owned();
         template.source = TemplateSource::UserDiscovered;
         connection.template_id = template.id.clone();
-        let api_origin = CanonicalOrigin::parse("http://192.168.10.20:11434").expect("LAN origin");
+        let api_origin = CanonicalOrigin::parse("https://192.168.10.20:11434").expect("LAN origin");
         connection.api_origin = api_origin.clone();
         connection.config.network_mode = ProviderNetworkMode::ApprovedLocalNetwork;
         connection.config.local_network_approval = Some(ProviderLocalNetworkApproval {
@@ -12320,7 +12261,7 @@ mod tests {
             .allowed_origins = vec![api_origin];
         connection.config.values = vec![ConnectionConfigEntry {
             key: LEGACY_BASE_URL_CONFIG_KEY.to_owned(),
-            value: ConnectionConfigValue::Text("http://192.168.10.20:11434/v1".to_owned()),
+            value: ConnectionConfigValue::Text("https://192.168.10.20:11434/v1".to_owned()),
         }];
         (template, connection)
     }
@@ -12395,7 +12336,7 @@ mod tests {
                     |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
                 )
                 .expect("LAN approval mirror");
-            assert_eq!(mirror.0, "http://192.168.10.20:11434");
+            assert_eq!(mirror.0, "https://192.168.10.20:11434");
             assert_eq!(mirror.1, r#"["192.168.10.20"]"#);
         }
         let reopened = Storage::open(root.path()).expect("reopen storage");
@@ -12419,6 +12360,39 @@ mod tests {
             panic!("missing LAN mirror must fail closed");
         };
         assert_eq!(error.code, CoreErrorCode::StorageCorrupted);
+    }
+
+    #[test]
+    fn provider_connection_storage_rejects_cleartext_credential_lan_grants() {
+        let root = tempdir().expect("temp root");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let (template, mut connection) = approved_lan_connection("cleartext-credential-lan");
+        let cleartext_origin =
+            CanonicalOrigin::parse("http://192.168.10.20:11434").expect("cleartext LAN origin");
+        connection.api_origin = cleartext_origin.clone();
+        connection
+            .config
+            .local_network_approval
+            .as_mut()
+            .expect("LAN approval")
+            .origin = cleartext_origin.clone();
+        connection
+            .credential_scope
+            .as_mut()
+            .expect("credential scope")
+            .allowed_origins = vec![cleartext_origin];
+        connection.config.values = vec![ConnectionConfigEntry {
+            key: LEGACY_BASE_URL_CONFIG_KEY.to_owned(),
+            value: ConnectionConfigValue::Text("http://192.168.10.20:11434/v1".to_owned()),
+        }];
+        storage
+            .save_provider_template(&template)
+            .expect("save LAN template");
+
+        let error = storage
+            .save_provider_connection(&connection)
+            .expect_err("credential-bearing LAN grants require authenticated transport");
+        assert_eq!(error.code, CoreErrorCode::PermissionDenied);
     }
 
     #[test]
@@ -17441,37 +17415,97 @@ mod tests {
         assert_eq!(error.code, CoreErrorCode::UnsafeArchive);
     }
 
-    #[test]
+    struct DurableCommittingPackageFixture {
+        root: tempfile::TempDir,
+        import_id: String,
+        database_path: PathBuf,
+        promoted_asset_path: PathBuf,
+        partial_document: Option<(String, String)>,
+    }
+
     #[allow(clippy::too_many_lines)] // The fixture follows every guarded durable transition.
-    fn startup_recovery_marks_interrupted_package_commit_failed() {
+    fn durable_committing_package_fixture(
+        import_id: &str,
+        with_partial_document: bool,
+    ) -> DurableCommittingPackageFixture {
         let root = tempdir().expect("temp root");
-        let import_id = "package-interrupted-commit";
         let source_sha256 = "ab".repeat(32);
         let snapshot_sha256 = "cd".repeat(32);
         let audit_payload = r#"{"schema_version":1,"value":{}}"#;
         let audit_payload_sha256 = hex::encode(Sha256::digest(audit_payload.as_bytes()));
         let created_at = "2026-08-16T00:00:00Z";
-        let promoted_asset_path = {
-            let storage = Storage::open(root.path()).expect("open storage");
-            let asset_bytes = b"\x89PNG\r\n\x1a\ninterrupted-package-asset";
-            let asset_sha256 = hex::encode(Sha256::digest(asset_bytes));
-            let staged_asset_path = storage.staging_dir().join("interrupted-asset.png");
-            fs::write(&staged_asset_path, asset_bytes).expect("write staged package asset");
-            let promoted_asset_path = storage
-                .promote_package_assets(
-                    import_id,
-                    &[StagedAssetImport {
-                        staged_path: staged_asset_path,
-                        sha256: asset_sha256,
-                        media_type: "image/png".to_owned(),
-                        size_bytes: u64::try_from(asset_bytes.len()).expect("small package asset"),
-                    }],
-                )
-                .expect("promote package asset before commit")
-                .into_iter()
-                .next()
-                .expect("one promoted package asset");
+        let storage = Storage::open(root.path()).expect("open storage");
+        let asset_bytes = b"\x89PNG\r\n\x1a\ninterrupted-package-asset";
+        let asset_sha256 = hex::encode(Sha256::digest(asset_bytes));
+        let staged_asset_path = storage.staging_dir().join("interrupted-asset.png");
+        fs::write(&staged_asset_path, asset_bytes).expect("write staged package asset");
+        let promoted_asset_path = storage
+            .promote_package_assets(
+                import_id,
+                &[StagedAssetImport {
+                    staged_path: staged_asset_path,
+                    sha256: asset_sha256,
+                    media_type: "image/png".to_owned(),
+                    size_bytes: u64::try_from(asset_bytes.len()).expect("small package asset"),
+                }],
+            )
+            .expect("promote package asset before commit")
+            .into_iter()
+            .next()
+            .expect("one promoted package asset");
+        let partial_document = with_partial_document.then(|| {
+            let component_sha256 = "ef".repeat(32);
+            let book: lorepia_domain::KnowledgeBook = serde_json::from_value(serde_json::json!({
+                "id": format!("{import_id}-knowledge"),
+                "name": "Interrupted package knowledge",
+                "schema_version": 1,
+                "entries": [],
+                "scan_depth": 1,
+                "token_budget": {"max_tokens": 1024},
+                "recursive": false,
+                "max_recursion_depth": 0,
+                "provenance": {
+                    "source_kind": "imported_package",
+                    "source_id": "interrupted-package",
+                    "source_hash": source_sha256,
+                    "author": null,
+                    "license": null,
+                    "imported_at": null
+                }
+            }))
+            .expect("valid interrupted knowledge document");
+            let descriptor = lorepia_orchestration::PackageComponentDescriptor {
+                id: format!("{import_id}-component"),
+                kind: lorepia_orchestration::PackageComponentKind::KnowledgeBook,
+                logical_path: "knowledge/interrupted.json".to_owned(),
+                sha256: Sha256Digest::parse(component_sha256).expect("component digest"),
+                dependencies: Vec::new(),
+                conflicts_with: Vec::new(),
+                required_capabilities: Vec::new(),
+                asset_ids: Vec::new(),
+                disposition: lorepia_orchestration::PackageComponentDisposition::Importable,
+            };
+            let document_json = serde_json::to_string(&book).expect("encode knowledge document");
+            let document_sha256 = hex::encode(Sha256::digest(document_json.as_bytes()));
+            let review_json = serde_json::to_string(&descriptor).expect("encode component review");
+            let review_sha256 = hex::encode(Sha256::digest(review_json.as_bytes()));
+            let revision_id = format!("{import_id}-knowledge-revision-1");
+            (
+                book,
+                descriptor,
+                document_json,
+                document_sha256,
+                review_json,
+                review_sha256,
+                revision_id,
+            )
+        });
+        let database_path = {
             let connection = storage.connection().expect("database connection");
+            let database_path = connection
+                .query_row("PRAGMA database_list", [], |row| row.get::<_, String>(2))
+                .map(PathBuf::from)
+                .expect("active database path");
             connection
                 .execute(
                     "INSERT INTO content_sources (
@@ -17511,6 +17545,39 @@ mod tests {
                     params![import_id, snapshot_sha256, created_at],
                 )
                 .expect("insert inspected package import");
+            if let Some((book, descriptor, _, document_sha256, review_json, review_sha256, _)) =
+                partial_document.as_ref()
+            {
+                connection
+                    .execute(
+                        "INSERT INTO package_import_components (
+                             import_id, ordinal, source_component_key, component_kind,
+                             disposition, selected, target_object_id, target_revision_id,
+                             review_json, review_sha256
+                         ) VALUES (?1, 0, ?2, 'knowledge_book', 'create', 1,
+                                   NULL, NULL, ?3, ?4)",
+                        params![import_id, descriptor.id, review_json, review_sha256],
+                    )
+                    .expect("insert interrupted package component");
+                connection
+                    .execute(
+                        "INSERT INTO package_import_document_target_reviews (
+                             import_id, component_ordinal, document_ordinal,
+                             document_index, document_kind, target_object_id,
+                             disposition, expected_target_revision_id,
+                             expected_target_state_revision, source_component_sha256,
+                             document_sha256
+                         ) VALUES (?1, 0, 0, 0, 'knowledge_book', ?2, 'create',
+                                   NULL, NULL, ?3, ?4)",
+                        params![
+                            import_id,
+                            book.id.as_str(),
+                            descriptor.sha256.as_str(),
+                            document_sha256,
+                        ],
+                    )
+                    .expect("insert interrupted package target review");
+            }
             connection
                 .execute(
                     "INSERT INTO package_import_audit_events (
@@ -17584,78 +17651,296 @@ mod tests {
                     params![import_id, created_at],
                 )
                 .expect("persist interrupted commit state");
-            promoted_asset_path
+            if let Some((book, descriptor, document_json, document_sha256, _, _, revision_id)) =
+                partial_document.as_ref()
+            {
+                let provenance_json =
+                    serde_json::to_string(&book.provenance).expect("encode provenance");
+                connection
+                    .execute(
+                        "INSERT INTO content_objects
+                         (id, object_kind, created_at, deleted_at)
+                         VALUES (?1, 'knowledge_book', ?2, NULL)",
+                        params![book.id.as_str(), created_at],
+                    )
+                    .expect("insert partially committed content object");
+                connection
+                    .execute(
+                        "INSERT INTO content_revisions (
+                             id, object_id, object_kind, revision_no, parent_revision_id,
+                             schema_version, document_json, document_sha256, source_kind,
+                             source_hash, provenance_json, local_override_of_revision_id,
+                             created_at
+                         ) VALUES (
+                             ?1, ?2, 'knowledge_book', 1, NULL, 1, ?3, ?4,
+                             'imported_package', ?5, ?6, NULL, ?7
+                         )",
+                        params![
+                            revision_id,
+                            book.id.as_str(),
+                            document_json,
+                            document_sha256,
+                            source_sha256,
+                            provenance_json,
+                            created_at,
+                        ],
+                    )
+                    .expect("insert partially committed content revision");
+                connection
+                    .execute(
+                        "INSERT INTO content_object_state
+                         (object_id, active_revision_id, state_version, updated_at)
+                         VALUES (?1, ?2, 1, ?3)",
+                        params![book.id.as_str(), revision_id, created_at],
+                    )
+                    .expect("publish partial content state inside the fixture");
+                connection
+                    .execute(
+                        "INSERT INTO content_revision_events (
+                             id, object_id, event_kind, from_revision_id, to_revision_id,
+                             diff_json, diff_sha256, plan_sha256, idempotency_key, created_at
+                         ) VALUES (?1, ?2, 'import', NULL, ?3, NULL, NULL, NULL, ?4, ?5)",
+                        params![
+                            format!("{import_id}-content-event"),
+                            book.id.as_str(),
+                            revision_id,
+                            format!("{import_id}-content-idempotency"),
+                            created_at,
+                        ],
+                    )
+                    .expect("insert partial content revision event");
+                connection
+                    .execute(
+                        "INSERT INTO knowledge_books (
+                             id, name, schema_version, revision, scan_depth, token_budget,
+                             recursive, max_recursion_depth, document_json, provenance_json,
+                             source_kind, source_hash, created_at, updated_at, deleted_at
+                         ) VALUES (?1, ?2, 1, 1, ?3, ?4, ?5, ?6, ?7, ?8,
+                                   'imported_package', ?9, ?10, ?10, NULL)",
+                        params![
+                            book.id.as_str(),
+                            book.name,
+                            book.scan_depth,
+                            book.token_budget.max_tokens,
+                            book.recursive,
+                            book.max_recursion_depth,
+                            document_json,
+                            provenance_json,
+                            source_sha256,
+                            created_at,
+                        ],
+                    )
+                    .expect("insert partial knowledge projection");
+                connection
+                    .execute(
+                        "INSERT INTO knowledge_book_revisions (
+                             revision_id, knowledge_book_id, revision_no, name,
+                             description, token_budget, scan_depth, recursive,
+                             max_recursion_depth, document_json
+                         ) VALUES (?1, ?2, 1, ?3, '', ?4, ?5, ?6, ?7, ?8)",
+                        params![
+                            revision_id,
+                            book.id.as_str(),
+                            book.name,
+                            book.token_budget.max_tokens,
+                            book.scan_depth,
+                            book.recursive,
+                            book.max_recursion_depth,
+                            document_json,
+                        ],
+                    )
+                    .expect("insert partial knowledge revision projection");
+                let result_json = serde_json::to_string(&serde_json::json!({
+                    "schema_version": 1,
+                    "value": {
+                        "source_component_key": descriptor.id,
+                        "component_document_ordinal": 0,
+                        "source_component_sha256": descriptor.sha256.as_str(),
+                        "document_sha256": document_sha256,
+                        "target_object_id": book.id.as_str(),
+                        "target_revision_id": revision_id,
+                        "target_state_revision": 1,
+                    }
+                }))
+                .expect("encode interrupted component result");
+                let result_sha256 = hex::encode(Sha256::digest(result_json.as_bytes()));
+                connection
+                    .execute(
+                        "INSERT INTO package_import_component_commits (
+                             import_id, component_ordinal, document_ordinal,
+                             target_object_id, target_revision_id, result_json,
+                             result_sha256, committed_at
+                         ) VALUES (?1, 0, 0, ?2, ?3, ?4, ?5, ?6)",
+                        params![
+                            import_id,
+                            book.id.as_str(),
+                            revision_id,
+                            result_json,
+                            result_sha256,
+                            created_at,
+                        ],
+                    )
+                    .expect("insert partial package component result");
+            }
+            assert_eq!(
+                connection
+                    .query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0))
+                    .expect("fixture integrity check"),
+                "ok"
+            );
+            assert!(
+                connection
+                    .prepare("PRAGMA foreign_key_check")
+                    .expect("foreign key check")
+                    .query([])
+                    .expect("foreign key rows")
+                    .next()
+                    .expect("foreign key result")
+                    .is_none(),
+                "fixture must satisfy every foreign key"
+            );
+            database_path
         };
+        drop(storage);
 
-        let reopened = Storage::open(root.path()).expect("recover interrupted package commit");
-        let connection = reopened.connection().expect("recovered database");
-        let (state, revision, failure_json, completed_at) = connection
-            .query_row(
-                "SELECT state, revision, failure_json, completed_at
-                 FROM package_imports WHERE id = ?1",
-                [import_id],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, u64>(1)?,
-                        row.get::<_, Option<String>>(2)?,
-                        row.get::<_, Option<String>>(3)?,
-                    ))
-                },
-            )
-            .expect("load recovered package import");
-        assert_eq!(state, "failed");
-        assert_eq!(revision, 5);
+        DurableCommittingPackageFixture {
+            root,
+            import_id: import_id.to_owned(),
+            database_path,
+            promoted_asset_path,
+            partial_document: partial_document.map(|(book, _, _, _, _, _, revision_id)| {
+                (book.id.as_str().to_owned(), revision_id)
+            }),
+        }
+    }
+
+    fn assert_durable_committing_fixture_unchanged(fixture: &DurableCommittingPackageFixture) {
+        let connection =
+            Connection::open(&fixture.database_path).expect("inspect rejected database");
         assert_eq!(
-            serde_json::from_str::<serde_json::Value>(
-                failure_json.as_deref().expect("durable recovery failure")
-            )
-            .expect("valid failure JSON"),
-            serde_json::json!({"code": "process_restarted"})
+            connection
+                .query_row(
+                    "SELECT state, revision, failure_json, completed_at
+                     FROM package_imports WHERE id = ?1",
+                    [fixture.import_id.as_str()],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, u64>(1)?,
+                            row.get::<_, Option<String>>(2)?,
+                            row.get::<_, Option<String>>(3)?,
+                        ))
+                    },
+                )
+                .expect("load rejected package import"),
+            ("committing".to_owned(), 4, None, None),
+            "fail-closed open must not reinterpret or mutate impossible durable state"
         );
-        assert!(completed_at.is_some(), "failed import is terminal");
-        assert!(
-            !promoted_asset_path.exists(),
-            "asset promotion abandoned by the interrupted commit must be removed"
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM package_import_audit_events WHERE import_id = ?1",
+                    [fixture.import_id.as_str()],
+                    |row| row.get::<_, u64>(0),
+                )
+                .expect("load unchanged package audit count"),
+            4
         );
         assert_eq!(
             connection
                 .query_row(
                     "SELECT event_kind FROM package_import_audit_events
                      WHERE import_id = ?1 ORDER BY sequence DESC LIMIT 1",
-                    [import_id],
+                    [fixture.import_id.as_str()],
                     |row| row.get::<_, String>(0),
                 )
-                .expect("load recovery audit"),
-            "failed"
+                .expect("load unchanged final package audit"),
+            "commit_started"
         );
-        drop(connection);
         assert!(
-            !reopened
-                .list_pending_package_import_ids(100)
-                .expect("list pending package imports")
-                .iter()
-                .any(|id| id == import_id),
-            "terminal recovery must remove the import from the resumable list"
+            fixture.promoted_asset_path.exists(),
+            "fail-closed open must preserve forensic CAS evidence"
         );
-        drop(reopened);
-
-        let reopened_again = Storage::open(root.path()).expect("repeat package recovery");
         assert_eq!(
-            reopened_again
-                .connection()
-                .expect("reopened database")
+            connection
                 .query_row(
-                    "SELECT revision, COUNT(audit.sequence)
-                     FROM package_imports AS import
-                     JOIN package_import_audit_events AS audit ON audit.import_id = import.id
-                     WHERE import.id = ?1",
-                    [import_id],
-                    |row| Ok((row.get::<_, u64>(0)?, row.get::<_, u64>(1)?)),
+                    "SELECT COUNT(*) FROM package_cas_promotion_journal
+                     WHERE import_id = ?1 AND namespace = 'asset'",
+                    [fixture.import_id.as_str()],
+                    |row| row.get::<_, u64>(0),
                 )
-                .expect("load idempotently recovered package import"),
-            (5, 5),
-            "a second startup must not append another recovery transition"
+                .expect("load unchanged package CAS journal"),
+            1
+        );
+    }
+
+    #[test]
+    fn startup_rejects_impossible_durable_package_committing_state_without_mutation() {
+        let fixture = durable_committing_package_fixture("package-impossible-committing", false);
+
+        let Err(error) = Storage::open(fixture.root.path()) else {
+            panic!("durable committing state must fail closed");
+        };
+        assert_eq!(error.code, CoreErrorCode::StorageCorrupted);
+        assert_eq!(
+            error.message,
+            "durable package import remained in the impossible committing state"
+        );
+        assert_durable_committing_fixture_unchanged(&fixture);
+    }
+
+    #[test]
+    fn startup_rejects_partial_package_commit_effects_without_publishing_or_mutating_them() {
+        let fixture = durable_committing_package_fixture("package-partial-committing", true);
+        let (document_id, revision_id) = fixture
+            .partial_document
+            .as_ref()
+            .expect("partial document fixture");
+
+        let Err(error) = Storage::open(fixture.root.path()) else {
+            panic!("schema-valid partial package commit must fail closed");
+        };
+        assert_eq!(error.code, CoreErrorCode::StorageCorrupted);
+        assert_eq!(
+            error.message,
+            "durable package import remained in the impossible committing state"
+        );
+        assert_durable_committing_fixture_unchanged(&fixture);
+
+        let connection = Connection::open(&fixture.database_path).expect("inspect partial effects");
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT state.active_revision_id, revision.source_kind
+                     FROM content_objects AS object
+                     JOIN content_object_state AS state ON state.object_id = object.id
+                     JOIN content_revisions AS revision
+                       ON revision.object_id = object.id
+                      AND revision.id = state.active_revision_id
+                     WHERE object.id = ?1 AND object.deleted_at IS NULL",
+                    [document_id],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                )
+                .expect("load preserved partial content"),
+            (revision_id.clone(), "imported_package".to_owned())
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM package_import_component_commits
+                     WHERE import_id = ?1 AND target_object_id = ?2
+                       AND target_revision_id = ?3",
+                    params![fixture.import_id, document_id, revision_id],
+                    |row| row.get::<_, u64>(0),
+                )
+                .expect("load preserved component effect"),
+            1
+        );
+        assert_eq!(
+            connection
+                .query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0))
+                .expect("post-rejection integrity check"),
+            "ok"
         );
     }
 

@@ -10,11 +10,13 @@ use lorepia_shell_api::{
     ProviderCredentialAccessAuthorityContext, ProviderCredentialOperationContext,
     ProviderCredentialOperationKindInput, ProviderCredentialSlotStatusInput, ShellApi,
 };
+use sha2::{Digest, Sha256};
 use tauri::AppHandle;
 use tauri_plugin_lorepia_platform::{
     BoundCredentialObservation, CredentialAuthority, CredentialStatus, LegacyCredentialObservation,
-    LorepiaPlatformExt, NativeCaptureStatus, NativeCredential, PlatformError, PlatformErrorCode,
-    PlatformResult, PreparedBoundCredentialStore,
+    LorepiaPlatformExt, NativeCaptureStatus, NativeCredential, NativeCredentialEffect,
+    NativeCredentialEffectConfirmation, NativeCredentialEffectContext, PlatformError,
+    PlatformErrorCode, PlatformResult, PreparedBoundCredentialStore,
 };
 
 use crate::error::{CommandError, CommandResult};
@@ -298,7 +300,14 @@ pub(crate) async fn capture_provider_connection_credential(
     app: &AppHandle,
     shell: &ShellApi,
     connection_id: &str,
+    confirmation: NativeCredentialEffectConfirmation,
 ) -> CommandResult<NativeCaptureStatus> {
+    consume_connection_confirmation(
+        shell,
+        confirmation,
+        NativeCredentialEffect::CaptureOrReplace,
+        connection_id,
+    )?;
     let vault = PlatformCredentialVault { app };
     let status = capture_provider_connection_credential_with(&vault, shell, connection_id).await?;
     recover_provider_credential_slot_garbage_with(&vault, shell).await?;
@@ -309,7 +318,14 @@ pub(crate) async fn delete_provider_connection_credential(
     app: &AppHandle,
     shell: &ShellApi,
     connection_id: &str,
+    confirmation: NativeCredentialEffectConfirmation,
 ) -> CommandResult<()> {
+    consume_connection_confirmation(
+        shell,
+        confirmation,
+        NativeCredentialEffect::Delete,
+        connection_id,
+    )?;
     let vault = PlatformCredentialVault { app };
     remove_provider_credential_with(&vault, shell, connection_id, false).await?;
     recover_provider_credential_slot_garbage_with(&vault, shell).await
@@ -320,11 +336,34 @@ pub(crate) async fn archive_provider_connection(
     shell: &ShellApi,
     connection_id: &str,
     credential_binding_required: bool,
+    legacy_raw: bool,
+    confirmation: Option<NativeCredentialEffectConfirmation>,
 ) -> CommandResult<()> {
     if !credential_binding_required {
+        if legacy_raw || confirmation.is_some() {
+            return Err(CommandError::invalid_input());
+        }
         return shell
             .delete_provider_connection(connection_id)
             .map_err(Into::into);
+    }
+    let confirmation = confirmation.ok_or_else(CommandError::invalid_input)?;
+    if legacy_raw {
+        consume_legacy_confirmation(
+            app,
+            shell,
+            confirmation,
+            NativeCredentialEffect::Archive,
+            connection_id,
+        )
+        .await?;
+    } else {
+        consume_connection_confirmation(
+            shell,
+            confirmation,
+            NativeCredentialEffect::Archive,
+            connection_id,
+        )?;
     }
     let vault = PlatformCredentialVault { app };
     remove_provider_credential_with(&vault, shell, connection_id, true).await?;
@@ -372,7 +411,16 @@ pub(crate) async fn capture_legacy_provider_credential(
     app: &AppHandle,
     shell: &ShellApi,
     provider_profile_id: &str,
+    confirmation: NativeCredentialEffectConfirmation,
 ) -> CommandResult<NativeCaptureStatus> {
+    consume_legacy_confirmation(
+        app,
+        shell,
+        confirmation,
+        NativeCredentialEffect::CaptureOrReplace,
+        provider_profile_id,
+    )
+    .await?;
     capture_legacy_provider_credential_with(
         &PlatformCredentialVault { app },
         shell,
@@ -385,13 +433,104 @@ pub(crate) async fn delete_legacy_provider_credential(
     app: &AppHandle,
     shell: &ShellApi,
     provider_profile_id: &str,
+    confirmation: NativeCredentialEffectConfirmation,
 ) -> CommandResult<()> {
+    consume_legacy_confirmation(
+        app,
+        shell,
+        confirmation,
+        NativeCredentialEffect::Delete,
+        provider_profile_id,
+    )
+    .await?;
     delete_legacy_provider_credential_with(
         &PlatformCredentialVault { app },
         shell,
         provider_profile_id,
     )
     .await
+}
+
+fn consume_connection_confirmation(
+    shell: &ShellApi,
+    confirmation: NativeCredentialEffectConfirmation,
+    expected_effect: NativeCredentialEffect,
+    connection_id: &str,
+) -> CommandResult<()> {
+    let context =
+        provider_connection_credential_effect_context(shell, connection_id, expected_effect)?;
+    confirmation.consume_exact(
+        context.effect(),
+        context.target_id(),
+        context.origin(),
+        context.revision(),
+    )?;
+    Ok(())
+}
+
+pub(crate) fn provider_connection_credential_effect_context(
+    shell: &ShellApi,
+    connection_id: &str,
+    effect: NativeCredentialEffect,
+) -> CommandResult<NativeCredentialEffectContext> {
+    let connection = shell
+        .list_provider_connections()?
+        .into_iter()
+        .find(|candidate| candidate.id == connection_id)
+        .ok_or_else(CommandError::invalid_input)?;
+    if !connection.credential_binding_required {
+        return Err(CommandError::invalid_input());
+    }
+    let unresolved = shell
+        .list_unresolved_provider_credential_operations()?
+        .into_iter()
+        .filter(|operation| operation.connection_id == connection_id)
+        .collect::<Vec<_>>();
+    if unresolved.len() > 1
+        || (effect == NativeCredentialEffect::CaptureOrReplace && !unresolved.is_empty())
+    {
+        return Err(CommandError::invalid_input());
+    }
+    let authority = shell.provider_credential_recovery_authority(connection_id)?;
+    let mut state_hasher = Sha256::new();
+    state_hasher.update(b"dev.lorepia.credential-confirmation-state.v1\0");
+    state_hasher.update(format!("{connection:?}").as_bytes());
+    state_hasher.update([0]);
+    state_hasher.update(format!("{authority:?}").as_bytes());
+    state_hasher.update([0]);
+    state_hasher.update(format!("{unresolved:?}").as_bytes());
+    let state_sha256 = format!("{:x}", state_hasher.finalize());
+    let journal = unresolved
+        .first()
+        .map_or("settled", |operation| operation.status.as_str());
+    NativeCredentialEffectContext::new(
+        effect,
+        connection.id,
+        connection.api_origin,
+        format!("credential_state_sha256={state_sha256};journal={journal}"),
+    )
+    .map_err(Into::into)
+}
+
+async fn consume_legacy_confirmation(
+    app: &AppHandle,
+    shell: &ShellApi,
+    confirmation: NativeCredentialEffectConfirmation,
+    expected_effect: NativeCredentialEffect,
+    provider_profile_id: &str,
+) -> CommandResult<()> {
+    let profile = shell
+        .list_provider_profiles()?
+        .into_iter()
+        .find(|candidate| candidate.id == provider_profile_id)
+        .ok_or_else(CommandError::invalid_input)?;
+    shell.ensure_legacy_profile_credential_mutation_settled(provider_profile_id)?;
+    let revision = app
+        .lorepia_platform()
+        .legacy_credential_confirmation_revision(provider_profile_id)
+        .await?;
+    confirmation.consume_exact(expected_effect, &profile.id, &profile.base_url, &revision)?;
+    Ok(())
 }
 
 pub(crate) async fn read_legacy_provider_credential(
@@ -565,7 +704,6 @@ async fn capture_provider_connection_credential_with_policy(
     if operation_authority(&started)? != authority {
         return Err(CommandError::internal());
     }
-    remove_replacement_predecessor_before_store(vault, shell, connection_id, &started).await?;
     let store_result = vault.store_prepared(prepared_store).await;
     if platform_result_requires_credential_recovery(&store_result) {
         persist_explicit_credential_recovery_barrier(
@@ -579,6 +717,14 @@ async fn capture_provider_connection_credential_with_policy(
             .into());
     }
     let (observed, observation_error) = observe_operation(vault, connection_id, authority).await;
+    if observed == ProviderCredentialSlotStatusInput::Available {
+        // B is now the verified recovery copy. If predecessor cleanup fails,
+        // leave both exact authorities attached to the durable Started
+        // operation. Startup fences it and explicit cleanup can safely remove
+        // the operation slot; an ad-hoc rollback here could erase the only
+        // surviving copy when the predecessor delete outcome is uncertain.
+        remove_replacement_predecessor(vault, shell, connection_id, &started).await?;
+    }
     let completed = shell.finish_provider_credential_operation(
         &started.operation_id,
         &started.plan_sha256,
@@ -596,7 +742,7 @@ async fn capture_provider_connection_credential_with_policy(
     Err(CommandError::invalid_input())
 }
 
-async fn remove_replacement_predecessor_before_store(
+async fn remove_replacement_predecessor(
     vault: &dyn CredentialVault,
     shell: &ShellApi,
     connection_id: &str,
@@ -914,8 +1060,7 @@ async fn cleanup_uncertain_credential_for_explicit_delete(
     let requires_predecessor_durability_repair = operation.predecessor_slot_recovery_required;
     operation = persist_explicit_cleanup_intent(shell, &operation, observed, archive)?;
     if requires_predecessor_durability_repair {
-        remove_replacement_predecessor_before_store(vault, shell, connection_id, &operation)
-            .await?;
+        remove_replacement_predecessor(vault, shell, connection_id, &operation).await?;
         operation = shell
             .list_unresolved_provider_credential_operations()?
             .into_iter()
@@ -965,7 +1110,7 @@ async fn cleanup_uncertain_credential_for_explicit_delete(
             )?;
         }
     }
-    remove_replacement_predecessor_before_store(vault, shell, connection_id, &operation).await?;
+    remove_replacement_predecessor(vault, shell, connection_id, &operation).await?;
     let archives_connection = operation.cleanup_archives_connection
         || (operation.operation_kind == ProviderCredentialOperationKindInput::RemoveForArchive
             && (operation.native_effect_started
@@ -1099,59 +1244,32 @@ async fn recover_provider_credential_slot_garbage_with(
     shell: &ShellApi,
 ) -> CommandResult<()> {
     for target in shell.list_provider_credential_slot_garbage()? {
-        let authority = credential_authority(&target.authority)?;
-        let requires_successful_delete = target.status == "started";
-        match target.status.as_str() {
-            "pending" => {
-                let (observed, observation_error) =
-                    observe_gc_slot(vault, &target.connection_id, authority.clone()).await;
-                if observation_error.is_some() {
-                    continue;
-                }
-                let started = shell.observe_provider_credential_slot_garbage(
-                    &target.connection_id,
-                    target.authority_sequence,
-                    observed,
-                )?;
-                if started.status == "completed" {
-                    continue;
-                }
-                if started.status != "started" {
-                    return Err(CommandError::internal());
-                }
-            }
-            "started" => {
-                // A prior delete may have returned RecoveryRequired after
-                // unlinking the item. Missing visibility therefore cannot
-                // complete Started work. Repeating this exact idempotent delete
-                // repairs the native directory durability boundary.
-            }
-            _ => return Err(CommandError::internal()),
-        }
-        let delete_result = vault
-            .delete_bound(&target.connection_id, authority.clone())
-            .await;
-        if requires_successful_delete && delete_result.is_err() {
-            // Started GC is itself the durable retry marker. An error cannot be
-            // converted to completion merely because the slot is already gone.
+        // This journal is derived entirely from SQLite. Even a self-consistent
+        // forged ownership history is therefore not authority to mutate an OS
+        // credential store. Unattended recovery may prove that a never-started
+        // target is already absent, but every present/unreadable target and
+        // every legacy Started target stays durably unresolved until a future
+        // native-user-confirmed cleanup flow owns the exact delete.
+        if target.status == "started" {
             continue;
         }
-        let (postflight, postflight_error) =
+        if target.status != "pending" {
+            return Err(CommandError::internal());
+        }
+        let authority = credential_authority(&target.authority)?;
+        let (observed, observation_error) =
             observe_gc_slot(vault, &target.connection_id, authority).await;
-        if platform_result_requires_credential_recovery(&delete_result)
-            || postflight_error.is_some()
-        {
+        if observation_error.is_some() || observed != ProviderCredentialSlotStatusInput::Missing {
             continue;
         }
         let completed = shell.observe_provider_credential_slot_garbage(
             &target.connection_id,
             target.authority_sequence,
-            postflight,
+            ProviderCredentialSlotStatusInput::Missing,
         )?;
-        if completed.status == "completed" {
-            continue;
+        if completed.status != "completed" {
+            return Err(CommandError::internal());
         }
-        let _ = delete_result;
     }
     Ok(())
 }
@@ -1369,11 +1487,13 @@ mod tests {
         OrdinaryCredentialTargetPolicy, PreparedCredentialStore, VaultFuture,
         capture_legacy_provider_credential_with, capture_provider_connection_credential_with,
         delete_legacy_provider_credential_with, ensure_slot_missing,
-        legacy_provider_credential_status_with, read_legacy_provider_credential_with,
-        read_provider_connection_credential_with, recover_provider_credential_operations_with,
-        recover_provider_credential_slot_garbage_with, remove_provider_credential_with,
-        remove_provider_credential_with_policy,
+        legacy_provider_credential_status_with, operation_authority,
+        operation_predecessor_authority, provider_connection_credential_effect_context,
+        read_legacy_provider_credential_with, read_provider_connection_credential_with,
+        recover_provider_credential_operations_with, recover_provider_credential_slot_garbage_with,
+        remove_provider_credential_with, remove_provider_credential_with_policy,
     };
+    use tauri_plugin_lorepia_platform::NativeCredentialEffect;
 
     #[derive(Clone)]
     struct FakeVault {
@@ -1441,6 +1561,7 @@ mod tests {
         CaptureOnce,
         PrepareStoreOnce,
         CreateRawSlotAfterCapture,
+        StoreBeforeMutation,
         StoreAfterMutation,
         StoreRecoveryRequiredAfterMutation,
         DeleteBeforeMutation,
@@ -1547,6 +1668,10 @@ mod tests {
 
         fn fail_store_after_mutation(&self) {
             self.inject_fault(FakeVaultFault::StoreAfterMutation);
+        }
+
+        fn fail_store_before_mutation(&self) {
+            self.inject_fault(FakeVaultFault::StoreBeforeMutation);
         }
 
         fn require_recovery_after_store_mutation(&self) {
@@ -1849,6 +1974,9 @@ mod tests {
                 state.store_calls += 1;
                 let key = FakeAuthorityKey::from_authority(&authority);
                 state.events.push(FakeVaultEvent::Store(key.clone()));
+                if take_fake_vault_fault(&mut state, FakeVaultFault::StoreBeforeMutation) {
+                    return Err(PlatformError::new(PlatformErrorCode::StorageUnavailable));
+                }
                 let item = FakeItem::Bound {
                     authority_id: authority.authority_id().to_owned(),
                     binding_sha256: authority.binding_sha256().to_owned(),
@@ -2167,6 +2295,87 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn confirmation_revision_changes_when_current_credential_authority_rotates() {
+        let root = tempdir().expect("root");
+        let shell = ShellApi::open_data_root(root.path()).expect("shell");
+        create_credential_connection(&shell, "confirmation-authority-rotation");
+        let vault = FakeVault::new(shell.clone(), FakeItem::Missing, "rotated-secret");
+        let before = provider_connection_credential_effect_context(
+            &shell,
+            "confirmation-authority-rotation",
+            NativeCredentialEffect::CaptureOrReplace,
+        )
+        .expect("no-credential confirmation context");
+
+        capture_provider_connection_credential_with(
+            &vault,
+            &shell,
+            "confirmation-authority-rotation",
+        )
+        .await
+        .expect("rotate into a durable current authority");
+        let after = provider_connection_credential_effect_context(
+            &shell,
+            "confirmation-authority-rotation",
+            NativeCredentialEffect::CaptureOrReplace,
+        )
+        .expect("owned confirmation context");
+
+        assert!(before.revision().ends_with("journal=settled"));
+        assert_ne!(before.revision(), after.revision());
+    }
+
+    #[tokio::test]
+    async fn delete_confirmation_binds_exact_unresolved_cleanup_state() {
+        let root = tempdir().expect("root");
+        let shell = ShellApi::open_data_root(root.path()).expect("shell");
+        create_credential_connection(&shell, "confirmation-unresolved-cleanup");
+        let vault = FakeVault::new(shell.clone(), FakeItem::Missing, "owned-secret");
+        capture_provider_connection_credential_with(
+            &vault,
+            &shell,
+            "confirmation-unresolved-cleanup",
+        )
+        .await
+        .expect("install current authority");
+        let prepared = shell
+            .prepare_provider_credential_operation(
+                "confirmation-unresolved-cleanup",
+                ProviderCredentialOperationKindInput::RemoveCredential,
+                ProviderCredentialSlotStatusInput::Available,
+            )
+            .expect("prepare explicit cleanup");
+        let prepared_context = provider_connection_credential_effect_context(
+            &shell,
+            "confirmation-unresolved-cleanup",
+            NativeCredentialEffect::Delete,
+        )
+        .expect("delete can confirm the exact unresolved cleanup");
+        assert!(prepared_context.revision().ends_with("journal=prepared"));
+        assert!(
+            provider_connection_credential_effect_context(
+                &shell,
+                "confirmation-unresolved-cleanup",
+                NativeCredentialEffect::CaptureOrReplace,
+            )
+            .is_err(),
+            "capture cannot layer over unresolved credential work"
+        );
+
+        shell
+            .start_provider_credential_operation(&prepared.operation_id, &prepared.plan_sha256)
+            .expect("advance exact cleanup cutpoint");
+        let started_context = provider_connection_credential_effect_context(
+            &shell,
+            "confirmation-unresolved-cleanup",
+            NativeCredentialEffect::Delete,
+        )
+        .expect("started cleanup remains explicitly confirmable");
+        assert!(started_context.revision().ends_with("journal=started"));
+        assert_ne!(prepared_context.revision(), started_context.revision());
+    }
+
+    #[tokio::test]
     async fn ordinary_credential_actions_reject_legacy_alias_but_archive_removes_it_durably() {
         let root = tempdir().expect("root");
         let shell = ShellApi::open_data_root(root.path()).expect("shell");
@@ -2348,7 +2557,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn replacement_deletes_exact_predecessor_before_store_and_preserves_raw_slot() {
+    async fn replacement_stores_successor_before_deleting_exact_predecessor_and_preserves_raw_slot()
+    {
         let root = tempdir().expect("root");
         let shell = ShellApi::open_data_root(root.path()).expect("shell");
         create_credential_connection(&shell, "replacement-order");
@@ -2373,7 +2583,7 @@ mod tests {
 
         capture_provider_connection_credential_with(&vault, &shell, "replacement-order")
             .await
-            .expect("replacement B deletes and attests A before storing B");
+            .expect("replacement B stores before deleting and attesting predecessor A");
         let authority_b = shell
             .ensure_provider_credential_access_settled("replacement-order")
             .expect("authority B");
@@ -2399,11 +2609,79 @@ mod tests {
             .iter()
             .position(|event| event == &FakeVaultEvent::Store(key_b.clone()))
             .expect("exact replacement B store");
-        assert!(delete_a < store_b, "A must be deleted before B is stored");
+        assert!(store_b < delete_a, "B must be stored before A is deleted");
     }
 
     #[tokio::test]
-    async fn replacement_cleanup_failure_drops_prepared_b_before_store() {
+    async fn replacement_missing_successor_never_starts_predecessor_delete() {
+        let root = tempdir().expect("root");
+        let shell = ShellApi::open_data_root(root.path()).expect("shell");
+        let connection_id = "replacement-missing-successor";
+        create_credential_connection(&shell, connection_id);
+        let vault = FakeVault::new(shell.clone(), FakeItem::Missing, "secret-a");
+
+        capture_provider_connection_credential_with(&vault, &shell, connection_id)
+            .await
+            .expect("install predecessor A");
+        let authority_a = shell
+            .ensure_provider_credential_access_settled(connection_id)
+            .expect("authority A");
+        let key_a = FakeAuthorityKey {
+            authority_id: authority_a.authority_id,
+            binding_sha256: authority_a.connection_binding_sha256,
+        };
+        vault.replace_capture_secret("secret-b");
+        vault.fail_store_before_mutation();
+
+        capture_provider_connection_credential_with(&vault, &shell, connection_id)
+            .await
+            .expect_err("missing B publication cannot authorize deleting A");
+
+        assert_eq!(vault.bound_slot_count(), 1);
+        assert!(matches!(
+            vault.bound_item_for(&key_a),
+            Some(FakeItem::Bound { .. })
+        ));
+        assert_eq!(
+            vault
+                .events()
+                .iter()
+                .filter(|event| event == &&FakeVaultEvent::Delete(key_a.clone()))
+                .count(),
+            0,
+            "A deletion must remain downstream of verified B publication"
+        );
+        assert_eq!(
+            operation_predecessor_authority(
+                &shell
+                    .list_unresolved_provider_credential_operations()
+                    .expect("failed replacement remains journaled")[0]
+            )
+            .expect("predecessor authority parses")
+            .as_ref()
+            .map(FakeAuthorityKey::from_authority),
+            Some(key_a.clone())
+        );
+
+        recover_provider_credential_operations_with(&vault, &shell)
+            .await
+            .expect("startup fences missing B without touching A");
+        assert!(matches!(
+            vault.bound_item_for(&key_a),
+            Some(FakeItem::Bound { .. })
+        ));
+        assert_eq!(
+            vault
+                .events()
+                .iter()
+                .filter(|event| event == &&FakeVaultEvent::Delete(key_a.clone()))
+                .count(),
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn replacement_predecessor_failure_keeps_a_and_b_in_durable_recoverable_state() {
         let root = tempdir().expect("root");
         let shell = ShellApi::open_data_root(root.path()).expect("shell");
         create_credential_connection(&shell, "replacement-prepared-drop");
@@ -2423,22 +2701,59 @@ mod tests {
 
         capture_provider_connection_credential_with(&vault, &shell, "replacement-prepared-drop")
             .await
-            .expect_err("failed A cleanup must stop before the prepared B store");
+            .expect_err("failed A cleanup leaves the verified B store journaled");
 
-        assert_eq!(vault.counts().2, 1, "only predecessor A was ever stored");
-        assert_eq!(vault.bound_slot_count(), 1);
+        let unresolved = shell
+            .list_unresolved_provider_credential_operations()
+            .expect("replacement failure remains journaled");
+        assert_eq!(unresolved.len(), 1);
+        let key_b = FakeAuthorityKey::from_authority(
+            &operation_authority(&unresolved[0]).expect("successor B authority"),
+        );
+        assert_eq!(
+            operation_predecessor_authority(&unresolved[0])
+                .expect("predecessor authority parses")
+                .as_ref()
+                .map(FakeAuthorityKey::from_authority),
+            Some(key_a.clone()),
+        );
+        assert_eq!(vault.counts().2, 2, "B is stored before A cleanup starts");
+        assert_eq!(vault.bound_slot_count(), 2);
         assert!(matches!(
             vault.bound_item_for(&key_a),
             Some(FakeItem::Bound { .. })
         ));
+        assert!(matches!(
+            vault.bound_item_for(&key_b),
+            Some(FakeItem::Bound { .. })
+        ));
+
+        recover_provider_credential_operations_with(&vault, &shell)
+            .await
+            .expect("startup fences the unresolved replacement");
         assert_eq!(
-            vault
-                .events()
-                .iter()
-                .filter(|event| matches!(event, FakeVaultEvent::Store(_)))
-                .count(),
-            1,
-            "replacement B cannot be stored after predecessor cleanup fails"
+            shell
+                .list_unresolved_provider_credential_operations()
+                .expect("replacement remains recoverable")[0]
+                .status,
+            "cleanup_required"
+        );
+        assert!(
+            shell
+                .ensure_provider_credential_access_settled("replacement-prepared-drop")
+                .is_err(),
+            "neither journaled slot is exposed as settled provider authority"
+        );
+
+        remove_provider_credential_with(&vault, &shell, "replacement-prepared-drop", false)
+            .await
+            .expect("explicit cleanup removes the exact journaled slots");
+        assert_eq!(vault.bound_slot_count(), 0);
+        assert!(
+            shell
+                .list_unresolved_provider_credential_operations()
+                .expect("cleanup settles the replacement")
+                .is_empty()
         );
     }
 
@@ -2715,103 +3030,101 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn available_superseded_gc_deletes_only_a_after_durable_start() {
+    async fn unattended_gc_never_deletes_a_sqlite_derived_available_slot() {
         let (_root, shell, vault, key_a, item_a, key_b) =
             replacement_gc_fixture("gc-available").await;
         vault.insert_bound_item(key_a.clone(), item_a);
         vault.replace_raw_item(FakeItem::Raw);
+        let deletes_before = vault.counts().3;
 
         recover_provider_credential_slot_garbage_with(&vault, &shell)
             .await
-            .expect("started GC deletes exact superseded A");
+            .expect("unattended GC observes but never deletes superseded A");
 
-        assert!(vault.bound_item_for(&key_a).is_none());
+        assert!(matches!(
+            vault.bound_item_for(&key_a),
+            Some(FakeItem::Bound { .. })
+        ));
         assert!(matches!(
             vault.bound_item_for(&key_b),
             Some(FakeItem::Bound { .. })
         ));
-        assert_eq!(vault.bound_slot_count(), 1);
+        assert_eq!(vault.bound_slot_count(), 2);
         assert!(matches!(vault.raw_item(), FakeItem::Raw));
-        assert!(
-            vault
-                .events()
-                .contains(&FakeVaultEvent::Delete(key_a.clone()))
-        );
+        assert_eq!(vault.counts().3, deletes_before);
         assert!(!vault.events().contains(&FakeVaultEvent::Delete(key_b)));
+        assert_eq!(
+            shell
+                .list_provider_credential_slot_garbage()
+                .expect("available target remains unresolved")[0]
+                .status,
+            "pending"
+        );
     }
 
     #[tokio::test]
-    async fn superseded_gc_mutate_then_error_uses_missing_postflight() {
+    async fn unattended_gc_never_calls_a_delete_that_would_mutate_then_error() {
         let (_root, shell, vault, key_a, item_a, key_b) =
             replacement_gc_fixture("gc-response-loss").await;
         vault.insert_bound_item(key_a.clone(), item_a);
         vault.fail_delete_after_mutation();
+        let deletes_before = vault.counts().3;
 
         recover_provider_credential_slot_garbage_with(&vault, &shell)
             .await
-            .expect("missing postflight wins over lost delete response");
+            .expect("unattended GC never enters the native delete path");
 
-        assert!(vault.bound_item_for(&key_a).is_none());
+        assert!(matches!(
+            vault.bound_item_for(&key_a),
+            Some(FakeItem::Bound { .. })
+        ));
         assert!(matches!(
             vault.bound_item_for(&key_b),
             Some(FakeItem::Bound { .. })
         ));
-        assert!(
+        assert_eq!(vault.counts().3, deletes_before);
+        assert_eq!(
             shell
                 .list_provider_credential_slot_garbage()
-                .expect("completed garbage")
-                .is_empty()
+                .expect("present target remains durable")[0]
+                .status,
+            "pending"
         );
     }
 
     #[tokio::test]
-    async fn superseded_gc_recovery_required_needs_a_durable_missing_delete_retry() {
+    async fn unattended_gc_never_uses_native_delete_to_repair_durability() {
         let (_root, shell, vault, key_a, item_a, key_b) =
             replacement_gc_fixture("gc-durability-recovery-required").await;
         vault.insert_bound_item(key_a.clone(), item_a);
         vault.require_recovery_after_delete_mutation();
+        let deletes_before = vault.counts().3;
 
         recover_provider_credential_slot_garbage_with(&vault, &shell)
             .await
-            .expect("explicit recovery-required keeps exact stale-slot work pending");
-        assert!(vault.bound_item_for(&key_a).is_none());
+            .expect("SQLite-derived work cannot authorize a durability-repair delete");
+        assert!(matches!(
+            vault.bound_item_for(&key_a),
+            Some(FakeItem::Bound { .. })
+        ));
         let unresolved = shell
             .list_provider_credential_slot_garbage()
             .expect("durability repair remains journaled");
         assert_eq!(unresolved.len(), 1);
-        assert_eq!(unresolved[0].status, "started");
-        let deletes_after_uncertain_effect = vault.counts().3;
+        assert_eq!(unresolved[0].status, "pending");
+        assert_eq!(vault.counts().3, deletes_before);
 
         vault.fail_delete_before_mutation();
         recover_provider_credential_slot_garbage_with(&vault, &shell)
             .await
-            .expect("a generic retry failure leaves Started GC pending");
-        assert_eq!(
-            vault.counts().3,
-            deletes_after_uncertain_effect + 1,
-            "Started GC still attempts the exact Missing-slot durability repair"
-        );
+            .expect("retries remain observe-only");
+        assert_eq!(vault.counts().3, deletes_before);
         assert_eq!(
             shell
                 .list_provider_credential_slot_garbage()
-                .expect("failed exact repair remains journaled")[0]
+                .expect("unresolved target remains journaled")[0]
                 .status,
-            "started"
-        );
-
-        recover_provider_credential_slot_garbage_with(&vault, &shell)
-            .await
-            .expect("retrying Missing delete repairs the native durability boundary");
-        assert_eq!(
-            vault.counts().3,
-            deletes_after_uncertain_effect + 2,
-            "Started plus Missing must execute the exact idempotent delete again"
-        );
-        assert!(
-            shell
-                .list_provider_credential_slot_garbage()
-                .expect("successful repair completes garbage collection")
-                .is_empty()
+            "pending"
         );
         assert!(matches!(
             vault.bound_item_for(&key_b),
@@ -2820,10 +3133,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn started_superseded_gc_resumes_after_crash_before_delete() {
+    async fn unattended_gc_never_resumes_a_started_sqlite_derived_delete() {
         let (_root, shell, vault, key_a, item_a, key_b) =
             replacement_gc_fixture("gc-started-before-delete").await;
         vault.insert_bound_item(key_a.clone(), item_a);
+        let deletes_before = vault.counts().3;
         let target = shell
             .list_provider_credential_slot_garbage()
             .expect("pending target")
@@ -2840,9 +3154,20 @@ mod tests {
 
         recover_provider_credential_slot_garbage_with(&vault, &shell)
             .await
-            .expect("restart resumes exact started target");
+            .expect("restart leaves legacy Started deletion unresolved");
 
-        assert!(vault.bound_item_for(&key_a).is_none());
+        assert!(matches!(
+            vault.bound_item_for(&key_a),
+            Some(FakeItem::Bound { .. })
+        ));
+        assert_eq!(vault.counts().3, deletes_before);
+        assert_eq!(
+            shell
+                .list_provider_credential_slot_garbage()
+                .expect("started target remains durable")[0]
+                .status,
+            "started"
+        );
         assert!(matches!(
             vault.bound_item_for(&key_b),
             Some(FakeItem::Bound { .. })
@@ -2850,7 +3175,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn started_superseded_gc_repeats_exact_delete_after_crash_before_observation() {
+    async fn unattended_gc_never_repeats_a_started_delete_after_crash() {
         let (_root, shell, vault, key_a, item_a, key_b) =
             replacement_gc_fixture("gc-delete-before-observe").await;
         vault.insert_bound_item(key_a.clone(), item_a);
@@ -2874,10 +3199,17 @@ mod tests {
 
         recover_provider_credential_slot_garbage_with(&vault, &shell)
             .await
-            .expect("restart repeats the exact delete before completing");
+            .expect("restart cannot replay a SQLite-derived native effect");
 
-        assert_eq!(vault.counts().3, deletes_after_crash + 1);
+        assert_eq!(vault.counts().3, deletes_after_crash);
         assert!(vault.bound_item_for(&key_a).is_none());
+        assert_eq!(
+            shell
+                .list_provider_credential_slot_garbage()
+                .expect("unattested started target remains durable")[0]
+                .status,
+            "started"
+        );
         assert!(matches!(
             vault.bound_item_for(&key_b),
             Some(FakeItem::Bound { .. })
@@ -2885,16 +3217,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unreadable_superseded_gc_never_adopts_and_deletes_exact_target() {
+    async fn unreadable_superseded_gc_stays_unresolved_without_native_delete() {
         let (_root, shell, vault, key_a, _item_a, key_b) =
             replacement_gc_fixture("gc-unreadable").await;
         vault.insert_bound_item(key_a.clone(), FakeItem::UnreadableSlot);
 
         recover_provider_credential_slot_garbage_with(&vault, &shell)
             .await
-            .expect("unreadable stale target is deleted, never adopted");
+            .expect("unreadable stale target is retained, never adopted");
 
-        assert!(vault.bound_item_for(&key_a).is_none());
+        assert!(matches!(
+            vault.bound_item_for(&key_a),
+            Some(FakeItem::UnreadableSlot)
+        ));
         assert!(matches!(
             vault.bound_item_for(&key_b),
             Some(FakeItem::Bound { .. })
@@ -2902,6 +3237,13 @@ mod tests {
         shell
             .ensure_provider_credential_access_settled("gc-unreadable")
             .expect("current B authority remains owned");
+        assert_eq!(
+            shell
+                .list_provider_credential_slot_garbage()
+                .expect("unreadable target remains durable")[0]
+                .status,
+            "pending"
+        );
     }
 
     #[tokio::test]
@@ -2910,6 +3252,7 @@ mod tests {
             replacement_gc_fixture("gc-observe-error").await;
         vault.insert_bound_item(key_a.clone(), item_a);
         vault.fail_next_bound_observation_and_status();
+        let deletes_before = vault.counts().3;
 
         recover_provider_credential_slot_garbage_with(&vault, &shell)
             .await
@@ -2941,33 +3284,42 @@ mod tests {
 
         recover_provider_credential_slot_garbage_with(&vault, &shell)
             .await
-            .expect("later retry deletes and attests exact stale A");
-        assert!(vault.bound_item_for(&key_a).is_none());
-        assert!(
+            .expect("later retry remains observe-only for present stale A");
+        assert!(matches!(
+            vault.bound_item_for(&key_a),
+            Some(FakeItem::Bound { .. })
+        ));
+        assert_eq!(vault.counts().3, deletes_before);
+        assert_eq!(
             shell
                 .list_provider_credential_slot_garbage()
-                .expect("retry completed")
-                .is_empty()
+                .expect("retry remains unresolved")[0]
+                .status,
+            "pending"
         );
     }
 
     #[tokio::test]
-    async fn gc_post_delete_observe_and_status_error_retries_exact_delete() {
+    async fn unattended_gc_never_enters_the_post_delete_retry_path() {
         let (_root, shell, vault, key_a, item_a, key_b) =
             replacement_gc_fixture("gc-post-delete-observe-error").await;
         vault.insert_bound_item(key_a.clone(), item_a);
         vault.fail_post_delete_observation_and_status();
+        let deletes_before = vault.counts().3;
 
         recover_provider_credential_slot_garbage_with(&vault, &shell)
             .await
-            .expect("post-delete backend error must not abort startup recovery");
-        let deletes_after_error = vault.counts().3;
-        assert!(vault.bound_item_for(&key_a).is_none());
+            .expect("no native delete means no post-delete observation");
+        assert!(matches!(
+            vault.bound_item_for(&key_a),
+            Some(FakeItem::Bound { .. })
+        ));
         let unresolved = shell
             .list_provider_credential_slot_garbage()
-            .expect("started target remains retryable");
+            .expect("present target remains retryable");
         assert_eq!(unresolved.len(), 1);
-        assert_eq!(unresolved[0].status, "started");
+        assert_eq!(unresolved[0].status, "pending");
+        assert_eq!(vault.counts().3, deletes_before);
         assert!(matches!(
             vault.bound_item_for(&key_b),
             Some(FakeItem::Bound { .. })
@@ -2978,17 +3330,14 @@ mod tests {
 
         recover_provider_credential_slot_garbage_with(&vault, &shell)
             .await
-            .expect("later Missing observation completes exact stale target");
+            .expect("later retry still cannot gain deletion authority");
+        assert_eq!(vault.counts().3, deletes_before);
         assert_eq!(
-            vault.counts().3,
-            deletes_after_error + 1,
-            "unattested Started deletion must repeat the exact idempotent repair"
-        );
-        assert!(
             shell
                 .list_provider_credential_slot_garbage()
-                .expect("retry completed")
-                .is_empty()
+                .expect("retry remains unresolved")[0]
+                .status,
+            "pending"
         );
     }
 
@@ -3222,7 +3571,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn replacement_predecessor_recovery_required_blocks_b_until_exact_cleanup_retry() {
+    async fn replacement_predecessor_recovery_required_preserves_b_until_exact_cleanup_retry() {
         let root = tempdir().expect("root");
         let shell = ShellApi::open_data_root(root.path()).expect("shell");
         let connection_id = "replacement-predecessor-durability";
@@ -3244,18 +3593,25 @@ mod tests {
 
         let error = capture_provider_connection_credential_with(&vault, &shell, connection_id)
             .await
-            .expect_err("uncertain predecessor delete must stop replacement B");
+            .expect_err("uncertain predecessor delete must leave replacement journaled");
         assert_eq!(error.code, "credential_recovery_required");
         assert!(vault.bound_item_for(&key_a).is_none());
         assert_eq!(
             vault.counts().2,
-            stores_before_b,
-            "B store must remain downstream of durable predecessor cleanup"
+            stores_before_b + 1,
+            "verified B must exist before predecessor cleanup starts"
         );
         let unresolved = shell
             .list_unresolved_provider_credential_operations()
             .expect("replacement cleanup remains durable");
         assert_eq!(unresolved.len(), 1);
+        let key_b = FakeAuthorityKey::from_authority(
+            &operation_authority(&unresolved[0]).expect("successor B authority"),
+        );
+        assert!(matches!(
+            vault.bound_item_for(&key_b),
+            Some(FakeItem::Bound { .. })
+        ));
         assert_eq!(unresolved[0].status, "cleanup_required");
         assert!(unresolved[0].predecessor_slot_recovery_required);
         assert!(!unresolved[0].operation_slot_recovery_required);
@@ -3290,12 +3646,12 @@ mod tests {
             .expect("failed predecessor repair remains journaled");
         assert_eq!(still_blocked.len(), 1);
         assert!(still_blocked[0].predecessor_slot_recovery_required);
-        assert_eq!(vault.counts().2, stores_before_b);
+        assert_eq!(vault.counts().2, stores_before_b + 1);
 
         remove_provider_credential_with(&vault, &shell, connection_id, false)
             .await
             .expect("explicit cleanup repeats exact predecessor delete boundary");
-        assert_eq!(vault.counts().3, deletes_before_repair + 2);
+        assert_eq!(vault.counts().3, deletes_before_repair + 3);
         assert_eq!(
             vault
                 .events()
@@ -3311,7 +3667,8 @@ mod tests {
                 .expect("replacement cleanup terminal")
                 .is_empty()
         );
-        assert_eq!(vault.counts().2, stores_before_b);
+        assert_eq!(vault.counts().2, stores_before_b + 1);
+        assert!(vault.bound_item_for(&key_b).is_none());
     }
 
     #[tokio::test]

@@ -525,14 +525,21 @@ impl ProviderPromptAdapterContract {
     ) -> Result<ProviderRoleMapping, ProviderPromptContractError> {
         let contract = self.resolution_contract(developer_capability);
         let mut reason = None;
-        let resolved_role = match requested_role {
-            RoleHint::System => ProviderMessageRole::System,
-            RoleHint::Developer => ProviderMessageRole::Developer,
-            RoleHint::User => ProviderMessageRole::User,
-            RoleHint::Assistant => ProviderMessageRole::Assistant,
-            RoleHint::ProviderDefault => {
-                reason = Some(ProviderRoleMappingReason::ProviderDefaultResolved);
-                contract.provider_default_role
+        let resolved_role = if authority == InstructionAuthority::ImportedContent
+            && matches!(requested_role, RoleHint::System | RoleHint::Developer)
+        {
+            reason = Some(ProviderRoleMappingReason::UnsupportedRoleMappedByContract);
+            ProviderMessageRole::User
+        } else {
+            match requested_role {
+                RoleHint::System => ProviderMessageRole::System,
+                RoleHint::Developer => ProviderMessageRole::Developer,
+                RoleHint::User => ProviderMessageRole::User,
+                RoleHint::Assistant => ProviderMessageRole::Assistant,
+                RoleHint::ProviderDefault => {
+                    reason = Some(ProviderRoleMappingReason::ProviderDefaultResolved);
+                    contract.provider_default_role
+                }
             }
         };
         let effective_role = if contract.supported_roles.contains(&resolved_role) {
@@ -684,11 +691,10 @@ impl ProviderPromptAdapterContract {
         cache_dialect: PromptCacheWireDialect,
     ) -> Result<ProviderCompiledPromptPlan, ProviderPromptContractError> {
         let mut developer_capability = None;
-        for message in plan
-            .effective_messages
-            .iter()
-            .filter(|message| message.requested_role == RoleHint::Developer)
-        {
+        for message in plan.effective_messages.iter().filter(|message| {
+            message.requested_role == RoleHint::Developer
+                && message.authority != InstructionAuthority::ImportedContent
+        }) {
             let observed = match message.effective_role {
                 ProviderMessageRole::Developer => DeveloperRoleCapability::Supported,
                 ProviderMessageRole::System => DeveloperRoleCapability::Unsupported,
@@ -982,12 +988,13 @@ mod tests {
     use lorepia_domain::{
         AnthropicBlockText, AnthropicContentBlock, AnthropicContentBlockTopology, CacheBoundary,
         CharacterPromptContent, ConversationBranchId, ConversationId, GenerationId,
-        GenerationPresetId, GenerationProviderProvenance, GenerationRequest, Message, MessageId,
+        GenerationPresetId, GenerationProviderProvenance, GenerationRequest,
+        KnowledgeActivationReason, KnowledgeEntryId, KnowledgePlacement, Message, MessageId,
         ModelRouteId, OpaqueReasoningContext, OpaqueReasoningData, OpaqueReasoningState,
         OpenRouterReasoningTopology, ParameterDefaultMode, ParameterId, PresetMetadata,
         PromptConversationMessage, PromptMessageRole, PromptPresetId, PromptResolutionContext,
         PromptResolveRequest, Provenance, ProviderParameterMapping, ProviderParameterTarget,
-        SourceKind, UiParameterLevel, VariableMap,
+        SelectedKnowledge, SourceKind, UiParameterLevel, VariableMap,
     };
     use lorepia_orchestration::{default_prompt_preset, resolve_prompt_plan};
 
@@ -1024,6 +1031,8 @@ mod tests {
                 resolver_contract,
                 cache_boundary_count,
                 false,
+                false,
+                false,
             ),
         )
     }
@@ -1033,7 +1042,7 @@ mod tests {
     ) -> GenerationRequest {
         bind_execution_hash(
             adapter,
-            build_resolved_generation_request(adapter, None, 0, true),
+            build_resolved_generation_request(adapter, None, 0, true, false, false),
         )
     }
 
@@ -1059,6 +1068,8 @@ mod tests {
         resolver_contract: Option<ProviderPromptContract>,
         cache_boundary_count: u32,
         duplicate_history: bool,
+        imported_developer: bool,
+        imported_knowledge: bool,
     ) -> GenerationRequest {
         let timestamp = Utc
             .with_ymd_and_hms(2026, 8, 3, 0, 0, 0)
@@ -1078,6 +1089,14 @@ mod tests {
             metadata,
         );
         preset.blocks[0].role_hint = RoleHint::Developer;
+        if imported_knowledge {
+            preset.blocks[0].kind = lorepia_domain::PromptBlockKind::WorldKnowledge;
+            preset.blocks[0].role_hint = RoleHint::System;
+            preset.blocks[0].source = lorepia_domain::BlockSource::SelectedKnowledge;
+            preset.blocks[0].placement_zone = lorepia_domain::PlacementZone::RetrievedContext;
+        } else if imported_developer {
+            preset.blocks[0].authority = InstructionAuthority::ImportedContent;
+        }
         if duplicate_history {
             let mut duplicate = preset.blocks[1].clone();
             duplicate.id = PromptBlockId::from("provider-contract.duplicate-history");
@@ -1144,7 +1163,24 @@ mod tests {
                     },
                 ],
                 latest_user_message_id,
-                selected_knowledge: Vec::new(),
+                selected_knowledge: imported_knowledge
+                    .then(|| SelectedKnowledge {
+                        entry_id: KnowledgeEntryId::from("provider-contract.imported-knowledge"),
+                        content: PROMPT_CANARY.to_owned(),
+                        placement: KnowledgePlacement::RetrievedContext,
+                        priority: 1,
+                        evidence: vec![KnowledgeActivationReason::Always],
+                        provenance: Provenance {
+                            source_kind: SourceKind::ImportedPackage,
+                            source_id: Some("dev.lorepia.provider-contract".to_owned()),
+                            source_hash: Some("ab".repeat(32)),
+                            author: Some("Untrusted package".to_owned()),
+                            license: Some("MIT".to_owned()),
+                            imported_at: None,
+                        },
+                    })
+                    .into_iter()
+                    .collect(),
                 selected_memory: Vec::new(),
                 summary_boundaries: Vec::new(),
                 conversation_summary: None,
@@ -1502,6 +1538,89 @@ mod tests {
     }
 
     #[test]
+    fn execution_compilation_accepts_imported_developer_downgrade_for_every_family() {
+        for family in [
+            ApiFamily::OpenAiResponses,
+            ApiFamily::OpenAiChatCompletions,
+            ApiFamily::AnthropicMessages,
+            ApiFamily::GeminiGenerateContent,
+            ApiFamily::OllamaNative,
+        ] {
+            let adapter = ProviderPromptAdapterContract::for_family(family);
+            let request = build_resolved_generation_request(adapter, None, 0, false, true, false);
+            let plan = request
+                .resolved_prompt_plan
+                .as_ref()
+                .expect("resolved plan");
+            let imported_developer = plan
+                .effective_messages
+                .iter()
+                .find(|message| message.requested_role == RoleHint::Developer)
+                .expect("imported developer message");
+            assert_eq!(
+                imported_developer.authority,
+                InstructionAuthority::ImportedContent
+            );
+            assert_eq!(imported_developer.effective_role, ProviderMessageRole::User);
+
+            let compiled = adapter
+                .compile_resolved_plan_for_execution(plan, cache_dialect(family))
+                .unwrap_or_else(|error| {
+                    panic!("{family:?} rejected a valid imported downgrade: {error}")
+                });
+            let compiled_message = compiled
+                .messages()
+                .iter()
+                .find(|message| message.block_id() == &imported_developer.block_id)
+                .expect("compiled imported developer message");
+            assert_eq!(compiled_message.effective_role(), ProviderMessageRole::User);
+            assert_eq!(compiled_message.wire_role(), ProviderWireRole::User);
+        }
+    }
+
+    #[test]
+    fn imported_knowledge_cannot_inherit_creator_system_authority_for_any_family() {
+        for family in [
+            ApiFamily::OpenAiResponses,
+            ApiFamily::OpenAiChatCompletions,
+            ApiFamily::AnthropicMessages,
+            ApiFamily::GeminiGenerateContent,
+            ApiFamily::OllamaNative,
+        ] {
+            let adapter = ProviderPromptAdapterContract::for_family(family);
+            let request = build_resolved_generation_request(adapter, None, 0, false, false, true);
+            let plan = request
+                .resolved_prompt_plan
+                .as_ref()
+                .expect("resolved plan");
+            let knowledge = plan
+                .effective_messages
+                .iter()
+                .find(|message| message.content == PROMPT_CANARY)
+                .expect("imported knowledge message");
+            assert_eq!(knowledge.requested_role, RoleHint::System);
+            assert_eq!(knowledge.authority, InstructionAuthority::ImportedContent);
+            assert_eq!(knowledge.effective_role, ProviderMessageRole::User);
+
+            let compiled = adapter
+                .compile_resolved_plan_for_execution(plan, cache_dialect(family))
+                .unwrap_or_else(|error| {
+                    panic!("{family:?} rejected downgraded imported knowledge: {error}")
+                });
+            let compiled_knowledge = compiled
+                .messages()
+                .iter()
+                .find(|message| message.block_id() == &knowledge.block_id)
+                .expect("compiled imported knowledge message");
+            assert_eq!(
+                compiled_knowledge.effective_role(),
+                ProviderMessageRole::User
+            );
+            assert_eq!(compiled_knowledge.wire_role(), ProviderWireRole::User);
+        }
+    }
+
+    #[test]
     fn opaque_topology_cannot_be_replayed_by_two_resolved_messages() {
         let compatible = crate::openai_compatible::prompt_contract();
         let compatible_request = with_openrouter_opaque_context(
@@ -1831,6 +1950,23 @@ mod tests {
             mapping.reason,
             Some(ProviderRoleMappingReason::ProviderDefaultResolved)
         );
+    }
+
+    #[test]
+    fn imported_content_privileged_roles_are_downgraded_at_the_wire_boundary() {
+        let adapter = ProviderPromptAdapterContract::for_family(ApiFamily::OpenAiResponses);
+        for requested_role in [RoleHint::System, RoleHint::Developer] {
+            let mapping = adapter
+                .map_role(
+                    requested_role,
+                    InstructionAuthority::ImportedContent,
+                    DeveloperRoleCapability::Supported,
+                )
+                .expect("imported content is representable as user data");
+            assert_eq!(mapping.requested_role, requested_role);
+            assert_eq!(mapping.effective_role, ProviderMessageRole::User);
+            assert_eq!(mapping.wire_role, ProviderWireRole::User);
+        }
     }
 
     #[test]

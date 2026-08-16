@@ -82,8 +82,8 @@ pub use interaction_repository::{
     interaction_state_key_for_branch, interaction_state_snapshot_sha256,
 };
 pub use knowledge_embedding::{
-    KnowledgeEmbeddingCoverageQuery, KnowledgeEmbeddingMatch, KnowledgeEmbeddingQuery,
-    KnowledgeEmbeddingWrite,
+    KnowledgeEmbeddingCoverageQuery, KnowledgeEmbeddingCoverageResult, KnowledgeEmbeddingMatch,
+    KnowledgeEmbeddingQuery, KnowledgeEmbeddingQueryResult, KnowledgeEmbeddingWrite,
 };
 pub use lifecycle_outbox::{LifecycleOccurrenceKind, StoredLifecycleOccurrence};
 pub use lorepia_orchestration::no_applied_module_runtime_plan_sha256;

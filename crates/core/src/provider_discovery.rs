@@ -25,17 +25,17 @@ use lorepia_domain::{
         DiscoveryActionEnvelope, DiscoveryActionId, DiscoveryApprovalBinding,
         DiscoveryApprovalDecision, DiscoveryApprovalGrant, DiscoveryApprovalId,
         DiscoveryApprovalRecord, DiscoveryAssistantCheckpoint, DiscoveryCandidate,
-        DiscoveryCandidateId, DiscoveryCandidateSummary, DiscoveryCommitAttemptId,
-        DiscoveryCommitPlan, DiscoveryCompensationKind, DiscoveryCompensationStatus,
-        DiscoveryCompensationStep, DiscoveryCompensationTarget, DiscoveryEffect, DiscoveryEventId,
-        DiscoveryEvidenceResolution, DiscoveryFailure, DiscoveryFreshEvidenceSource,
-        DiscoveryInterruptionOutcome, DiscoveryOperationId, DiscoveryOperationKind,
-        DiscoveryPreviousSelection, DiscoveryProbeBudget, DiscoveryReviewChange,
-        DiscoveryReviewChangeKind, DiscoveryReviewDiff, DiscoveryState, ProviderDiscoveryAction,
-        ProviderDiscoveryConnectionOptions, ProviderDiscoverySession, SanitizedDiscoveryInput,
+        DiscoveryCandidateId, DiscoveryCandidateSummary, DiscoveryCatalogAuthorityBinding,
+        DiscoveryCommitAttemptId, DiscoveryCommitPlan, DiscoveryCompensationKind,
+        DiscoveryCompensationStatus, DiscoveryCompensationStep, DiscoveryCompensationTarget,
+        DiscoveryEffect, DiscoveryEventId, DiscoveryEvidenceResolution, DiscoveryFailure,
+        DiscoveryFreshEvidenceSource, DiscoveryInterruptionOutcome, DiscoveryOperationId,
+        DiscoveryOperationKind, DiscoveryPreviousSelection, DiscoveryProbeBudget,
+        DiscoveryReviewChange, DiscoveryReviewChangeKind, DiscoveryReviewDiff, DiscoveryState,
+        ProviderDiscoveryAction, ProviderDiscoveryConnectionOptions, ProviderDiscoverySession,
+        SanitizedDiscoveryInput,
     },
 };
-use lorepia_providers::catalog::CatalogRevisionSnapshot;
 use lorepia_providers::{
     AdapterRegistry, BuiltInTemplateId, CapabilityProbeEngine, CapabilityProbeKind, CurlAuthHint,
     ModelListRequest, ParsedCurlEvidence, ProbeBudget, ProbeConsent, ProbeRunOutcome, Provider,
@@ -78,6 +78,7 @@ use crate::{
         initial_generation_preset, provider_api_capability_observations, reconcile_input_routes,
         template_accepts_empty_preset,
     },
+    catalog::operational_provider_catalog_projection_for_storage,
     provider_discovery_deterministic::{
         DeterministicDiscoveryErrorKind, DeterministicDiscoveryExecutor,
         DeterministicDiscoveryOutput, DeterministicDiscoverySource, DiscoveryCandidateConfidence,
@@ -222,6 +223,7 @@ fn native_credential_execution_context_ids(
 pub struct ProviderDiscoveryCredentialLeaseContext {
     pub session_id: DiscoverySessionId,
     pub connection_id: ProviderConnectionId,
+    pub credential_api_origin: CanonicalOrigin,
     pub credential_origin_approval_id: DiscoveryApprovalId,
     pub credential_origin_grant_sha256: String,
     pub connection_binding_sha256: String,
@@ -234,6 +236,9 @@ pub struct ProviderDiscoveryCredentialAuthority {
     pub native_execution_id: String,
     pub commit_attempt_id: DiscoveryCommitAttemptId,
     pub connection_id: ProviderConnectionId,
+    pub credential_api_origin: CanonicalOrigin,
+    pub credential_origin_approval_id: DiscoveryApprovalId,
+    pub credential_origin_grant_sha256: String,
     pub connection_binding_sha256: String,
 }
 
@@ -416,7 +421,7 @@ impl ProviderDiscoverySource {
         input: SecretCurlInput,
         connection_options: ProviderDiscoveryConnectionOptions,
     ) -> CoreResult<Self> {
-        let policy = discovery_url_policy(&connection_options)?;
+        let policy = unissued_discovery_url_policy(&connection_options)?;
         let inspection = inspect_curl(input)
             .map_err(|_| CoreError::invalid("pasted cURL input was rejected"))?;
         let (evidence, extracted_credential) = inspection.into_parts();
@@ -465,6 +470,8 @@ struct DiscoveryWorkingDraft {
     extra_evidence_ids: Vec<EvidenceId>,
     selected_candidate_id: Option<DiscoveryCandidateId>,
     template: Option<ProviderTemplate>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    catalog_authority: Option<DiscoveryCatalogAuthorityBinding>,
     connection: Option<ProviderConnection>,
     routes: Vec<ModelRoute>,
     observations: Vec<CapabilityObservation>,
@@ -491,6 +498,7 @@ impl DiscoveryWorkingDraft {
             extra_evidence_ids: Vec::new(),
             selected_candidate_id: None,
             template: None,
+            catalog_authority: None,
             connection: None,
             routes: Vec::new(),
             observations: Vec::new(),
@@ -1087,7 +1095,7 @@ impl<'a> ProviderDiscoveryOrchestrator<'a> {
         input: SecretCurlInput,
         connection_options: &ProviderDiscoveryConnectionOptions,
     ) -> CoreResult<ProviderCurlInspection> {
-        let policy = discovery_url_policy(connection_options)?;
+        let policy = unissued_discovery_url_policy(connection_options)?;
         let inspection = inspect_curl(input)
             .map_err(|_| CoreError::invalid("pasted cURL input was rejected"))?;
         let (evidence, extracted_credential) = inspection.into_parts();
@@ -1144,10 +1152,22 @@ impl<'a> ProviderDiscoveryOrchestrator<'a> {
     /// secret-free deterministic result before any draft is serialized.
     pub fn begin_with_credential_authority(
         &self,
-        input: SanitizedDiscoveryInput,
+        mut input: SanitizedDiscoveryInput,
         mut source: ProviderDiscoverySource,
         credential_authority: Option<ProviderCredentialAccessAuthority>,
     ) -> CoreResult<DiscoverySessionSnapshot> {
+        let occurred_at = Utc::now();
+        input
+            .connection_options
+            .issue_local_network_approval_at(occurred_at)
+            .map_err(|error| CoreError::invalid(format!("invalid discovery input: {error}")))?;
+        if let Some(declared) = source.declared_connection_options.as_mut() {
+            declared
+                .issue_local_network_approval_at(occurred_at)
+                .map_err(|error| {
+                    CoreError::invalid(format!("invalid cURL connection options: {error}"))
+                })?;
+        }
         input
             .validate()
             .map_err(|error| CoreError::invalid(format!("invalid discovery input: {error}")))?;
@@ -1202,7 +1222,7 @@ impl<'a> ProviderDiscoveryOrchestrator<'a> {
             completed_operation: None,
             prepared_commit: None,
             provider_graph: None,
-            occurred_at: Utc::now(),
+            occurred_at,
         };
         self.storage
             .begin_discovery_session_with_credential_authority(
@@ -1210,7 +1230,8 @@ impl<'a> ProviderDiscoveryOrchestrator<'a> {
                 &write,
                 credential_authority.as_ref(),
             )?;
-        self.drive_nonpersistent(&session_id, None)
+        let (_cancel, cancelled) = watch::channel(false);
+        self.drive_nonpersistent(&session_id, None, cancelled)
     }
 
     /// Applies one user action with revision/idempotency and exact approval
@@ -1220,6 +1241,17 @@ impl<'a> ProviderDiscoveryOrchestrator<'a> {
         session_id: &DiscoverySessionId,
         envelope: DiscoveryActionEnvelope,
         credential: Option<&str>,
+    ) -> CoreResult<DiscoverySessionSnapshot> {
+        let (_cancel, cancelled) = watch::channel(false);
+        self.continue_discovery_with_cancellation(session_id, envelope, credential, cancelled)
+    }
+
+    pub fn continue_discovery_with_cancellation(
+        &self,
+        session_id: &DiscoverySessionId,
+        envelope: DiscoveryActionEnvelope,
+        credential: Option<&str>,
+        cancelled: watch::Receiver<bool>,
     ) -> CoreResult<DiscoverySessionSnapshot> {
         Self::validate_envelope(&envelope)?;
         if self
@@ -1273,8 +1305,13 @@ impl<'a> ProviderDiscoveryOrchestrator<'a> {
         self.storage.persist_discovery_transition(&write)?;
         if is_cancel {
             self.settle_prepared_cancellation(session_id)?;
+            // A Started operation owns its real cancellation outcome. Do not
+            // re-enter the dispatcher without its credential and falsely
+            // attest ConfirmedNoExternalEffect while another worker is still
+            // in flight. The worker's shared watch token will settle it.
+            return self.get(session_id);
         }
-        self.drive_nonpersistent(session_id, credential)
+        self.drive_nonpersistent(session_id, credential, cancelled)
     }
 
     /// Collects one new document or one-shot cURL source under the existing
@@ -1433,7 +1470,8 @@ impl<'a> ProviderDiscoveryOrchestrator<'a> {
                 provider_graph: None,
                 occurred_at: Utc::now(),
             })?;
-        self.drive_nonpersistent(session_id, None)
+        let (_cancel, cancelled) = watch::channel(false);
+        self.drive_nonpersistent(session_id, None, cancelled)
     }
 
     fn settle_prepared_cancellation(&self, session_id: &DiscoverySessionId) -> CoreResult<()> {
@@ -1549,6 +1587,7 @@ impl<'a> ProviderDiscoveryOrchestrator<'a> {
         Ok(ProviderDiscoveryCredentialLeaseContext {
             session_id: snapshot.session.id,
             connection_id: current_connection.id.clone(),
+            credential_api_origin: current_connection.api_origin.clone(),
             credential_origin_approval_id: approval_id,
             credential_origin_grant_sha256: grant_sha256,
             connection_binding_sha256,
@@ -1746,6 +1785,13 @@ impl<'a> ProviderDiscoveryOrchestrator<'a> {
             )?;
         let connection_binding_sha256 =
             validated_discovery_credential_binding_sha256(&snapshot, &draft, connection)?;
+        let (credential_origin_approval_id, credential_origin_grant_sha256) =
+            approved_discovery_credential_origin_authority(self.storage, &snapshot, &draft)?;
+        if attempt.plan.credential_approval_id.as_ref() != Some(&credential_origin_approval_id) {
+            return Err(CoreError::invalid(
+                "credential compensation origin approval differs from its immutable commit",
+            ));
+        }
         let native_execution = self
             .storage
             .get_discovery_native_credential_execution(&operation_id)?
@@ -1771,6 +1817,9 @@ impl<'a> ProviderDiscoveryOrchestrator<'a> {
             native_execution_id: native_execution.physical_authority_id,
             commit_attempt_id: attempt.id,
             connection_id: connection.id.clone(),
+            credential_api_origin: connection.api_origin.clone(),
+            credential_origin_approval_id,
+            credential_origin_grant_sha256,
             connection_binding_sha256,
         })
     }
@@ -2005,11 +2054,7 @@ impl<'a> ProviderDiscoveryOrchestrator<'a> {
         credential_confirmation: Option<&ProviderDiscoveryCredentialCommitConfirmation>,
     ) -> CoreResult<ProviderConnection> {
         let snapshot = self.get(session_id)?;
-        if snapshot.session.state != DiscoveryState::Committing {
-            return Err(CoreError::invalid(
-                "provider discovery is not awaiting an atomic commit",
-            ));
-        }
+        require_active_discovery_commit_authority(&snapshot)?;
         let operation_id = snapshot
             .active_operation_id
             .clone()
@@ -2020,6 +2065,7 @@ impl<'a> ProviderDiscoveryOrchestrator<'a> {
                 CoreError::internal("committing discovery lost its commit attempt")
             })?;
         let attempt = self.storage.get_discovery_commit_attempt(attempt_id)?;
+        revalidate_prepared_discovery_catalog_authority(self.storage, &draft, attempt.phase)?;
         let graph = graph_from_plan(&draft, attempt.plan, attempt.plan_sha256)?;
         let credential_bound = graph.connection.credential_ref.is_some();
         if !credential_bound && credential_confirmation.is_some() {
@@ -2908,7 +2954,8 @@ impl<'a> ProviderDiscoveryOrchestrator<'a> {
             Vec::new(),
             DiscoveryJsonUpdate::Preserve,
         )?;
-        self.drive_nonpersistent(session_id, None)
+        let (_cancel, cancelled) = watch::channel(false);
+        self.drive_nonpersistent(session_id, None, cancelled)
     }
 
     pub fn record_assistant_failure(
@@ -3327,6 +3374,7 @@ impl<'a> ProviderDiscoveryOrchestrator<'a> {
         &self,
         session_id: &DiscoverySessionId,
         credential: Option<&str>,
+        cancelled: watch::Receiver<bool>,
     ) -> CoreResult<DiscoverySessionSnapshot> {
         for _ in 0..MAX_AUTOMATIC_EFFECTS {
             let snapshot = self.get(session_id)?;
@@ -3376,12 +3424,15 @@ impl<'a> ProviderDiscoveryOrchestrator<'a> {
                 operation.kind,
                 &mut draft,
                 credential,
+                cancelled.clone(),
             ) {
                 Ok(completion) => completion,
                 Err(error) => {
                     let (action, outcome) = nonpersistent_failure_action(operation.kind, &error);
+                    let completion_snapshot =
+                        self.inflight_completion_snapshot(&snapshot, &operation.id)?;
                     self.persist_operation_completion(
-                        &snapshot,
+                        &completion_snapshot,
                         &operation.id,
                         &mut draft,
                         action,
@@ -3393,8 +3444,10 @@ impl<'a> ProviderDiscoveryOrchestrator<'a> {
                     return self.get(session_id);
                 }
             };
+            let completion_snapshot =
+                self.inflight_completion_snapshot(&snapshot, &operation.id)?;
             self.persist_operation_completion(
-                &snapshot,
+                &completion_snapshot,
                 &operation.id,
                 &mut draft,
                 completion.action,
@@ -3409,6 +3462,37 @@ impl<'a> ProviderDiscoveryOrchestrator<'a> {
         ))
     }
 
+    fn inflight_completion_snapshot(
+        &self,
+        started_snapshot: &DiscoverySessionSnapshot,
+        operation_id: &DiscoveryOperationId,
+    ) -> CoreResult<DiscoverySessionSnapshot> {
+        let latest = self.get(&started_snapshot.session.id)?;
+        if latest.session.revision == started_snapshot.session.revision {
+            return Ok(latest);
+        }
+        let current_operation = self
+            .storage
+            .get_current_discovery_operation(&started_snapshot.session.id)?;
+        if latest.session.cancellation_pending
+            && latest.session.state == started_snapshot.session.state
+            && current_operation.as_ref().is_some_and(|operation| {
+                operation.id == *operation_id
+                    && operation.status == DiscoveryOperationStatus::Started
+            })
+        {
+            // RequestCancellation deliberately advances the durable revision
+            // while the same operation remains active. Complete against that
+            // exact cancellation snapshot so the domain transition settles to
+            // Cancelled or UnknownOutcome instead of losing the cancellation
+            // to a stale-revision write.
+            return Ok(latest);
+        }
+        Err(CoreError::internal(
+            "provider discovery changed while its operation was in flight",
+        ))
+    }
+
     #[allow(clippy::too_many_lines)]
     fn execute_nonpersistent_effect(
         &self,
@@ -3416,6 +3500,7 @@ impl<'a> ProviderDiscoveryOrchestrator<'a> {
         operation: DiscoveryOperationKind,
         draft: &mut DiscoveryWorkingDraft,
         credential: Option<&str>,
+        cancelled: watch::Receiver<bool>,
     ) -> CoreResult<EffectCompletion> {
         match operation {
             DiscoveryOperationKind::ResolveKnownProvider => {
@@ -3560,7 +3645,7 @@ impl<'a> ProviderDiscoveryOrchestrator<'a> {
                 ))
             }
             DiscoveryOperationKind::BuildDeterministicManifestDraft => {
-                build_deterministic_graph(snapshot, draft, Utc::now())?;
+                build_deterministic_graph(self.storage, snapshot, draft, Utc::now())?;
                 let template = draft
                     .template
                     .as_ref()
@@ -3597,7 +3682,8 @@ impl<'a> ProviderDiscoveryOrchestrator<'a> {
                 ))
             }
             DiscoveryOperationKind::ListModels => {
-                list_models_for_draft(self.runtime, snapshot, draft, credential)?;
+                revalidate_discovery_catalog_authority(self.storage, draft, Utc::now())?;
+                list_models_for_draft(self.runtime, snapshot, draft, credential, cancelled)?;
                 let model_count = u32::try_from(draft.routes.len())
                     .map_err(|_| CoreError::invalid("too many listed models"))?;
                 draft.probe_route_ids = draft.routes.iter().map(|route| route.id.clone()).collect();
@@ -3619,8 +3705,10 @@ impl<'a> ProviderDiscoveryOrchestrator<'a> {
                 })
             }
             DiscoveryOperationKind::ProbeCapabilities => {
+                revalidate_discovery_catalog_authority(self.storage, draft, Utc::now())?;
                 let budget = approved_probe_budget(self.storage, snapshot, draft)?;
-                let outcome = probe_draft(self.runtime, snapshot, draft, credential, budget)?;
+                let outcome =
+                    probe_draft(self.runtime, snapshot, draft, credential, budget, cancelled)?;
                 match outcome {
                     ProbeExecution::Completed { evidence } => Ok(EffectCompletion {
                         action: ProviderDiscoveryAction::ProbesCompleted,
@@ -5012,10 +5100,14 @@ fn select_candidate(
         })
         .ok_or_else(|| CoreError::internal("selected provider template cannot be hydrated"))?;
     draft.selected_candidate_id = Some(candidate_id.clone());
-    install_graph_seed(snapshot, draft, template, observed_at)
+    let catalog_authority = current_discovery_catalog_authority(storage, &template, observed_at)?;
+    install_graph_seed(snapshot, draft, template, observed_at)?;
+    draft.catalog_authority = catalog_authority;
+    Ok(())
 }
 
 fn build_deterministic_graph(
+    storage: &Storage,
     snapshot: &DiscoverySessionSnapshot,
     draft: &mut DiscoveryWorkingDraft,
     observed_at: DateTime<Utc>,
@@ -5035,7 +5127,10 @@ fn build_deterministic_graph(
                 .then(|| output.manifest_candidates[0].template.clone())
         })
         .ok_or_else(|| CoreError::invalid("provider template selection is still ambiguous"))?;
-    install_graph_seed(snapshot, draft, template, observed_at)
+    let catalog_authority = current_discovery_catalog_authority(storage, &template, observed_at)?;
+    install_graph_seed(snapshot, draft, template, observed_at)?;
+    draft.catalog_authority = catalog_authority;
+    Ok(())
 }
 
 fn install_graph_seed(
@@ -5063,6 +5158,10 @@ fn install_graph_seed_internal(
     observed_at: DateTime<Utc>,
     api_base_path_is_embedded: bool,
 ) -> CoreResult<()> {
+    require_active_discovery_network_authority(
+        &snapshot.session.input.connection_options,
+        observed_at,
+    )?;
     validate_connection_fields(&template.connection_fields)?;
     let hint = draft.deterministic.as_ref().and_then(|output| {
         output
@@ -5106,6 +5205,15 @@ fn install_graph_seed_internal(
         snapshot.session.input.credential_ref.as_ref(),
     )?;
     let local_network_approval = normalized_local_network_approval(options, &api_origin)?;
+    let created_at = if options.network_mode == ProviderNetworkMode::ApprovedLocalNetwork {
+        options.local_network_approved_at.ok_or_else(|| {
+            CoreError::invalid(
+                "legacy LAN discovery has no approval issue time; restart provider discovery",
+            )
+        })?
+    } else {
+        observed_at
+    };
     draft.connection = Some(ProviderConnection {
         id: snapshot.session.input.connection_id.clone(),
         template_id: template.id.clone(),
@@ -5122,10 +5230,11 @@ fn install_graph_seed_internal(
         credential_scope: None,
         timeout_seconds: options.timeout_seconds,
         status: ConnectionStatus::Untested,
-        created_at: observed_at,
+        created_at,
         updated_at: observed_at,
     });
     draft.template = Some(template);
+    draft.catalog_authority = None;
     Ok(())
 }
 
@@ -5392,7 +5501,8 @@ fn discovery_state_accepts_credential_lease(session: &ProviderDiscoverySession) 
         | DiscoveryState::ListingModels
         | DiscoveryState::AwaitingProbeConsent
         | DiscoveryState::ProbingCapabilities
-        | DiscoveryState::AwaitingReview => true,
+        | DiscoveryState::AwaitingReview
+        | DiscoveryState::Committing => true,
         DiscoveryState::Interrupted => session.recovery.as_ref().is_some_and(|checkpoint| {
             matches!(
                 checkpoint.operation,
@@ -5401,6 +5511,27 @@ fn discovery_state_accepts_credential_lease(session: &ProviderDiscoverySession) 
         }),
         _ => false,
     }
+}
+
+fn approved_discovery_credential_origin_authority(
+    storage: &Storage,
+    snapshot: &DiscoverySessionSnapshot,
+    draft: &DiscoveryWorkingDraft,
+) -> CoreResult<(DiscoveryApprovalId, String)> {
+    let approval_id = draft
+        .credential_approval_id
+        .as_ref()
+        .ok_or_else(|| CoreError::invalid("credential lease has no durable origin approval"))?;
+    let approval = storage
+        .list_discovery_approvals(&snapshot.session.id, MAX_DISCOVERY_ROWS)?
+        .into_iter()
+        .find(|approval| &approval.id == approval_id)
+        .ok_or_else(|| CoreError::invalid("credential lease origin approval record is missing"))?;
+    validate_credential_origin_approval(snapshot, draft, &approval)?;
+    Ok((
+        approval.id,
+        canonical_serde_sha256(&approval.grant, "credential-origin approval grant")?,
+    ))
 }
 
 fn validate_credential_origin_approval(
@@ -5473,6 +5604,7 @@ fn sanitized_graph_sha256(draft: &DiscoveryWorkingDraft) -> CoreResult<String> {
         credential_ref: connection.credential_ref.clone(),
         credential_approval_id: draft.credential_approval_id.clone(),
         review_sha256: "0".repeat(64),
+        catalog_authority: draft.catalog_authority.clone(),
         previous_selection: DiscoveryPreviousSelection::None,
     };
     DiscoveredProviderGraph {
@@ -5531,6 +5663,7 @@ fn commit_plan_for(
     attempt_id: DiscoveryCommitAttemptId,
     review: &DiscoveryReviewDiff,
 ) -> CoreResult<DiscoveryCommitPlan> {
+    revalidate_discovery_catalog_authority(storage, draft, Utc::now())?;
     let template = draft
         .template
         .as_ref()
@@ -5561,6 +5694,7 @@ fn commit_plan_for(
         credential_ref: connection.credential_ref.clone(),
         credential_approval_id: draft.credential_approval_id.clone(),
         review_sha256: review.sha256.clone(),
+        catalog_authority: draft.catalog_authority.clone(),
         previous_selection: storage.current_discovery_previous_selection()?,
     };
     plan.validate()
@@ -5641,12 +5775,14 @@ fn approved_probe_routes(
     Ok(routes)
 }
 
+#[allow(clippy::too_many_lines)]
 fn probe_draft(
     runtime: &Handle,
     snapshot: &DiscoverySessionSnapshot,
     draft: &mut DiscoveryWorkingDraft,
     credential: Option<&str>,
     approved_budget: DiscoveryProbeBudget,
+    cancelled: watch::Receiver<bool>,
 ) -> CoreResult<ProbeExecution> {
     let approved_routes = approved_probe_routes(draft, approved_budget)?;
     let template = draft
@@ -5671,9 +5807,31 @@ fn probe_draft(
     let mut request_count = 0_u32;
     let mut evidence = Vec::new();
     for route in approved_routes {
+        if *cancelled.borrow() {
+            return if request_count == 0 {
+                Err(CoreError::new(
+                    CoreErrorCode::Cancelled,
+                    "provider discovery was cancelled before capability probing started",
+                    false,
+                ))
+            } else {
+                Ok(ProbeExecution::Unknown)
+            };
+        }
         let provider =
             registry.build_provider_for_route_with_plan(template, connection, &route, None)?;
         for probe in STANDARD_DISCOVERY_PROBE_PLAN {
+            if *cancelled.borrow() {
+                return if request_count == 0 {
+                    Err(CoreError::new(
+                        CoreErrorCode::Cancelled,
+                        "provider discovery was cancelled before capability probing started",
+                        false,
+                    ))
+                } else {
+                    Ok(ProbeExecution::Unknown)
+                };
+            }
             request_count = request_count
                 .checked_add(1)
                 .ok_or_else(|| CoreError::invalid("capability probe request count overflowed"))?;
@@ -5700,13 +5858,12 @@ fn probe_draft(
                 &format!("probe:{}:{}", route.id.as_str(), probe_slug(probe)),
             );
             let consent = ProbeConsent::new(consent_id, route.id.clone(), probe, budget)?;
-            let (_cancel_sender, cancel_receiver) = watch::channel(false);
             match runtime.block_on(engine.run(
                 Arc::new(adapter),
                 &route.id,
                 probe,
                 consent,
-                cancel_receiver,
+                cancelled.clone(),
             )) {
                 ProbeRunOutcome::Observed(observation) => {
                     evidence.push(capability_probe_evidence(
@@ -5777,6 +5934,7 @@ fn list_models_for_draft(
     snapshot: &DiscoverySessionSnapshot,
     draft: &mut DiscoveryWorkingDraft,
     credential: Option<&str>,
+    cancelled: watch::Receiver<bool>,
 ) -> CoreResult<()> {
     if snapshot.session.state != DiscoveryState::ListingModels {
         return Err(CoreError::invalid(
@@ -5792,9 +5950,8 @@ fn list_models_for_draft(
         .as_ref()
         .ok_or_else(|| CoreError::internal("model listing has no connection"))?;
     let listing = AdapterRegistry::new().build_model_listing(template, connection)?;
-    let (_cancel_sender, cancel_receiver) = watch::channel(false);
-    let listed = runtime
-        .block_on(listing.list_models(ModelListRequest::new(credential, cancel_receiver)))?;
+    let listed =
+        runtime.block_on(listing.list_models(ModelListRequest::new(credential, cancelled)))?;
     ensure_listing_does_not_reflect_credential(&listed, credential)?;
     apply_listed_models_to_draft(draft, &listed.models, Utc::now())
 }
@@ -6132,13 +6289,32 @@ impl crate::app::Core {
                 envelope.expected_revision,
             )?
         {
+            self.forget_discovery_credential_reservation(&physical_authority_id)?;
+        }
+        self.provider_discovery()
+            .continue_discovery(session_id, envelope, credential)
+    }
+
+    pub fn continue_provider_discovery_with_cancellation(
+        &self,
+        session_id: &DiscoverySessionId,
+        envelope: DiscoveryActionEnvelope,
+        credential: Option<&str>,
+        cancelled: watch::Receiver<bool>,
+    ) -> CoreResult<DiscoverySessionSnapshot> {
+        if matches!(&envelope.action, ProviderDiscoveryAction::Cancel)
+            && let Some(physical_authority_id) = self.prepared_discovery_credential_reservation_id(
+                session_id,
+                envelope.expected_revision,
+            )?
+        {
             // Cancellation abandons a Prepared reservation. Consume the
             // process-local capability first so any later transition failure
             // remains fail-closed and cannot make that slot reusable.
             self.forget_discovery_credential_reservation(&physical_authority_id)?;
         }
         self.provider_discovery()
-            .continue_discovery(session_id, envelope, credential)
+            .continue_discovery_with_cancellation(session_id, envelope, credential, cancelled)
     }
 
     pub fn supply_provider_discovery_evidence(
@@ -6559,41 +6735,63 @@ fn active_discovery_templates(storage: &Storage) -> CoreResult<Vec<ProviderTempl
         }
     }
 
-    let catalog_state = storage
-        .catalog_state()
-        .map_err(|_| CoreError::internal("active provider catalog state could not be loaded"))?;
-    if let Some(pointer) = catalog_state.active {
-        let stored = storage
-            .catalog_snapshot(pointer.local_revision)
-            .map_err(|_| {
-                CoreError::internal("active provider catalog snapshot could not be loaded")
-            })?
-            .ok_or_else(|| CoreError::internal("active provider catalog snapshot is missing"))?;
-        if stored.snapshot_sha256 != pointer.snapshot_sha256 {
-            return Err(CoreError::internal(
-                "active provider catalog pointer hash does not match its snapshot",
-            ));
-        }
-        let snapshot: CatalogRevisionSnapshot = serde_json::from_str(&stored.snapshot_json)
-            .map_err(|_| CoreError::internal("active provider catalog snapshot is invalid"))?;
-        let snapshot_sha256 = snapshot
-            .sha256()
-            .map_err(|_| CoreError::internal("active provider catalog snapshot is invalid"))?;
-        if snapshot_sha256 != stored.snapshot_sha256 {
-            return Err(CoreError::internal(
-                "active provider catalog snapshot hash does not match",
-            ));
-        }
-        let now = Utc::now();
-        for entry in snapshot.manifests {
-            if entry.verified_at <= now
-                && entry.expires_at.is_none_or(|expires_at| expires_at > now)
-            {
-                insert_active_discovery_template(&mut active, entry.template)?;
-            }
-        }
+    let projection = operational_provider_catalog_projection_for_storage(storage, Utc::now())?;
+    for template in projection.provider_templates() {
+        insert_active_discovery_template(&mut active, template)?;
     }
     Ok(active.into_values().collect())
+}
+
+fn current_discovery_catalog_authority(
+    storage: &Storage,
+    template: &ProviderTemplate,
+    now: DateTime<Utc>,
+) -> CoreResult<Option<DiscoveryCatalogAuthorityBinding>> {
+    if template.source != TemplateSource::SignedCatalog {
+        return Ok(None);
+    }
+    operational_provider_catalog_projection_for_storage(storage, now)?
+        .discovery_authority_binding(template, now)
+}
+
+fn revalidate_discovery_catalog_authority(
+    storage: &Storage,
+    draft: &DiscoveryWorkingDraft,
+    now: DateTime<Utc>,
+) -> CoreResult<()> {
+    let template = draft
+        .template
+        .as_ref()
+        .ok_or_else(|| CoreError::internal("provider discovery has no template authority"))?;
+    if template.source != TemplateSource::SignedCatalog {
+        return if draft.catalog_authority.is_none() {
+            Ok(())
+        } else {
+            Err(CoreError::invalid(
+                "non-catalog provider discovery carries signed catalog authority",
+            ))
+        };
+    }
+    let current = current_discovery_catalog_authority(storage, template, now)?;
+    if current != draft.catalog_authority {
+        return Err(CoreError::new(
+            CoreErrorCode::InvalidInput,
+            "signed catalog authority changed or expired; restart provider discovery",
+            true,
+        ));
+    }
+    Ok(())
+}
+
+fn revalidate_prepared_discovery_catalog_authority(
+    storage: &Storage,
+    draft: &DiscoveryWorkingDraft,
+    phase: DiscoveryCommitPhase,
+) -> CoreResult<()> {
+    if phase == DiscoveryCommitPhase::Prepared {
+        revalidate_discovery_catalog_authority(storage, draft, Utc::now())?;
+    }
+    Ok(())
 }
 
 fn insert_active_discovery_template(
@@ -6617,7 +6815,46 @@ fn insert_active_discovery_template(
     }
 }
 
+fn require_active_discovery_network_authority(
+    options: &ProviderDiscoveryConnectionOptions,
+    observed_at: DateTime<Utc>,
+) -> CoreResult<()> {
+    options
+        .require_active_local_network_approval_at(observed_at)
+        .map_err(|error| {
+            CoreError::new(
+                CoreErrorCode::InvalidInput,
+                format!("provider discovery network authority is inactive: {error}"),
+                true,
+            )
+        })
+}
+
+fn require_active_discovery_commit_authority(
+    snapshot: &DiscoverySessionSnapshot,
+) -> CoreResult<()> {
+    if snapshot.session.state != DiscoveryState::Committing {
+        return Err(CoreError::invalid(
+            "provider discovery is not awaiting an atomic commit",
+        ));
+    }
+    require_active_discovery_network_authority(
+        &snapshot.session.input.connection_options,
+        Utc::now(),
+    )
+}
+
 fn discovery_url_policy(options: &ProviderDiscoveryConnectionOptions) -> CoreResult<UrlPolicy> {
+    require_active_discovery_network_authority(options, Utc::now())?;
+    unissued_discovery_url_policy(options)
+}
+
+/// Builds a policy only for pre-session cURL parsing. It never authorizes a
+/// network effect; durable sessions receive their server-issued timestamp at
+/// `begin_with_credential_authority` before any effect is driven.
+fn unissued_discovery_url_policy(
+    options: &ProviderDiscoveryConnectionOptions,
+) -> CoreResult<UrlPolicy> {
     options
         .validate()
         .map_err(|error| CoreError::invalid(format!("invalid connection options: {error}")))?;
@@ -6804,7 +7041,8 @@ pub mod test_support {
             SanitizedDiscoveryInput {
                 connection_id: connection_id.clone(),
                 display_name: "Synthetic Shell direct-capture fixture".to_owned(),
-                site_url: HttpUrl::parse("https://openrouter.ai/").map_err(CoreError::invalid)?,
+                site_url: HttpUrl::parse("https://docs.openrouter.example/")
+                    .map_err(CoreError::invalid)?,
                 docs_url: None,
                 credential_ref: Some(CredentialRef(connection_id.as_str().to_owned())),
                 preferred_assistant: None,
@@ -6985,10 +7223,15 @@ pub mod test_support {
 
 #[cfg(test)]
 mod policy_tests {
-    use std::net::IpAddr;
     use std::sync::{
         Mutex,
         atomic::{AtomicBool, Ordering},
+    };
+    use std::{
+        io::Read,
+        net::{IpAddr, TcpListener, TcpStream},
+        sync::mpsc as std_mpsc,
+        thread,
     };
 
     use lorepia_domain::{
@@ -7009,6 +7252,74 @@ mod policy_tests {
         plain_generate_called: Arc<AtomicBool>,
         captured_bodies: Arc<Mutex<Vec<(ApiFamily, Value)>>>,
         response: String,
+    }
+
+    fn read_probe_request_headers(stream: &mut TcpStream) -> String {
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .expect("set probe request timeout");
+        let mut request = Vec::new();
+        let mut buffer = [0_u8; 4_096];
+        while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+            let read = stream.read(&mut buffer).expect("read probe request");
+            if read == 0 {
+                break;
+            }
+            request.extend_from_slice(&buffer[..read]);
+        }
+        String::from_utf8(request).expect("probe request is UTF-8")
+    }
+
+    fn spawn_stalling_probe_provider() -> (
+        String,
+        std_mpsc::Receiver<String>,
+        std_mpsc::Sender<()>,
+        std_mpsc::Receiver<bool>,
+        thread::JoinHandle<()>,
+    ) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind probe provider");
+        let address = listener.local_addr().expect("probe provider address");
+        let (request_sender, request_receiver) = std_mpsc::channel();
+        let (release_sender, release_receiver) = std_mpsc::channel();
+        let (later_dispatch_sender, later_dispatch_receiver) = std_mpsc::channel();
+        let handle = thread::spawn(move || {
+            let (mut first, _) = listener.accept().expect("accept first probe request");
+            request_sender
+                .send(read_probe_request_headers(&mut first))
+                .expect("report first probe request");
+            release_receiver
+                .recv_timeout(Duration::from_secs(5))
+                .expect("release first probe request");
+            drop(first);
+
+            listener
+                .set_nonblocking(true)
+                .expect("make probe listener nonblocking");
+            let deadline = std::time::Instant::now() + Duration::from_millis(750);
+            let mut later_dispatch = false;
+            while std::time::Instant::now() < deadline {
+                match listener.accept() {
+                    Ok((_stream, _)) => {
+                        later_dispatch = true;
+                        break;
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(error) => panic!("accept later probe request: {error}"),
+                }
+            }
+            later_dispatch_sender
+                .send(later_dispatch)
+                .expect("report later probe dispatch");
+        });
+        (
+            format!("http://{address}"),
+            request_receiver,
+            release_sender,
+            later_dispatch_receiver,
+            handle,
+        )
     }
 
     #[async_trait::async_trait]
@@ -7132,6 +7443,33 @@ mod policy_tests {
             connection_options,
             supplied_evidence_ids: Vec::new(),
         }
+    }
+
+    #[test]
+    fn signed_discovery_template_without_current_operational_authority_fails_closed() {
+        let root = tempdir().expect("temporary Core root");
+        let core = crate::Core::open(crate::CoreConfig::new(root.path())).expect("open Core");
+        let now = Utc::now();
+        let mut template =
+            AdapterRegistry::built_in_template(BuiltInTemplateId::OpenRouter).unwrap();
+        template.source = TemplateSource::SignedCatalog;
+        template.manifest_version += 1;
+        let authority = DiscoveryCatalogAuthorityBinding::new(
+            1,
+            &template,
+            now + chrono::Duration::minutes(10),
+        )
+        .unwrap();
+        let mut draft = DiscoveryWorkingDraft::new(DiscoverySourceIntent::KnownProvider {
+            template_id: template.id.clone(),
+        });
+        draft.template = Some(template);
+        draft.catalog_authority = Some(authority);
+
+        let error = revalidate_discovery_catalog_authority(core.storage(), &draft, now)
+            .expect_err("inactive signed template must not retain discovery authority");
+        assert_eq!(error.code, CoreErrorCode::InvalidInput);
+        assert!(error.recoverable);
     }
 
     fn credential_commit_confirmation(
@@ -7342,6 +7680,9 @@ mod policy_tests {
             .unwrap_or_else(|error| panic!("restore schema-36 trigger {trigger_name}: {error}"));
     }
 
+    // Keep the complete schema downgrade in one fixture transaction so callers cannot
+    // accidentally observe or reuse a partially reversed credential schema.
+    #[allow(clippy::too_many_lines)]
     fn reverse_schema37_credential_migration(database: &std::path::Path) {
         const MIGRATION_0027: &str = include_str!(
             "../../storage/migrations/0027_provider_discovery_native_attestations.sql"
@@ -7349,10 +7690,41 @@ mod policy_tests {
         const MIGRATION_0037: &str =
             include_str!("../../storage/migrations/0037_provider_credential_operations.sql");
 
+        const MIGRATION_0038: &str =
+            include_str!("../../storage/migrations/0038_conversation_speakers.sql");
+
         let connection = rusqlite::Connection::open(database).expect("open schema-37 database");
         connection
             .execute_batch("PRAGMA foreign_keys = OFF; BEGIN IMMEDIATE;")
             .expect("begin exact schema-37 inverse");
+        // Schema 38 sits above 37, so it is removed first to reach 36.
+        for (object_type, name) in MIGRATION_0038
+            .lines()
+            .filter_map(|line| {
+                let mut tokens = line.split_ascii_whitespace();
+                (tokens.next() == Some("CREATE")).then_some(())?;
+                let object_type = tokens.next()?;
+                let (object_type, name) = if object_type == "UNIQUE" {
+                    (tokens.next()?, tokens.next()?)
+                } else {
+                    (object_type, tokens.next()?)
+                };
+                Some((object_type, name.trim_end_matches(';')))
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+        {
+            connection
+                .execute(&format!("DROP {object_type} \"{name}\""), [])
+                .unwrap_or_else(|error| panic!("drop schema-38 {object_type} {name}: {error}"));
+        }
+        assert_eq!(
+            connection
+                .execute("DELETE FROM schema_migrations WHERE version = 38", [])
+                .expect("remove schema-38 migration registry row"),
+            1
+        );
         for trigger_name in [
             "provider_discovery_native_no_effect_attestation_binding",
             "provider_discovery_operation_legal_transition",
@@ -7440,6 +7812,7 @@ mod policy_tests {
                 origin: CanonicalOrigin::parse("http://models.lan:8080").unwrap(),
                 addresses: vec!["192.168.10.20".parse::<IpAddr>().unwrap()],
             }),
+            local_network_approved_at: Some(Utc::now()),
             ..ProviderDiscoveryConnectionOptions::default()
         }
     }
@@ -7713,6 +8086,237 @@ mod policy_tests {
             DiscoveryState::AwaitingCredentialOriginApproval
         );
         selected
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn cancellation_during_authenticated_probe_prevents_every_later_dispatch() {
+        let (origin, request_receiver, release_sender, later_dispatch_receiver, server) =
+            spawn_stalling_probe_provider();
+        let api_origin = CanonicalOrigin::parse(&origin).expect("canonical probe origin");
+        let template = AdapterRegistry::built_in_template(BuiltInTemplateId::OpenAiChatCompatible)
+            .expect("OpenAI-compatible template");
+        let auth = template.default_manifest.auth.clone();
+        let connection_id = ProviderConnectionId::from("cancelled-authenticated-probes");
+        let connection = ProviderConnection {
+            id: connection_id.clone(),
+            template_id: template.id.clone(),
+            template_version: template.manifest_version,
+            display_name: "Cancelled authenticated probes".to_owned(),
+            api_origin: api_origin.clone(),
+            config: ConnectionConfig {
+                api_base_path: Some(EndpointPath::parse("/v1").expect("probe base path")),
+                network_mode: ProviderNetworkMode::LocalLoopback,
+                local_network_approval: None,
+                values: vec![lorepia_domain::ConnectionConfigEntry {
+                    key: "api_base_url".to_owned(),
+                    value: ConnectionConfigValue::Text(format!("{origin}/v1")),
+                }],
+            },
+            credential_ref: Some(CredentialRef(connection_id.as_str().to_owned())),
+            credential_scope: Some(CredentialScope {
+                allowed_origins: vec![api_origin],
+                auth_binding: auth,
+                redirect_policy: CredentialRedirectPolicy::Deny,
+            }),
+            timeout_seconds: 5,
+            status: ConnectionStatus::Untested,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let route_id = ModelRouteId::from("cancelled-authenticated-probe-route");
+        let route = ModelRoute {
+            id: route_id.clone(),
+            connection_id: connection_id.clone(),
+            api_family: template.api_family,
+            model_id: "cancelled-probe-model".to_owned(),
+            display_name: None,
+            route_config: ModelRouteConfig::default(),
+            status: ModelAvailability::Available,
+            miss_count: 0,
+            raw_metadata: None,
+            metadata_source: ModelMetadataSource::Legacy,
+            metadata_observed_at: None,
+            last_reconciled_sync_job_id: None,
+            metadata_sync_job_id: None,
+            first_seen_at: Utc::now(),
+            last_seen_at: None,
+        };
+        let options = ProviderDiscoveryConnectionOptions {
+            network_mode: ProviderNetworkMode::LocalLoopback,
+            ..ProviderDiscoveryConnectionOptions::default()
+        };
+        let session = ProviderDiscoverySession::new(
+            DiscoverySessionId::from("cancelled-authenticated-probe-session"),
+            SanitizedDiscoveryInput {
+                connection_id: connection_id.clone(),
+                display_name: "Cancelled authenticated probes".to_owned(),
+                site_url: HttpUrl::parse(&format!("{origin}/")).expect("probe site URL"),
+                docs_url: None,
+                credential_ref: Some(CredentialRef(connection_id.as_str().to_owned())),
+                preferred_assistant: None,
+                connection_options: options,
+                supplied_evidence_ids: Vec::new(),
+            },
+        )
+        .expect("probe session");
+        let now = Utc::now();
+        let snapshot = DiscoverySessionSnapshot {
+            session,
+            active_operation_id: None,
+            draft_json: None,
+            review: None,
+            created_at: now,
+            updated_at: now,
+        };
+        let mut draft = DiscoveryWorkingDraft::new(DiscoverySourceIntent::KnownProvider {
+            template_id: template.id.clone(),
+        });
+        draft.template = Some(template);
+        draft.connection = Some(connection);
+        draft.routes = vec![route];
+        draft.probe_route_ids = vec![route_id];
+        let budget = standard_probe_budget(1).expect("standard probe budget");
+        let (cancel_sender, cancelled) = watch::channel(false);
+        let runtime = Arc::new(tokio::runtime::Runtime::new().expect("probe runtime"));
+        let worker_runtime = Arc::clone(&runtime);
+        let worker = thread::spawn(move || {
+            probe_draft(
+                worker_runtime.handle(),
+                &snapshot,
+                &mut draft,
+                Some("authenticated-probe-secret"),
+                budget,
+                cancelled,
+            )
+        });
+
+        let request = request_receiver
+            .recv_timeout(Duration::from_secs(5))
+            .expect("first authenticated probe dispatched");
+        assert!(
+            request
+                .to_ascii_lowercase()
+                .contains("authorization: bearer authenticated-probe-secret\r\n")
+        );
+        cancel_sender
+            .send(true)
+            .expect("cancel in-flight authenticated probe");
+        thread::sleep(Duration::from_millis(50));
+        release_sender.send(()).expect("release first probe socket");
+
+        let outcome = worker
+            .join()
+            .expect("join probe worker")
+            .expect("probe cancellation outcome");
+        assert!(matches!(outcome, ProbeExecution::Unknown));
+        assert!(
+            !later_dispatch_receiver
+                .recv_timeout(Duration::from_secs(2))
+                .expect("later dispatch observation"),
+            "no later authenticated probe may dispatch after cancellation"
+        );
+        server.join().expect("join probe provider");
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn request_cancellation_does_not_fake_completion_of_started_authenticated_listing() {
+        let root = tempdir().expect("temporary Core root");
+        let core = crate::Core::open(crate::CoreConfig::new(root.path())).expect("open Core");
+        let selected =
+            prepare_openrouter_credential_origin_approval(&core, "started-list-cancellation");
+        let proposal = core
+            .get_provider_discovery_approval_proposal(&selected.session.id)
+            .expect("load credential-origin proposal")
+            .expect("credential-origin proposal");
+        let orchestrator = core.provider_discovery();
+        let envelope = provider_discovery_action_envelope(
+            DiscoveryActionId::new(),
+            selected.session.revision,
+            ProviderDiscoveryAction::ApproveCredentialOrigin {
+                approval_id: proposal.id,
+            },
+        )
+        .expect("approve credential origin");
+        let mut draft = hydrate_working_draft(&selected).expect("hydrate selected draft");
+        let occurred_at = Utc::now();
+        let (approval, review, prepared_commit) = orchestrator
+            .prepare_user_action(&selected, &envelope, &mut draft, occurred_at)
+            .expect("prepare credential approval");
+        let transition = selected
+            .session
+            .apply(&envelope)
+            .expect("apply credential approval");
+        let operation_id = DiscoveryOperationId::new();
+        orchestrator
+            .storage
+            .persist_discovery_transition(&DiscoveryTransitionWrite {
+                transition,
+                draft: DiscoveryJsonUpdate::Replace(
+                    working_draft_value(&draft).expect("serialize approved draft"),
+                ),
+                review,
+                new_evidence: Vec::new(),
+                new_candidates: Vec::new(),
+                approval,
+                new_operation_id: Some(operation_id.clone()),
+                completed_operation: None,
+                prepared_commit,
+                provider_graph: None,
+                occurred_at,
+            })
+            .expect("persist listing operation");
+        assert!(
+            orchestrator
+                .storage
+                .mark_discovery_operation_started(&operation_id, Utc::now())
+                .expect("start authenticated listing")
+        );
+        let listing = core
+            .get_provider_discovery(&selected.session.id)
+            .expect("load started listing");
+
+        let cancelling = core
+            .cancel_provider_discovery(&listing.session.id, listing.session.revision)
+            .expect("persist cancellation request");
+
+        assert_eq!(cancelling.session.state, DiscoveryState::ListingModels);
+        assert!(cancelling.session.cancellation_pending);
+        let active = core
+            .storage()
+            .get_current_discovery_operation(&listing.session.id)
+            .expect("load active listing")
+            .expect("started listing remains active");
+        assert_eq!(active.id, operation_id);
+        assert_eq!(active.status, DiscoveryOperationStatus::Started);
+
+        let rebased = orchestrator
+            .inflight_completion_snapshot(&listing, &operation_id)
+            .expect("rebase worker completion onto cancellation revision");
+        assert_eq!(rebased.session.revision, cancelling.session.revision);
+        let mut worker_draft =
+            hydrate_working_draft(&listing).expect("hydrate in-flight worker draft");
+        orchestrator
+            .persist_operation_completion(
+                &rebased,
+                &operation_id,
+                &mut worker_draft,
+                ProviderDiscoveryAction::Interrupt {
+                    operation: DiscoveryOperationKind::ListModels,
+                    outcome: DiscoveryInterruptionOutcome::ConfirmedNoExternalEffect,
+                },
+                DurableOperationOutcome::Interrupted,
+                Vec::new(),
+                Vec::new(),
+                DiscoveryJsonUpdate::Preserve,
+            )
+            .expect("settle actual cancelled worker outcome");
+        let settled = core
+            .get_provider_discovery(&listing.session.id)
+            .expect("load settled cancellation");
+        assert_eq!(settled.session.state, DiscoveryState::Cancelled);
+        assert!(!settled.session.cancellation_pending);
     }
 
     #[test]
@@ -8063,6 +8667,14 @@ mod policy_tests {
                 template.id.clone(),
             )
             .expect("begin no-network provider discovery");
+        finish_no_network_credential_commit(core, &template, &selecting)
+    }
+
+    fn finish_no_network_credential_commit(
+        core: &crate::Core,
+        template: &ProviderTemplate,
+        selecting: &DiscoverySessionSnapshot,
+    ) -> DiscoverySessionSnapshot {
         let candidate = core
             .list_provider_discovery_candidates(&selecting.session.id)
             .expect("list template candidates")
@@ -8137,6 +8749,137 @@ mod policy_tests {
             .expect("prepare no-network credential commit");
         assert_eq!(committing.session.state, DiscoveryState::Committing);
         committing
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)] // Keeps the real lock/expiry timeline visible in one fixture.
+    fn credential_graph_publication_rechecks_lan_expiry_after_sqlite_write_lock_wait() {
+        let root = tempdir().expect("temporary Core root");
+        let core = crate::Core::open(crate::CoreConfig::new(root.path())).expect("open Core");
+        let template = AdapterRegistry::built_in_template(BuiltInTemplateId::OpenAiChatCompatible)
+            .expect("custom OpenAI-compatible template");
+        let connection_id = ProviderConnectionId::from("lan-lock-expiry-publication");
+        let selecting = core
+            .begin_provider_discovery_known(
+                SanitizedDiscoveryInput {
+                    connection_id: connection_id.clone(),
+                    display_name: "LAN lock expiry provider".to_owned(),
+                    site_url: HttpUrl::parse("https://models.lan:8443/")
+                        .expect("approved LAN site URL"),
+                    docs_url: None,
+                    credential_ref: Some(CredentialRef(connection_id.as_str().to_owned())),
+                    preferred_assistant: None,
+                    connection_options: ProviderDiscoveryConnectionOptions {
+                        network_mode: ProviderNetworkMode::ApprovedLocalNetwork,
+                        local_network_approval: Some(ProviderLocalNetworkApproval {
+                            origin: CanonicalOrigin::parse("https://models.lan:8443")
+                                .expect("approved credential-bearing LAN origin"),
+                            addresses: vec!["192.168.10.20".parse::<IpAddr>().unwrap()],
+                        }),
+                        local_network_approved_at: Some(Utc::now()),
+                        ..ProviderDiscoveryConnectionOptions::default()
+                    },
+                    supplied_evidence_ids: Vec::new(),
+                },
+                template.id.clone(),
+            )
+            .expect("begin LAN provider discovery");
+
+        // Preparing the credential-backed graph can contend with other long-running
+        // Core tests. Keep a wide setup margin while still crossing a real expiry
+        // boundary under the SQLite write lock below.
+        let expires_at = Utc::now() + chrono::Duration::seconds(60);
+        let approved_at = expires_at - chrono::Duration::hours(24);
+        let mut aged_input = selecting.session.input.clone();
+        aged_input.connection_options.local_network_approved_at = Some(approved_at);
+        let mut input_json = String::new();
+        write_canonical_json(
+            &serde_json::to_value(&aged_input).expect("serialize aged LAN input"),
+            &mut input_json,
+        )
+        .expect("canonicalize aged LAN input");
+        let database_path = active_test_database_path(root.path());
+        let fixture =
+            rusqlite::Connection::open(&database_path).expect("open LAN fixture database");
+        let revision_guard = fixture
+            .query_row(
+                "SELECT sql FROM sqlite_schema
+                 WHERE type = 'trigger' AND name = 'provider_discovery_session_revision_guard'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .expect("load discovery revision guard");
+        fixture
+            .execute_batch("DROP TRIGGER provider_discovery_session_revision_guard")
+            .expect("suspend revision guard for immutable-time fixture");
+        assert_eq!(
+            fixture
+                .execute(
+                    "UPDATE provider_discovery_sessions
+                     SET sanitized_input_json = ?2, created_at = ?3
+                     WHERE id = ?1",
+                    rusqlite::params![
+                        selecting.session.id.as_str(),
+                        input_json,
+                        approved_at.to_rfc3339(),
+                    ],
+                )
+                .expect("age LAN session authority"),
+            1
+        );
+        fixture
+            .execute_batch(&revision_guard)
+            .expect("restore discovery revision guard");
+        drop(fixture);
+
+        let committing = finish_no_network_credential_commit(&core, &template, &selecting);
+        let prepared = core
+            .get_provider_discovery_credential_install_context(&committing.session.id)
+            .expect("prepared credential install context");
+        let started = reserve_and_start_credential_install(&core, &prepared);
+        let confirmation = credential_commit_confirmation(&started);
+        let lock_at = expires_at - chrono::Duration::seconds(5);
+        assert!(
+            Utc::now() < lock_at,
+            "fixture must finish before the bounded SQLite lock-wait window"
+        );
+        while Utc::now() < lock_at {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
+        let blocker =
+            rusqlite::Connection::open(&database_path).expect("open SQLite write-lock blocker");
+        blocker
+            .execute_batch("BEGIN IMMEDIATE")
+            .expect("acquire SQLite write lock before LAN expiry");
+        let error = std::thread::scope(|scope| {
+            let worker = scope.spawn(|| {
+                core.commit_provider_discovery(&committing.session.id, Some(&confirmation))
+            });
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            assert!(
+                !worker.is_finished(),
+                "publication must be waiting on the real SQLite write lock"
+            );
+            while Utc::now() < expires_at {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            blocker
+                .execute_batch("COMMIT")
+                .expect("release SQLite write lock after LAN expiry");
+            worker
+                .join()
+                .expect("publication worker")
+                .expect_err("expired LAN authority must not publish a provider graph")
+        });
+        assert_eq!(error.code, CoreErrorCode::InvalidInput);
+        assert!(error.recoverable);
+        assert!(
+            core.storage()
+                .get_provider_connection(&connection_id)
+                .is_err(),
+            "expired authority must leave the provider graph unpublished"
+        );
     }
 
     #[test]
@@ -8338,7 +9081,7 @@ mod policy_tests {
         .expect("upgrade genuine schema-36 Started cancellation");
         assert_eq!(
             upgraded.storage().schema_version().expect("schema version"),
-            37
+            38
         );
         upgraded
             .get_provider_discovery_credential_install_context(&committing.session.id)
@@ -8921,6 +9664,9 @@ mod policy_tests {
         .expect("open Core with native recovery ownership");
         let committing =
             prepare_no_network_credential_commit(&core, "started-cancel-crash-authority");
+        let credential_authority = core
+            .get_provider_discovery_credential_lease_context(&committing.session.id)
+            .expect("load immutable credential origin authority before compensation");
         let prepared = core
             .get_provider_discovery_credential_install_context(&committing.session.id)
             .expect("load prepared credential operation");
@@ -8962,6 +9708,22 @@ mod policy_tests {
             .expect("load exact physical compensation authority B");
         assert_eq!(authority.operation_id, started.operation_id);
         assert_eq!(authority.native_execution_id, physical_b);
+        assert_eq!(
+            authority.credential_api_origin,
+            credential_authority.credential_api_origin
+        );
+        assert_eq!(
+            authority.credential_origin_approval_id,
+            credential_authority.credential_origin_approval_id
+        );
+        assert_eq!(
+            authority.credential_origin_grant_sha256,
+            credential_authority.credential_origin_grant_sha256
+        );
+        assert_eq!(
+            authority.connection_binding_sha256,
+            credential_authority.connection_binding_sha256
+        );
         drop(reopened);
 
         let reopened = crate::Core::open_with_discovery_recovery_owner(
@@ -10342,6 +11104,91 @@ mod policy_tests {
                 options,
             )
             .is_err()
+        );
+    }
+
+    #[test]
+    fn legacy_or_expired_lan_authority_cannot_reach_a_network_policy() {
+        let mut legacy = approved_lan_options();
+        legacy.local_network_approved_at = None;
+        assert!(legacy.validate().is_ok(), "legacy records remain readable");
+        assert!(
+            ProviderDiscoverySource::curl(
+                SecretCurlInput::new("curl http://models.lan:8080/v1/models".to_owned()),
+                legacy.clone(),
+            )
+            .is_ok(),
+            "pre-session cURL parsing does not itself perform a network effect"
+        );
+        assert!(discovery_url_policy(&legacy).is_err());
+
+        let mut expired = approved_lan_options();
+        expired.local_network_approved_at = Some(Utc::now() - chrono::Duration::hours(25));
+        assert!(discovery_url_policy(&expired).is_err());
+    }
+
+    #[test]
+    fn discovery_begin_issues_lan_authority_at_the_immutable_session_time() {
+        let root = tempdir().expect("temporary Core root");
+        let core = crate::Core::open(crate::CoreConfig::new(root.path())).expect("open Core");
+        let mut options = approved_lan_options();
+        options.local_network_approved_at = Some(Utc::now() - chrono::Duration::hours(48));
+        let snapshot = core
+            .provider_discovery()
+            .begin_with_credential_authority(
+                input_with_options("http://models.lan:8080/", options),
+                ProviderDiscoverySource::known_provider_id(ProviderTemplateId::from(
+                    "unknown-lan-template",
+                )),
+                None,
+            )
+            .expect("persist LAN discovery before local template lookup fails closed");
+
+        assert_eq!(
+            snapshot
+                .session
+                .input
+                .connection_options
+                .local_network_approved_at,
+            Some(snapshot.created_at),
+            "Core must overwrite caller time and bind LAN authority to session creation"
+        );
+    }
+
+    #[test]
+    fn approved_lan_graph_seed_does_not_refresh_session_authority() {
+        let approved_at = Utc::now() - chrono::Duration::hours(1);
+        let observed_at = approved_at + chrono::Duration::minutes(30);
+        let mut options = approved_lan_options();
+        options.local_network_approved_at = Some(approved_at);
+        let session = ProviderDiscoverySession::new(
+            DiscoverySessionId::from("approved-lan-authority-time"),
+            input_with_options("http://models.lan:8080/", options),
+        )
+        .expect("approved LAN discovery session");
+        let snapshot = DiscoverySessionSnapshot {
+            session,
+            active_operation_id: None,
+            draft_json: None,
+            review: None,
+            created_at: approved_at,
+            updated_at: approved_at,
+        };
+        let mut template =
+            AdapterRegistry::built_in_template(BuiltInTemplateId::OllamaNative).unwrap();
+        template.default_manifest.default_api_origin =
+            Some(CanonicalOrigin::parse("http://models.lan:8080").unwrap());
+        let mut draft = DiscoveryWorkingDraft::new(DiscoverySourceIntent::KnownProvider {
+            template_id: template.id.clone(),
+        });
+
+        install_graph_seed(&snapshot, &mut draft, template, observed_at)
+            .expect("install approved LAN graph seed");
+
+        assert_eq!(
+            draft.connection.expect("seeded connection").created_at,
+            approved_at,
+            "graph seeding must carry the immutable LAN approval issue time"
         );
     }
 

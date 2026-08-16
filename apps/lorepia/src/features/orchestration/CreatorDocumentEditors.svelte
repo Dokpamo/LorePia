@@ -446,7 +446,7 @@
     .empty-note,
     .document-body small,
     .document-card summary small {
-        color: var(--muted);
+        color: var(--ink-muted);
     }
 
     .creator-count {
@@ -529,7 +529,7 @@
 
     .document-card > summary > span:last-child {
         text-align: right;
-        color: var(--muted);
+        color: var(--ink-muted);
         font-size: 0.78rem;
     }
 

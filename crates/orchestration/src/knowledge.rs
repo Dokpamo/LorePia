@@ -19,6 +19,90 @@ pub const MAX_REGEX_PATTERN_BYTES: usize = 4 * 1_024;
 pub const MAX_KNOWLEDGE_SCAN_CHARS: usize = 512 * 1_024;
 pub const MAX_KNOWLEDGE_RECURSION_DEPTH: u32 = 32;
 pub const MAX_ACTIVATION_PROBABILITY_BASIS_POINTS: u16 = 10_000;
+const MAX_TOTAL_REGEX_PATTERNS: usize = 1_024;
+const MAX_TOTAL_REGEX_SOURCE_BYTES: usize = 256 * 1_024;
+const MAX_TOTAL_REGEX_COMPILED_BYTES: usize = 16 * 1_024 * 1_024;
+const MAX_TOTAL_REGEX_DFA_BYTES: usize = 32 * 1_024 * 1_024;
+const MAX_REGEX_COMPILED_BYTES: usize = 2 * 1_024 * 1_024;
+const MAX_REGEX_DFA_BYTES: usize = 4 * 1_024 * 1_024;
+pub const MAX_GENERATION_KNOWLEDGE_WORK_BYTES: usize = 64 * 1_024 * 1_024;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KnowledgeWorkBudget {
+    max_work_bytes: usize,
+    used_work_bytes: usize,
+}
+
+impl Default for KnowledgeWorkBudget {
+    fn default() -> Self {
+        Self {
+            max_work_bytes: MAX_GENERATION_KNOWLEDGE_WORK_BYTES,
+            used_work_bytes: 0,
+        }
+    }
+}
+
+impl KnowledgeWorkBudget {
+    /// Creates a stricter budget without allowing callers to raise the
+    /// generation-wide security limit.
+    pub fn with_max_work_bytes(max_work_bytes: usize) -> Self {
+        Self {
+            max_work_bytes: max_work_bytes.min(MAX_GENERATION_KNOWLEDGE_WORK_BYTES),
+            used_work_bytes: 0,
+        }
+    }
+
+    pub const fn used_work_bytes(&self) -> usize {
+        self.used_work_bytes
+    }
+
+    pub const fn remaining_work_bytes(&self) -> usize {
+        self.max_work_bytes.saturating_sub(self.used_work_bytes)
+    }
+
+    pub fn charge_work_bytes(
+        &mut self,
+        scope_id: &str,
+        work_bytes: usize,
+    ) -> Result<(), KnowledgeSelectionError> {
+        let next = self
+            .used_work_bytes
+            .checked_add(work_bytes)
+            .ok_or_else(|| KnowledgeSelectionError::RuleLimitExceeded {
+                entry_id: scope_id.to_owned(),
+            })?;
+        if next > self.max_work_bytes {
+            return Err(KnowledgeSelectionError::RuleLimitExceeded {
+                entry_id: scope_id.to_owned(),
+            });
+        }
+        self.used_work_bytes = next;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+std::thread_local! {
+    static FULL_SCAN_LOWERCASE_CALLS: std::cell::Cell<usize> = const {
+        std::cell::Cell::new(0)
+    };
+}
+
+fn lowercase_full_scan(scan: &str) -> String {
+    #[cfg(test)]
+    FULL_SCAN_LOWERCASE_CALLS.with(|calls| calls.set(calls.get().saturating_add(1)));
+    scan.to_lowercase()
+}
+
+#[cfg(test)]
+fn reset_full_scan_lowercase_calls() {
+    FULL_SCAN_LOWERCASE_CALLS.with(|calls| calls.set(0));
+}
+
+#[cfg(test)]
+fn full_scan_lowercase_calls() -> usize {
+    FULL_SCAN_LOWERCASE_CALLS.with(std::cell::Cell::get)
+}
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum KnowledgeSelectionError {
@@ -106,6 +190,85 @@ struct EvaluationContext<'a> {
     variables: &'a VariableMap,
     supported_capabilities: &'a [CapabilityKey],
     regexes: &'a BTreeMap<RegexKey, Regex>,
+    activation_seed: u64,
+}
+
+struct ActivationScan {
+    original: String,
+    lowercase: String,
+    characters: usize,
+}
+
+impl ActivationScan {
+    fn from_texts(
+        book: &KnowledgeBook,
+        scan_texts: &[String],
+        work_budget: &mut KnowledgeWorkBudget,
+        scope_id: &str,
+    ) -> Result<Self, KnowledgeSelectionError> {
+        let depth = usize::try_from(book.scan_depth).unwrap_or(usize::MAX);
+        let start = scan_texts.len().saturating_sub(depth);
+        let source_bytes = scan_texts[start..]
+            .iter()
+            .enumerate()
+            .try_fold(0_usize, |total, (index, text)| {
+                total
+                    .checked_add(usize::from(index > 0))
+                    .and_then(|total| total.checked_add(text.len()))
+            })
+            .ok_or_else(|| KnowledgeSelectionError::RuleLimitExceeded {
+                entry_id: scope_id.to_owned(),
+            })?;
+        let normalization_work = source_bytes.checked_mul(2).ok_or_else(|| {
+            KnowledgeSelectionError::RuleLimitExceeded {
+                entry_id: scope_id.to_owned(),
+            }
+        })?;
+        work_budget.charge_work_bytes(scope_id, normalization_work)?;
+        let mut original = String::new();
+        let mut characters = 0;
+        for text in &scan_texts[start..] {
+            append_scan_text(&mut original, &mut characters, text)?;
+        }
+        let lowercase = lowercase_full_scan(&original);
+        Ok(Self {
+            original,
+            lowercase,
+            characters,
+        })
+    }
+
+    fn append_text(
+        &mut self,
+        text: &str,
+        work_budget: &mut KnowledgeWorkBudget,
+        scope_id: &str,
+    ) -> Result<(), KnowledgeSelectionError> {
+        let needs_separator = !self.original.is_empty();
+        let source_bytes = text
+            .len()
+            .checked_add(usize::from(needs_separator))
+            .and_then(|bytes| bytes.checked_mul(2))
+            .ok_or_else(|| KnowledgeSelectionError::RuleLimitExceeded {
+                entry_id: scope_id.to_owned(),
+            })?;
+        work_budget.charge_work_bytes(scope_id, source_bytes)?;
+        append_scan_text(&mut self.original, &mut self.characters, text)?;
+        if needs_separator {
+            self.lowercase.push('\n');
+        }
+        self.lowercase
+            .extend(text.chars().flat_map(char::to_lowercase));
+        Ok(())
+    }
+
+    fn matching_text(&self, case_sensitive: bool) -> &str {
+        if case_sensitive {
+            &self.original
+        } else {
+            &self.lowercase
+        }
+    }
 }
 
 type NormalizedSemanticScores = (
@@ -118,14 +281,26 @@ pub struct KnowledgeEngine;
 impl KnowledgeEngine {
     /// Selects entries without performing I/O. All unordered inputs are
     /// normalized and every tie is resolved by the stable entry id.
-    #[allow(clippy::too_many_lines)]
     pub fn select(
         book: &KnowledgeBook,
         context: &KnowledgeSelectionContext<'_>,
     ) -> Result<KnowledgeSelection, KnowledgeSelectionError> {
+        let mut work_budget = KnowledgeWorkBudget::default();
+        Self::select_with_budget(book, context, &mut work_budget)
+    }
+
+    /// Selects entries while charging every expensive operation to a budget
+    /// shared by all knowledge books in one generation.
+    #[allow(clippy::too_many_lines)]
+    pub fn select_with_budget(
+        book: &KnowledgeBook,
+        context: &KnowledgeSelectionContext<'_>,
+        work_budget: &mut KnowledgeWorkBudget,
+    ) -> Result<KnowledgeSelection, KnowledgeSelectionError> {
         validate_book(book)?;
+        charge_book_normalization(book, work_budget)?;
         let entries = normalized_entries(book)?;
-        let regexes = compile_regexes(&entries)?;
+        let regexes = compile_regexes(&entries, work_budget)?;
         let (semantic_scores, semantic_rank) =
             normalize_semantic_scores(&entries, context.semantic_scores)?;
         let evaluation = EvaluationContext {
@@ -135,16 +310,20 @@ impl KnowledgeEngine {
             variables: context.variables,
             supported_capabilities: context.supported_capabilities,
             regexes: &regexes,
+            activation_seed: context.activation_seed,
         };
         let mut evidence = initial_evidence(&entries, context.token_estimates);
-        let mut scan = initial_scan(book, context.scan_texts)?;
+        let scope_id = entries
+            .first()
+            .map_or_else(|| book.id.as_str(), |entry| entry.id.as_str());
+        let mut scan = ActivationScan::from_texts(book, context.scan_texts, work_budget, scope_id)?;
         let mut activated = BTreeMap::<KnowledgeEntryId, ActivatedCandidate>::new();
 
         for entry in &entries {
             if !entry.enabled {
                 continue;
             }
-            if let Some(reasons) = evaluate_activation(entry, &scan, &evaluation)
+            if let Some(reasons) = evaluate_activation(entry, &scan, &evaluation, work_budget)?
                 && probability_allows(book, entry, context.activation_seed)
             {
                 activated.insert(
@@ -169,7 +348,7 @@ impl KnowledgeEngine {
                     let Some(parent) = entries.iter().find(|entry| &entry.id == parent_id) else {
                         continue;
                     };
-                    append_scan_text(&mut scan, &parent.content)?;
+                    scan.append_text(&parent.content, work_budget, parent.id.as_str())?;
                 }
 
                 let frontier_ids = frontier.iter().cloned().collect::<BTreeSet<_>>();
@@ -181,7 +360,9 @@ impl KnowledgeEngine {
                     if !entry.enabled || activated.contains_key(&entry.id) {
                         continue;
                     }
-                    let Some(mut reasons) = evaluate_activation(entry, &scan, &evaluation) else {
+                    let Some(mut reasons) =
+                        evaluate_activation(entry, &scan, &evaluation, work_budget)?
+                    else {
                         continue;
                     };
                     if !probability_allows(book, entry, context.activation_seed) {
@@ -215,11 +396,11 @@ impl KnowledgeEngine {
             book,
             &entries,
             &activated,
-            context.activation_seed,
             &scan,
             &evaluation,
+            work_budget,
             &mut evidence,
-        );
+        )?;
         let (selected, used_tokens) = apply_budget(book, &entries, &activated, &mut evidence);
         let mut evidence = evidence.into_values().collect::<Vec<_>>();
         evidence.sort_by(|left, right| left.entry_id.cmp(&right.entry_id));
@@ -258,6 +439,75 @@ fn validate_book(book: &KnowledgeBook) -> Result<(), KnowledgeSelectionError> {
         })?;
     if book.max_recursion_depth > MAX_KNOWLEDGE_RECURSION_DEPTH {
         return Err(KnowledgeSelectionError::RecursionDepthLimitExceeded);
+    }
+    Ok(())
+}
+
+fn charge_book_normalization(
+    book: &KnowledgeBook,
+    work_budget: &mut KnowledgeWorkBudget,
+) -> Result<(), KnowledgeSelectionError> {
+    work_budget.charge_work_bytes(
+        book.id.as_str(),
+        book.id
+            .as_str()
+            .len()
+            .checked_add(book.name.len())
+            .and_then(|bytes| bytes.checked_add(book.entries.len()))
+            .ok_or_else(|| KnowledgeSelectionError::RuleLimitExceeded {
+                entry_id: book.id.as_str().to_owned(),
+            })?,
+    )?;
+    for entry in &book.entries {
+        let entry_bytes = [
+            entry.id.as_str().len(),
+            entry.book_id.as_str().len(),
+            entry.name.len(),
+            entry.content.len(),
+            entry
+                .parent_id
+                .as_ref()
+                .map_or(0, |parent_id| parent_id.as_str().len()),
+        ]
+        .into_iter()
+        .try_fold(1_usize, usize::checked_add)
+        .ok_or_else(|| KnowledgeSelectionError::RuleLimitExceeded {
+            entry_id: entry.id.as_str().to_owned(),
+        })?;
+        work_budget.charge_work_bytes(entry.id.as_str(), entry_bytes)?;
+        charge_activation_rule_normalization(&entry.activation, &entry.id, work_budget)?;
+    }
+    Ok(())
+}
+
+fn charge_activation_rule_normalization(
+    rule: &ActivationRule,
+    entry_id: &KnowledgeEntryId,
+    work_budget: &mut KnowledgeWorkBudget,
+) -> Result<(), KnowledgeSelectionError> {
+    work_budget.charge_work_bytes(entry_id.as_str(), 1)?;
+    match rule {
+        ActivationRule::Keyword {
+            primary, secondary, ..
+        } => {
+            for keyword in primary.iter().chain(secondary) {
+                work_budget.charge_work_bytes(entry_id.as_str(), keyword.len())?;
+            }
+        }
+        ActivationRule::Regex { patterns } => {
+            for pattern in patterns {
+                work_budget.charge_work_bytes(entry_id.as_str(), pattern.pattern.len())?;
+            }
+        }
+        ActivationRule::Any { rules } | ActivationRule::All { rules } => {
+            for rule in rules {
+                charge_activation_rule_normalization(rule, entry_id, work_budget)?;
+            }
+        }
+        ActivationRule::Always
+        | ActivationRule::Manual
+        | ActivationRule::Semantic { .. }
+        | ActivationRule::Condition { .. } => {}
     }
     Ok(())
 }
@@ -359,6 +609,7 @@ fn contains_invalid_semantic_threshold(rule: &ActivationRule) -> bool {
 
 fn compile_regexes(
     entries: &[&KnowledgeEntry],
+    work_budget: &mut KnowledgeWorkBudget,
 ) -> Result<BTreeMap<RegexKey, Regex>, KnowledgeSelectionError> {
     fn collect<'a>(rule: &'a ActivationRule, output: &mut Vec<&'a lorepia_domain::SafeRegex>) {
         match rule {
@@ -376,7 +627,9 @@ fn compile_regexes(
         }
     }
 
-    let mut compiled = BTreeMap::new();
+    let mut seen = BTreeSet::new();
+    let mut planned = Vec::new();
+    let mut total_source_bytes = 0_usize;
     for entry in entries {
         let mut patterns = Vec::new();
         collect(&entry.activation, &mut patterns);
@@ -385,22 +638,58 @@ fn compile_regexes(
                 pattern: pattern.pattern.clone(),
                 case_insensitive: pattern.case_insensitive,
             };
-            if compiled.contains_key(&key) {
+            if !seen.insert(key.clone()) {
                 continue;
             }
-            let regex = RegexBuilder::new(&pattern.pattern)
-                .case_insensitive(pattern.case_insensitive)
-                .size_limit(2 * 1_024 * 1_024)
-                .dfa_size_limit(4 * 1_024 * 1_024)
-                .build()
-                .map_err(|error| KnowledgeSelectionError::InvalidRegex {
+            total_source_bytes = total_source_bytes
+                .checked_add(pattern.pattern.len())
+                .ok_or_else(|| KnowledgeSelectionError::RuleLimitExceeded {
                     entry_id: entry.id.as_str().to_owned(),
-                    message: error.to_string(),
                 })?;
-            compiled.insert(key, regex);
+            if planned.len() >= MAX_TOTAL_REGEX_PATTERNS
+                || total_source_bytes > MAX_TOTAL_REGEX_SOURCE_BYTES
+            {
+                return Err(KnowledgeSelectionError::RuleLimitExceeded {
+                    entry_id: entry.id.as_str().to_owned(),
+                });
+            }
+            planned.push((key, entry.id.as_str()));
         }
     }
+
+    let (compiled_limit, dfa_limit) = regex_memory_limits(planned.len());
+    if let Some((_, scope_id)) = planned.first() {
+        let compile_work = compiled_limit
+            .checked_add(dfa_limit)
+            .and_then(|per_pattern| per_pattern.checked_mul(planned.len()))
+            .and_then(|work| work.checked_add(total_source_bytes))
+            .ok_or_else(|| KnowledgeSelectionError::RuleLimitExceeded {
+                entry_id: (*scope_id).to_owned(),
+            })?;
+        work_budget.charge_work_bytes(scope_id, compile_work)?;
+    }
+    let mut compiled = BTreeMap::new();
+    for (key, entry_id) in planned {
+        let regex = RegexBuilder::new(&key.pattern)
+            .case_insensitive(key.case_insensitive)
+            .size_limit(compiled_limit)
+            .dfa_size_limit(dfa_limit)
+            .build()
+            .map_err(|error| KnowledgeSelectionError::InvalidRegex {
+                entry_id: entry_id.to_owned(),
+                message: error.to_string(),
+            })?;
+        compiled.insert(key, regex);
+    }
     Ok(compiled)
+}
+
+fn regex_memory_limits(regex_count: usize) -> (usize, usize) {
+    let regex_count = regex_count.max(1);
+    (
+        MAX_REGEX_COMPILED_BYTES.min(MAX_TOTAL_REGEX_COMPILED_BYTES / regex_count),
+        MAX_REGEX_DFA_BYTES.min(MAX_TOTAL_REGEX_DFA_BYTES / regex_count),
+    )
 }
 
 fn normalize_semantic_scores(
@@ -477,24 +766,13 @@ fn initial_evidence(
         .collect()
 }
 
-fn initial_scan(
-    book: &KnowledgeBook,
-    scan_texts: &[String],
-) -> Result<String, KnowledgeSelectionError> {
-    let depth = usize::try_from(book.scan_depth).unwrap_or(usize::MAX);
-    let start = scan_texts.len().saturating_sub(depth);
-    let mut scan = String::new();
-    for text in &scan_texts[start..] {
-        append_scan_text(&mut scan, text)?;
-    }
-    Ok(scan)
-}
-
-fn append_scan_text(scan: &mut String, text: &str) -> Result<(), KnowledgeSelectionError> {
+fn append_scan_text(
+    scan: &mut String,
+    scan_characters: &mut usize,
+    text: &str,
+) -> Result<(), KnowledgeSelectionError> {
     let separator_chars = usize::from(!scan.is_empty());
-    let next_chars = scan
-        .chars()
-        .count()
+    let next_chars = scan_characters
         .checked_add(separator_chars)
         .and_then(|count| count.checked_add(text.chars().count()))
         .ok_or(KnowledgeSelectionError::ScanLimitExceeded)?;
@@ -505,133 +783,185 @@ fn append_scan_text(scan: &mut String, text: &str) -> Result<(), KnowledgeSelect
         scan.push('\n');
     }
     scan.push_str(text);
+    *scan_characters = next_chars;
     Ok(())
 }
 
 fn evaluate_activation(
     entry: &KnowledgeEntry,
-    scan: &str,
+    scan: &ActivationScan,
     context: &EvaluationContext<'_>,
-) -> Option<Vec<KnowledgeActivationReason>> {
-    evaluate_rule(&entry.activation, &entry.id, scan, context)
+    work: &mut KnowledgeWorkBudget,
+) -> Result<Option<Vec<KnowledgeActivationReason>>, KnowledgeSelectionError> {
+    evaluate_rule(&entry.activation, &entry.id, scan, context, work)
 }
 
 fn evaluate_rule(
     rule: &ActivationRule,
     entry_id: &KnowledgeEntryId,
-    scan: &str,
+    scan: &ActivationScan,
     context: &EvaluationContext<'_>,
-) -> Option<Vec<KnowledgeActivationReason>> {
+    work: &mut KnowledgeWorkBudget,
+) -> Result<Option<Vec<KnowledgeActivationReason>>, KnowledgeSelectionError> {
     match rule {
-        ActivationRule::Always => Some(vec![KnowledgeActivationReason::Always]),
-        ActivationRule::Manual => context
+        ActivationRule::Always => Ok(Some(vec![KnowledgeActivationReason::Always])),
+        ActivationRule::Manual => Ok(context
             .manual_entry_ids
             .contains(entry_id)
-            .then(|| vec![KnowledgeActivationReason::Manual]),
-        ActivationRule::Keyword {
-            primary,
-            secondary,
-            selective,
-            case_sensitive,
-            whole_word,
-        } => {
-            let primary_match = first_keyword_match(scan, primary, *case_sensitive, *whole_word)?;
-            let mut reasons = vec![KnowledgeActivationReason::Keyword {
-                matched: primary_match,
-            }];
-            if *selective {
-                let secondary_match =
-                    first_keyword_match(scan, secondary, *case_sensitive, *whole_word)?;
-                push_reason(
-                    &mut reasons,
-                    KnowledgeActivationReason::Keyword {
-                        matched: secondary_match,
-                    },
-                );
-            }
-            Some(reasons)
-        }
-        ActivationRule::Regex { patterns } => patterns.iter().find_map(|pattern| {
-            let key = RegexKey {
-                pattern: pattern.pattern.clone(),
-                case_insensitive: pattern.case_insensitive,
-            };
-            context.regexes.get(&key).and_then(|regex| {
-                regex.is_match(scan).then(|| {
-                    vec![KnowledgeActivationReason::Regex {
+            .then(|| vec![KnowledgeActivationReason::Manual])),
+        ActivationRule::Keyword { .. } => evaluate_keyword_rule(rule, entry_id, scan, work),
+        ActivationRule::Regex { patterns } => {
+            for pattern in patterns {
+                work.charge_work_bytes(entry_id.as_str(), scan.original.len())?;
+                let key = RegexKey {
+                    pattern: pattern.pattern.clone(),
+                    case_insensitive: pattern.case_insensitive,
+                };
+                if context
+                    .regexes
+                    .get(&key)
+                    .is_some_and(|regex| regex.is_match(&scan.original))
+                {
+                    return Ok(Some(vec![KnowledgeActivationReason::Regex {
                         pattern: pattern.pattern.clone(),
-                    }]
-                })
-            })
-        }),
+                    }]));
+                }
+            }
+            Ok(None)
+        }
         ActivationRule::Semantic { threshold, top_k } => {
-            let score = *context.semantic_scores.get(entry_id)?;
+            let Some(score) = context.semantic_scores.get(entry_id).copied() else {
+                return Ok(None);
+            };
             let threshold = score_to_millionths(*threshold);
-            let rank = *context.semantic_rank.get(entry_id)?;
-            (score >= threshold && rank < usize::try_from(*top_k).unwrap_or(usize::MAX)).then(
-                || {
-                    vec![KnowledgeActivationReason::Semantic {
-                        score_millionths: score,
-                    }]
-                },
+            let Some(rank) = context.semantic_rank.get(entry_id).copied() else {
+                return Ok(None);
+            };
+            Ok(
+                (score >= threshold && rank < usize::try_from(*top_k).unwrap_or(usize::MAX)).then(
+                    || {
+                        vec![KnowledgeActivationReason::Semantic {
+                            score_millionths: score,
+                        }]
+                    },
+                ),
             )
         }
-        ActivationRule::Condition { expression } => evaluate_condition(
+        ActivationRule::Condition { expression } => Ok(evaluate_condition(
             expression,
             context.variables,
             context.supported_capabilities,
         )
-        .then(|| vec![KnowledgeActivationReason::Condition]),
+        .then(|| vec![KnowledgeActivationReason::Condition])),
         ActivationRule::Any { rules } => {
             let mut reasons = Vec::new();
             for rule in rules {
-                if let Some(child_reasons) = evaluate_rule(rule, entry_id, scan, context) {
+                if let Some(child_reasons) = evaluate_rule(rule, entry_id, scan, context, work)? {
                     for reason in child_reasons {
                         push_reason(&mut reasons, reason);
                     }
                 }
             }
-            (!reasons.is_empty()).then_some(reasons)
+            Ok((!reasons.is_empty()).then_some(reasons))
         }
         ActivationRule::All { rules } => {
             let mut reasons = Vec::new();
             for rule in rules {
-                let child_reasons = evaluate_rule(rule, entry_id, scan, context)?;
+                let Some(child_reasons) = evaluate_rule(rule, entry_id, scan, context, work)?
+                else {
+                    return Ok(None);
+                };
                 for reason in child_reasons {
                     push_reason(&mut reasons, reason);
                 }
             }
-            Some(reasons)
+            Ok(Some(reasons))
         }
     }
 }
 
+fn evaluate_keyword_rule(
+    rule: &ActivationRule,
+    entry_id: &KnowledgeEntryId,
+    scan: &ActivationScan,
+    work: &mut KnowledgeWorkBudget,
+) -> Result<Option<Vec<KnowledgeActivationReason>>, KnowledgeSelectionError> {
+    let ActivationRule::Keyword {
+        primary,
+        secondary,
+        selective,
+        case_sensitive,
+        whole_word,
+    } = rule
+    else {
+        unreachable!("keyword evaluator receives only keyword rules");
+    };
+    let Some(primary_match) =
+        first_keyword_match(scan, primary, *case_sensitive, *whole_word, entry_id, work)?
+    else {
+        return Ok(None);
+    };
+    let mut reasons = vec![KnowledgeActivationReason::Keyword {
+        matched: primary_match,
+    }];
+    if *selective {
+        let Some(secondary_match) = first_keyword_match(
+            scan,
+            secondary,
+            *case_sensitive,
+            *whole_word,
+            entry_id,
+            work,
+        )?
+        else {
+            return Ok(None);
+        };
+        push_reason(
+            &mut reasons,
+            KnowledgeActivationReason::Keyword {
+                matched: secondary_match,
+            },
+        );
+    }
+    Ok(Some(reasons))
+}
+
 fn first_keyword_match(
-    scan: &str,
+    scan: &ActivationScan,
     keywords: &[String],
     case_sensitive: bool,
     whole_word: bool,
-) -> Option<String> {
-    keywords.iter().find_map(|keyword| {
-        (!keyword.is_empty() && contains_keyword(scan, keyword, case_sensitive, whole_word))
-            .then(|| keyword.clone())
-    })
+    entry_id: &KnowledgeEntryId,
+    work: &mut KnowledgeWorkBudget,
+) -> Result<Option<String>, KnowledgeSelectionError> {
+    for keyword in keywords {
+        if keyword.is_empty() {
+            continue;
+        }
+        if !case_sensitive {
+            work.charge_work_bytes(entry_id.as_str(), keyword.len())?;
+        }
+        work.charge_work_bytes(entry_id.as_str(), scan.matching_text(case_sensitive).len())?;
+        if contains_keyword(scan, keyword, case_sensitive, whole_word) {
+            return Ok(Some(keyword.clone()));
+        }
+    }
+    Ok(None)
 }
 
-fn contains_keyword(scan: &str, keyword: &str, case_sensitive: bool, whole_word: bool) -> bool {
+fn contains_keyword(
+    scan: &ActivationScan,
+    keyword: &str,
+    case_sensitive: bool,
+    whole_word: bool,
+) -> bool {
+    let haystack = scan.matching_text(case_sensitive);
+    let lowercase_keyword = (!case_sensitive).then(|| keyword.to_lowercase());
+    let needle = lowercase_keyword.as_deref().unwrap_or(keyword);
     if !whole_word {
-        return if case_sensitive {
-            scan.contains(keyword)
-        } else {
-            scan.to_lowercase().contains(&keyword.to_lowercase())
-        };
+        return haystack.contains(needle);
     }
-    let (haystack, needle) = if case_sensitive {
-        (scan.to_owned(), keyword.to_owned())
-    } else {
-        (scan.to_lowercase(), keyword.to_lowercase())
-    };
-    haystack.match_indices(&needle).any(|(start, matched)| {
+    haystack.match_indices(needle).any(|(start, matched)| {
         let before = haystack[..start].chars().next_back();
         let end = start + matched.len();
         let after = haystack[end..].chars().next();
@@ -717,11 +1047,11 @@ fn apply_activation_exclusions(
     book: &KnowledgeBook,
     entries: &[&KnowledgeEntry],
     activated: &BTreeMap<KnowledgeEntryId, ActivatedCandidate>,
-    seed: u64,
-    scan: &str,
+    scan: &ActivationScan,
     context: &EvaluationContext<'_>,
+    work: &mut KnowledgeWorkBudget,
     evidence: &mut BTreeMap<KnowledgeEntryId, KnowledgeSelectionEvidence>,
-) {
+) -> Result<(), KnowledgeSelectionError> {
     for entry in entries {
         let item = evidence
             .get_mut(&entry.id)
@@ -733,14 +1063,15 @@ fn apply_activation_exclusions(
             item.reasons.clone_from(&candidate.reasons);
             continue;
         }
-        if evaluate_activation(entry, scan, context).is_some()
-            && !probability_allows(book, entry, seed)
+        if evaluate_activation(entry, scan, context, work)?.is_some()
+            && !probability_allows(book, entry, context.activation_seed)
         {
             item.exclusion_reason = Some("deterministic activation probability gate".to_owned());
         } else {
             item.exclusion_reason = Some("activation rule did not match".to_owned());
         }
     }
+    Ok(())
 }
 
 fn apply_budget(
@@ -870,7 +1201,10 @@ mod tests {
     };
 
     use super::{
-        KnowledgeEngine, KnowledgeSelectionContext, KnowledgeSelectionError, estimate_text_tokens,
+        KnowledgeEngine, KnowledgeSelectionContext, KnowledgeSelectionError, KnowledgeWorkBudget,
+        MAX_KNOWLEDGE_SCAN_CHARS, MAX_REGEX_COMPILED_BYTES, MAX_REGEX_DFA_BYTES,
+        MAX_TOTAL_REGEX_COMPILED_BYTES, MAX_TOTAL_REGEX_DFA_BYTES, estimate_text_tokens,
+        full_scan_lowercase_calls, regex_memory_limits, reset_full_scan_lowercase_calls,
     };
 
     fn provenance() -> Provenance {
@@ -941,6 +1275,214 @@ mod tests {
                 activation_seed: 7,
             },
         )
+    }
+
+    #[test]
+    fn case_insensitive_activation_lowercases_the_full_scan_once() {
+        let book = book(vec![entry(
+            "keyword",
+            ActivationRule::Keyword {
+                primary: vec!["absent-one".to_owned(), "absent-two".to_owned()],
+                secondary: Vec::new(),
+                selective: false,
+                case_sensitive: false,
+                whole_word: false,
+            },
+            "content",
+        )]);
+        reset_full_scan_lowercase_calls();
+
+        let selection = select(
+            &book,
+            &["A SCAN WITHOUT EITHER KEYWORD".to_owned()],
+            &BTreeSet::new(),
+            &[],
+            &lorepia_domain::VariableMap::default(),
+            &BTreeMap::new(),
+        )
+        .expect("bounded keyword selection");
+
+        assert!(selection.selected.is_empty());
+        assert_eq!(full_scan_lowercase_calls(), 1);
+    }
+
+    #[test]
+    fn generation_budget_is_shared_across_books() {
+        let scan = vec!["shared generation scan".repeat(8)];
+        let keyword_rule = || ActivationRule::Keyword {
+            primary: vec!["not-present".to_owned()],
+            secondary: Vec::new(),
+            selective: false,
+            case_sensitive: true,
+            whole_word: false,
+        };
+        let first = book(vec![entry("first", keyword_rule(), "content")]);
+        let second = book(vec![entry("second", keyword_rule(), "content")]);
+        let context = KnowledgeSelectionContext {
+            scan_texts: &scan,
+            manual_entry_ids: &BTreeSet::new(),
+            semantic_scores: &[],
+            variables: &lorepia_domain::VariableMap::default(),
+            supported_capabilities: &[],
+            token_estimates: &BTreeMap::new(),
+            activation_seed: 41,
+        };
+        let mut measurement = KnowledgeWorkBudget::default();
+        KnowledgeEngine::select_with_budget(&first, &context, &mut measurement)
+            .expect("one book fits the generation budget");
+        let one_book_work = measurement.used_work_bytes();
+        assert!(one_book_work > 0, "book work must be charged");
+
+        let mut exact_budget = KnowledgeWorkBudget::with_max_work_bytes(one_book_work);
+        KnowledgeEngine::select_with_budget(&first, &context, &mut exact_budget)
+            .expect("one book fits the exact measured budget");
+        assert!(matches!(
+            KnowledgeEngine::select_with_budget(&second, &context, &mut exact_budget),
+            Err(KnowledgeSelectionError::RuleLimitExceeded { .. })
+        ));
+    }
+
+    #[test]
+    fn generation_budget_accumulates_regex_compilation_across_books() {
+        let regex_rule = || ActivationRule::Regex {
+            patterns: vec![SafeRegex {
+                pattern: "bounded-regex".to_owned(),
+                case_insensitive: false,
+            }],
+        };
+        let first = book(vec![entry("first-regex", regex_rule(), "content")]);
+        let second = book(vec![entry("second-regex", regex_rule(), "content")]);
+        let context = KnowledgeSelectionContext {
+            scan_texts: &[],
+            manual_entry_ids: &BTreeSet::new(),
+            semantic_scores: &[],
+            variables: &lorepia_domain::VariableMap::default(),
+            supported_capabilities: &[],
+            token_estimates: &BTreeMap::new(),
+            activation_seed: 43,
+        };
+        let mut measurement = KnowledgeWorkBudget::default();
+        KnowledgeEngine::select_with_budget(&first, &context, &mut measurement)
+            .expect("one regex book fits the generation budget");
+        let one_book_work = measurement.used_work_bytes();
+
+        let mut exact_budget = KnowledgeWorkBudget::with_max_work_bytes(one_book_work);
+        KnowledgeEngine::select_with_budget(&first, &context, &mut exact_budget)
+            .expect("one regex book fits the exact measured budget");
+        assert!(matches!(
+            KnowledgeEngine::select_with_budget(&second, &context, &mut exact_budget),
+            Err(KnowledgeSelectionError::RuleLimitExceeded { .. })
+        ));
+    }
+
+    #[test]
+    fn generation_budget_cannot_be_raised_by_a_caller() {
+        let mut budget = KnowledgeWorkBudget::with_max_work_bytes(usize::MAX);
+        budget
+            .charge_work_bytes("book", super::MAX_GENERATION_KNOWLEDGE_WORK_BYTES)
+            .expect("the exact generation limit is allowed");
+        assert!(matches!(
+            budget.charge_work_bytes("book", 1),
+            Err(KnowledgeSelectionError::RuleLimitExceeded { .. })
+        ));
+    }
+
+    #[test]
+    fn aggregate_regex_compilation_is_bounded() {
+        let regex_entries = |count| {
+            (0..count)
+                .map(|index| {
+                    entry(
+                        &format!("regex-{index:04}"),
+                        ActivationRule::Regex {
+                            patterns: vec![SafeRegex {
+                                pattern: format!("pattern-{index:04}"),
+                                case_insensitive: false,
+                            }],
+                        },
+                        "content",
+                    )
+                })
+                .collect()
+        };
+
+        select(
+            &book(regex_entries(1_024)),
+            &[],
+            &BTreeSet::new(),
+            &[],
+            &lorepia_domain::VariableMap::default(),
+            &BTreeMap::new(),
+        )
+        .expect("aggregate regex count at the limit");
+
+        assert!(matches!(
+            select(
+                &book(regex_entries(1_025)),
+                &[],
+                &BTreeSet::new(),
+                &[],
+                &lorepia_domain::VariableMap::default(),
+                &BTreeMap::new(),
+            ),
+            Err(KnowledgeSelectionError::RuleLimitExceeded { .. })
+        ));
+    }
+
+    #[test]
+    fn regex_memory_limits_are_shared_across_the_book() {
+        assert_eq!(
+            regex_memory_limits(1),
+            (MAX_REGEX_COMPILED_BYTES, MAX_REGEX_DFA_BYTES)
+        );
+        let regex_count = 1_024;
+        let (compiled, dfa) = regex_memory_limits(regex_count);
+        assert!(compiled.saturating_mul(regex_count) <= MAX_TOTAL_REGEX_COMPILED_BYTES);
+        assert!(dfa.saturating_mul(regex_count) <= MAX_TOTAL_REGEX_DFA_BYTES);
+    }
+
+    #[test]
+    fn aggregate_activation_scan_work_is_bounded() {
+        let keyword_entries = |count| {
+            (0..count)
+                .map(|index| {
+                    entry(
+                        &format!("keyword-{index:03}"),
+                        ActivationRule::Keyword {
+                            primary: vec!["z".to_owned()],
+                            secondary: Vec::new(),
+                            selective: false,
+                            case_sensitive: true,
+                            whole_word: false,
+                        },
+                        "content",
+                    )
+                })
+                .collect()
+        };
+        let scan = "a".repeat(MAX_KNOWLEDGE_SCAN_CHARS);
+
+        select(
+            &book(keyword_entries(62)),
+            std::slice::from_ref(&scan),
+            &BTreeSet::new(),
+            &[],
+            &lorepia_domain::VariableMap::default(),
+            &BTreeMap::new(),
+        )
+        .expect("aggregate scan work below the generation limit");
+
+        assert!(matches!(
+            select(
+                &book(keyword_entries(63)),
+                &[scan],
+                &BTreeSet::new(),
+                &[],
+                &lorepia_domain::VariableMap::default(),
+                &BTreeMap::new(),
+            ),
+            Err(KnowledgeSelectionError::RuleLimitExceeded { .. })
+        ));
     }
 
     #[test]

@@ -22,8 +22,9 @@ use sha2::{Digest, Sha256};
 use uuid::{Uuid, Version};
 
 use crate::{
-    CredentialStatus, NativeCaptureStatus, NativeCredential, NativeSensitiveText, PlatformError,
-    PlatformErrorCode, PlatformResult, StagedImport,
+    CredentialStatus, NativeCaptureStatus, NativeCredential, NativeCredentialEffect,
+    NativeCredentialEffectContext, NativeSensitiveText, PlatformError, PlatformErrorCode,
+    PlatformResult, StagedImport,
     model::NativeSavedContentSource,
     validation::{MAXIMUM_CREDENTIAL_WRITE_BYTES, validate_reference},
 };
@@ -2141,6 +2142,39 @@ impl<R: Runtime> DesktopPlatform<R> {
     }
 
     #[cfg(any(target_os = "macos", windows))]
+    pub(crate) async fn confirm_credential_effect(
+        &self,
+        context: &NativeCredentialEffectContext,
+    ) -> PlatformResult<()> {
+        let (title, informative_text) = credential_confirmation_copy(context);
+        #[cfg(target_os = "macos")]
+        {
+            let (sender, receiver) = tokio::sync::oneshot::channel();
+            let app = self.app.clone();
+            self.app
+                .run_on_main_thread(move || {
+                    let result = ensure_main_window_focused(&app)
+                        .and_then(|()| macos::confirm_credential_effect(&title, &informative_text));
+                    let _ = sender.send(result);
+                })
+                .map_err(|_| PlatformError::new(PlatformErrorCode::PermissionDenied))?;
+            receiver
+                .await
+                .map_err(|_| PlatformError::new(PlatformErrorCode::PermissionDenied))?
+        }
+        #[cfg(windows)]
+        windows::confirm_credential_effect(&self.app, &title, &informative_text).await
+    }
+
+    #[cfg(not(any(target_os = "macos", windows)))]
+    pub(crate) fn confirm_credential_effect(
+        &self,
+        _context: &NativeCredentialEffectContext,
+    ) -> std::future::Ready<PlatformResult<()>> {
+        std::future::ready(self.unsupported())
+    }
+
+    #[cfg(any(target_os = "macos", windows))]
     pub(crate) async fn pick_import(&self) -> PlatformResult<Option<StagedImport>> {
         #[cfg(target_os = "macos")]
         let selection = macos::pick_file(&self.app).await?;
@@ -2193,7 +2227,7 @@ impl<R: Runtime> DesktopPlatform<R> {
         let Some(destination) = destination else {
             return Ok(None);
         };
-        validate_content_export_destination(&destination, &self.data_root)?;
+        let destination = validate_content_export_destination(&destination, &self.data_root)?;
 
         let source_path = source_path.to_owned();
         let data_root = self.data_root.clone();
@@ -2217,7 +2251,7 @@ impl<R: Runtime> DesktopPlatform<R> {
             )?;
             let display_name = destination
                 .file_name()
-                .and_then(|name| name.to_str())
+                .to_str()
                 .ok_or_else(|| PlatformError::new(PlatformErrorCode::SelectionFailed))?
                 .to_owned();
             validate_export_receipt_display_name(&display_name)?;
@@ -2516,6 +2550,37 @@ impl<R: Runtime> DesktopPlatform<R> {
             active: &self.export_in_flight,
         })
     }
+}
+
+#[cfg(any(target_os = "macos", windows, test))]
+fn credential_confirmation_copy(context: &NativeCredentialEffectContext) -> (String, String) {
+    let (title, effect) = match context.effect() {
+        NativeCredentialEffect::CaptureOrReplace => (
+            "Allow credential capture?",
+            "read one credential from the clipboard and store it. If an older credential exists, it will be deleted only after the replacement is stored",
+        ),
+        NativeCredentialEffect::Delete => (
+            "Delete stored credential?",
+            "permanently delete the stored credential",
+        ),
+        NativeCredentialEffect::Archive => (
+            "Archive connection and delete credential?",
+            "archive this provider connection and permanently delete its stored credential",
+        ),
+        NativeCredentialEffect::DiscoveryCompensation => (
+            "Remove uncommitted credential?",
+            "permanently delete the credential created by the cancelled or failed discovery",
+        ),
+    };
+    (
+        title.to_owned(),
+        format!(
+            "LorePia will {effect}.\n\nTarget: {}\nOrigin: {}\nRevision: {}\n\nApprove only if these exact details match your intended action.",
+            context.target_id(),
+            context.origin(),
+            context.revision(),
+        ),
+    )
 }
 
 #[cfg(any(target_os = "macos", windows))]
