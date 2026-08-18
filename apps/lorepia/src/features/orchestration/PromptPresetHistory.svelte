@@ -384,7 +384,7 @@
         border: 0;
     }
 
-    @media (max-width: 680px) {
+    @container view (max-width: 680px) {
         .history-heading,
         .revision-list li {
             align-items: stretch;

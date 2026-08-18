@@ -232,6 +232,37 @@
         gap: 1rem;
     }
 
+    /*
+     * The heading row every settings panel wears: title on the left, its one
+     * action on the right. It stacks once the column is too narrow to seat
+     * both.
+     */
+    .section-heading {
+        display: flex;
+        gap: 16px;
+        align-items: center;
+        justify-content: space-between;
+    }
+
+    @container view (max-width: 640px) {
+        .section-heading {
+            align-items: flex-start;
+        }
+
+        /*
+         * The panel is already a card at this width, so a bordered block
+         * inside it only draws a second frame around the same content and
+         * spends the width twice. A rule and some air separate them instead.
+         */
+        .persona-selection,
+        .persona-form {
+            padding: 1rem 0 0;
+            border-width: 1px 0 0;
+            border-radius: 0;
+            background: transparent;
+        }
+    }
+
     .persona-selection,
     .persona-form {
         display: grid;

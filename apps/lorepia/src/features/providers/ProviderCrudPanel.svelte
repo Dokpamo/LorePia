@@ -1224,7 +1224,7 @@
         font-weight: 800;
     }
 
-    @media (max-width: 700px) {
+    @container view (max-width: 700px) {
         .form-grid,
         .nested-grid,
         .preview-card dl {

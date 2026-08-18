@@ -21,7 +21,6 @@ import type {
 import { LiveLorepiaClient, type LorepiaTransport } from '../../lib/ipc/client';
 import { LorepiaClientError } from '../../lib/ipc/errors';
 import ChatPane from '../chat/ChatPane.svelte';
-import ProviderSettings from '../providers/ProviderSettings.svelte';
 import OrchestrationQuickDrawer from './OrchestrationQuickDrawer.svelte';
 import OrchestrationStudio from './OrchestrationStudio.svelte';
 import {
@@ -979,6 +978,7 @@ describe('OrchestrationQuickDrawer', () => {
         if (recentBlock === undefined) throw new Error('recent block fixture is missing');
         recentBlock.enabled = false;
         render(OrchestrationStudio, {
+            section: 'prompt',
             appState: appState(),
             orchestrationState: state,
             controller: controller(),
@@ -1024,6 +1024,7 @@ describe('OrchestrationStudio', () => {
         const orchestrationController = controller();
         const move = vi.spyOn(orchestrationController, 'movePromptBlock').mockResolvedValue(true);
         render(OrchestrationStudio, {
+            section: 'prompt',
             appState: appState(),
             orchestrationState: orchestrationState(),
             controller: orchestrationController,
@@ -1055,6 +1056,7 @@ describe('OrchestrationStudio', () => {
         const stage = vi.spyOn(orchestrationController, 'stageRoomConfig');
         const save = vi.spyOn(orchestrationController, 'saveRoomConfig').mockResolvedValue(true);
         render(OrchestrationStudio, {
+            section: 'prompt',
             appState: appState(),
             orchestrationState: readyState,
             controller: orchestrationController,
@@ -1105,6 +1107,7 @@ describe('OrchestrationStudio', () => {
             { name: 'tone', value: '명랑하게' },
         ];
         render(OrchestrationStudio, {
+            section: 'prompt',
             appState: appState(),
             orchestrationState: duplicateState,
             controller: controller(),
@@ -1120,6 +1123,7 @@ describe('OrchestrationStudio', () => {
             (_, index) => ({ name: `slot_${String(index)}`, value: '' }),
         );
         render(OrchestrationStudio, {
+            section: 'prompt',
             appState: appState(),
             orchestrationState: cappedState,
             controller: controller(),
@@ -1136,6 +1140,7 @@ describe('OrchestrationStudio', () => {
         const readyState = get(orchestrationController.state);
         expect(readyState.phase).toBe('ready');
         const props = {
+            section: 'memory' as const,
             client: fixture.client,
             appState: appState(),
             orchestrationState: readyState,
@@ -1335,14 +1340,13 @@ describe('OrchestrationStudio', () => {
         await expect(appController.selectConversation(selectedConversation)).resolves.toBe(true);
         vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue(operationNonce);
         const props = {
+            section: 'diagnostics' as const,
             appState: get(appController.state),
             orchestrationState: get(orchestrationController.state),
             controller: orchestrationController,
             appController,
         };
         const rendered = render(OrchestrationStudio, props);
-
-        await fireEvent.click(screen.getByRole('tab', { name: '전문가' }));
         const reviewedText = '달빛 아래의 실제 검토 전송';
         await fireEvent.input(screen.getByLabelText('다음 사용자 메시지'), {
             target: { value: reviewedText },
@@ -1481,14 +1485,13 @@ describe('OrchestrationStudio', () => {
         const orchestrationController = new OrchestrationController(fixture.client);
         await orchestrationController.loadContext('conversation-1', 'branch-1');
         const props = {
+            section: 'diagnostics' as const,
             client: fixture.client,
             appState: appState(),
             orchestrationState: get(orchestrationController.state),
             controller: orchestrationController,
         };
         const rendered = render(OrchestrationStudio, props);
-
-        await fireEvent.click(screen.getByRole('tab', { name: '전문가' }));
         await fireEvent.input(screen.getByLabelText('다음 사용자 메시지'), {
             target: { value: '첫 미리보기 입력' },
         });
@@ -1576,13 +1579,12 @@ describe('OrchestrationStudio', () => {
         const orchestrationController = new OrchestrationController(fixture.client);
         await orchestrationController.loadContext('conversation-1', 'branch-1');
         render(OrchestrationStudio, {
+            section: 'diagnostics',
             client: fixture.client,
             appState: appState(),
             orchestrationState: get(orchestrationController.state),
             controller: orchestrationController,
         });
-
-        await fireEvent.click(screen.getByRole('tab', { name: '전문가' }));
         await fireEvent.input(screen.getByLabelText('다음 사용자 메시지'), {
             target: { value: '승인 뒤 재시도 입력' },
         });
@@ -1644,6 +1646,7 @@ describe('OrchestrationStudio', () => {
         const orchestrationController = new OrchestrationController(fixture.client);
         await orchestrationController.loadContext('conversation-1', 'branch-1');
         const props = {
+            section: 'memory' as const,
             client: fixture.client,
             appState: appState(),
             orchestrationState: get(orchestrationController.state),
@@ -1714,6 +1717,7 @@ describe('OrchestrationStudio', () => {
             },
         };
         render(OrchestrationStudio, {
+            section: 'memory',
             appState: readyAppState,
             orchestrationState: readyOrchestrationState,
             controller: studioController,
@@ -1776,16 +1780,19 @@ describe('OrchestrationStudio', () => {
             },
         ];
 
-        render(OrchestrationStudio, {
+        const knowledgeProps = {
+            section: 'memory' as const,
             appState: appState(),
             orchestrationState: state,
             controller: controller(),
-        });
+        };
+        const rendered = render(OrchestrationStudio, knowledgeProps);
 
         expect(screen.getByText(/선택 근거 일부가 축약되었습니다/)).toHaveTextContent(
             '전체 후보 목록으로 해석하지 마세요',
         );
-        await fireEvent.click(screen.getByRole('tab', { name: '전문가' }));
+
+        await rendered.rerender({ ...knowledgeProps, section: 'diagnostics' });
         expect(
             screen.getByRole('heading', { name: '현재 방의 지식·기억 선택 근거' }),
         ).toBeInTheDocument();
@@ -1805,23 +1812,22 @@ describe('OrchestrationStudio', () => {
 
     it('shows the safe module lifecycle boundary and a bounded, escaped final plan preview in expert mode', async () => {
         const orchestrationController = controller();
-        render(OrchestrationStudio, {
+        const expertProps = {
+            section: 'content' as const,
             appState: appState(),
             orchestrationState: orchestrationState(),
             controller: orchestrationController,
-        });
+        };
+        const rendered = render(OrchestrationStudio, expertProps);
 
-        const advancedTab = screen.getByRole('tab', { name: '고급' });
-        await fireEvent.keyDown(advancedTab, { key: 'ArrowRight' });
-        const expertTab = screen.getByRole('tab', { name: '전문가' });
-        expect(expertTab).toHaveAttribute('aria-selected', 'true');
-        expect(expertTab).toHaveFocus();
         expect(
             screen.getByRole('heading', { name: '콘텐츠 모듈 활성화·롤백' }),
         ).toBeInTheDocument();
         expect(
             screen.getAllByText(/해시로 고정된 콘텐츠 모듈 활성화·롤백 API/).length,
         ).toBeGreaterThan(0);
+
+        await rendered.rerender({ ...expertProps, section: 'diagnostics' });
         expect(screen.getByText('sha256:synthetic-plan')).toBeInTheDocument();
         expect(screen.queryByText('<script>never execute</script>')).not.toBeInTheDocument();
         expect(document.querySelector('script:not([src])')).toBeNull();
@@ -1857,7 +1863,7 @@ describe('OrchestrationStudio', () => {
         expect(document.body.textContent).not.toContain('/Users/');
     });
 
-    it('shows only content-free, hash-verified DisplayOnly diagnostics after message reopen', async () => {
+    it('shows only content-free, hash-verified DisplayOnly diagnostics after message reopen', () => {
         const reopenedAppState = appState();
         reopenedAppState.messages = {
             phase: 'ready',
@@ -1903,12 +1909,11 @@ describe('OrchestrationStudio', () => {
             ],
         };
         render(OrchestrationStudio, {
+            section: 'diagnostics',
             appState: reopenedAppState,
             orchestrationState: orchestrationState(),
             controller: controller(),
         });
-
-        await fireEvent.click(screen.getByRole('tab', { name: '전문가' }));
         const diagnosticsCard = screen
             .getByRole('heading', { name: '메시지 표시 변환 진단' })
             .closest('section');
@@ -1963,14 +1968,13 @@ describe('OrchestrationStudio', () => {
         } as unknown as LorepiaClient;
 
         render(OrchestrationStudio, {
+            section: 'diagnostics',
             client: approvalClient,
             appState: appState(),
             orchestrationState: orchestrationState(),
             controller: orchestrationController,
             appController,
         });
-
-        await fireEvent.click(screen.getByRole('tab', { name: '전문가' }));
         await waitFor(() => expect(listGenerationAttemptProposals).toHaveBeenCalledOnce());
         const sendButton = screen.getByRole('button', { name: '검토한 계획으로 전송' });
         expect(sendButton).toBeEnabled();
@@ -2022,14 +2026,13 @@ describe('OrchestrationStudio', () => {
         } as unknown as LorepiaClient;
 
         render(OrchestrationStudio, {
+            section: 'diagnostics',
             client: approvalClient,
             appState: readyAppState,
             orchestrationState: orchestrationState(),
             controller: orchestrationController,
             appController,
         });
-
-        await fireEvent.click(screen.getByRole('tab', { name: '전문가' }));
         expect(
             screen.getByRole('heading', { name: '기억 검색 준비가 중단되었습니다' }),
         ).toBeInTheDocument();
@@ -2060,15 +2063,14 @@ describe('OrchestrationStudio', () => {
         failedProviderState.providers.phase = 'error';
         failedProviderState.providers.error = 'synthetic provider failure';
 
-        render(ProviderSettings, {
+        render(OrchestrationStudio, {
+            section: 'prompt',
             appState: failedProviderState,
-            controller: new LorepiaAppController({} as LorepiaClient),
             orchestrationState: orchestrationState(),
-            orchestrationController: controller(),
+            controller: controller(),
         });
 
         expect(screen.getByRole('heading', { name: '프롬프트 제작실' })).toBeInTheDocument();
-        expect(screen.getByText('synthetic provider failure')).toBeInTheDocument();
     });
 
     it('requires bounded dimensions and disables fallback routes for memory embedding profiles', async () => {
@@ -2094,6 +2096,7 @@ describe('OrchestrationStudio', () => {
         const stage = vi.spyOn(orchestrationController, 'stageTaskProfile');
 
         render(OrchestrationStudio, {
+            section: 'prompt',
             appState: appState(),
             orchestrationState: state,
             controller: orchestrationController,
@@ -2115,16 +2118,15 @@ describe('OrchestrationStudio', () => {
         });
     });
 
-    it('renders only the safe selective package review and disables quarantined components', async () => {
+    it('renders only the safe selective package review and disables quarantined components', () => {
         render(OrchestrationStudio, {
+            section: 'content',
             appState: appState(),
             orchestrationState: orchestrationState(),
             controller: controller(),
             contentPackageState: contentPackageState(),
             contentPackageController: new ContentPackageController({} as LorepiaClient),
         });
-
-        await fireEvent.click(screen.getByRole('tab', { name: '전문가' }));
 
         expect(
             screen.getByRole('heading', { name: 'LorePia 패키지 선택 가져오기' }),
@@ -2154,14 +2156,13 @@ describe('OrchestrationStudio', () => {
             file_name: 'package.synthetic.lorepia.zip',
         };
         render(OrchestrationStudio, {
+            section: 'content',
             appState: appState(),
             orchestrationState: orchestrationState(),
             controller: controller(),
             contentPackageState: packageState,
             contentPackageController: packageController,
         });
-
-        await fireEvent.click(screen.getByRole('tab', { name: '전문가' }));
         expect(screen.getByRole('heading', { name: '가져오기 완료' })).toBeInTheDocument();
         expect(screen.getByRole('heading', { name: '최근 패키지 내보내기' })).toBeInTheDocument();
         expect(screen.getByText('파일명 package.synthetic.lorepia.zip')).toBeVisible();
@@ -2176,13 +2177,13 @@ describe('OrchestrationStudio', () => {
         cleanup();
         packageState.exporting_import_id = 'import-1';
         render(OrchestrationStudio, {
+            section: 'content',
             appState: appState(),
             orchestrationState: orchestrationState(),
             controller: controller(),
             contentPackageState: packageState,
             contentPackageController: packageController,
         });
-        await fireEvent.click(screen.getByRole('tab', { name: '전문가' }));
         expect(screen.getByRole('button', { name: '내보내는 중…' })).toBeDisabled();
         expect(screen.getByRole('status')).toHaveTextContent(
             '운영체제 저장 위치를 선택하고 있습니다.',
@@ -2199,14 +2200,13 @@ describe('OrchestrationStudio', () => {
             .mockResolvedValue(true);
         const packageState = restartedCompletedExportState();
         render(OrchestrationStudio, {
+            section: 'content',
             appState: appState(),
             orchestrationState: orchestrationState(),
             controller: controller(),
             contentPackageState: packageState,
             contentPackageController: packageController,
         });
-
-        await fireEvent.click(screen.getByRole('tab', { name: '전문가' }));
         const catalog = screen.getByRole('list', { name: '완료된 패키지 내보내기 목록' });
         const rows = within(catalog).getAllByRole('listitem');
         const [newerRow, olderRow] = rows;
@@ -2227,7 +2227,7 @@ describe('OrchestrationStudio', () => {
         expect(reload).toHaveBeenCalledOnce();
     });
 
-    it('bounds a corrupt oversized completed package catalog before rendering actions', async () => {
+    it('bounds a corrupt oversized completed package catalog before rendering actions', () => {
         const packageState = restartedCompletedExportState();
         packageState.completed_package_exports = Array.from({ length: 101 }, (_, index) => ({
             kind: 'lorepia_package' as const,
@@ -2237,14 +2237,13 @@ describe('OrchestrationStudio', () => {
             suggested_file_name: `package-${String(index)}.lorepia.zip`,
         }));
         render(OrchestrationStudio, {
+            section: 'content',
             appState: appState(),
             orchestrationState: orchestrationState(),
             controller: controller(),
             contentPackageState: packageState,
             contentPackageController: new ContentPackageController({} as LorepiaClient),
         });
-
-        await fireEvent.click(screen.getByRole('tab', { name: '전문가' }));
         expect(screen.getByText('package-99.lorepia.zip')).toBeVisible();
         expect(screen.queryByText('package-100.lorepia.zip')).toBeNull();
         expect(screen.getByText(/처음 100개 완료 패키지만 표시합니다/)).toBeVisible();
@@ -2258,14 +2257,13 @@ describe('OrchestrationStudio', () => {
             .mockReturnValue(true);
         const packageState = contentPackageSelectionState();
         render(OrchestrationStudio, {
+            section: 'content',
             appState: appState(),
             orchestrationState: orchestrationState(),
             controller: controller(),
             contentPackageState: packageState,
             contentPackageController: packageController,
         });
-
-        await fireEvent.click(screen.getByRole('tab', { name: '전문가' }));
         expect(screen.getByRole('heading', { name: '대상 쓰기 검토' })).toBeInTheDocument();
         expect(screen.getByText('1'.repeat(64))).toBeInTheDocument();
         expect(screen.getAllByText('2'.repeat(64))).toHaveLength(2);
@@ -2293,19 +2291,19 @@ describe('OrchestrationStudio', () => {
             },
         ];
         render(OrchestrationStudio, {
+            section: 'content',
             appState: appState(),
             orchestrationState: orchestrationState(),
             controller: controller(),
             contentPackageState: packageState,
             contentPackageController: packageController,
         });
-        await fireEvent.click(screen.getByRole('tab', { name: '전문가' }));
         expect(
             screen.getByRole('button', { name: '표시된 근거와 기능 명시적 승인' }),
         ).toBeEnabled();
     });
 
-    it('bounds target-review rendering and does not expose an unconfirmed hidden update', async () => {
+    it('bounds target-review rendering and does not expose an unconfirmed hidden update', () => {
         const packageState = contentPackageSelectionState();
         const selectionReview = packageState.selection;
         if (selectionReview === null) throw new Error('synthetic package selection is missing');
@@ -2322,14 +2320,13 @@ describe('OrchestrationStudio', () => {
             document_sha256: '3'.repeat(64),
         }));
         render(OrchestrationStudio, {
+            section: 'content',
             appState: appState(),
             orchestrationState: orchestrationState(),
             controller: controller(),
             contentPackageState: packageState,
             contentPackageController: new ContentPackageController({} as LorepiaClient),
         });
-
-        await fireEvent.click(screen.getByRole('tab', { name: '전문가' }));
         expect(screen.getByText(/처음 200개 대상 문서만 표시합니다/)).toBeInTheDocument();
         expect(screen.getByText('prompt-target-199')).toBeInTheDocument();
         expect(screen.queryByText('prompt-target-200')).not.toBeInTheDocument();

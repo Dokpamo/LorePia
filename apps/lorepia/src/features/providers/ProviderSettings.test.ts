@@ -86,7 +86,7 @@ describe('ProviderSettings retained legacy profiles', () => {
         ];
         const controller = new LorepiaAppController({} as LorepiaClient);
 
-        render(ProviderSettings, { appState, controller });
+        render(ProviderSettings, { appState, controller, section: 'target' });
 
         const heading = screen.getByRole('heading', { name: '저장된 기본 생성 대상' });
         const targetSection = heading.closest('section');
@@ -109,6 +109,7 @@ describe('ProviderSettings retained legacy profiles', () => {
         render(ProviderSettings, {
             appState: legacyProviderState(),
             controller,
+            section: 'connections',
         });
 
         const profileHeading = screen.getByRole('heading', {
@@ -134,13 +135,19 @@ describe('ProviderSettings retained legacy profiles', () => {
             pendingSelection.promise,
         );
 
-        render(ProviderSettings, {
+        const rendered = render(ProviderSettings, {
             appState: legacyProviderState(),
             controller,
+            section: 'connections',
         });
 
         await fireEvent.click(screen.getByRole('button', { name: '기본 대상으로 선택' }));
 
+        await rendered.rerender({
+            appState: legacyProviderState(),
+            controller,
+            section: 'target',
+        });
         expect(screen.getByLabelText('취소·오류 시 생성된 일부 응답을 보존')).toBeDisabled();
         expect(screen.getByRole('button', { name: '기본 대상 해제' })).toBeDisabled();
         const targetSection = screen
@@ -163,7 +170,7 @@ describe('ProviderSettings retained legacy profiles', () => {
         appState.providers.workspace.settings.selected_generation_preset_id = 'legacy-profile-1';
         const controller = new LorepiaAppController({} as LorepiaClient);
 
-        render(ProviderSettings, { appState, controller });
+        render(ProviderSettings, { appState, controller, section: 'target' });
 
         const summary = screen
             .getByRole('heading', { name: '저장된 기본 생성 대상' })
@@ -210,7 +217,7 @@ describe('ProviderSettings retained legacy profiles', () => {
             .spyOn(controller, 'deleteProviderCredential')
             .mockResolvedValue();
 
-        render(ProviderSettings, { appState, controller });
+        const rendered = render(ProviderSettings, { appState, controller, section: 'connections' });
 
         expect(screen.queryByLabelText('정규화된 레거시 연결 자격증명')).not.toBeInTheDocument();
         const ordinaryConnectionCard = screen
@@ -237,6 +244,7 @@ describe('ProviderSettings retained legacy profiles', () => {
             kind: 'legacy_profile',
             provider_profile_id: 'legacy-profile-1',
         });
+        await rendered.rerender({ appState, controller, section: 'target' });
         const summary = screen
             .getByRole('heading', { name: '저장된 기본 생성 대상' })
             .closest('section');

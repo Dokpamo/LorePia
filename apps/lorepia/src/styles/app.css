@@ -1,51 +1,64 @@
 /*
- * LorePia design system — neutral, flat, typographic.
+ * LorePia design system — one handheld column, everywhere.
  *
- * One sidebar and one reading column. No messenger chrome: the transcript is
- * a document, not a stream of bubbles, so turns are full-measure rows and the
- * only thing that separates a speaker from the page is a name and a rhythm of
- * whitespace. The reader's own turns sit in a quiet container so the
- * alternation stays scannable; the character's turns sit directly on the page,
- * because that is the writing the app exists to show.
+ * There is exactly one layout: a single handheld column. It fills the window
+ * at every size — no frame, no gutters — and the rows inside it centre their
+ * content on a reading measure, so the two form factors share every pixel of
+ * UI without a desktop window ever looking half empty.
  *
- * The palette is a single neutral ramp plus one accent that is spent only on
- * focus, links, and liveness. Every colour is a token defined once per theme.
- * Components never hardcode a hex value; that is what keeps light and dark
- * honest across the twenty-odd panels that consume these tokens.
+ * Navigation takes the shape the screen affords. A phone divides in time: a
+ * bottom tab bar with four destinations — home, chat, create, settings — one
+ * on screen at a time. A desktop divides in space: the character and
+ * conversation hierarchy docks into a sidebar beside the transcript, so
+ * switching conversations never takes the transcript off screen, and home
+ * stops being a destination at all. Create and settings are full-region modes
+ * on both. The composer docks to the foot of the transcript either way.
+ *
+ * The transcript is a messenger: the character speaks in soft neutral bubbles
+ * under their name and round avatar, the reader answers in solid accent
+ * bubbles on the right. One warm neutral ramp carries every surface; one teal
+ * accent carries identity, focus, liveness, and the reader's own voice.
+ * Every colour is a token defined once per theme — components never hardcode
+ * a hex value.
  */
 
 :root {
     color-scheme: light;
 
-    /* Surfaces, from furthest back to closest to the reader. */
-    --bg: #ffffff;
+    /*
+     * Surfaces, from furthest back to closest to the reader. The page is
+     * tinted and the card is white — that difference is what makes a card read
+     * as a card, and without it a border has to do the whole job alone.
+     */
+    --bg: #f1f1f3;
     --surface: #ffffff;
-    --surface-sunken: #f7f7f8;
+    --surface-sunken: #e8e8ec;
     --surface-raised: #ffffff;
-    --surface-hover: #f1f1f3;
-    --surface-active: #e7e7ea;
+    --surface-hover: #eaeaee;
+    --surface-active: #dededf;
 
     /* Text, from primary to incidental. */
-    --ink: #18181b;
-    --ink-muted: #6f6f7a;
-    --ink-subtle: #9d9da8;
+    --ink: #1b1b20;
+    --ink-muted: #6c6b78;
+    --ink-subtle: #9c9ba8;
     --ink-inverse: #ffffff;
 
-    --line: #e9e9ed;
-    --line-strong: #d6d6dc;
+    --line: #e4e4e8;
+    --line-strong: #d0d0d6;
 
-    /* The container around the reader's own turn, one step off the canvas. */
-    --turn-user-bg: #f2f2f5;
+    /* The two voices of the transcript. */
+    --bubble-char-bg: #ffffff;
+    --bubble-user-bg: #0e9384;
+    --bubble-user-ink: #ffffff;
 
-    /* The accent is for focus, links, and liveness — never for decoration. */
-    --accent: #4f46e5;
-    --accent-hover: #4338ca;
-    --accent-soft: #eef0fe;
-    --accent-line: #c3c6f7;
+    /* One accent: identity, focus, links, liveness, primary actions. */
+    --accent: #0e9384;
+    --accent-hover: #0b7c70;
+    --accent-soft: #e2f5f1;
+    --accent-line: #a8ddd3;
 
-    /* Primary actions are ink, not accent: one loud colour is enough. */
-    --primary-bg: #18181b;
-    --primary-bg-hover: #2c2c31;
+    --primary-bg: #0e9384;
+    --primary-bg-hover: #0b7c70;
     --primary-ink: #ffffff;
 
     --danger: #b42318;
@@ -55,19 +68,33 @@
     --success: #067647;
     --success-soft: #ecfdf3;
 
-    --radius-xs: 6px;
-    --radius-sm: 8px;
-    --radius-md: 12px;
-    --radius-lg: 16px;
+    --radius-xs: 8px;
+    --radius-sm: 11px;
+    --radius-md: 15px;
+    --radius-lg: 20px;
     --radius-pill: 999px;
 
     --shadow-1: 0 1px 2px rgb(16 18 24 / 5%);
-    --shadow-2: 0 6px 20px rgb(16 18 24 / 8%);
-    --shadow-3: 0 24px 64px rgb(16 18 24 / 16%);
+    --shadow-2: 0 8px 32px rgb(16 18 24 / 9%);
+    --shadow-3: 0 24px 64px rgb(16 18 24 / 18%);
 
-    --touch: 40px;
-    --sidebar: 276px;
-    --reading: 46rem;
+    /* Finger-sized targets at every width: the desktop is a big phone here. */
+    --touch: 44px;
+
+    /* The docked sidebar, on screens wide enough to hold one. */
+    --sidebar: 300px;
+
+    /*
+     * Content measures. A full-bleed row spends its own padding to centre its
+     * content on one of these, so the row still reaches both window edges
+     * while the writing inside it stays the width of a phone-ish column.
+     * The percentage resolves against the row, so this collapses to the
+     * minimum on a phone with no media query.
+     */
+    --reading: 44rem;
+    --settings: 54rem;
+    --gutter: max(14px, calc((100% - var(--reading)) / 2));
+    --settings-gutter: max(16px, calc((100% - var(--settings)) / 2));
 
     font-family:
         Pretendard,
@@ -92,33 +119,33 @@
     :root:not([data-theme='light']) {
         color-scheme: dark;
 
-        --bg: #0f0f11;
-        --surface: #0f0f11;
-        --surface-sunken: #09090b;
-        --surface-raised: #17171a;
-        --surface-hover: #1c1c20;
-        --surface-active: #26262c;
+        --bg: #0a0a0a;
+        --surface: #0f0f0f;
+        --surface-sunken: #141414;
+        --surface-raised: #181818;
+        --surface-hover: #202020;
+        --surface-active: #2a2a2a;
 
-        --ink: #f4f4f5;
-        --ink-muted: #a0a0ab;
-        --ink-subtle: #6f6f7a;
+        --ink: #f2f2f4;
+        --ink-muted: #a3a2ae;
+        --ink-subtle: #706f7c;
         --ink-inverse: #ffffff;
 
-        --line: #232327;
-        --line-strong: #33333a;
+        --line: #242424;
+        --line-strong: #333333;
 
-        /* Raised in dark, so the container reads as a container. */
-        --turn-user-bg: #1e1e23;
+        --bubble-char-bg: #212121;
+        --bubble-user-bg: #0d7f72;
+        --bubble-user-ink: #ffffff;
 
-        --accent: #8b91f7;
-        --accent-hover: #a5a9fa;
-        --accent-soft: #1b1b2e;
-        --accent-line: #3b3b6b;
+        --accent: #45d6c2;
+        --accent-hover: #6ce2d1;
+        --accent-soft: #12332e;
+        --accent-line: #23564e;
 
-        /* Inverted in dark: the loud button is light on a dark page. */
-        --primary-bg: #f4f4f5;
-        --primary-bg-hover: #ffffff;
-        --primary-ink: #18181b;
+        --primary-bg: #2fd0ba;
+        --primary-bg-hover: #56dcc9;
+        --primary-ink: #05221e;
 
         --danger: #ff9a90;
         --danger-soft: #2a1512;
@@ -128,7 +155,7 @@
         --success-soft: #0d2620;
 
         --shadow-1: 0 1px 2px rgb(0 0 0 / 45%);
-        --shadow-2: 0 6px 20px rgb(0 0 0 / 50%);
+        --shadow-2: 0 8px 32px rgb(0 0 0 / 55%);
         --shadow-3: 0 24px 64px rgb(0 0 0 / 65%);
     }
 }
@@ -136,33 +163,33 @@
 :root[data-theme='dark'] {
     color-scheme: dark;
 
-    --bg: #0f0f11;
-    --surface: #0f0f11;
-    --surface-sunken: #09090b;
-    --surface-raised: #17171a;
-    --surface-hover: #1c1c20;
-    --surface-active: #26262c;
+    --bg: #0a0a0a;
+    --surface: #0f0f0f;
+    --surface-sunken: #141414;
+    --surface-raised: #181818;
+    --surface-hover: #202020;
+    --surface-active: #2a2a2a;
 
-    --ink: #f4f4f5;
-    --ink-muted: #a0a0ab;
-    --ink-subtle: #6f6f7a;
+    --ink: #f2f2f4;
+    --ink-muted: #a3a2ae;
+    --ink-subtle: #706f7c;
     --ink-inverse: #ffffff;
 
-    --line: #232327;
-    --line-strong: #33333a;
+    --line: #242424;
+    --line-strong: #333333;
 
-    /* Raised in dark, so the container reads as a container. */
-    --turn-user-bg: #1e1e23;
+    --bubble-char-bg: #212121;
+    --bubble-user-bg: #0d7f72;
+    --bubble-user-ink: #ffffff;
 
-    --accent: #8b91f7;
-    --accent-hover: #a5a9fa;
-    --accent-soft: #1b1b2e;
-    --accent-line: #3b3b6b;
+    --accent: #45d6c2;
+    --accent-hover: #6ce2d1;
+    --accent-soft: #12332e;
+    --accent-line: #23564e;
 
-    /* Inverted in dark: the loud button is light on a dark page. */
-    --primary-bg: #f4f4f5;
-    --primary-bg-hover: #ffffff;
-    --primary-ink: #18181b;
+    --primary-bg: #2fd0ba;
+    --primary-bg-hover: #56dcc9;
+    --primary-ink: #05221e;
 
     --danger: #ff9a90;
     --danger-soft: #2a1512;
@@ -172,7 +199,7 @@
     --success-soft: #0d2620;
 
     --shadow-1: 0 1px 2px rgb(0 0 0 / 45%);
-    --shadow-2: 0 6px 20px rgb(0 0 0 / 50%);
+    --shadow-2: 0 8px 32px rgb(0 0 0 / 55%);
     --shadow-3: 0 24px 64px rgb(0 0 0 / 65%);
 }
 
@@ -180,10 +207,18 @@
     box-sizing: border-box;
 }
 
+/*
+ * The floor is the one thing that can manufacture a horizontal scrollbar out
+ * of a layout that would otherwise still fit: below it the page stops
+ * shrinking and starts scrolling. Every screen here narrows to roughly 220px
+ * on its own, so the floor sits under that rather than at a phone's width —
+ * a zoomed webview or a very small window then keeps shrinking instead of
+ * sliding sideways.
+ */
 html,
 body,
 #app {
-    min-width: 320px;
+    min-width: 240px;
     min-height: 100%;
     margin: 0;
 }
@@ -207,7 +242,7 @@ figure {
 
 h1 {
     font-size: 1.0625rem;
-    font-weight: 600;
+    font-weight: 700;
     letter-spacing: -0.015em;
 }
 
@@ -227,9 +262,17 @@ h4 {
     font-weight: 600;
 }
 
+/*
+ * Inline code carries hashes, origins and identifiers — strings with no space
+ * to break at. Left alone they set a floor the column cannot meet and the page
+ * slides sideways, so they are allowed to break mid-token. Code in a `pre`
+ * block is unaffected: `white-space: pre` there keeps lines intact and the
+ * block scrolls on its own.
+ */
 code {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 0.9em;
+    overflow-wrap: anywhere;
 }
 
 a {
@@ -277,7 +320,7 @@ button {
     justify-content: center;
     gap: 6px;
     white-space: nowrap;
-    padding: 0 12px;
+    padding: 0 14px;
     border: 1px solid var(--line-strong);
     border-radius: var(--radius-sm);
     background: var(--surface-raised);
@@ -340,9 +383,21 @@ button:disabled {
     color: var(--ink);
 }
 
+/*
+ * A label that cannot wrap is a width the page must find somewhere. On a phone
+ * there is nowhere to find it, so long labels are allowed to take a second
+ * line — `normal` only wraps when the line does not fit, so short labels are
+ * untouched.
+ */
+@container view (max-width: 480px) {
+    button {
+        white-space: normal;
+    }
+}
+
 .compact {
-    min-height: 30px;
-    padding: 0 9px;
+    min-height: 36px;
+    padding: 0 11px;
     font-size: 0.75rem;
 }
 
@@ -352,10 +407,17 @@ button:disabled {
     padding: 0;
 }
 
+/*
+ * A form control's intrinsic width is its `size` default — around twenty
+ * characters — and it never shrinks below that on its own. Inside a flex or
+ * grid row that floor is what pushes a narrow window sideways, so controls are
+ * allowed to shrink and take their width from the row instead.
+ */
 input,
 textarea,
 select {
-    padding: 8px 11px;
+    min-width: 0;
+    padding: 9px 12px;
     border: 1px solid var(--line-strong);
     border-radius: var(--radius-sm);
     background: var(--surface);
@@ -381,17 +443,36 @@ textarea {
 /* --------------------------------------------------------------- shell */
 
 /*
- * Two regions only: a sidebar that owns navigation end to end, and a main
- * region that owns whatever is being read. There is no top bar spanning both
- * — the brand, the health of the local core, and settings all belong to the
- * sidebar, which buys the transcript its full height.
+ * The shell is the window: it never caps its own width, so a desktop never
+ * shows a boxed-in app floating on dead space. On a phone it is a column of
+ * two rows — the active view, then the tab bar; on a desktop it is two
+ * columns — the sidebar, then the view. `contain: layout` makes it the
+ * containing block for fixed-position descendants, so floating panels pin to
+ * the app rather than escaping it.
  */
 .app-shell {
-    display: grid;
+    position: relative;
+    display: flex;
+    width: 100%;
     height: 100dvh;
+    flex-direction: column;
+    overflow: clip;
+    background: var(--bg);
+    contain: layout;
+}
+
+.app-shell[data-layout='desktop'] {
+    display: grid;
     grid-template-columns: var(--sidebar) minmax(0, 1fr);
 }
 
+/* ------------------------------------------------------------- sidebar */
+
+/*
+ * The desktop's standing navigation. It carries the same two sections the
+ * phone's home screen does, plus the two modes that would otherwise need a
+ * tab of their own.
+ */
 .sidebar {
     display: grid;
     min-width: 0;
@@ -403,50 +484,172 @@ textarea {
 
 .sidebar-head {
     display: flex;
-    height: 52px;
+    min-height: 56px;
     align-items: center;
     justify-content: space-between;
-    padding: 0 10px 0 14px;
+    padding: 8px 12px 8px 14px;
     gap: 8px;
 }
 
-.brand {
-    display: inline-flex;
-    align-items: center;
-    color: var(--ink);
-    font-size: 0.875rem;
-    font-weight: 600;
-    gap: 8px;
-    letter-spacing: -0.015em;
-    text-decoration: none;
-}
-
-.brand-mark {
+.sidebar-foot {
     display: grid;
-    width: 22px;
-    height: 22px;
-    border-radius: var(--radius-xs);
-    background: var(--primary-bg);
-    color: var(--primary-ink);
-    font-size: 0.6875rem;
-    font-weight: 700;
-    place-items: center;
+    padding: 8px;
+    border-top: 1px solid var(--line);
+    gap: 2px;
 }
 
-.sidebar-body {
+.nav-row {
+    min-height: var(--touch);
+    justify-content: flex-start;
+    padding: 0 10px;
+    border-color: transparent;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--ink-muted);
+    font-size: 0.8125rem;
+    gap: 10px;
+}
+
+.nav-row:hover:not(:disabled) {
+    background: var(--surface-hover);
+    color: var(--ink);
+}
+
+.nav-row[aria-current='page'] {
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-weight: 600;
+}
+
+/* The transcript has the sidebar beside it; a back control would be noise. */
+.app-shell[data-layout='desktop'] .back-button {
+    display: none;
+}
+
+/*
+ * Panels inside the view ask this element how much room they have, not the
+ * window: with a sidebar docked, the two are hundreds of pixels apart, and a
+ * form that stacks on a phone should also stack in a narrow desktop window.
+ */
+.main {
+    display: flex;
+    min-width: 0;
+    min-height: 0;
+    flex: 1;
+    flex-direction: column;
+    background: var(--bg);
+    container: view / inline-size;
+}
+
+/* A view that renders its own pane fills the region rather than sitting in it. */
+.main > .provider-pane {
+    min-height: 0;
+    flex: 1;
+}
+
+/* ------------------------------------------------------------- tab bar */
+
+/*
+ * The phone's navigation: four destinations, always reachable, one thumb away.
+ * It is a pill resting on the page rather than a ledge fused to the bottom
+ * edge — the page reads as continuing underneath it, and the bar stops
+ * competing with the composer for the same horizon.
+ */
+.tab-bar {
+    display: flex;
+    flex: none;
+    padding: 5px 6px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-pill);
+    margin: 6px var(--gutter) calc(8px + env(safe-area-inset-bottom));
+    background: var(--surface-raised);
+    box-shadow: var(--shadow-2);
+    gap: 2px;
+}
+
+.tab {
+    display: flex;
+    min-width: 0;
+    min-height: 48px;
+    flex: 1;
+    flex-direction: column;
+    justify-content: center;
+    padding: 5px 2px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: transparent;
+    color: var(--ink);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    gap: 4px;
+}
+
+.tab:hover:not(:disabled) {
+    background: var(--surface-hover);
+    color: var(--ink-muted);
+}
+
+/*
+ * The current destination carries a filled pill, not just a colour: on a small
+ * bar a tint alone is easy to miss, and the shape reads at a glance.
+ */
+.tab[aria-current='page'] {
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-weight: 600;
+}
+
+.nav-icon {
+    fill: none;
+    stroke: currentcolor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.7;
+}
+
+.tab .nav-icon {
+    width: 24px;
+    height: 24px;
+    stroke-width: 1.8;
+}
+
+.nav-row .nav-icon {
+    width: 18px;
+    height: 18px;
+    flex: none;
+}
+
+.tab[aria-current='page'] .nav-icon,
+.nav-row[aria-current='page'] .nav-icon {
+    fill: var(--accent-soft);
+}
+
+.tab-label {
+    line-height: 1;
+}
+
+/* ---------------------------------------------------------------- home */
+
+.home-view {
+    display: grid;
+    min-height: 0;
+    flex: 1;
+    grid-template-rows: auto minmax(0, 1fr);
+}
+
+/*
+ * The two-section hierarchy, rendered once and placed twice: on the phone's
+ * home screen, and in the desktop sidebar. Only its padding differs.
+ */
+.navigator {
     display: flex;
     min-height: 0;
     flex-direction: column;
     overflow: hidden;
 }
 
-.sidebar-foot {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 8px 10px;
-    border-top: 1px solid var(--line);
-    gap: 8px;
+.home-view .navigator {
+    padding-inline: var(--gutter);
 }
 
 .health-chip {
@@ -460,8 +663,8 @@ textarea {
 }
 
 .health-dot {
-    width: 6px;
-    height: 6px;
+    width: 7px;
+    height: 7px;
     flex: none;
     border-radius: 50%;
     background: var(--success);
@@ -475,46 +678,18 @@ textarea {
     background: var(--danger);
 }
 
-.settings-button {
-    min-height: 30px;
-    padding: 0 10px;
-    border-color: transparent;
-    background: transparent;
-    color: var(--ink-muted);
-    font-size: 0.75rem;
-}
-
-.settings-button:hover:not(:disabled) {
-    background: var(--surface-hover);
-    color: var(--ink);
-}
-
-.settings-button[aria-pressed='true'] {
-    background: var(--surface-active);
-    color: var(--ink);
-}
-
-/* The drawer scrim only exists on narrow windows. */
-.sidebar-scrim {
-    display: none;
-}
-
-.main {
-    display: flex;
-    min-width: 0;
-    min-height: 0;
-    flex-direction: column;
-    background: var(--bg);
-}
-
-/* Settings is a mode that takes the whole main region, not a fourth column. */
-.settings-region {
+/*
+ * Create and settings are long scrolling forms rather than reading columns,
+ * so they centre on the wider measure.
+ */
+.view-scroll {
     min-height: 0;
     flex: 1;
+    padding: 16px var(--settings-gutter) 24px;
     overflow-y: auto;
 }
 
-/* ------------------------------------------------------ sidebar panes */
+/* ---------------------------------------------------------- home panes */
 
 .pane {
     display: flex;
@@ -534,35 +709,35 @@ textarea {
 }
 
 /*
- * Characters and conversations are one hierarchy, so they stack in a single
- * sidebar instead of competing as two columns. Only the open section takes
- * the free space; the closed one collapses to its header.
+ * Characters and conversations are one hierarchy, so they stack on the home
+ * screen instead of competing as two columns. Only the open section takes the
+ * free space; the closed one collapses to its header.
  */
-.sidebar-section {
+.home-section {
     display: flex;
     min-height: 0;
     flex-direction: column;
     border-bottom: 1px solid var(--line);
 }
 
-.sidebar-section:last-child {
+.home-section:last-child {
     border-bottom: 0;
 }
 
-.sidebar-section.open {
+.home-section.open {
     flex: 1;
 }
 
-.sidebar-section:not(.open) {
+.home-section:not(.open) {
     flex: none;
 }
 
-.sidebar-section:not(.open) .pane-header,
-.sidebar-section:not(.open) .entity-list,
-.sidebar-section:not(.open) .state-panel,
-.sidebar-section:not(.open) .greeting-picker,
-.sidebar-section:not(.open) .greeting-status,
-.sidebar-section:not(.open) .export-status {
+.home-section:not(.open) .pane-header,
+.home-section:not(.open) .entity-list,
+.home-section:not(.open) .state-panel,
+.home-section:not(.open) .greeting-picker,
+.home-section:not(.open) .greeting-status,
+.home-section:not(.open) .export-status {
     display: none;
 }
 
@@ -570,19 +745,17 @@ textarea {
 .section-toggle {
     display: flex;
     width: 100%;
-    min-height: 38px;
+    min-height: 40px;
     align-items: center;
-    padding: 0 8px 0 12px;
+    padding: 10px 14px 4px;
     border: 0;
     border-radius: 0;
     background: transparent;
-    color: var(--ink-muted);
-    font-size: 0.6875rem;
+    color: var(--accent);
+    font-size: 0.875rem;
     font-weight: 600;
-    gap: 8px;
-    letter-spacing: 0.06em;
+    gap: 6px;
     text-align: left;
-    text-transform: uppercase;
 }
 
 .section-toggle:hover:not(:disabled) {
@@ -599,11 +772,11 @@ textarea {
 
 .section-toggle .chevron {
     color: var(--ink-subtle);
-    font-size: 0.75rem;
+    font-size: 0.875rem;
     transition: transform 140ms ease;
 }
 
-.sidebar-section.open .section-toggle .chevron {
+.home-section.open .section-toggle .chevron {
     transform: rotate(90deg);
 }
 
@@ -612,7 +785,7 @@ textarea {
     min-height: 40px;
     align-items: center;
     justify-content: space-between;
-    padding: 4px 8px 8px 12px;
+    padding: 4px 10px 8px 16px;
     gap: 8px;
 }
 
@@ -632,22 +805,22 @@ textarea {
     display: flex;
     overflow-y: auto;
     flex-direction: column;
-    padding: 0 8px 8px;
+    padding: 0 10px 10px;
     margin: 0;
-    gap: 1px;
+    gap: 2px;
     list-style: none;
 }
 
 .entity-row {
     display: flex;
     width: 100%;
-    min-height: 34px;
+    min-height: 72px;
     align-items: center;
-    padding: 6px 8px;
+    padding: 8px 14px;
     border: 0;
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-md);
     background: transparent;
-    gap: 9px;
+    gap: 12px;
     text-align: left;
 }
 
@@ -656,13 +829,10 @@ textarea {
     background: var(--surface-hover);
 }
 
-/*
- * Selection is a fill in the neutral ramp, not a colour. Nothing in the
- * sidebar should compete with the transcript for attention.
- */
+/* Selection speaks with the accent, softly. */
 .entity-row.active,
 .entity-row.active:hover {
-    background: var(--surface-active);
+    background: var(--accent-soft);
     color: var(--ink);
     font-weight: 500;
 }
@@ -671,27 +841,28 @@ textarea {
     display: grid;
     min-width: 0;
     flex: 1;
-    gap: 0;
+    gap: 1px;
 }
 
 .entity-copy > span,
 .entity-copy > small {
     overflow: hidden;
     color: var(--ink-muted);
-    font-size: 0.6875rem;
+    font-size: 0.875rem;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
 .entity-copy > strong {
     overflow: hidden;
-    font-size: 0.8125rem;
-    font-weight: inherit;
+    font-size: 1.0625rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
-/* Conversation rows are text only: a title and a date, like a file list. */
+/* Conversation rows are text only: a title and a date, like a chat list. */
 .conversation-row .entity-copy {
     grid-auto-flow: column;
     align-items: baseline;
@@ -704,27 +875,27 @@ textarea {
     display: none;
 }
 
+/* People are circles here; a messenger's oldest convention. */
 .avatar,
 .review-avatar {
     display: grid;
     overflow: hidden;
-    width: 24px;
-    height: 24px;
+    width: 54px;
+    height: 54px;
     flex: none;
-    border-radius: var(--radius-xs);
+    border-radius: 50%;
     background: var(--surface-active);
     color: var(--ink-muted);
-    font-size: 0.6875rem;
+    font-size: 1.125rem;
     font-weight: 600;
     object-fit: cover;
     place-items: center;
 }
 
 .review-avatar {
-    width: 48px;
-    height: 48px;
-    border-radius: var(--radius-md);
-    font-size: 1rem;
+    width: 52px;
+    height: 52px;
+    font-size: 1.0625rem;
 }
 
 .avatar .asset-status,
@@ -750,9 +921,22 @@ textarea {
 }
 
 .chat-pane > .chat-header,
+.chat-pane > .chat-toolbar,
 .chat-pane > .composer,
 .chat-pane > .chat-live-status {
     flex: none;
+}
+
+/*
+ * The header answers "who am I talking to"; anything that changes how the room
+ * behaves sits on a quieter row beneath it. Crammed onto one line the identity
+ * loses to the controls, which is the wrong way round.
+ */
+.chat-toolbar {
+    display: flex;
+    align-items: center;
+    padding: 0 var(--gutter) 8px;
+    gap: 8px;
 }
 
 /*
@@ -767,36 +951,48 @@ textarea {
     flex: none;
 }
 
+.chat-pane > .attempt-approvals {
+    width: min(100% - 28px, var(--reading));
+    margin-inline: auto;
+}
+
 .chat-header {
     display: flex;
-    min-height: 52px;
+    min-height: 60px;
     flex-wrap: nowrap;
     align-items: center;
     justify-content: space-between;
-    padding: 8px clamp(12px, 4vw, 28px);
+    padding: 8px var(--gutter);
     border-bottom: 1px solid var(--line);
     background: var(--bg);
-    gap: 12px;
+    gap: 8px;
 }
 
 .chat-identity {
     display: flex;
     min-width: 0;
     align-items: center;
-    gap: 9px;
+    gap: 10px;
 }
 
 .chat-identity h2 {
     overflow: hidden;
-    font-size: 0.875rem;
+    font-size: 1.0625rem;
+    font-weight: 600;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.chat-identity .avatar {
+    width: 36px;
+    height: 36px;
+    font-size: 0.875rem;
 }
 
 .chat-subtitle {
     overflow: hidden;
     color: var(--ink-muted);
-    font-size: 0.6875rem;
+    font-size: 0.8125rem;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
@@ -810,17 +1006,18 @@ textarea {
 
 .segmented {
     display: inline-flex;
-    padding: 2px;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-sm);
+    padding: 3px;
+    border: 0;
+    border-radius: var(--radius-pill);
     background: var(--surface-sunken);
     gap: 2px;
 }
 
 .segmented button {
-    min-height: 26px;
-    padding: 0 10px;
+    min-height: 30px;
+    padding: 0 11px;
     border: 0;
+    border-radius: var(--radius-pill);
     background: transparent;
     color: var(--ink-muted);
     font-size: 0.75rem;
@@ -843,23 +1040,29 @@ textarea {
 }
 
 .branch-picker select {
-    min-height: 30px;
+    min-height: 34px;
     padding: 0 8px;
+    border-radius: var(--radius-pill);
     font-size: 0.75rem;
+}
+
+/* A back chevron needs more optical weight than a text glyph gets by default. */
+.back-button {
+    font-size: 1.375rem;
 }
 
 /* ----------------------------------------------------------- transcript */
 
 .message-scroll {
     overflow-y: auto;
-    padding: 0 clamp(16px, 5vw, 32px);
+    padding: 0 var(--gutter);
     background: var(--bg);
     overscroll-behavior: contain;
 }
 
 .message-list {
     display: flex;
-    max-width: var(--reading);
+    max-width: 100%;
     flex-direction: column;
     padding: 0;
     margin: 0 auto;
@@ -868,29 +1071,29 @@ textarea {
 }
 
 /*
- * A turn is a row of the document: a fixed gutter carrying the speaker's
- * initial, and a full-measure column carrying the writing. Nothing is
- * right-aligned — alternating sides makes long prose hard to read, and the
- * name plus the container already says who is speaking.
+ * A turn is a bubble. The character speaks on the left under their name and
+ * round avatar; the reader answers on the right in the accent. That
+ * alternation is the entire visual grammar of the transcript.
  */
 .message-item {
     display: grid;
     max-width: 100%;
-    padding: 14px 0;
-    column-gap: 12px;
-    grid-template-columns: 24px minmax(0, 1fr);
+    padding: 6px 0;
+    column-gap: 10px;
+    grid-template-columns: 32px minmax(0, 1fr);
     scroll-margin-block: 24px;
 }
 
 .message-avatar {
     display: grid;
-    width: 24px;
-    height: 24px;
+    overflow: hidden;
+    width: 32px;
+    height: 32px;
     align-self: start;
-    border-radius: var(--radius-xs);
+    border-radius: 50%;
     background: var(--surface-active);
     color: var(--ink-muted);
-    font-size: 0.625rem;
+    font-size: 0.6875rem;
     font-weight: 700;
     grid-column: 1;
     grid-row: 1 / span 3;
@@ -903,38 +1106,63 @@ textarea {
     grid-column: 2;
 }
 
-.message-item.from-user .message-avatar {
-    background: var(--primary-bg);
-    color: var(--primary-ink);
-}
-
 .message-role {
-    padding-bottom: 3px;
-    color: var(--ink);
+    padding: 0 0 4px 3px;
+    color: var(--ink-muted);
     font-size: 0.75rem;
     font-weight: 600;
 }
 
 .message-body {
+    width: fit-content;
     min-width: 0;
+    max-width: 100%;
+    padding: 10px 14px;
     border: 0;
+    border-radius: var(--radius-lg);
+    border-top-left-radius: var(--radius-xs);
+    background: var(--bubble-char-bg);
     color: var(--ink);
     font-size: 0.9375rem;
-    line-height: 1.7;
+    line-height: 1.65;
     overflow-wrap: anywhere;
 }
 
-/*
- * The reader's own turns sit in a quiet container and the character's sit
- * directly on the page. That is the whole visual grammar of the transcript.
- */
+/* The reader's own turn: no name, no avatar, accent bubble on the right. */
+.message-item.from-user {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.message-item.from-user .message-avatar,
+.message-item.from-user .message-role {
+    display: none;
+}
+
 .message-item.from-user .message-body {
-    width: fit-content;
-    max-width: 100%;
-    justify-self: start;
-    padding: 8px 12px;
-    border-radius: var(--radius-md);
-    background: var(--turn-user-bg);
+    max-width: 88%;
+    justify-self: end;
+    border-radius: var(--radius-lg);
+    border-top-right-radius: var(--radius-xs);
+    background: var(--bubble-user-bg);
+    color: var(--bubble-user-ink);
+    grid-column: 1;
+}
+
+.message-item.from-user .message-body a {
+    color: inherit;
+    text-decoration: underline;
+}
+
+.message-item.from-user .message-actions {
+    justify-content: flex-end;
+    grid-column: 1;
+}
+
+/* Editing swaps the bubble for a working surface, whoever is speaking. */
+.message-body:has(> .inline-editor) {
+    width: 100%;
+    background: var(--surface-sunken);
+    color: var(--ink);
 }
 
 .message-body.streaming {
@@ -942,8 +1170,7 @@ textarea {
 }
 
 .message-item.memory-source-boundary .message-body {
-    box-shadow: inset 2px 0 0 var(--accent);
-    padding-left: 12px;
+    box-shadow: inset 0 0 0 1.5px var(--accent-line);
 }
 
 .stream-caret {
@@ -969,11 +1196,15 @@ textarea {
     font-size: 0.6875rem;
 }
 
-/* Actions stay out of the way until the turn is hovered or focused. */
+.message-item.from-user .message-status {
+    color: color-mix(in srgb, var(--bubble-user-ink) 72%, transparent);
+}
+
+/* Turn actions surface on hover where hover exists, and always on touch. */
 .message-actions {
     display: flex;
     flex-wrap: wrap;
-    padding-top: 6px;
+    padding-top: 4px;
     gap: 2px;
     opacity: 0;
     transition: opacity 110ms ease;
@@ -984,10 +1215,17 @@ textarea {
     opacity: 1;
 }
 
+@media (hover: none) {
+    .message-actions {
+        opacity: 1;
+    }
+}
+
 .message-actions button {
-    min-height: 26px;
-    padding: 0 7px;
+    min-height: 32px;
+    padding: 0 9px;
     border-color: transparent;
+    border-radius: var(--radius-pill);
     background: transparent;
     color: var(--ink-muted);
     font-size: 0.6875rem;
@@ -1010,7 +1248,7 @@ textarea {
 
 .chat-live-status {
     min-height: 0;
-    padding: 0 clamp(16px, 5vw, 32px) 6px;
+    padding: 0 var(--gutter) 6px;
     color: var(--ink-muted);
     font-size: 0.6875rem;
     text-align: center;
@@ -1020,57 +1258,64 @@ textarea {
     display: none;
 }
 
+/*
+ * The empty transcript borrows the empty-state panel for its copy, but it
+ * fills the whole region — at that size the dashed frame stops reading as a
+ * placeholder and becomes a box drawn around the window.
+ */
 .chat-placeholder {
     display: grid;
     height: 100%;
     align-content: center;
     justify-items: center;
-    gap: 6px;
+    padding: 24px;
+    border: 0;
+    margin: 0;
+    background: transparent;
+    gap: 8px;
     text-align: center;
+}
+
+/* The call to action wants a beat of air after the copy above it. */
+.chat-placeholder .primary {
+    margin-top: 8px;
 }
 
 .large-mark {
     display: grid;
-    width: 44px;
-    height: 44px;
-    border-radius: var(--radius-md);
-    background: var(--surface-sunken);
-    color: var(--ink-subtle);
-    font-size: 1.25rem;
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: 1.375rem;
     place-items: center;
 }
 
 /* ------------------------------------------------------------ composer */
 
 /*
- * The composer is a bordered field floating in the reading column, so the
- * page reads as a document with an input at its foot rather than an app with
- * a toolbar.
+ * The composer docks above the tab bar at every width, the way a native
+ * keyboard accessory does: a pill field and a round send button. The tab bar
+ * below it owns the safe-area inset.
  */
 .composer {
     display: flex;
-    max-width: var(--reading);
     align-items: flex-end;
-    padding: 6px 6px 6px 14px;
-    border: 1px solid var(--line-strong);
-    border-radius: var(--radius-lg);
-    margin: 0 auto 18px;
-    background: var(--surface);
-    box-shadow: var(--shadow-1);
+    padding: 8px var(--gutter);
+    border-top: 1px solid var(--line);
+    background: var(--bg);
     gap: 8px;
-    inline-size: min(100% - 2 * clamp(16px, 5vw, 32px), var(--reading));
-}
-
-.composer:focus-within {
-    border-color: var(--ink-subtle);
 }
 
 .composer textarea {
-    max-height: 40vh;
+    max-height: 38vh;
+    min-height: var(--touch);
     flex: 1;
-    padding: 9px 0;
-    border: 0;
-    background: transparent;
+    padding: 11px 16px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-lg);
+    background: var(--surface-sunken);
     field-sizing: content;
     font-size: 0.9375rem;
     resize: none;
@@ -1081,16 +1326,22 @@ textarea {
 }
 
 .composer textarea:focus-visible {
+    border-color: var(--accent);
     outline: 0;
 }
 
 .send-button {
-    width: 32px;
-    min-width: 32px;
-    min-height: 32px;
+    width: var(--touch);
+    min-width: var(--touch);
+    min-height: var(--touch);
     padding: 0;
-    border-radius: var(--radius-sm);
-    font-size: 0.9375rem;
+    border-radius: 50%;
+    font-size: 1.0625rem;
+}
+
+.composer .danger.compact {
+    min-height: var(--touch);
+    border-radius: var(--radius-pill);
 }
 
 /* ------------------------------------------------------- status boxes */
@@ -1152,6 +1403,200 @@ textarea {
     text-align: center;
 }
 
+/*
+ * An index screen names itself once and then gets out of the way: the tab bar
+ * below already says where the reader is, so a second eyebrow and a paragraph
+ * of explanation would spend the top of the screen restating it. What each
+ * destination covers is the job of its row.
+ */
+.index-header {
+    display: flex;
+    min-height: 56px;
+    flex: none;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px var(--settings-gutter) 6px;
+    gap: 12px;
+}
+
+.index-header h1,
+.index-header h2,
+.index-title {
+    font-size: 1.375rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+}
+
+/* ------------------------------------------------------ settings list */
+
+/*
+ * Two list patterns, and they are not interchangeable.
+ *
+ * An index lists destinations: a filled colour tile to aim at, the name, and a
+ * line of what it covers. Rows are told apart by their tiles and the air
+ * between them, so there are no rules and no chevrons — the tile already says
+ * "this is a place".
+ *
+ * A detail list inside a destination lists settings: a quiet outline mark, the
+ * name, and the value it currently holds. Those rows look alike, so a rule
+ * separates them — inset to the text column, so the marks stay a clean edge.
+ */
+.setting-list {
+    display: flex;
+    flex-direction: column;
+    padding: 6px 0;
+    border: 0;
+    border-radius: var(--radius-lg);
+    margin: 0;
+    background: var(--surface-raised);
+    list-style: none;
+    overflow: hidden;
+}
+
+.setting-row {
+    display: flex;
+    width: 100%;
+    min-height: 62px;
+    align-items: center;
+    padding: 10px 14px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    gap: 16px;
+    text-align: left;
+}
+
+.setting-row:hover:not(:disabled) {
+    background: var(--surface-hover);
+}
+
+.setting-tile {
+    display: grid;
+    width: 40px;
+    height: 40px;
+    flex: none;
+    border-radius: 12px;
+    background: var(--ink-subtle);
+    color: #ffffff;
+    place-items: center;
+}
+
+.setting-tile svg {
+    width: 23px;
+    height: 23px;
+    fill: none;
+    stroke: currentcolor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 2;
+}
+
+/*
+ * The tile colours are the one place in the app that spends hue on wayfinding:
+ * a row is found by its colour before its name is read. They are deliberately
+ * muted — a row of saturated chips competes with the writing beside it.
+ */
+.setting-tile[data-tone='violet'] {
+    background: #7b6ad6;
+}
+
+.setting-tile[data-tone='green'] {
+    background: #6cbc59;
+}
+
+.setting-tile[data-tone='blue'] {
+    background: #4f79f1;
+}
+
+.setting-tile[data-tone='orange'] {
+    background: #d9963d;
+}
+
+.setting-tile[data-tone='teal'] {
+    background: #5cb8c5;
+}
+
+.setting-tile[data-tone='slate'] {
+    background: #8a8f99;
+}
+
+.setting-copy {
+    display: grid;
+    min-width: 0;
+    flex: 1;
+    gap: 2px;
+}
+
+.setting-copy > strong {
+    font-size: 1.0625rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+}
+
+.setting-copy > small {
+    overflow: hidden;
+    color: var(--ink-muted);
+    font-size: 0.875rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* The value is the answer the row was opened for, so it carries the accent. */
+.setting-value {
+    flex: none;
+    color: var(--accent);
+    font-size: 1.0625rem;
+}
+
+/* A label belongs to the card it heads, so it sits inside its top edge. */
+.group-label {
+    padding: 8px 16px 6px;
+    color: var(--accent);
+    font-size: 0.875rem;
+    font-weight: 600;
+}
+
+/*
+ * A pushed screen carries its own way back and drops the tab bar, so the row
+ * of destinations never competes with the one screen the reader chose.
+ */
+.sub-header {
+    display: flex;
+    min-height: 56px;
+    flex: none;
+    align-items: center;
+    padding: 8px var(--settings-gutter);
+    gap: 4px;
+}
+
+.sub-header h1 {
+    overflow: hidden;
+    flex: 1;
+    font-size: 1.25rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/*
+ * A settings card. Panels across the app reach for this class, so it lives
+ * here rather than scoped inside one of them — a scoped copy silently does
+ * nothing for every other panel that asks for it.
+ */
+.settings-section {
+    padding: 20px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: var(--surface-raised);
+}
+
+@container view (max-width: 640px) {
+    .settings-section {
+        padding: 15px;
+    }
+}
+
 .assistant-block,
 .review-block,
 .block-editor {
@@ -1194,7 +1639,7 @@ textarea {
 
 .modal-card {
     display: grid;
-    width: min(92vw, 34rem);
+    width: min(94vw, 32rem);
     max-height: 86dvh;
     padding: 0;
     border: 1px solid var(--line);
@@ -1240,33 +1685,34 @@ textarea {
     font-size: 0.8125rem;
 }
 
-/* ------------------------------------------------- sidebar composition */
+/* ---------------------------------------------------- home composition */
 
 /*
  * The section toggle above already names the section, so a pane header inside
- * the sidebar carries nothing but its one action, shaped like a list row.
+ * the navigator carries nothing but its one action, shaped like a list row.
  */
-.sidebar .pane-header {
+.navigator .pane-header {
     min-height: 0;
-    padding: 0 8px 8px;
+    padding: 0 2px 8px;
 }
 
-.sidebar .pane-header button {
+.navigator .pane-header button {
     width: 100%;
-    min-height: 32px;
+    min-height: 38px;
     border-color: transparent;
+    border-radius: var(--radius-md);
     background: transparent;
     color: var(--ink-muted);
     justify-content: flex-start;
 }
 
-.sidebar .pane-header button:hover:not(:disabled) {
+.navigator .pane-header button:hover:not(:disabled) {
     background: var(--surface-hover);
     color: var(--ink);
 }
 
-.sidebar .state-panel {
-    margin: 4px 8px 8px;
+.navigator .state-panel {
+    margin: 4px 2px 10px;
     font-size: 0.75rem;
 }
 
@@ -1275,214 +1721,31 @@ textarea {
     overflow: hidden;
     max-width: 50%;
     color: var(--ink);
+    font-size: 0.75rem;
     font-weight: 500;
-    letter-spacing: 0;
     text-overflow: ellipsis;
-    text-transform: none;
     white-space: nowrap;
 }
 
-.sidebar-section.open .section-value {
+.home-section.open .section-value {
     display: none;
 }
 
-/* Drawer controls are inert until the sidebar can actually be hidden. */
-.sidebar-close,
-.sidebar-toggle {
-    display: none;
-}
+/* ------------------------------------------------------- small screens */
 
-.chat-identity .avatar {
-    width: 28px;
-    height: 28px;
-    font-size: 0.75rem;
-}
-
-/* -------------------------------------------------------- layout ladder */
-
-/*
- * The layout steps down rather than flipping once. The sidebar spends its
- * width first, then its secondary text, then it stops being a column at all;
- * only below that does the transcript itself take on touch shaping. Each step
- * is the smallest concession that buys the reading column the room it needs,
- * so dragging a desktop window narrower walks through the phone layout
- * instead of snapping into it.
- *
- *   >= 1440    roomy desktop   wider sidebar, 48rem measure
- *   1180-1439  desktop         the defaults
- *   1000-1179  narrow desktop  the sidebar gives up width
- *    901-999   tight desktop   the sidebar gives up its secondary text
- *    700-900   tablet          the sidebar becomes an overlay drawer
- *   <= 699     touch           the composer docks, controls grow to fingers
- *   <= 480     phone           the header sheds all but the title
- */
-
-@media (min-width: 1440px) {
-    :root {
-        --sidebar: 296px;
-        --reading: 48rem;
-    }
-}
-
-@media (min-width: 901px) and (max-width: 1179px) {
-    :root {
-        --sidebar: 240px;
-    }
-}
-
-/* The last docked step: the column keeps names and drops the rest. */
-@media (min-width: 901px) and (max-width: 999px) {
-    :root {
-        --sidebar: 208px;
-    }
-
-    .conversation-row .entity-copy > span,
-    .greeting-picker small {
-        display: none;
-    }
-
-    .chat-header {
-        padding-inline: 16px;
-    }
-}
-
-/*
- * Tablet and below: the sidebar can no longer hold a column of its own, so it
- * slides over the transcript instead of beside it. There is no tab bar — the
- * chat header carries the one control that opens navigation.
- */
-@media (max-width: 900px) {
-    .app-shell {
-        grid-template-columns: minmax(0, 1fr);
-    }
-
-    .sidebar {
-        position: fixed;
-        z-index: 30;
-        width: min(86vw, var(--sidebar));
-        border-right: 1px solid var(--line);
-        inset: 0 auto 0 0;
-        transform: translateX(-100%);
-        transition: transform 180ms ease;
-    }
-
-    .app-shell[data-sidebar='open'] .sidebar {
-        transform: translateX(0);
-    }
-
-    .app-shell[data-sidebar='open'] .sidebar-scrim {
-        position: fixed;
-        z-index: 20;
-        display: block;
-        border: 0;
-        background: rgb(9 10 12 / 40%);
-        inset: 0;
-    }
-
-    .chat-header {
-        min-height: 48px;
-        padding-inline: 12px;
-    }
-
-    .message-scroll {
-        padding-inline: 14px;
-    }
-
-    .composer {
-        margin-bottom: calc(12px + env(safe-area-inset-bottom));
-        inline-size: calc(100% - 28px);
-    }
-
-    .sidebar-close,
-    .sidebar-toggle {
-        display: inline-flex;
-    }
-
-    .chat-placeholder .sidebar-toggle {
-        margin-top: 8px;
-    }
-
-    /* Touch has no hover, so turn actions must always be reachable. */
-    .message-actions {
-        opacity: 1;
-    }
-}
-
-/*
- * Touch: the point where a narrow desktop stops pretending and becomes a
- * phone. The composer gives up its floating card and docks to the bottom edge
- * the way a native keyboard accessory does, and every control grows to a
- * finger-sized target.
- */
-@media (max-width: 699px) {
-    :root {
-        --touch: 44px;
-    }
-
-    .composer {
-        padding: 6px 10px calc(6px + env(safe-area-inset-bottom)) 14px;
-        border-right: 0;
-        border-bottom: 0;
-        border-left: 0;
-        border-radius: 0;
-        margin: 0;
-        box-shadow: none;
-        inline-size: 100%;
-    }
-
-    .composer:focus-within {
-        border-top-color: var(--ink-subtle);
-    }
-
-    .send-button {
-        width: 36px;
-        min-width: 36px;
-        min-height: 36px;
-    }
-
-    .compact {
-        min-height: 36px;
-    }
-
-    .segmented button {
-        min-height: 32px;
-    }
-
-    .message-actions button {
-        min-height: 32px;
-        padding: 0 9px;
-        font-size: 0.75rem;
-    }
-
-    .entity-row {
-        min-height: 42px;
-    }
-}
-
-@media (max-width: 480px) {
+/* The narrowest phones: the title gets the room the subtitle was using. */
+@media (max-width: 420px) {
     .chat-controls {
         gap: 4px;
     }
 
-    /* The sidebar already named the character; the title needs the room. */
-    .chat-identity .avatar,
     .chat-subtitle {
         display: none;
     }
 
     .segmented button {
-        padding: 0 8px;
+        padding: 0 9px;
         font-size: 0.6875rem;
-    }
-
-    .message-item {
-        column-gap: 10px;
-        grid-template-columns: 20px minmax(0, 1fr);
-    }
-
-    .message-avatar {
-        width: 20px;
-        height: 20px;
     }
 }
 

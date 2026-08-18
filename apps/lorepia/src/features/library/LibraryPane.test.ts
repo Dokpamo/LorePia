@@ -31,20 +31,17 @@ afterEach(() => {
 
 function libraryState(): LorepiaAppState {
     const state: LorepiaAppState = structuredClone(INITIAL_APP_STATE);
-    state.library = {
-        phase: 'ready',
-        error: null,
-        characters: [
-            {
-                id: 'character-1',
-                name: '라온',
-                description: '합성 캐릭터',
-                source_hash: 'synthetic',
-                avatar_asset_id: null,
-                created_at: '2026-08-03T00:00:00Z',
-            },
-        ],
+    const character = {
+        id: 'character-1',
+        name: '라온',
+        description: '합성 캐릭터',
+        source_hash: 'synthetic',
+        avatar_asset_id: null,
+        created_at: '2026-08-03T00:00:00Z',
     };
+    state.library = { phase: 'ready', error: null, characters: [character] };
+    /* Export acts on the open character, so the list has one open. */
+    state.selected_character = character;
     return state;
 }
 

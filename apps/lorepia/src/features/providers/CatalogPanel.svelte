@@ -518,7 +518,7 @@
         font-weight: 800;
     }
 
-    @media (max-width: 760px) {
+    @container view (max-width: 760px) {
         .workflow-heading,
         .history li {
             align-items: stretch;

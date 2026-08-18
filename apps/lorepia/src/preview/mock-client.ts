@@ -58,6 +58,19 @@ const MESSAGES = [
     },
 ];
 
+/*
+ * A turn built to break a narrow column: an unbroken URL, a long identifier,
+ * and a code block whose lines run past any phone. The preview exists to catch
+ * exactly this before a device does.
+ */
+const STRESS_MESSAGE = {
+    id: 'msg-4',
+    role: 'assistant',
+    content:
+        '참고 링크: https://archive.example.com/collections/maritime/1801/silver-strait/logbook-transcription-volume-four-appendix.html\n\n식별자 `provider-connection-openai-responses-eu-west-1-deployment-0f3c9a21b7d84e6fa5c2` 를 쓰세요.\n\n```\ncurl -sS -X POST https://api.example.com/v1/responses -H "content-type: application/json" -d \'{"model":"gpt-x","input":"..."}\'\n```',
+    status: 'complete',
+};
+
 const BOOTSTRAP = {
     app_version: '0.1.0',
     shell_api_version: 2,
@@ -66,6 +79,97 @@ const BOOTSTRAP = {
     core_version: '0.1.0',
     platform: 'macos',
     health: { database_open: true, data_root_writable: true },
+};
+
+/*
+ * A provider workspace with real-shaped content. Empty arrays render empty
+ * panels, which hide every layout problem the settings screen can have — the
+ * identifiers and origins here are deliberately long, because that is what
+ * actually strains a phone-width column.
+ */
+const CONNECTION = {
+    id: 'conn-openai-responses-eu-west-1',
+    template_id: 'tmpl-openai-responses',
+    template_version: 3,
+    display_name: 'OpenAI Responses (eu-west-1)',
+    api_origin: 'https://api.openai-compatible-gateway.example.com',
+    api_base_path: '/v1/responses',
+    network_mode: 'public',
+    local_network_approval: null,
+    config_values: [],
+    credential_binding_required: true,
+    credential_status: 'present',
+    credential_scope: null,
+    approved_credential_origins: ['https://api.openai-compatible-gateway.example.com'],
+    timeout_seconds: 60,
+};
+
+const ROUTE = {
+    id: 'route-primary-long-lived-deployment',
+    connection_id: CONNECTION.id,
+    api_family: 'openai_responses',
+    model_id: 'gpt-x-2026-08-01-preview-eu-west-1-deployment-0f3c9a21b7d84e6f',
+    display_name: '기본 응답 모델',
+    route_config: { deployment_id: null, region: 'eu-west-1', endpoint_path: null, values: [] },
+    status: 'active',
+    miss_count: 0,
+    metadata_source: 'catalog',
+};
+
+const PRESET = {
+    id: 'preset-balanced',
+    model_route_id: ROUTE.id,
+    display_name: '균형',
+    values: [],
+    reasoning: {
+        mode: 'off',
+        effort: null,
+        budget_tokens: null,
+        summary: 'none',
+        preserve_opaque_state: false,
+    },
+    prompt_cache: { mode: 'off', ttl_kind: 'none' },
+};
+
+const PROVIDER_OVERVIEW = {
+    settings: {
+        preserve_partial_generations: true,
+        selected_provider_profile_id: null,
+        selected_model_route_id: ROUTE.id,
+        selected_generation_preset_id: PRESET.id,
+    },
+    templates: [],
+    connections: [CONNECTION],
+    legacy_profiles: [],
+};
+
+/*
+ * Catalog revisions carry a snapshot hash: sixty-four characters with nowhere
+ * to break. An empty history hides every layout question that string asks, and
+ * that is exactly how a real overflow reached the app unnoticed.
+ */
+const CATALOG_HISTORY = {
+    history_schema_version: 1,
+    active_revision: 4,
+    revisions: [
+        {
+            revision: 4,
+            captured_at: '2026-08-16T00:00:00Z',
+            snapshot_sha256: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+            signed_revisions: [4],
+            active: true,
+        },
+        {
+            revision: 3,
+            captured_at: '2026-08-10T00:00:00Z',
+            snapshot_sha256: '9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08',
+            signed_revisions: [],
+            active: false,
+        },
+    ],
+    activations: [],
+    next_before_revision: null,
+    next_before_state_version: null,
 };
 
 const FIXTURES: Record<string, unknown> = {
@@ -91,27 +195,19 @@ const FIXTURES: Record<string, unknown> = {
             created_at: '2026-08-16T00:00:00Z',
         },
     ],
-    listBranchMessages: MESSAGES,
-    listMessages: MESSAGES,
+    listBranchMessages: [...MESSAGES, STRESS_MESSAGE],
+    listMessages: [...MESSAGES, STRESS_MESSAGE],
     getCharacterGreetingCatalog: {
         character_id: 'char-1',
         character_content_revision_id: 'rev-1',
         greetings: [],
     },
-    providerWorkspace: {
-        settings: {
-            preserve_partial_generations: true,
-            selected_provider_profile_id: null,
-            selected_model_route_id: null,
-            selected_generation_preset_id: null,
-        },
-        profiles: [],
-        connections: [],
-        templates: [],
-        model_routes: [],
-        generation_presets: [],
-        credential_targets: [],
-    },
+    getProviderOverview: PROVIDER_OVERVIEW,
+    listModelRoutes: [ROUTE],
+    listGenerationPresets: [PRESET],
+    credentialStatus: { status: 'present' },
+    providerCatalogStatus: null,
+    providerCatalogHistory: CATALOG_HISTORY,
 };
 
 /** Inert defaults keep panels rendering instead of throwing mid-paint. */

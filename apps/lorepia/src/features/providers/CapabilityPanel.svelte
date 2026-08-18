@@ -785,7 +785,7 @@
         background: var(--surface-sunken);
     }
 
-    @media (max-width: 760px) {
+    @container view (max-width: 760px) {
         .content-grid,
         .form-grid {
             grid-template-columns: 1fr;

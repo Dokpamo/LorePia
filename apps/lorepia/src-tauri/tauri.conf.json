@@ -19,7 +19,7 @@
         "title": "LorePia",
         "width": 1180,
         "height": 760,
-        "minWidth": 320,
+        "minWidth": 342,
         "minHeight": 480,
         "center": true,
         "resizable": true,

@@ -317,7 +317,7 @@
         font-size: 0.72rem;
     }
 
-    @media (max-width: 640px) {
+    @container view (max-width: 640px) {
         .start-row,
         .job-picker,
         .job-card > header {

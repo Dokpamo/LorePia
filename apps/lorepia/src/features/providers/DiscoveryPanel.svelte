@@ -960,7 +960,7 @@
         color: var(--ink-muted);
     }
 
-    @media (max-width: 640px) {
+    @container view (max-width: 640px) {
         .workflow-heading,
         .workflow-toolbar,
         .workflow-card > header {

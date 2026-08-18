@@ -567,7 +567,7 @@
         color: var(--danger);
     }
 
-    @media (max-width: 640px) {
+    @container view (max-width: 640px) {
         .quick-drawer {
             position: fixed;
             inset: auto 8px 76px;

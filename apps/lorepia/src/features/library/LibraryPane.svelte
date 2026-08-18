@@ -116,6 +116,20 @@
         <button class="compact" type="button" onclick={() => void controller.beginImport()}>
             {$tr('library.import')}
         </button>
+        {#if appState.selected_character !== null}
+            {@const selected = appState.selected_character}
+            <button
+                class="compact"
+                type="button"
+                aria-label={$tr('library.export.label', { name: selected.name.slice(0, 256) })}
+                disabled={exportingCharacterId !== null}
+                onclick={() => void exportCharacter(selected)}
+            >
+                {exportingCharacterId === selected.id
+                    ? $tr('library.export.busy')
+                    : $tr('library.export')}
+            </button>
+        {/if}
     </header>
 
     <div class="export-status" aria-live="polite" aria-atomic="true">
@@ -159,53 +173,35 @@
         <ul class="entity-list" aria-label={$tr('library.list.label')}>
             {#each appState.library.characters as character (character.id)}
                 <li>
-                    <div class="character-row">
-                        <button
-                            type="button"
-                            class:active={appState.selected_character?.id === character.id}
-                            class="entity-row"
-                            aria-pressed={appState.selected_character?.id === character.id}
-                            onclick={() => selectCharacter(character)}
-                        >
-                            <span class="avatar">
-                                {#if character.avatar_asset_id === null}
-                                    <span aria-hidden="true">{character.name.slice(0, 1)}</span>
-                                {:else}
-                                    <TrustedAsset
-                                        {client}
-                                        selector={{
-                                            kind: 'asset_id',
-                                            asset_id: character.avatar_asset_id,
-                                        }}
-                                        expectedKind="image"
-                                        alt={$tr('library.character.image', {
-                                            name: character.name.slice(0, 256),
-                                        })}
-                                    />
-                                {/if}
-                            </span>
-                            <span class="entity-copy">
-                                <strong>{character.name}</strong>
-                                <span
-                                    >{character.description ||
-                                        $tr('library.description.empty')}</span
-                                >
-                            </span>
-                        </button>
-                        <button
-                            class="compact"
-                            type="button"
-                            aria-label={$tr('library.export.label', {
-                                name: character.name.slice(0, 256),
-                            })}
-                            disabled={exportingCharacterId !== null}
-                            onclick={() => void exportCharacter(character)}
-                        >
-                            {exportingCharacterId === character.id
-                                ? $tr('library.export.busy')
-                                : $tr('library.export')}
-                        </button>
-                    </div>
+                    <button
+                        type="button"
+                        class:active={appState.selected_character?.id === character.id}
+                        class="entity-row"
+                        aria-pressed={appState.selected_character?.id === character.id}
+                        onclick={() => selectCharacter(character)}
+                    >
+                        <span class="avatar">
+                            {#if character.avatar_asset_id === null}
+                                <span aria-hidden="true">{character.name.slice(0, 1)}</span>
+                            {:else}
+                                <TrustedAsset
+                                    {client}
+                                    selector={{
+                                        kind: 'asset_id',
+                                        asset_id: character.avatar_asset_id,
+                                    }}
+                                    expectedKind="image"
+                                    alt={$tr('library.character.image', {
+                                        name: character.name.slice(0, 256),
+                                    })}
+                                />
+                            {/if}
+                        </span>
+                        <span class="entity-copy">
+                            <strong>{character.name}</strong>
+                            <span>{character.description || $tr('library.description.empty')}</span>
+                        </span>
+                    </button>
                 </li>
             {/each}
         </ul>
@@ -236,27 +232,11 @@
         font-size: 0.82rem;
     }
 
-    .character-row {
-        display: grid;
-        align-items: center;
-        gap: 4px;
-        grid-template-columns: minmax(0, 1fr) auto;
-    }
-
     /*
      * Export is a rare, deliberate action. Keeping it hidden until the row is
      * hovered or focused lets the list read as a roster of characters instead
      * of a table of controls, without removing it from the tab order.
      */
-    .character-row > :global(button:last-child) {
-        opacity: 0;
-        transition: opacity 120ms ease;
-    }
-
-    .character-row:hover > :global(button:last-child),
-    .character-row:focus-within > :global(button:last-child) {
-        opacity: 1;
-    }
 
     @media (hover: none) {
         .character-row > :global(button:last-child) {

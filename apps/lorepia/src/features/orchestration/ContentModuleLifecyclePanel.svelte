@@ -1189,7 +1189,7 @@
     .hash-grid,
     .hash-review dl {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(12rem, 100%), 1fr));
         gap: 0.6rem;
         margin: 0;
     }
@@ -1219,7 +1219,7 @@
     .draft-grid,
     .conflict-list {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(14rem, 100%), 1fr));
         gap: 0.75rem;
     }
 

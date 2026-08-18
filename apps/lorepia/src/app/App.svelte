@@ -11,6 +11,7 @@
     import ConversationPane from '../features/conversations/ConversationPane.svelte';
     import ImportReviewDialog from '../features/import/ImportReviewDialog.svelte';
     import LibraryPane from '../features/library/LibraryPane.svelte';
+    import OrchestrationStudio from '../features/orchestration/OrchestrationStudio.svelte';
     import {
         INITIAL_ORCHESTRATION_STATE,
         OrchestrationController,
@@ -22,6 +23,8 @@
         type ContentPackageState,
     } from '../features/orchestration/content-package-controller';
     import ProviderSettings from '../features/providers/ProviderSettings.svelte';
+    import type { SettingsSection } from '../features/providers/settings-contracts';
+    import type { StudioSection } from '../features/orchestration/studio-contracts';
     import {
         INITIAL_PERSONA_STATE,
         PersonaController,
@@ -31,10 +34,21 @@
     import { createLiveLorepiaClient } from '../lib/ipc/client';
     import type { LorepiaClient, MemoryRecordSourceNavigationDto } from '../lib/ipc/contracts';
 
-    /* The main region shows either the transcript or settings; never both. */
-    type MainView = 'chat' | 'settings';
+    /*
+     * One app, two layouts, because the two screens run out of different room.
+     *
+     * A phone is short on space, so it divides in time: four destinations under
+     * a bottom tab bar, one visible at a time. A desktop is short on nothing
+     * but attention, so it divides in space: the character and conversation
+     * hierarchy stands in a docked sidebar beside the transcript, and switching
+     * conversations never takes the transcript off screen. Home is therefore a
+     * destination only on the phone — on a desktop it is the sidebar, always
+     * there. Studio and settings are full-region modes on both.
+     */
+    const DESKTOP_LAYOUT = '(min-width: 900px)';
+    type MainView = 'home' | 'chat' | 'create' | 'settings';
     /* Characters and conversations are one hierarchy, disclosed one at a time. */
-    type SidebarSection = 'characters' | 'conversations';
+    type HomeSection = 'characters' | 'conversations';
 
     interface Props {
         client?: LorepiaClient;
@@ -56,10 +70,12 @@
         structuredClone(INITIAL_CONTENT_PACKAGE_STATE),
     );
     let personaState = $state<PersonaState>(structuredClone(INITIAL_PERSONA_STATE));
-    let view = $state<MainView>('chat');
-    let sidebarSection = $state<SidebarSection>('characters');
-    /* Only meaningful below the sidebar breakpoint, where it slides over. */
-    let sidebarOpen = $state(false);
+    let view = $state<MainView>('home');
+    let homeSection = $state<HomeSection>('characters');
+    /* Settings and the studio are lists; opening an entry pushes a screen. */
+    let settingsSection = $state<SettingsSection | null>(null);
+    let studioSection = $state<StudioSection | null>(null);
+    let isDesktop = $state(false);
     let orchestrationContextKey = '';
     let personaContextKey = '';
     let messageFocusRequest = $state<
@@ -67,23 +83,23 @@
     >(null);
     let nextMessageFocusRequestId = 0;
 
-    function openSettings(): void {
-        view = 'settings';
-        sidebarOpen = false;
-        void controller.loadProviders();
-    }
-
-    function toggleSettings(): void {
-        if (view === 'settings') {
-            view = 'chat';
-            return;
-        }
-        openSettings();
+    function showHome(): void {
+        view = 'home';
     }
 
     function showChat(): void {
         view = 'chat';
-        sidebarOpen = false;
+    }
+
+    function openCreate(): void {
+        view = 'create';
+        studioSection = null;
+    }
+
+    function openSettings(): void {
+        view = 'settings';
+        settingsSection = null;
+        void controller.loadProviders();
     }
 
     async function navigateToMemorySource(source: MemoryRecordSourceNavigationDto): Promise<void> {
@@ -135,6 +151,22 @@
     });
 
     onMount(() => {
+        const layout = window.matchMedia(DESKTOP_LAYOUT);
+        const syncLayout = (): void => {
+            /*
+             * Read the query fresh rather than trusting the list captured
+             * above: a window resized by the host can update the media state
+             * without delivering a change event to a list made earlier, which
+             * would strand the app in the layout it started in.
+             */
+            isDesktop = window.matchMedia(DESKTOP_LAYOUT).matches;
+            /* The sidebar already is home, so it is never a destination here. */
+            if (isDesktop && view === 'home') view = 'chat';
+        };
+        syncLayout();
+        layout.addEventListener('change', syncLayout);
+        window.addEventListener('resize', syncLayout);
+
         let previousBootstrapPhase = appState.bootstrap.phase;
         const unsubscribe = controller.state.subscribe((value) => {
             const bootstrapBecameReady =
@@ -154,6 +186,8 @@
         });
         void controller.start();
         return () => {
+            layout.removeEventListener('change', syncLayout);
+            window.removeEventListener('resize', syncLayout);
             unsubscribe();
             unsubscribeOrchestration();
             unsubscribeContentPackage();
@@ -166,97 +200,105 @@
     });
 </script>
 
+{#snippet identity()}
+    <h1 class="index-title">LorePia</h1>
+    <div class="health-chip" class:unhealthy={!appState.bootstrap.value?.health.database_open}>
+        <span class="health-dot" aria-hidden="true"></span>
+        {#if appState.bootstrap.phase === 'loading'}
+            {$tr('app.core.connecting')}
+        {:else if appState.bootstrap.phase === 'ready'}
+            {$tr('app.core.local')}
+        {:else}
+            {$tr('app.core.checking')}
+        {/if}
+    </div>
+{/snippet}
+
+{#snippet navigator()}
+    <div class="navigator">
+        <section class="home-section" class:open={homeSection === 'characters'}>
+            <button
+                class="section-toggle"
+                type="button"
+                aria-expanded={homeSection === 'characters'}
+                onclick={() => (homeSection = 'characters')}
+            >
+                <span class="chevron" aria-hidden="true">›</span>
+                <span class="section-name">{$tr('app.tab.library')}</span>
+                {#if appState.selected_character !== null}
+                    <span class="section-value">{appState.selected_character.name}</span>
+                {/if}
+            </button>
+            <LibraryPane
+                state={appState}
+                {controller}
+                client={appClient}
+                onOpenConversations={() => (homeSection = 'conversations')}
+            />
+        </section>
+
+        <section class="home-section" class:open={homeSection === 'conversations'}>
+            <button
+                class="section-toggle"
+                type="button"
+                aria-expanded={homeSection === 'conversations'}
+                disabled={appState.selected_character === null}
+                onclick={() => (homeSection = 'conversations')}
+            >
+                <span class="chevron" aria-hidden="true">›</span>
+                <span class="section-name">{$tr('app.tab.conversations')}</span>
+            </button>
+            <ConversationPane state={appState} {controller} onOpenChat={showChat} />
+        </section>
+    </div>
+{/snippet}
+
+{#snippet createIcon()}
+    <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="m12 3 2.2 5.3L19.5 10l-5.3 2.2L12 17.5 9.8 12.2 4.5 10l5.3-1.7z" />
+        <path d="M18 16.5 18.8 19l2.2.8-2.2.9-.8 2.3-.9-2.3-2.1-.9 2.1-.8z" />
+    </svg>
+{/snippet}
+
+{#snippet settingsIcon()}
+    <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 7h10M18 7h2M4 17h2M10 17h10" />
+        <circle cx="16" cy="7" r="2.4" />
+        <circle cx="8" cy="17" r="2.4" />
+    </svg>
+{/snippet}
+
 <svelte:head>
     <meta name="description" content={$tr('app.description')} />
 </svelte:head>
 
-<div class="app-shell" data-sidebar={sidebarOpen ? 'open' : 'closed'} data-view={view}>
-    <aside class="sidebar" aria-label={$tr('app.nav.label')}>
-        <div class="sidebar-head">
-            <a class="brand" href="#main-content">
-                <span class="brand-mark" aria-hidden="true">L</span>
-                <span>LorePia</span>
-                <span class="sr-only">— {$tr('app.brand.skip')}</span>
-            </a>
-            <button
-                class="icon-button ghost compact sidebar-close"
-                type="button"
-                aria-label={$tr('app.nav.close')}
-                onclick={() => (sidebarOpen = false)}
-            >
-                <span aria-hidden="true">×</span>
-            </button>
-        </div>
-
-        <div class="sidebar-body">
-            <section class="sidebar-section" class:open={sidebarSection === 'characters'}>
+<div class="app-shell" data-view={view} data-layout={isDesktop ? 'desktop' : 'mobile'}>
+    {#if isDesktop && appState.bootstrap.phase !== 'error'}
+        <aside class="sidebar" aria-label={$tr('app.nav.label')}>
+            <div class="sidebar-head">{@render identity()}</div>
+            {@render navigator()}
+            <div class="sidebar-foot">
                 <button
-                    class="section-toggle"
+                    class="nav-row"
                     type="button"
-                    aria-expanded={sidebarSection === 'characters'}
-                    onclick={() => (sidebarSection = 'characters')}
+                    aria-current={view === 'create' ? 'page' : undefined}
+                    onclick={openCreate}
                 >
-                    <span class="chevron" aria-hidden="true">›</span>
-                    <span class="section-name">{$tr('app.tab.library')}</span>
-                    {#if appState.selected_character !== null}
-                        <span class="section-value">{appState.selected_character.name}</span>
-                    {/if}
+                    {@render createIcon()}
+                    <span>{$tr('app.view.create')}</span>
                 </button>
-                <LibraryPane
-                    state={appState}
-                    {controller}
-                    client={appClient}
-                    onOpenConversations={() => (sidebarSection = 'conversations')}
-                />
-            </section>
-
-            <section class="sidebar-section" class:open={sidebarSection === 'conversations'}>
                 <button
-                    class="section-toggle"
+                    class="nav-row"
                     type="button"
-                    aria-expanded={sidebarSection === 'conversations'}
-                    disabled={appState.selected_character === null}
-                    onclick={() => (sidebarSection = 'conversations')}
+                    aria-current={view === 'settings' ? 'page' : undefined}
+                    onclick={openSettings}
                 >
-                    <span class="chevron" aria-hidden="true">›</span>
-                    <span class="section-name">{$tr('app.tab.conversations')}</span>
+                    {@render settingsIcon()}
+                    <span>{$tr('app.tab.providers')}</span>
                 </button>
-                <ConversationPane state={appState} {controller} onOpenChat={showChat} />
-            </section>
-        </div>
-
-        <div class="sidebar-foot">
-            <div
-                class="health-chip"
-                class:unhealthy={!appState.bootstrap.value?.health.database_open}
-            >
-                <span class="health-dot" aria-hidden="true"></span>
-                {#if appState.bootstrap.phase === 'loading'}
-                    {$tr('app.core.connecting')}
-                {:else if appState.bootstrap.phase === 'ready'}
-                    {$tr('app.core.local')}
-                {:else}
-                    {$tr('app.core.checking')}
-                {/if}
             </div>
-            <button
-                class="settings-button"
-                type="button"
-                aria-pressed={view === 'settings'}
-                onclick={toggleSettings}
-            >
-                {view === 'settings' ? $tr('app.toggle.to_chat') : $tr('app.toggle.to_providers')}
-            </button>
-        </div>
-    </aside>
-
-    <button
-        class="sidebar-scrim"
-        type="button"
-        tabindex="-1"
-        aria-hidden="true"
-        onclick={() => (sidebarOpen = false)}
-    ></button>
+        </aside>
+    {/if}
 
     {#if appState.bootstrap.phase === 'error'}
         <main id="main-content" class="main">
@@ -271,23 +313,12 @@
         </main>
     {:else}
         <main id="main-content" class="main">
-            {#if view === 'settings'}
-                <div class="settings-region">
-                    <ProviderSettings
-                        client={appClient}
-                        {appState}
-                        {controller}
-                        {orchestrationState}
-                        {orchestrationController}
-                        {contentPackageState}
-                        {contentPackageController}
-                        {personaState}
-                        {personaController}
-                        onNavigateToMemorySource={(source: MemoryRecordSourceNavigationDto) =>
-                            void navigateToMemorySource(source)}
-                    />
-                </div>
-            {:else}
+            {#if view === 'home'}
+                <section class="home-view" aria-label={$tr('app.tab.home')}>
+                    <header class="index-header">{@render identity()}</header>
+                    {@render navigator()}
+                </section>
+            {:else if view === 'chat'}
                 <ChatPane
                     {appState}
                     {controller}
@@ -295,11 +326,107 @@
                     {orchestrationState}
                     {orchestrationController}
                     {messageFocusRequest}
-                    onOpenSidebar={() => (sidebarOpen = true)}
-                    onOpenOrchestrationStudio={openSettings}
+                    onOpenHome={showHome}
+                    onOpenOrchestrationStudio={openCreate}
+                />
+            {:else if view === 'create'}
+                {#if studioSection !== null}
+                    <header class="sub-header">
+                        <button
+                            class="icon-button ghost back-button"
+                            type="button"
+                            aria-label={$tr('app.nav.back')}
+                            onclick={() => (studioSection = null)}
+                        >
+                            <span aria-hidden="true">‹</span>
+                        </button>
+                        <h1>{$tr(`studio.section.${studioSection}.title`)}</h1>
+                    </header>
+                {/if}
+                <div class="view-scroll">
+                    <OrchestrationStudio
+                        client={appClient}
+                        {appState}
+                        {orchestrationState}
+                        controller={orchestrationController}
+                        appController={controller}
+                        {contentPackageState}
+                        {contentPackageController}
+                        onNavigateToMemorySource={(source: MemoryRecordSourceNavigationDto) =>
+                            void navigateToMemorySource(source)}
+                        section={studioSection}
+                        onOpenSection={(next: StudioSection) => (studioSection = next)}
+                    />
+                </div>
+            {:else}
+                {#if settingsSection !== null}
+                    <header class="sub-header">
+                        <button
+                            class="icon-button ghost back-button"
+                            type="button"
+                            aria-label={$tr('app.nav.back')}
+                            onclick={() => (settingsSection = null)}
+                        >
+                            <span aria-hidden="true">‹</span>
+                        </button>
+                        <h1>{$tr(`settings.section.${settingsSection}.title`)}</h1>
+                    </header>
+                {/if}
+                <ProviderSettings
+                    {appState}
+                    {controller}
+                    {personaState}
+                    {personaController}
+                    section={settingsSection}
+                    onOpenSection={(next: SettingsSection) => (settingsSection = next)}
                 />
             {/if}
         </main>
+    {/if}
+
+    {#if !isDesktop && settingsSection === null && studioSection === null}
+        <nav class="tab-bar" aria-label={$tr('app.nav.label')}>
+            <button
+                class="tab"
+                type="button"
+                aria-current={view === 'home' ? 'page' : undefined}
+                onclick={showHome}
+            >
+                <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z" />
+                </svg>
+                <span class="tab-label">{$tr('app.tab.home')}</span>
+            </button>
+            <button
+                class="tab"
+                type="button"
+                aria-current={view === 'chat' ? 'page' : undefined}
+                onclick={showChat}
+            >
+                <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M4 5h16v11H9l-5 4z" />
+                </svg>
+                <span class="tab-label">{$tr('app.tab.chat')}</span>
+            </button>
+            <button
+                class="tab"
+                type="button"
+                aria-current={view === 'create' ? 'page' : undefined}
+                onclick={openCreate}
+            >
+                {@render createIcon()}
+                <span class="tab-label">{$tr('app.tab.create')}</span>
+            </button>
+            <button
+                class="tab"
+                type="button"
+                aria-current={view === 'settings' ? 'page' : undefined}
+                onclick={openSettings}
+            >
+                {@render settingsIcon()}
+                <span class="tab-label">{$tr('app.tab.providers')}</span>
+            </button>
+        </nav>
     {/if}
 
     <div class="sr-only" role="status" aria-live="polite" aria-atomic="true">

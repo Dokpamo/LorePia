@@ -376,7 +376,7 @@
         border: 0;
     }
 
-    @media (max-width: 760px) {
+    @container view (max-width: 760px) {
         header,
         article,
         .attempt-error,

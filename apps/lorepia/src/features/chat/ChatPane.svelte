@@ -46,7 +46,7 @@
         client?: InteractionRoomCapableClient;
         messageFocusRequest?: (MemoryRecordSourceNavigationDto & { request_id: number }) | null;
         onOpenOrchestrationStudio?: () => void;
-        onOpenSidebar?: () => void;
+        onOpenHome?: () => void;
     }
 
     interface MessageMeasurementInput {
@@ -77,7 +77,7 @@
         client,
         messageFocusRequest = null,
         onOpenOrchestrationStudio = () => undefined,
-        onOpenSidebar = () => undefined,
+        onOpenHome = () => undefined,
     }: Props = $props();
     let draft = $state('');
     let compositionActive = $state(false);
@@ -813,20 +813,18 @@
             <span class="large-mark" aria-hidden="true">✦</span>
             <strong>대화를 선택하세요.</strong>
             <p>메시지와 생성 상태는 로컬 Core에서 복원됩니다.</p>
-            <button class="sidebar-toggle" type="button" onclick={onOpenSidebar}>
-                대화 목록 열기
-            </button>
+            <button class="primary" type="button" onclick={onOpenHome}> 대화 목록 열기 </button>
         </div>
     {:else}
         <header class="chat-header">
             <div class="chat-identity">
                 <button
-                    class="icon-button ghost sidebar-toggle"
+                    class="icon-button ghost back-button"
                     type="button"
-                    aria-label="탐색 열기"
-                    onclick={onOpenSidebar}
+                    aria-label="대화 목록으로"
+                    onclick={onOpenHome}
                 >
-                    <span aria-hidden="true">☰</span>
+                    <span aria-hidden="true">‹</span>
                 </button>
                 <span class="avatar" aria-hidden="true"
                     >{(appState.selected_character?.name ?? '?').slice(0, 1)}</span
@@ -852,42 +850,45 @@
                         onOpenStudio={onOpenOrchestrationStudio}
                     />
                 {/if}
-                <div class="segmented" aria-label="대화 모드">
-                    <button
-                        type="button"
-                        class:active={appState.conversation_state?.selected_mode === 'chat'}
-                        aria-pressed={appState.conversation_state?.selected_mode === 'chat'}
-                        onclick={() => setMode('chat')}
-                    >
-                        채팅
-                    </button>
-                    <button
-                        type="button"
-                        class:active={appState.conversation_state?.selected_mode === 'story'}
-                        aria-pressed={appState.conversation_state?.selected_mode === 'story'}
-                        onclick={() => setMode('story')}
-                    >
-                        스토리
-                    </button>
-                </div>
-                {#if appState.branches.length > 1}
-                    <label class="branch-picker">
-                        <span>분기</span>
-                        <select
-                            value={appState.conversation_state?.active_branch_id}
-                            onchange={(event) =>
-                                void controller.selectBranch(event.currentTarget.value)}
-                        >
-                            {#each appState.branches as branch, index (branch.id)}
-                                <option value={branch.id}>
-                                    {branch.title ?? `분기 ${String(index + 1)}`}
-                                </option>
-                            {/each}
-                        </select>
-                    </label>
-                {/if}
             </div>
         </header>
+
+        <div class="chat-toolbar">
+            <div class="segmented" aria-label="대화 모드">
+                <button
+                    type="button"
+                    class:active={appState.conversation_state?.selected_mode === 'chat'}
+                    aria-pressed={appState.conversation_state?.selected_mode === 'chat'}
+                    onclick={() => setMode('chat')}
+                >
+                    채팅
+                </button>
+                <button
+                    type="button"
+                    class:active={appState.conversation_state?.selected_mode === 'story'}
+                    aria-pressed={appState.conversation_state?.selected_mode === 'story'}
+                    onclick={() => setMode('story')}
+                >
+                    스토리
+                </button>
+            </div>
+            {#if appState.branches.length > 1}
+                <label class="branch-picker">
+                    <span>분기</span>
+                    <select
+                        value={appState.conversation_state?.active_branch_id}
+                        onchange={(event) =>
+                            void controller.selectBranch(event.currentTarget.value)}
+                    >
+                        {#each appState.branches as branch, index (branch.id)}
+                            <option value={branch.id}>
+                                {branch.title ?? `분기 ${String(index + 1)}`}
+                            </option>
+                        {/each}
+                    </select>
+                </label>
+            {/if}
+        </div>
 
         {#if client !== undefined && interactionController !== null && interactionState.phase !== 'unavailable'}
             {#if interactionState.phase === 'loading'}

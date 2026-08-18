@@ -11,8 +11,54 @@ mod persona_commands;
 mod provider_commands;
 mod state;
 
-use tauri::Manager;
+use std::sync::atomic::{AtomicU32, Ordering};
+
+use tauri::{LogicalSize, Manager, WindowEvent};
 use tauri_plugin_lorepia_platform::LorepiaPlatformExt;
+
+/// Narrowest shape the window may take, as width over height.
+///
+/// Recent handsets run between 19.5:9 and 20:9; the taller of the two is the
+/// most elongated screen the layout is drawn for. Letting the window pass it
+/// would ask every screen to render in a shape no phone has, so the minimum
+/// width follows whatever height the window currently has rather than sitting
+/// at one fixed number.
+const NARROWEST_PHONE_ASPECT: f64 = 9.0 / 20.0;
+
+/// Floor from `tauri.conf.json`, kept here so the two minimums move together.
+const MIN_WINDOW_HEIGHT: f64 = 480.0;
+
+/// Last minimum width handed to the window manager, in logical points.
+///
+/// `set_min_size` has no getter, and calling it resizes the window, which
+/// raises another resize event. Remembering the last value lets the handler
+/// skip the calls that would change nothing and so never feed itself.
+static APPLIED_MIN_WIDTH: AtomicU32 = AtomicU32::new(0);
+
+/// Ties the window's minimum width to its current height.
+///
+/// Called on every resize, so dragging the window taller also raises the width
+/// it may be squeezed to.
+fn hold_phone_aspect(window: &tauri::Window) {
+    let Ok(scale) = window.scale_factor() else {
+        return;
+    };
+    let Ok(size) = window.inner_size() else {
+        return;
+    };
+    let logical = size.to_logical::<f64>(scale);
+    let target = (logical.height * NARROWEST_PHONE_ASPECT).round();
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "a window dimension in points is small and never negative"
+    )]
+    let target_points = target.max(0.0) as u32;
+    if APPLIED_MIN_WIDTH.swap(target_points, Ordering::Relaxed) == target_points {
+        return;
+    }
+    let _ = window.set_min_size(Some(LogicalSize::new(target, MIN_WINDOW_HEIGHT)));
+}
 
 /// Starts the native `LorePia` shell and owns the process event loop.
 ///
@@ -48,7 +94,15 @@ pub fn run() {
                 });
             },
         )
+        .on_window_event(|window, event| {
+            if matches!(event, WindowEvent::Resized(_)) {
+                hold_phone_aspect(window);
+            }
+        })
         .setup(|app| {
+            for window in app.webview_windows().values() {
+                hold_phone_aspect(&window.as_ref().window());
+            }
             let data_root = app.lorepia_platform().data_root().to_path_buf();
             app.manage(state::AppState::new_with_app(
                 data_root,
