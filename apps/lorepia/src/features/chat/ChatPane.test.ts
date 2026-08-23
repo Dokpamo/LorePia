@@ -14,6 +14,7 @@ import {
     LorepiaAppController,
     type LorepiaAppState,
 } from '../../app/app-controller';
+import '../../styles/app.css';
 import ChatPane from './ChatPane.svelte';
 
 class ControlledResizeObserver implements ResizeObserver {
@@ -118,6 +119,82 @@ function renderChat(appState = chatReadyState(), client?: LorepiaClient): Render
     render(ChatPane, { appState, controller, client });
     return { controller, sendMessage };
 }
+
+describe('ChatPane empty state', () => {
+    it('uses an open canvas instead of a full-pane dashed placeholder frame', () => {
+        const controller = new LorepiaAppController({} as LorepiaClient);
+        const rendered = render(ChatPane, {
+            appState: structuredClone(INITIAL_APP_STATE),
+            controller,
+        });
+        const placeholder = rendered.container.querySelector<HTMLElement>('.chat-placeholder');
+        if (placeholder === null) throw new Error('chat placeholder is missing');
+
+        expect(screen.getByRole('heading', { name: '채팅' })).toBeInTheDocument();
+        expect(screen.queryByText(/로컬 Core/)).not.toBeInTheDocument();
+        expect(
+            screen.queryByText('캐릭터와 대화를 선택하면 이어서 이야기할 수 있어요.'),
+        ).not.toBeInTheDocument();
+        expect(getComputedStyle(placeholder).borderStyle).toBe('none');
+        expect(getComputedStyle(placeholder).borderWidth).toBe('0px');
+        controller.destroy();
+    });
+});
+
+describe('ChatPane transcript chrome', () => {
+    it('renders calendar-day separators and a time for every persisted message', () => {
+        const appState = chatReadyState();
+        appState.messages.items = [
+            {
+                id: 'user-day-one',
+                conversation_id: 'conversation-1',
+                parent_id: null,
+                role: 'user',
+                content: '첫날 메시지',
+                status: 'complete',
+                generation_id: null,
+                created_at: '2026-08-02T09:14:00',
+            },
+            {
+                id: 'assistant-day-two',
+                conversation_id: 'conversation-1',
+                parent_id: 'user-day-one',
+                role: 'assistant',
+                content: '다음날 메시지',
+                status: 'complete',
+                generation_id: 'generation-1',
+                created_at: '2026-08-03T19:47:00',
+            },
+        ];
+
+        const controller = new LorepiaAppController({} as LorepiaClient);
+        const rendered = render(ChatPane, { appState, controller });
+        const separators = screen.getAllByRole('separator');
+        const messageTimes = rendered.container.querySelectorAll<HTMLTimeElement>('.message-time');
+
+        expect(separators).toHaveLength(2);
+        expect(separators[0]).toHaveTextContent('2026년 8월 2일');
+        expect(separators[1]).toHaveTextContent('2026년 8월 3일');
+        expect(messageTimes).toHaveLength(2);
+        expect(messageTimes[0]).toHaveAttribute('datetime', '2026-08-02T09:14:00');
+        expect(messageTimes[0]).toHaveTextContent('09:14');
+        expect(messageTimes[1]).toHaveTextContent('19:47');
+        controller.destroy();
+    });
+
+    it('uses a single messenger input surface with a round icon send action', () => {
+        const { controller } = renderChat();
+        const composer = screen.getByRole('form', { name: '메시지 작성' });
+        const field = composer.querySelector('.composer-field');
+        const send = screen.getByRole('button', { name: '메시지 보내기' });
+
+        expect(field).not.toBeNull();
+        expect(field).toContainElement(screen.getByRole('textbox', { name: '메시지' }));
+        expect(send).toHaveClass('send-button');
+        expect(send.querySelector('svg')).not.toBeNull();
+        controller.destroy();
+    });
+});
 
 describe('ChatPane live response', () => {
     it('suppresses only the live pending checkpoint and keeps an empty snapshot visibly active', async () => {

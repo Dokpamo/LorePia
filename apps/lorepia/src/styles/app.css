@@ -1,88 +1,100 @@
 /*
  * LorePia design system — one handheld column, everywhere.
  *
- * There is exactly one layout: a single handheld column. It fills the window
- * at every size — no frame, no gutters — and the rows inside it centre their
- * content on a reading measure, so the two form factors share every pixel of
- * UI without a desktop window ever looking half empty.
+ * There is exactly one layout: a 437px reference handheld column. It fills a
+ * narrow host, scales its principal measurements below that baseline, and is
+ * centred without changing navigation structure in a wider desktop host.
  *
- * Navigation takes the shape the screen affords. A phone divides in time: a
- * bottom tab bar with four destinations — home, chat, create, settings — one
- * on screen at a time. A desktop divides in space: the character and
- * conversation hierarchy docks into a sidebar beside the transcript, so
- * switching conversations never takes the transcript off screen, and home
- * stops being a destination at all. Create and settings are full-region modes
- * on both. The composer docks to the foot of the transcript either way.
- *
- * The transcript is a messenger: the character speaks in soft neutral bubbles
- * under their name and round avatar, the reader answers in solid accent
- * bubbles on the right. One warm neutral ramp carries every surface; one teal
- * accent carries identity, focus, liveness, and the reader's own voice.
- * Every colour is a token defined once per theme — components never hardcode
- * a hex value.
+ * The colour source is the LorePia sibling palette: the original electric
+ * yellow plus ten bright, playful, high-energy companions. Black marks on
+ * vivid fills mirror the supplied cards; quiet warm neutrals keep those fills
+ * legible instead of making every surface compete for attention.
  */
 
 :root {
     color-scheme: light;
+
+    /* Original + ten named siblings from the supplied LorePia palette. */
+    --brand-original: #f1fb06;
+    --brand-acid-lime: #b8ff00;
+    --brand-apple-green: #63e85b;
+    --brand-emerald-mint: #42e6a4;
+    --brand-electric-cyan: #31dff3;
+    --brand-bright-sky-blue: #62b5ff;
+    --brand-blue-lavender: #8b8cff;
+    --brand-electric-violet: #b56bff;
+    --brand-neon-pink: #ff5aa5;
+    --brand-pop-coral: #ff6d62;
+    --brand-tangerine-orange: #ffaa24;
+    --brand-ink: #11110f;
 
     /*
      * Surfaces, from furthest back to closest to the reader. The page is
      * tinted and the card is white — that difference is what makes a card read
      * as a card, and without it a border has to do the whole job alone.
      */
-    --bg: #f1f1f3;
-    --surface: #ffffff;
-    --surface-sunken: #e8e8ec;
-    --surface-raised: #ffffff;
-    --surface-hover: #eaeaee;
-    --surface-active: #dededf;
+    --bg: #f8f8f0;
+    --surface: #fffef8;
+    --surface-sunken: #efefe3;
+    --surface-raised: #fffef8;
+    --surface-hover: #f4f5d7;
+    --surface-active: #e9eca9;
 
     /* Text, from primary to incidental. */
-    --ink: #1b1b20;
-    --ink-muted: #6c6b78;
-    --ink-subtle: #9c9ba8;
+    --ink: var(--brand-ink);
+    --ink-muted: #666659;
+    --ink-subtle: #989887;
     --ink-inverse: #ffffff;
 
-    --line: #e4e4e8;
-    --line-strong: #d0d0d6;
+    --line: #e7e7d7;
+    --line-strong: #d2d2bc;
 
     /* The two voices of the transcript. */
-    --bubble-char-bg: #ffffff;
-    --bubble-user-bg: #0e9384;
-    --bubble-user-ink: #ffffff;
+    --bubble-char-bg: var(--surface-raised);
+    --bubble-user-bg: var(--brand-blue-lavender);
+    --bubble-user-ink: var(--brand-ink);
 
-    /* One accent: identity, focus, links, liveness, primary actions. */
-    --accent: #0e9384;
-    --accent-hover: #0b7c70;
-    --accent-soft: #e2f5f1;
-    --accent-line: #a8ddd3;
+    /* Tangerine Orange is the identity fill; a dark mix keeps text accessible. */
+    --accent: color-mix(in srgb, var(--brand-tangerine-orange) 30%, var(--brand-ink));
+    --accent-hover: color-mix(in srgb, var(--brand-tangerine-orange) 22%, var(--brand-ink));
+    --accent-soft: var(--brand-tangerine-orange);
+    --accent-line: color-mix(in srgb, var(--brand-tangerine-orange) 70%, var(--line-strong));
+    --utility-blue: var(--brand-bright-sky-blue);
 
-    --primary-bg: #0e9384;
-    --primary-bg-hover: #0b7c70;
-    --primary-ink: #ffffff;
+    --primary-bg: var(--brand-tangerine-orange);
+    --primary-bg-hover: color-mix(in srgb, var(--brand-tangerine-orange) 84%, var(--brand-ink));
+    --primary-ink: var(--brand-ink);
 
-    --danger: #b42318;
-    --danger-soft: #fef3f2;
-    --warning: #8a5a00;
-    --warning-soft: #fdf5e3;
-    --success: #067647;
-    --success-soft: #ecfdf3;
+    --danger: color-mix(in srgb, var(--brand-pop-coral) 58%, var(--brand-ink));
+    --danger-soft: color-mix(in srgb, var(--brand-pop-coral) 16%, var(--surface-raised));
+    --warning: color-mix(in srgb, var(--brand-tangerine-orange) 55%, var(--brand-ink));
+    --warning-soft: color-mix(in srgb, var(--brand-tangerine-orange) 18%, var(--surface-raised));
+    --success: color-mix(in srgb, var(--brand-apple-green) 55%, var(--brand-ink));
+    --success-soft: color-mix(in srgb, var(--brand-apple-green) 16%, var(--surface-raised));
 
-    --radius-xs: 8px;
-    --radius-sm: 11px;
-    --radius-md: 15px;
-    --radius-lg: 20px;
+    --radius-xs: clamp(7px, 1.831vw, 8px);
+    --radius-sm: clamp(9px, 2.517vw, 11px);
+    --radius-md: clamp(12px, 3.432vw, 15px);
+    --radius-lg: clamp(16px, 4.577vw, 20px);
     --radius-pill: 999px;
 
     --shadow-1: 0 1px 2px rgb(16 18 24 / 5%);
     --shadow-2: 0 8px 32px rgb(16 18 24 / 9%);
     --shadow-3: 0 24px 64px rgb(16 18 24 / 18%);
 
-    /* Finger-sized targets at every width: the desktop is a big phone here. */
-    --touch: 44px;
-
-    /* The docked sidebar, on screens wide enough to hold one. */
-    --sidebar: 300px;
+    /* 437px is the measured comparison width; narrower hosts scale from it. */
+    --touch: clamp(38px, 10.069vw, 44px);
+    --mobile-toolbar: clamp(48px, 12.815vw, 56px);
+    --mobile-root-header: clamp(56px, 16.476vw, 72px);
+    --mobile-top-action: clamp(42px, 12.18vw, 53px);
+    --mobile-top-inset: clamp(13px, 3.89vw, 17px);
+    --mobile-top-offset: clamp(14px, 4.06vw, 18px);
+    --mobile-top-fade: clamp(103px, 30.2vw, 132px);
+    --mobile-root-title-inset: clamp(20px, 6.095vw, 26px);
+    --mobile-row: clamp(58px, 16.476vw, 72px);
+    --mobile-search: clamp(39px, 10.984vw, 48px);
+    --mobile-search-inset: clamp(10px, 3vw, 13px);
+    --mobile-nav: clamp(53px, 15.103vw, 66px);
 
     /*
      * Content measures. A full-bleed row spends its own padding to centre its
@@ -93,8 +105,9 @@
      */
     --reading: 44rem;
     --settings: 54rem;
-    --gutter: max(14px, calc((100% - var(--reading)) / 2));
-    --settings-gutter: max(16px, calc((100% - var(--settings)) / 2));
+    --sidebar: 300px;
+    --gutter: clamp(14px, 3.89vw, 17px);
+    --settings-gutter: clamp(12px, 3.432vw, 15px);
 
     font-family:
         Pretendard,
@@ -106,6 +119,7 @@
     font-synthesis: none;
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
+    font-size: clamp(13px, 3.661vw, 16px);
     color: var(--ink);
     background: var(--bg);
 }
@@ -119,40 +133,45 @@
     :root:not([data-theme='light']) {
         color-scheme: dark;
 
-        --bg: #0a0a0a;
-        --surface: #0f0f0f;
-        --surface-sunken: #141414;
-        --surface-raised: #181818;
-        --surface-hover: #202020;
-        --surface-active: #2a2a2a;
+        --bg: #10100d;
+        --surface: #171712;
+        --surface-sunken: #1d1d16;
+        --surface-raised: #22221a;
+        --surface-hover: #2c2c20;
+        --surface-active: #383826;
 
-        --ink: #f2f2f4;
-        --ink-muted: #a3a2ae;
-        --ink-subtle: #706f7c;
+        --ink: #fbfbf2;
+        --ink-muted: #b9b9a7;
+        --ink-subtle: #7f7f6d;
         --ink-inverse: #ffffff;
 
-        --line: #242424;
-        --line-strong: #333333;
+        --line: #323225;
+        --line-strong: #484834;
 
-        --bubble-char-bg: #212121;
-        --bubble-user-bg: #0d7f72;
-        --bubble-user-ink: #ffffff;
+        --bubble-char-bg: var(--surface-raised);
+        --bubble-user-bg: var(--brand-blue-lavender);
+        --bubble-user-ink: var(--brand-ink);
 
-        --accent: #45d6c2;
-        --accent-hover: #6ce2d1;
-        --accent-soft: #12332e;
-        --accent-line: #23564e;
+        --accent: var(--brand-tangerine-orange);
+        --accent-hover: color-mix(in srgb, var(--brand-tangerine-orange) 84%, var(--ink));
+        --accent-soft: color-mix(in srgb, var(--brand-tangerine-orange) 20%, var(--surface-raised));
+        --accent-line: color-mix(in srgb, var(--brand-tangerine-orange) 46%, var(--line));
+        --utility-blue: var(--brand-bright-sky-blue);
 
-        --primary-bg: #2fd0ba;
-        --primary-bg-hover: #56dcc9;
-        --primary-ink: #05221e;
+        --primary-bg: var(--brand-tangerine-orange);
+        --primary-bg-hover: color-mix(in srgb, var(--brand-tangerine-orange) 84%, var(--brand-ink));
+        --primary-ink: var(--brand-ink);
 
-        --danger: #ff9a90;
-        --danger-soft: #2a1512;
-        --warning: #f0be6a;
-        --warning-soft: #2b2210;
-        --success: #6ee7b7;
-        --success-soft: #0d2620;
+        --danger: var(--brand-pop-coral);
+        --danger-soft: color-mix(in srgb, var(--brand-pop-coral) 16%, var(--surface-raised));
+        --warning: var(--brand-tangerine-orange);
+        --warning-soft: color-mix(
+            in srgb,
+            var(--brand-tangerine-orange) 18%,
+            var(--surface-raised)
+        );
+        --success: var(--brand-apple-green);
+        --success-soft: color-mix(in srgb, var(--brand-apple-green) 16%, var(--surface-raised));
 
         --shadow-1: 0 1px 2px rgb(0 0 0 / 45%);
         --shadow-2: 0 8px 32px rgb(0 0 0 / 55%);
@@ -163,40 +182,41 @@
 :root[data-theme='dark'] {
     color-scheme: dark;
 
-    --bg: #0a0a0a;
-    --surface: #0f0f0f;
-    --surface-sunken: #141414;
-    --surface-raised: #181818;
-    --surface-hover: #202020;
-    --surface-active: #2a2a2a;
+    --bg: #10100d;
+    --surface: #171712;
+    --surface-sunken: #1d1d16;
+    --surface-raised: #22221a;
+    --surface-hover: #2c2c20;
+    --surface-active: #383826;
 
-    --ink: #f2f2f4;
-    --ink-muted: #a3a2ae;
-    --ink-subtle: #706f7c;
+    --ink: #fbfbf2;
+    --ink-muted: #b9b9a7;
+    --ink-subtle: #7f7f6d;
     --ink-inverse: #ffffff;
 
-    --line: #242424;
-    --line-strong: #333333;
+    --line: #323225;
+    --line-strong: #484834;
 
-    --bubble-char-bg: #212121;
-    --bubble-user-bg: #0d7f72;
-    --bubble-user-ink: #ffffff;
+    --bubble-char-bg: var(--surface-raised);
+    --bubble-user-bg: var(--brand-blue-lavender);
+    --bubble-user-ink: var(--brand-ink);
 
-    --accent: #45d6c2;
-    --accent-hover: #6ce2d1;
-    --accent-soft: #12332e;
-    --accent-line: #23564e;
+    --accent: var(--brand-tangerine-orange);
+    --accent-hover: color-mix(in srgb, var(--brand-tangerine-orange) 84%, var(--ink));
+    --accent-soft: color-mix(in srgb, var(--brand-tangerine-orange) 20%, var(--surface-raised));
+    --accent-line: color-mix(in srgb, var(--brand-tangerine-orange) 46%, var(--line));
+    --utility-blue: var(--brand-bright-sky-blue);
 
-    --primary-bg: #2fd0ba;
-    --primary-bg-hover: #56dcc9;
-    --primary-ink: #05221e;
+    --primary-bg: var(--brand-tangerine-orange);
+    --primary-bg-hover: color-mix(in srgb, var(--brand-tangerine-orange) 84%, var(--brand-ink));
+    --primary-ink: var(--brand-ink);
 
-    --danger: #ff9a90;
-    --danger-soft: #2a1512;
-    --warning: #f0be6a;
-    --warning-soft: #2b2210;
-    --success: #6ee7b7;
-    --success-soft: #0d2620;
+    --danger: var(--brand-pop-coral);
+    --danger-soft: color-mix(in srgb, var(--brand-pop-coral) 16%, var(--surface-raised));
+    --warning: var(--brand-tangerine-orange);
+    --warning-soft: color-mix(in srgb, var(--brand-tangerine-orange) 18%, var(--surface-raised));
+    --success: var(--brand-apple-green);
+    --success-soft: color-mix(in srgb, var(--brand-apple-green) 16%, var(--surface-raised));
 
     --shadow-1: 0 1px 2px rgb(0 0 0 / 45%);
     --shadow-2: 0 8px 32px rgb(0 0 0 / 55%);
@@ -334,10 +354,6 @@ button {
         color 110ms ease;
 }
 
-button:hover:not(:disabled) {
-    background: var(--surface-hover);
-}
-
 button:active:not(:disabled) {
     background: var(--surface-active);
 }
@@ -353,7 +369,6 @@ button:disabled {
     color: var(--primary-ink);
 }
 
-.primary:hover:not(:disabled),
 .primary:active:not(:disabled) {
     background: var(--primary-bg-hover);
     border-color: transparent;
@@ -366,21 +381,11 @@ button:disabled {
     color: var(--danger);
 }
 
-.danger:hover:not(:disabled) {
-    background: var(--danger-soft);
-    border-color: var(--danger);
-}
-
 /* A quiet button: reads as a label until it is pointed at. */
 .ghost {
     border-color: transparent;
     background: transparent;
     color: var(--ink-muted);
-}
-
-.ghost:hover:not(:disabled) {
-    background: var(--surface-hover);
-    color: var(--ink);
 }
 
 /*
@@ -424,12 +429,6 @@ select {
     font-size: 0.8125rem;
 }
 
-input:hover,
-textarea:hover,
-select:hover {
-    border-color: var(--ink-subtle);
-}
-
 textarea {
     resize: vertical;
     line-height: 1.6;
@@ -443,27 +442,62 @@ textarea {
 /* --------------------------------------------------------------- shell */
 
 /*
- * The shell is the window: it never caps its own width, so a desktop never
- * shows a boxed-in app floating on dead space. On a phone it is a column of
- * two rows — the active view, then the tab bar; on a desktop it is two
- * columns — the sidebar, then the view. `contain: layout` makes it the
- * containing block for fixed-position descendants, so floating panels pin to
- * the app rather than escaping it.
+ * The shell fills its host. Handheld navigation remains active through the
+ * widest Fold/tablet tier; desktop switches to a sidebar and workspace grid.
  */
 .app-shell {
     position: relative;
-    display: flex;
+    display: grid;
     width: 100%;
+    height: 100vh;
     height: 100dvh;
-    flex-direction: column;
+    grid-template-columns: 0 minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    margin-inline: 0;
     overflow: clip;
     background: var(--bg);
     contain: layout;
+    transition: grid-template-columns 240ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.app-shell[data-layout='mobile'] {
+    width: min(100%, 899px);
+    margin-inline: auto;
+    grid-template-columns: 0 minmax(0, 1fr);
 }
 
 .app-shell[data-layout='desktop'] {
-    display: grid;
+    width: 100%;
+    margin-inline: 0;
     grid-template-columns: var(--sidebar) minmax(0, 1fr);
+    transition-duration: 300ms;
+    transition-timing-function: cubic-bezier(0.22, 0.61, 0.36, 1);
+    --gutter: max(14px, calc((100% - var(--reading)) / 2));
+    --settings-gutter: max(16px, calc((100% - var(--settings)) / 2));
+    --mobile-root-header: 60px;
+    --mobile-top-action: 44px;
+    --mobile-top-inset: 14px;
+    --mobile-top-offset: 8px;
+}
+
+/* Keep native wheel and touch scrolling, but hide scrollbar chrome on mobile. */
+.app-shell[data-layout='mobile'],
+.app-shell[data-layout='mobile'] * {
+    scrollbar-width: none;
+}
+
+.app-shell[data-layout='mobile']::-webkit-scrollbar,
+.app-shell[data-layout='mobile'] *::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+}
+
+.app-shell[data-layout='mobile']
+    :where(.navigator, .view-scroll, .provider-scroll, .entity-list, .message-scroll, .modal-card) {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
 }
 
 /* ------------------------------------------------------------- sidebar */
@@ -473,11 +507,20 @@ textarea {
  * phone's home screen does, plus the two modes that would otherwise need a
  * tab of their own.
  */
-.sidebar {
-    display: grid;
+.sidebar-rail {
     min-width: 0;
     min-height: 0;
-    border-right: 1px solid var(--line);
+    overflow: hidden;
+    box-shadow: inset -1px 0 var(--line);
+    grid-column: 1;
+    grid-row: 1;
+}
+
+.sidebar {
+    display: grid;
+    width: var(--sidebar);
+    height: 100%;
+    min-height: 0;
     background: var(--surface-sunken);
     grid-template-rows: auto minmax(0, 1fr) auto;
 }
@@ -510,28 +553,18 @@ textarea {
     gap: 10px;
 }
 
-.nav-row:hover:not(:disabled) {
-    background: var(--surface-hover);
-    color: var(--ink);
-}
-
 .nav-row[aria-current='page'] {
     background: var(--accent-soft);
     color: var(--accent);
     font-weight: 600;
 }
 
-/* The transcript has the sidebar beside it; a back control would be noise. */
-.app-shell[data-layout='desktop'] .back-button {
-    display: none;
-}
-
 /*
- * Panels inside the view ask this element how much room they have, not the
- * window: with a sidebar docked, the two are hundreds of pixels apart, and a
- * form that stacks on a phone should also stack in a narrow desktop window.
+ * Panels ask this element how much room the shared handheld frame has rather
+ * than reacting to the wider host window around it.
  */
 .main {
+    position: relative;
     display: flex;
     min-width: 0;
     min-height: 0;
@@ -539,12 +572,19 @@ textarea {
     flex-direction: column;
     background: var(--bg);
     container: view / inline-size;
+    grid-column: 2;
+    grid-row: 1;
 }
 
 /* A view that renders its own pane fills the region rather than sitting in it. */
 .main > .provider-pane {
     min-height: 0;
     flex: 1;
+}
+
+/* Settings cards need a tinted canvas in both themes, especially in light mode. */
+.provider-pane {
+    background: var(--bg);
 }
 
 /* ------------------------------------------------------------- tab bar */
@@ -556,37 +596,44 @@ textarea {
  * competing with the composer for the same horizon.
  */
 .tab-bar {
+    position: absolute;
+    z-index: 20;
+    right: auto;
+    bottom: calc(8px + env(safe-area-inset-bottom));
+    left: 50%;
     display: flex;
-    flex: none;
-    padding: 5px 6px;
+    width: min(calc(100% - var(--gutter) - var(--gutter)), 560px);
+    height: var(--mobile-nav);
+    min-height: var(--mobile-nav);
+    padding: clamp(2px, 0.686vw, 3px);
     border: 1px solid var(--line);
     border-radius: var(--radius-pill);
-    margin: 6px var(--gutter) calc(8px + env(safe-area-inset-bottom));
+    margin: 0;
     background: var(--surface-raised);
     box-shadow: var(--shadow-2);
     gap: 2px;
+    transform: translateX(-50%);
 }
 
 .tab {
+    position: relative;
     display: flex;
+    height: 100%;
     min-width: 0;
-    min-height: 48px;
+    min-height: 0;
     flex: 1;
     flex-direction: column;
     justify-content: center;
-    padding: 5px 2px;
+    padding: clamp(3px, 1.144vw, 5px) 2px;
     border: 0;
     border-radius: var(--radius-pill);
+    margin-inline: clamp(1px, 0.458vw, 2px);
     background: transparent;
     color: var(--ink);
     font-size: 0.8125rem;
-    font-weight: 600;
-    gap: 4px;
-}
-
-.tab:hover:not(:disabled) {
-    background: var(--surface-hover);
-    color: var(--ink-muted);
+    font-weight: 700;
+    gap: clamp(2px, 0.915vw, 4px);
+    isolation: isolate;
 }
 
 /*
@@ -594,9 +641,48 @@ textarea {
  * bar a tint alone is easy to miss, and the shape reads at a glance.
  */
 .tab[aria-current='page'] {
-    background: var(--accent-soft);
+    background: transparent;
     color: var(--accent);
-    font-weight: 600;
+    font-weight: 700;
+}
+
+.tab::before {
+    position: absolute;
+    z-index: 0;
+    border-radius: var(--radius-pill);
+    background: transparent;
+    content: '';
+    inset: clamp(1px, 0.458vw, 2px) clamp(2px, 0.686vw, 3px);
+    pointer-events: none;
+}
+
+/*
+ * At the bar ends, padding plus the tab margin already equals the vertical
+ * inset. Removing the extra outer-side inset keeps both end-cap arcs
+ * concentric with the floating bar instead of shifting them inward.
+ */
+.tab:first-child::before {
+    left: 0;
+}
+
+.tab:last-child::before {
+    right: 0;
+}
+
+.tab[aria-current='page']::before {
+    background: var(--accent-soft);
+}
+
+.tab:active:not(:disabled) {
+    background: transparent;
+}
+
+.tab:active:not(:disabled)::before {
+    background: var(--surface-active);
+}
+
+.tab[aria-current='page']:active:not(:disabled)::before {
+    background: var(--accent-soft);
 }
 
 .nav-icon {
@@ -608,9 +694,16 @@ textarea {
 }
 
 .tab .nav-icon {
-    width: 24px;
-    height: 24px;
+    width: clamp(22px, 5.95vw, 26px);
+    height: clamp(22px, 5.95vw, 26px);
     stroke-width: 1.8;
+}
+
+.tab > .nav-icon,
+.tab > .tab-label {
+    position: relative;
+    z-index: 1;
+    transform: translateY(-2px);
 }
 
 .nav-row .nav-icon {
@@ -625,16 +718,223 @@ textarea {
 }
 
 .tab-label {
+    font-size: clamp(11px, 3.204vw, 14px);
+    font-weight: 700;
     line-height: 1;
 }
 
 /* ---------------------------------------------------------------- home */
 
 .home-view {
-    display: grid;
+    display: flex;
     min-height: 0;
     flex: 1;
-    grid-template-rows: auto minmax(0, 1fr);
+    flex-direction: column;
+}
+
+.mobile-root {
+    min-width: 0;
+    min-height: 0;
+    flex: 1;
+    background: var(--bg);
+}
+
+.mobile-root > .pane {
+    height: auto;
+    min-height: 0;
+    flex: 1;
+}
+
+.mobile-top-bar {
+    position: relative;
+    z-index: 6;
+    display: grid;
+    height: calc(var(--mobile-root-header) + env(safe-area-inset-top));
+    min-height: calc(var(--mobile-root-header) + env(safe-area-inset-top));
+    flex: none;
+    grid-template-columns: var(--mobile-top-action) minmax(0, 1fr) var(--mobile-top-action);
+    align-items: center;
+    padding-top: env(safe-area-inset-top);
+    padding-inline-start: max(var(--mobile-top-inset), env(safe-area-inset-left));
+    padding-inline-end: max(var(--mobile-top-inset), env(safe-area-inset-right));
+    background: var(--bg);
+}
+
+.mobile-top-bar > .mobile-top-action {
+    align-self: start;
+    margin-top: var(--mobile-top-offset);
+}
+
+.mobile-top-action {
+    display: grid;
+    width: var(--mobile-top-action);
+    height: var(--mobile-top-action);
+    min-width: var(--mobile-top-action);
+    min-height: var(--mobile-top-action);
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: var(--surface-raised);
+    box-shadow: var(--shadow-1);
+    color: var(--ink);
+    place-items: center;
+}
+
+.mobile-top-action svg {
+    width: 24px;
+    height: 24px;
+    fill: none;
+    stroke: currentcolor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 2;
+}
+
+.mobile-top-action-left {
+    grid-column: 1;
+}
+
+.mobile-top-action-right {
+    grid-column: 3;
+}
+
+.mobile-root-header h1 {
+    grid-column: 1 / 3;
+    align-self: center;
+    padding-left: calc(var(--mobile-root-title-inset) - var(--mobile-top-inset));
+    margin: 0;
+    font-size: 1.5rem;
+    font-weight: 700;
+    letter-spacing: -0.025em;
+}
+
+.chat-list-view {
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+}
+
+/* Home and chat are parallel root destinations; only their content differs. */
+.app-shell[data-layout='mobile'] .mobile-root-search {
+    display: flex;
+    min-height: var(--mobile-search);
+    flex: none;
+    align-items: center;
+    padding: 0 clamp(10px, 3.204vw, 14px);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-pill);
+    width: min(
+        calc(100% - var(--mobile-search-inset) - var(--mobile-search-inset)),
+        var(--reading)
+    );
+    margin: 0 auto 8px;
+    background: var(--surface-raised);
+    box-shadow: var(--shadow-1);
+    color: var(--ink-muted);
+    gap: clamp(8px, 2.288vw, 10px);
+}
+
+.app-shell[data-layout='mobile'] .mobile-root-search:focus-within {
+    border-color: var(--accent);
+}
+
+.app-shell[data-layout='mobile'] .mobile-root-search svg {
+    width: clamp(16px, 4.577vw, 20px);
+    height: clamp(16px, 4.577vw, 20px);
+    flex: none;
+    fill: none;
+    stroke: currentcolor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.8;
+}
+
+.app-shell[data-layout='mobile'] .mobile-root-search input {
+    width: 100%;
+    min-height: calc(var(--mobile-search) - 2px);
+    padding: 0;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: var(--ink);
+    font-size: clamp(13px, 3.432vw, 15px);
+}
+
+.app-shell[data-layout='mobile'] .mobile-root-search input::placeholder {
+    color: var(--ink-subtle);
+}
+
+/* Empty-home action measured from Telegram Contacts at the same phone ratio. */
+.app-shell[data-layout='mobile'] .mobile-root-contact-action {
+    position: absolute;
+    z-index: 5;
+    top: calc(65% - 10px);
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+.app-shell[data-layout='mobile'] .mobile-root-contact-button {
+    display: inline-flex;
+    width: clamp(155px, 45.35vw, 198px);
+    min-height: clamp(43px, 12.52vw, 55px);
+    align-items: center;
+    justify-content: center;
+    padding: 0 18px;
+    border-radius: var(--radius-pill);
+    box-shadow: none;
+    font-size: clamp(14px, 3.55vw, 16px);
+    font-weight: 700;
+    gap: 8px;
+    white-space: nowrap;
+}
+
+.app-shell[data-layout='mobile'] .mobile-root-contact-button svg {
+    width: clamp(19px, 5.03vw, 22px);
+    height: clamp(19px, 5.03vw, 22px);
+    flex: none;
+    fill: none;
+    stroke: currentcolor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.9;
+}
+
+.app-shell[data-layout='mobile'] .mobile-root-fab {
+    position: absolute;
+    z-index: 21;
+    right: max(22px, calc((100% - var(--reading)) / 2 + 8px));
+    bottom: calc(var(--mobile-nav) + 26px + env(safe-area-inset-bottom));
+    display: grid;
+    width: 56px;
+    height: 56px;
+    min-height: 56px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: var(--primary-bg);
+    box-shadow: var(--shadow-2);
+    color: var(--primary-ink);
+    place-items: center;
+}
+
+.app-shell[data-layout='mobile'] .mobile-root-fab-mark {
+    display: block;
+    font-size: 2rem;
+    font-weight: 300;
+    line-height: 1;
+}
+
+.app-shell[data-layout='mobile'] .mobile-root-fab:disabled {
+    opacity: 0.45;
+}
+
+.app-shell[data-layout='mobile'] .mobile-root-fab:active:not(:disabled) {
+    background: var(--primary-bg-hover);
+}
+
+.app-shell[data-layout='mobile'] .mobile-root-row {
+    min-height: var(--mobile-row);
+    border-radius: var(--radius-md);
 }
 
 /*
@@ -649,33 +949,9 @@ textarea {
 }
 
 .home-view .navigator {
-    padding-inline: var(--gutter);
-}
-
-.health-chip {
-    display: inline-flex;
-    min-width: 0;
-    align-items: center;
-    padding: 0 6px;
-    color: var(--ink-muted);
-    font-size: 0.6875rem;
-    gap: 6px;
-}
-
-.health-dot {
-    width: 7px;
-    height: 7px;
-    flex: none;
-    border-radius: 50%;
-    background: var(--success);
-}
-
-.health-chip.unhealthy {
-    color: var(--danger);
-}
-
-.health-chip.unhealthy .health-dot {
-    background: var(--danger);
+    padding: 0 var(--gutter) calc(var(--mobile-nav) + 28px + env(safe-area-inset-bottom));
+    gap: 8px;
+    overflow-y: auto;
 }
 
 /*
@@ -687,6 +963,58 @@ textarea {
     flex: 1;
     padding: 16px var(--settings-gutter) 24px;
     overflow-y: auto;
+}
+
+.app-shell[data-layout='mobile'] .view-scroll {
+    padding-bottom: calc(var(--mobile-nav) + 28px + env(safe-area-inset-bottom));
+}
+
+/*
+ * Pushed mobile screens have no header ledge. Their action and title remain
+ * fixed in a transparent overlay while content dissolves beneath them.
+ */
+.app-shell[data-layout='mobile'] .sub-header {
+    position: absolute;
+    z-index: 10;
+    border: 0;
+    background: transparent;
+    inset: 0 0 auto;
+    pointer-events: none;
+}
+
+.app-shell[data-layout='mobile'] .sub-header > .mobile-top-action {
+    position: relative;
+    z-index: 2;
+    pointer-events: auto;
+}
+
+.app-shell[data-layout='mobile'] :is(.studio-detail-scroll, .settings-detail-scroll) {
+    padding-top: calc(
+        env(safe-area-inset-top) + var(--mobile-top-offset) + var(--mobile-top-action) + 16px
+    );
+    -webkit-mask-image: linear-gradient(
+        to bottom,
+        rgb(0 0 0 / var(--mobile-top-mask-alpha, 1)) 0,
+        #000 var(--mobile-top-fade)
+    );
+    mask-image: linear-gradient(
+        to bottom,
+        rgb(0 0 0 / var(--mobile-top-mask-alpha, 1)) 0,
+        #000 var(--mobile-top-fade)
+    );
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+    scroll-padding-top: calc(var(--mobile-top-action) + var(--mobile-top-offset) + 8px);
+}
+
+.app-shell[data-layout='mobile'] .mobile-root .entity-list {
+    width: min(100%, var(--reading));
+    margin-inline: auto;
+}
+
+.app-shell[data-layout='mobile'] :is(.settings-home-scroll, .studio-home) > .setting-list {
+    width: min(calc(100% - 6px), var(--reading));
+    margin-inline: auto;
 }
 
 /* ---------------------------------------------------------- home panes */
@@ -758,9 +1086,64 @@ textarea {
     text-align: left;
 }
 
-.section-toggle:hover:not(:disabled) {
-    background: var(--surface-hover);
+.section-mark {
+    display: grid;
+    width: 32px;
+    height: 32px;
+    flex: none;
+    border-radius: 10px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    place-items: center;
+}
+
+.section-mark[data-kind='conversations'] {
+    background: color-mix(in srgb, var(--utility-blue) 14%, var(--surface-raised));
+    color: var(--utility-blue);
+}
+
+.section-mark svg {
+    width: 20px;
+    height: 20px;
+    fill: none;
+    stroke: currentcolor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.8;
+}
+
+.home-view .home-section {
+    flex: none;
+    border: 0;
+    border-radius: var(--radius-lg);
+    background: var(--surface-raised);
+    overflow: hidden;
+}
+
+.home-view .home-section.open {
+    flex: none;
+}
+
+.home-view .section-toggle {
+    min-height: 68px;
+    padding: 8px 16px;
     color: var(--ink);
+    font-size: 1.0625rem;
+    gap: 14px;
+}
+
+.home-view .section-mark {
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+}
+
+.home-view .section-toggle .chevron {
+    font-size: 1.5rem;
+}
+
+.home-view .pane-header {
+    padding-inline: 16px;
 }
 
 .section-toggle .section-name {
@@ -824,14 +1207,12 @@ textarea {
     text-align: left;
 }
 
-.entity-row:hover,
 .entity-row:focus-visible {
     background: var(--surface-hover);
 }
 
 /* Selection speaks with the accent, softly. */
-.entity-row.active,
-.entity-row.active:hover {
+.entity-row.active {
     background: var(--accent-soft);
     color: var(--ink);
     font-weight: 500;
@@ -915,6 +1296,43 @@ textarea {
     background: var(--bg);
 }
 
+/* The mobile thread is a room layered over a quiet message canvas. */
+.app-shell[data-layout='mobile'][data-view='chat'] .chat-pane {
+    background-color: color-mix(in srgb, var(--brand-electric-cyan) 7%, var(--bg));
+    background-image:
+        radial-gradient(
+            circle at 18px 22px,
+            color-mix(in srgb, var(--brand-blue-lavender) 9%, transparent) 0 2px,
+            transparent 2.5px
+        ),
+        radial-gradient(
+            circle at 64px 58px,
+            color-mix(in srgb, var(--brand-neon-pink) 7%, transparent) 0 3px,
+            transparent 3.5px
+        );
+    background-size: 92px 92px;
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .chat-pane .message-scroll {
+    background: transparent;
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .chat-pane .chat-header {
+    height: calc(var(--mobile-root-header) + env(safe-area-inset-top));
+    min-height: calc(var(--mobile-root-header) + env(safe-area-inset-top));
+    border: 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+    border-radius: 0;
+    margin: 0;
+    background: color-mix(in srgb, var(--bg) 92%, transparent);
+    box-shadow: none;
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .chat-pane .chat-toolbar {
+    justify-content: center;
+    padding: 6px 12px 0;
+}
+
 .chat-pane > .message-scroll {
     flex: 1;
     min-height: 0;
@@ -957,22 +1375,26 @@ textarea {
 }
 
 .chat-header {
-    display: flex;
-    min-height: 60px;
-    flex-wrap: nowrap;
-    align-items: center;
-    justify-content: space-between;
-    padding: 8px var(--gutter);
     border-bottom: 1px solid var(--line);
     background: var(--bg);
-    gap: 8px;
+}
+
+.empty-chat-header {
+    border-bottom-color: transparent;
 }
 
 .chat-identity {
     display: flex;
     min-width: 0;
+    grid-column: 2;
     align-items: center;
+    padding-inline: clamp(8px, 2.288vw, 10px);
     gap: 10px;
+}
+
+.empty-chat-header .chat-identity {
+    grid-column: 1 / 3;
+    padding-left: clamp(9px, 2.517vw, 11px);
 }
 
 .chat-identity h2 {
@@ -999,9 +1421,46 @@ textarea {
 
 .chat-controls {
     display: flex;
+    width: var(--mobile-top-action);
     flex: none;
+    grid-column: 3;
     align-items: center;
+    justify-self: end;
     gap: 6px;
+}
+
+.app-shell[data-layout='mobile'] .chat-controls {
+    height: var(--mobile-top-action);
+    align-self: start;
+    margin-top: var(--mobile-top-offset);
+}
+
+/* Desktop restores the compact transcript toolbar instead of stretching the phone grid. */
+.app-shell[data-layout='desktop'] .chat-header {
+    display: flex;
+    height: auto;
+    min-height: 60px;
+    flex-wrap: nowrap;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px var(--gutter);
+    gap: 8px;
+}
+
+.app-shell[data-layout='desktop'] .chat-pane .back-button {
+    display: none;
+}
+
+.app-shell[data-layout='desktop'] .chat-identity,
+.app-shell[data-layout='desktop'] .empty-chat-header .chat-identity {
+    padding: 0;
+    grid-column: auto;
+}
+
+.app-shell[data-layout='desktop'] .chat-controls {
+    width: auto;
+    grid-column: auto;
+    justify-self: auto;
 }
 
 .segmented {
@@ -1025,9 +1484,9 @@ textarea {
 }
 
 .segmented button.active {
-    background: var(--surface-raised);
+    background: var(--accent-soft);
     box-shadow: var(--shadow-1);
-    color: var(--ink);
+    color: var(--accent);
     font-weight: 600;
 }
 
@@ -1060,6 +1519,10 @@ textarea {
     overscroll-behavior: contain;
 }
 
+.app-shell[data-layout='mobile'] .message-scroll {
+    padding-inline: max(var(--gutter), calc((100% - var(--reading)) / 2));
+}
+
 .message-list {
     display: flex;
     max-width: 100%;
@@ -1084,6 +1547,27 @@ textarea {
     scroll-margin-block: 24px;
 }
 
+.message-date-divider {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px 0 8px;
+    color: var(--ink-muted);
+    grid-column: 1 / -1;
+}
+
+.message-date-divider time {
+    padding: 5px 11px;
+    border: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
+    border-radius: var(--radius-pill);
+    background: color-mix(in srgb, var(--surface-raised) 90%, transparent);
+    box-shadow: var(--shadow-1);
+    font-size: 0.6875rem;
+    font-weight: 650;
+    line-height: 1;
+    backdrop-filter: blur(10px);
+}
+
 .message-avatar {
     display: grid;
     overflow: hidden;
@@ -1100,8 +1584,13 @@ textarea {
     place-items: center;
 }
 
+.message-item.has-date-divider .message-avatar {
+    grid-row: 2 / span 3;
+}
+
 .message-role,
 .message-body,
+.message-time,
 .message-actions {
     grid-column: 2;
 }
@@ -1111,6 +1600,15 @@ textarea {
     color: var(--ink-muted);
     font-size: 0.75rem;
     font-weight: 600;
+}
+
+.message-time {
+    justify-self: start;
+    padding: 4px 3px 0;
+    color: var(--ink-subtle);
+    font-size: 0.65625rem;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
 }
 
 .message-body {
@@ -1158,6 +1656,12 @@ textarea {
     grid-column: 1;
 }
 
+.message-item.from-user .message-time {
+    justify-self: end;
+    padding-right: 3px;
+    grid-column: 1;
+}
+
 /* Editing swaps the bubble for a working surface, whoever is speaking. */
 .message-body:has(> .inline-editor) {
     width: 100%;
@@ -1178,7 +1682,7 @@ textarea {
     width: 2px;
     height: 1em;
     margin-left: 2px;
-    background: var(--accent);
+    background: var(--primary-bg);
     vertical-align: text-bottom;
     animation: caret 1s steps(2) infinite;
 }
@@ -1210,7 +1714,6 @@ textarea {
     transition: opacity 110ms ease;
 }
 
-.message-item:hover .message-actions,
 .message-item:focus-within .message-actions {
     opacity: 1;
 }
@@ -1230,11 +1733,6 @@ textarea {
     color: var(--ink-muted);
     font-size: 0.6875rem;
     font-weight: 400;
-}
-
-.message-actions button:hover:not(:disabled) {
-    background: var(--surface-hover);
-    color: var(--ink);
 }
 
 .inline-editor {
@@ -1265,7 +1763,8 @@ textarea {
  */
 .chat-placeholder {
     display: grid;
-    height: 100%;
+    min-height: 0;
+    flex: 1;
     align-content: center;
     justify-items: center;
     padding: 24px;
@@ -1276,7 +1775,7 @@ textarea {
     text-align: center;
 }
 
-/* The call to action wants a beat of air after the copy above it. */
+/* The call to action gets a beat of air after the empty-state title. */
 .chat-placeholder .primary {
     margin-top: 8px;
 }
@@ -1300,47 +1799,74 @@ textarea {
  * below it owns the safe-area inset.
  */
 .composer {
-    display: flex;
-    align-items: flex-end;
+    display: block;
     padding: 8px var(--gutter);
-    border-top: 1px solid var(--line);
-    background: var(--bg);
-    gap: 8px;
+    background: color-mix(in srgb, var(--bg) 92%, transparent);
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .composer {
+    padding: 6px max(10px, calc((100% - var(--reading)) / 2))
+        calc(10px + env(safe-area-inset-bottom));
+    border: 0;
+    margin: 0;
+    background: linear-gradient(to top, var(--bg) 72%, transparent);
+}
+
+.composer-field {
+    display: flex;
+    min-height: 54px;
+    align-items: flex-end;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-pill);
+    background: var(--surface-raised);
+    box-shadow: var(--shadow-2);
+    gap: 4px;
+}
+
+.composer-field:focus-within {
+    border-color: var(--accent-line);
 }
 
 .composer textarea {
     max-height: 38vh;
-    min-height: var(--touch);
+    min-height: 44px;
     flex: 1;
-    padding: 11px 16px;
-    border: 1px solid transparent;
-    border-radius: var(--radius-lg);
-    background: var(--surface-sunken);
+    padding: 11px 12px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    outline: 0;
+    background: transparent;
     field-sizing: content;
     font-size: 0.9375rem;
+    line-height: 1.45;
     resize: none;
 }
 
-.composer textarea:hover {
-    border-color: transparent;
-}
-
 .composer textarea:focus-visible {
-    border-color: var(--accent);
     outline: 0;
 }
 
 .send-button {
-    width: var(--touch);
-    min-width: var(--touch);
-    min-height: var(--touch);
+    width: 44px;
+    min-width: 44px;
+    min-height: 44px;
     padding: 0;
     border-radius: 50%;
-    font-size: 1.0625rem;
+}
+
+.send-button svg {
+    width: 21px;
+    height: 21px;
+    fill: none;
+    stroke: currentcolor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.8;
 }
 
 .composer .danger.compact {
-    min-height: var(--touch);
+    min-height: 44px;
     border-radius: var(--radius-pill);
 }
 
@@ -1360,6 +1886,11 @@ textarea {
     border-style: dashed;
     background: transparent;
     text-align: center;
+}
+
+/* The full chat placeholder is a canvas, not a dashed card stretched to the window. */
+.chat-placeholder.state-panel.empty {
+    border: 0;
 }
 
 .state-panel.error,
@@ -1411,7 +1942,7 @@ textarea {
  */
 .index-header {
     display: flex;
-    min-height: 56px;
+    min-height: var(--mobile-toolbar);
     flex: none;
     align-items: center;
     justify-content: space-between;
@@ -1432,10 +1963,10 @@ textarea {
 /*
  * Two list patterns, and they are not interchangeable.
  *
- * An index lists destinations: a filled colour tile to aim at, the name, and a
- * line of what it covers. Rows are told apart by their tiles and the air
- * between them, so there are no rules and no chevrons — the tile already says
- * "this is a place".
+ * An index groups its destinations into one raised panel, with a quiet outline
+ * icon, each destination name, and the value it currently holds. The rows stay
+ * separate buttons, but the shared outer curve and narrow surface seams make
+ * the index read as one settings list.
  *
  * A detail list inside a destination lists settings: a quiet outline mark, the
  * name, and the value it currently holds. Those rows look alike, so a rule
@@ -1444,46 +1975,47 @@ textarea {
 .setting-list {
     display: flex;
     flex-direction: column;
-    padding: 6px 0;
+    padding: 0;
     border: 0;
-    border-radius: var(--radius-lg);
-    margin: 0;
-    background: var(--surface-raised);
+    border-radius: clamp(20px, 6.59vw, 24px);
+    margin: 0 clamp(3px, 0.686vw, 3px);
+    background: var(--bg);
+    box-shadow: var(--shadow-1);
     list-style: none;
+    gap: clamp(2px, 0.686vw, 3px);
     overflow: hidden;
 }
 
 .setting-row {
     display: flex;
     width: 100%;
-    min-height: 62px;
+    min-height: clamp(54px, 15.561vw, 68px);
     align-items: center;
-    padding: 10px 14px;
+    padding: clamp(8px, 2.288vw, 10px) clamp(16px, 4.577vw, 20px);
     border: 0;
-    border-radius: 0;
-    background: transparent;
-    gap: 16px;
+    border-radius: clamp(3px, 0.915vw, 4px);
+    background: var(--surface-raised);
+    box-shadow: none;
+    gap: clamp(19px, 5.492vw, 24px);
     text-align: left;
 }
 
-.setting-row:hover:not(:disabled) {
-    background: var(--surface-hover);
+.setting-row:focus-visible {
+    outline-offset: -3px;
 }
 
-.setting-tile {
+.setting-icon {
     display: grid;
-    width: 40px;
-    height: 40px;
+    width: clamp(28px, 7.78vw, 34px);
+    height: clamp(28px, 7.78vw, 34px);
     flex: none;
-    border-radius: 12px;
-    background: var(--ink-subtle);
-    color: #ffffff;
+    color: var(--ink);
     place-items: center;
 }
 
-.setting-tile svg {
-    width: 23px;
-    height: 23px;
+.setting-icon svg {
+    width: clamp(20px, 5.492vw, 24px);
+    height: clamp(20px, 5.492vw, 24px);
     fill: none;
     stroke: currentcolor;
     stroke-linecap: round;
@@ -1491,61 +2023,56 @@ textarea {
     stroke-width: 2;
 }
 
-/*
- * The tile colours are the one place in the app that spends hue on wayfinding:
- * a row is found by its colour before its name is read. They are deliberately
- * muted — a row of saturated chips competes with the writing beside it.
- */
-.setting-tile[data-tone='violet'] {
-    background: #7b6ad6;
-}
-
-.setting-tile[data-tone='green'] {
-    background: #6cbc59;
-}
-
-.setting-tile[data-tone='blue'] {
-    background: #4f79f1;
-}
-
-.setting-tile[data-tone='orange'] {
-    background: #d9963d;
-}
-
-.setting-tile[data-tone='teal'] {
-    background: #5cb8c5;
-}
-
-.setting-tile[data-tone='slate'] {
-    background: #8a8f99;
-}
-
 .setting-copy {
-    display: grid;
+    display: flex;
     min-width: 0;
     flex: 1;
-    gap: 2px;
 }
 
 .setting-copy > strong {
     font-size: 1.0625rem;
-    font-weight: 600;
+    font-weight: 550;
+    line-height: 1.15;
     letter-spacing: -0.01em;
 }
 
-.setting-copy > small {
-    overflow: hidden;
+.setting-content {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    align-items: center;
+    gap: 8px;
+}
+
+.setting-trailing {
+    display: flex;
+    min-width: 0;
+    max-width: 48%;
+    flex: none;
+    align-items: center;
     color: var(--ink-muted);
+    gap: 4px;
+}
+
+.setting-value {
+    overflow: hidden;
     font-size: 0.875rem;
+    font-weight: 500;
+    line-height: 1.25;
+    text-align: right;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
-/* The value is the answer the row was opened for, so it carries the accent. */
-.setting-value {
+.setting-chevron {
+    width: 16px;
+    height: 16px;
     flex: none;
-    color: var(--accent);
-    font-size: 1.0625rem;
+    fill: none;
+    stroke: currentcolor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.8;
 }
 
 /* A label belongs to the card it heads, so it sits inside its top edge. */
@@ -1561,22 +2088,49 @@ textarea {
  * of destinations never competes with the one screen the reader chose.
  */
 .sub-header {
-    display: flex;
-    min-height: 56px;
-    flex: none;
-    align-items: center;
-    padding: 8px var(--settings-gutter);
-    gap: 4px;
+    border: 0;
 }
 
 .sub-header h1 {
     overflow: hidden;
-    flex: 1;
-    font-size: 1.25rem;
+    min-width: 0;
+    grid-column: 2;
+    padding-inline: 8px;
+    font-size: clamp(18px, 4.577vw, 20px);
     font-weight: 700;
     letter-spacing: -0.02em;
+    text-align: center;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.app-shell[data-layout='desktop'] .sub-header {
+    position: relative;
+    display: flex;
+    height: auto;
+    min-height: 60px;
+    align-items: center;
+    padding: 8px var(--settings-gutter);
+    border-bottom: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+    background: var(--bg);
+    gap: 8px;
+    pointer-events: auto;
+}
+
+.app-shell[data-layout='desktop'] .sub-header > .mobile-top-action {
+    align-self: center;
+    margin-top: 0;
+}
+
+.app-shell[data-layout='desktop'] .sub-header h1 {
+    flex: 1;
+    padding-inline: 0;
+    grid-column: auto;
+    text-align: left;
+}
+
+.app-shell[data-layout='desktop'] :is(.view-scroll, .provider-scroll, .message-scroll) {
+    scrollbar-gutter: stable;
 }
 
 /*
@@ -1629,12 +2183,12 @@ textarea {
 .modal-backdrop {
     position: fixed;
     border: 0;
-    background: rgb(9 10 12 / 46%);
+    background: color-mix(in srgb, var(--brand-ink) 46%, transparent);
     inset: 0;
 }
 
 .modal-backdrop::backdrop {
-    background: rgb(9 10 12 / 46%);
+    background: color-mix(in srgb, var(--brand-ink) 46%, transparent);
 }
 
 .modal-card {
@@ -1706,11 +2260,6 @@ textarea {
     justify-content: flex-start;
 }
 
-.navigator .pane-header button:hover:not(:disabled) {
-    background: var(--surface-hover);
-    color: var(--ink);
-}
-
 .navigator .state-panel {
     margin: 4px 2px 10px;
     font-size: 0.75rem;
@@ -1729,6 +2278,104 @@ textarea {
 
 .home-section.open .section-value {
     display: none;
+}
+
+/*
+ * Hover is a pointer affordance, not a narrow-screen state. Keeping every
+ * hover rule behind this capability query prevents sticky or stray highlights
+ * on touch while preserving an immediate response for a mouse or trackpad.
+ */
+@media (hover: hover) and (pointer: fine) {
+    button:hover:not(:disabled) {
+        background: var(--surface-hover);
+    }
+
+    .primary:hover:not(:disabled) {
+        border-color: transparent;
+        background: var(--primary-bg-hover);
+        color: var(--primary-ink);
+    }
+
+    .app-shell[data-layout='mobile'] .mobile-root-fab:hover:not(:disabled) {
+        background: var(--primary-bg-hover);
+        color: var(--primary-ink);
+    }
+
+    .danger:hover:not(:disabled) {
+        border-color: var(--danger);
+        background: var(--danger-soft);
+    }
+
+    .ghost:hover:not(:disabled) {
+        background: var(--surface-hover);
+        color: var(--ink);
+    }
+
+    input:hover,
+    textarea:hover,
+    select:hover {
+        border-color: var(--ink-subtle);
+    }
+
+    .nav-row:hover:not(:disabled),
+    .section-toggle:hover:not(:disabled),
+    .navigator .pane-header button:hover:not(:disabled) {
+        background: var(--surface-hover);
+        color: var(--ink);
+    }
+
+    .nav-row[aria-current='page']:hover:not(:disabled),
+    .entity-row.active:hover {
+        background: var(--accent-soft);
+        color: var(--accent);
+    }
+
+    .tab:hover:not(:disabled) {
+        background: transparent;
+        color: var(--ink-muted);
+    }
+
+    .tab:hover:not(:disabled)::before {
+        background: var(--surface-hover);
+    }
+
+    .tab[aria-current='page']:hover:not(:disabled) {
+        background: transparent;
+        color: var(--accent);
+    }
+
+    .tab[aria-current='page']:hover:not(:disabled)::before {
+        background: var(--accent-soft);
+    }
+
+    .section-toggle:hover:not(:disabled) {
+        color: var(--ink);
+    }
+
+    .entity-row:hover {
+        background: var(--surface-hover);
+    }
+
+    .setting-row:hover:not(:disabled) {
+        background: var(--bg);
+    }
+
+    .entity-row.active:hover {
+        color: var(--ink);
+    }
+
+    .message-item:hover .message-actions {
+        opacity: 1;
+    }
+
+    .message-actions button:hover:not(:disabled) {
+        background: var(--surface-hover);
+        color: var(--ink);
+    }
+
+    .composer textarea:hover {
+        border-color: transparent;
+    }
 }
 
 /* ------------------------------------------------------- small screens */

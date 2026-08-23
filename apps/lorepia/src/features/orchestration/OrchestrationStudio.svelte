@@ -55,15 +55,8 @@
         onNavigateToMemorySource?: (source: MemoryRecordSourceNavigationDto) => void;
         section?: StudioSection | null;
         onOpenSection?: (section: StudioSection) => void;
+        showIndexHeader?: boolean;
     }
-
-    /* The one place hue is spent on wayfinding, matched to the settings list. */
-    const STUDIO_TONES: Record<StudioSection, string> = {
-        prompt: 'violet',
-        memory: 'blue',
-        content: 'orange',
-        diagnostics: 'slate',
-    };
 
     const MAX_INLINE_ITEMS = 100;
     const MAX_MODULE_COMPONENTS = 200;
@@ -100,6 +93,7 @@
         onNavigateToMemorySource = () => undefined,
         section = null,
         onOpenSection = () => undefined,
+        showIndexHeader = true,
     }: Props = $props();
     let blockSearch = $state('');
     let blockZoneFilter = $state('all');
@@ -494,39 +488,56 @@
     </svg>
 {/snippet}
 
-<section class="orchestration-studio" aria-labelledby="orchestration-studio-title">
-    <header class="index-header">
-        <h2 id="orchestration-studio-title">{$tr('studio.title')}</h2>
-        <button
-            class="ghost compact"
-            type="button"
-            disabled={orchestrationState.workspace.room_config.conversation_id === ''}
-            onclick={() =>
-                void controller.loadContext(
-                    orchestrationState.workspace.room_config.conversation_id || null,
-                    orchestrationState.workspace.room_config.branch_id || null,
-                )}
-        >
-            {$tr('common.refresh')}
-        </button>
-    </header>
-
+<section
+    class="orchestration-studio"
+    class:index={section === null}
+    aria-labelledby={section === null && showIndexHeader ? 'orchestration-studio-title' : undefined}
+    aria-label={section === null && !showIndexHeader
+        ? $tr('studio.title')
+        : section === null
+          ? undefined
+          : $tr(`studio.section.${section}.title`)}
+>
     {#if section === null}
-        <ul class="setting-list">
-            {#each STUDIO_SECTIONS as id (id)}
-                <li>
-                    <button class="setting-row" type="button" onclick={() => onOpenSection(id)}>
-                        <span class="setting-tile" data-tone={STUDIO_TONES[id]} aria-hidden="true">
-                            {@render tileMark(id)}
-                        </span>
-                        <span class="setting-copy">
-                            <strong>{$tr(`studio.section.${id}.title`)}</strong>
-                            <small>{$tr(`studio.section.${id}.hint`)}</small>
-                        </span>
-                    </button>
-                </li>
-            {/each}
-        </ul>
+        {#if showIndexHeader}
+            <header class="index-header studio-index-header">
+                <h2 id="orchestration-studio-title">{$tr('studio.title')}</h2>
+            </header>
+        {/if}
+
+        <div class="studio-home">
+            <ul class="setting-list studio-destination-list" aria-label={$tr('studio.tools.label')}>
+                {#each STUDIO_SECTIONS as id (id)}
+                    <li>
+                        <button
+                            class="setting-row studio-destination-row"
+                            type="button"
+                            onclick={() => onOpenSection(id)}
+                        >
+                            <span class="setting-icon" aria-hidden="true">
+                                {@render tileMark(id)}
+                            </span>
+                            <span class="setting-content">
+                                <span class="setting-copy">
+                                    <strong>
+                                        {$tr(
+                                            id === 'prompt'
+                                                ? 'studio.feature.prompt.title'
+                                                : `studio.section.${id}.title`,
+                                        )}
+                                    </strong>
+                                </span>
+                                <span class="setting-trailing" aria-hidden="true">
+                                    <svg class="setting-chevron" viewBox="0 0 20 20">
+                                        <path d="m7.5 4.5 5 5-5 5" />
+                                    </svg>
+                                </span>
+                            </span>
+                        </button>
+                    </li>
+                {/each}
+            </ul>
+        </div>
     {/if}
 
     {#if orchestrationState.phase === 'loading'}
@@ -3646,6 +3657,27 @@
         border: 1px solid var(--line);
         border-radius: var(--radius-md);
         background: var(--surface-raised);
+    }
+
+    .orchestration-studio.index {
+        padding: 0;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        gap: 8px;
+    }
+
+    .studio-index-header {
+        min-height: var(--mobile-toolbar);
+        padding: 0;
+    }
+
+    .studio-index-header h2 {
+        font-size: 1.5rem;
+    }
+
+    .studio-home {
+        display: grid;
     }
 
     .studio-panel {

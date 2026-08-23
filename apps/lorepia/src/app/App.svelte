@@ -35,19 +35,15 @@
     import type { LorepiaClient, MemoryRecordSourceNavigationDto } from '../lib/ipc/contracts';
 
     /*
-     * One app, two layouts, because the two screens run out of different room.
-     *
-     * A phone is short on space, so it divides in time: four destinations under
-     * a bottom tab bar, one visible at a time. A desktop is short on nothing
-     * but attention, so it divides in space: the character and conversation
-     * hierarchy stands in a docked sidebar beside the transcript, and switching
-     * conversations never takes the transcript off screen. Home is therefore a
-     * destination only on the phone — on a desktop it is the sidebar, always
-     * there. Studio and settings are full-region modes on both.
+     * Phones and wide handhelds divide destinations in time under a bottom
+     * bar. Desktop windows have enough room to keep the character/conversation
+     * hierarchy beside the active workspace instead.
      */
     const DESKTOP_LAYOUT = '(min-width: 900px)';
+    const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
+    const SIDEBAR_EXIT_SETTLE_MS = 260;
+    const MOBILE_TOP_FADE_DISTANCE_PX = 48;
     type MainView = 'home' | 'chat' | 'create' | 'settings';
-    /* Characters and conversations are one hierarchy, disclosed one at a time. */
     type HomeSection = 'characters' | 'conversations';
 
     interface Props {
@@ -72,10 +68,14 @@
     let personaState = $state<PersonaState>(structuredClone(INITIAL_PERSONA_STATE));
     let view = $state<MainView>('home');
     let homeSection = $state<HomeSection>('characters');
-    /* Settings and the studio are lists; opening an entry pushes a screen. */
+    let chatThreadOpen = $state(false);
+    /* Settings and studio entries open as dedicated screens inside the handheld shell. */
     let settingsSection = $state<SettingsSection | null>(null);
     let studioSection = $state<StudioSection | null>(null);
     let isDesktop = $state(false);
+    let sidebarContentMounted = $state(false);
+    let studioScrollElement = $state<HTMLDivElement>();
+    let sidebarUnmountTimer: ReturnType<typeof setTimeout> | undefined;
     let orchestrationContextKey = '';
     let personaContextKey = '';
     let messageFocusRequest = $state<
@@ -83,17 +83,59 @@
     >(null);
     let nextMessageFocusRequestId = 0;
 
+    function sidebarMotionDuration(duration: number): number {
+        return typeof window !== 'undefined' && window.matchMedia(REDUCED_MOTION).matches
+            ? 0
+            : duration;
+    }
+
     function showHome(): void {
         view = 'home';
+        chatThreadOpen = false;
     }
 
     function showChat(): void {
         view = 'chat';
+        chatThreadOpen = false;
+    }
+
+    function openChatThread(): void {
+        view = 'chat';
+        chatThreadOpen = true;
     }
 
     function openCreate(): void {
         view = 'create';
         studioSection = null;
+    }
+
+    function setStudioTopMaskAlpha(alpha: number): void {
+        studioScrollElement?.style.setProperty('--mobile-top-mask-alpha', String(alpha));
+    }
+
+    function resetStudioDetailScroll(): void {
+        if (studioScrollElement === undefined) return;
+        studioScrollElement.scrollTop = 0;
+        setStudioTopMaskAlpha(1);
+    }
+
+    function openStudioSection(next: StudioSection): void {
+        studioSection = next;
+        resetStudioDetailScroll();
+    }
+
+    function closeStudioSection(): void {
+        studioSection = null;
+        resetStudioDetailScroll();
+    }
+
+    function handleStudioDetailScroll(event: Event): void {
+        const scroller = event.currentTarget as HTMLDivElement;
+        const alpha = Math.min(
+            1,
+            Math.max(0, 1 - scroller.scrollTop / MOBILE_TOP_FADE_DISTANCE_PX),
+        );
+        scroller.style.setProperty('--mobile-top-mask-alpha', String(alpha));
     }
 
     function openSettings(): void {
@@ -112,7 +154,7 @@
         if (appState.conversation_state?.active_branch_id !== source.branch_id) {
             await controller.selectBranch(source.branch_id);
         }
-        showChat();
+        openChatThread();
         messageFocusRequest = {
             ...source,
             request_id: ++nextMessageFocusRequestId,
@@ -152,16 +194,34 @@
 
     onMount(() => {
         const layout = window.matchMedia(DESKTOP_LAYOUT);
+        const cancelSidebarUnmount = (): void => {
+            if (sidebarUnmountTimer === undefined) return;
+            clearTimeout(sidebarUnmountTimer);
+            sidebarUnmountTimer = undefined;
+        };
         const syncLayout = (): void => {
-            /*
-             * Read the query fresh rather than trusting the list captured
-             * above: a window resized by the host can update the media state
-             * without delivering a change event to a list made earlier, which
-             * would strand the app in the layout it started in.
-             */
-            isDesktop = window.matchMedia(DESKTOP_LAYOUT).matches;
-            /* The sidebar already is home, so it is never a destination here. */
-            if (isDesktop && view === 'home') view = 'chat';
+            const nextIsDesktop = layout.matches;
+            cancelSidebarUnmount();
+
+            if (nextIsDesktop) {
+                sidebarContentMounted = true;
+                isDesktop = true;
+                if (view === 'home') view = 'chat';
+                return;
+            }
+
+            isDesktop = false;
+            if (!sidebarContentMounted) return;
+
+            const settleDuration = sidebarMotionDuration(SIDEBAR_EXIT_SETTLE_MS);
+            if (settleDuration === 0) {
+                sidebarContentMounted = false;
+                return;
+            }
+            sidebarUnmountTimer = setTimeout(() => {
+                sidebarUnmountTimer = undefined;
+                if (!isDesktop) sidebarContentMounted = false;
+            }, settleDuration);
         };
         syncLayout();
         layout.addEventListener('change', syncLayout);
@@ -186,6 +246,7 @@
         });
         void controller.start();
         return () => {
+            cancelSidebarUnmount();
             layout.removeEventListener('change', syncLayout);
             window.removeEventListener('resize', syncLayout);
             unsubscribe();
@@ -199,20 +260,6 @@
         };
     });
 </script>
-
-{#snippet identity()}
-    <h1 class="index-title">LorePia</h1>
-    <div class="health-chip" class:unhealthy={!appState.bootstrap.value?.health.database_open}>
-        <span class="health-dot" aria-hidden="true"></span>
-        {#if appState.bootstrap.phase === 'loading'}
-            {$tr('app.core.connecting')}
-        {:else if appState.bootstrap.phase === 'ready'}
-            {$tr('app.core.local')}
-        {:else}
-            {$tr('app.core.checking')}
-        {/if}
-    </div>
-{/snippet}
 
 {#snippet navigator()}
     <div class="navigator">
@@ -248,7 +295,7 @@
                 <span class="chevron" aria-hidden="true">›</span>
                 <span class="section-name">{$tr('app.tab.conversations')}</span>
             </button>
-            <ConversationPane state={appState} {controller} onOpenChat={showChat} />
+            <ConversationPane state={appState} {controller} onOpenChat={openChatThread} />
         </section>
     </div>
 {/snippet}
@@ -273,32 +320,36 @@
 </svelte:head>
 
 <div class="app-shell" data-view={view} data-layout={isDesktop ? 'desktop' : 'mobile'}>
-    {#if isDesktop && appState.bootstrap.phase !== 'error'}
-        <aside class="sidebar" aria-label={$tr('app.nav.label')}>
-            <div class="sidebar-head">{@render identity()}</div>
-            {@render navigator()}
-            <div class="sidebar-foot">
-                <button
-                    class="nav-row"
-                    type="button"
-                    aria-current={view === 'create' ? 'page' : undefined}
-                    onclick={openCreate}
-                >
-                    {@render createIcon()}
-                    <span>{$tr('app.view.create')}</span>
-                </button>
-                <button
-                    class="nav-row"
-                    type="button"
-                    aria-current={view === 'settings' ? 'page' : undefined}
-                    onclick={openSettings}
-                >
-                    {@render settingsIcon()}
-                    <span>{$tr('app.tab.providers')}</span>
-                </button>
-            </div>
-        </aside>
-    {/if}
+    <div class="sidebar-rail" aria-hidden={!isDesktop} inert={!isDesktop}>
+        {#if sidebarContentMounted && appState.bootstrap.phase !== 'error'}
+            <aside class="sidebar" aria-label={$tr('app.nav.label')}>
+                <div class="sidebar-head">
+                    <h1 class="index-title">LorePia</h1>
+                </div>
+                {@render navigator()}
+                <div class="sidebar-foot">
+                    <button
+                        class="nav-row"
+                        type="button"
+                        aria-current={view === 'create' ? 'page' : undefined}
+                        onclick={openCreate}
+                    >
+                        {@render createIcon()}
+                        <span>{$tr('app.view.create')}</span>
+                    </button>
+                    <button
+                        class="nav-row"
+                        type="button"
+                        aria-current={view === 'settings' ? 'page' : undefined}
+                        onclick={openSettings}
+                    >
+                        {@render settingsIcon()}
+                        <span>{$tr('app.tab.providers')}</span>
+                    </button>
+                </div>
+            </aside>
+        {/if}
+    </div>
 
     {#if appState.bootstrap.phase === 'error'}
         <main id="main-content" class="main">
@@ -314,36 +365,70 @@
     {:else}
         <main id="main-content" class="main">
             {#if view === 'home'}
-                <section class="home-view" aria-label={$tr('app.tab.home')}>
-                    <header class="index-header">{@render identity()}</header>
-                    {@render navigator()}
+                <section class="mobile-root home-view" aria-label={$tr('app.tab.home')}>
+                    <header class="mobile-top-bar mobile-root-header">
+                        <h1>캐릭터</h1>
+                    </header>
+                    <LibraryPane
+                        state={appState}
+                        {controller}
+                        client={appClient}
+                        rootView
+                        onOpenConversations={showChat}
+                    />
                 </section>
             {:else if view === 'chat'}
-                <ChatPane
-                    {appState}
-                    {controller}
-                    client={appClient}
-                    {orchestrationState}
-                    {orchestrationController}
-                    {messageFocusRequest}
-                    onOpenHome={showHome}
-                    onOpenOrchestrationStudio={openCreate}
-                />
+                {#if isDesktop || chatThreadOpen}
+                    <ChatPane
+                        {appState}
+                        {controller}
+                        client={appClient}
+                        {orchestrationState}
+                        {orchestrationController}
+                        {messageFocusRequest}
+                        onOpenHome={showChat}
+                        onOpenOrchestrationStudio={openCreate}
+                    />
+                {:else}
+                    <section class="mobile-root chat-list-view" aria-label={$tr('app.tab.chat')}>
+                        <ConversationPane
+                            state={appState}
+                            {controller}
+                            rootView
+                            onOpenChat={openChatThread}
+                        />
+                    </section>
+                {/if}
             {:else if view === 'create'}
-                {#if studioSection !== null}
-                    <header class="sub-header">
+                {#if studioSection === null}
+                    {#if !isDesktop}
+                        <header class="mobile-top-bar mobile-root-header">
+                            <h1>{$tr('studio.title')}</h1>
+                        </header>
+                    {/if}
+                {:else}
+                    <header class="mobile-top-bar sub-header">
                         <button
-                            class="icon-button ghost back-button"
+                            class="icon-button ghost mobile-top-action mobile-top-action-left back-button"
                             type="button"
                             aria-label={$tr('app.nav.back')}
-                            onclick={() => (studioSection = null)}
+                            onclick={closeStudioSection}
                         >
-                            <span aria-hidden="true">‹</span>
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M19 12H5m7-7-7 7 7 7" />
+                            </svg>
                         </button>
-                        <h1>{$tr(`studio.section.${studioSection}.title`)}</h1>
+                        {#if studioSection !== null}
+                            <h1>{$tr(`studio.section.${studioSection}.title`)}</h1>
+                        {/if}
                     </header>
                 {/if}
-                <div class="view-scroll">
+                <div
+                    bind:this={studioScrollElement}
+                    class="view-scroll"
+                    class:studio-detail-scroll={studioSection !== null}
+                    onscroll={handleStudioDetailScroll}
+                >
                     <OrchestrationStudio
                         client={appClient}
                         {appState}
@@ -355,19 +440,22 @@
                         onNavigateToMemorySource={(source: MemoryRecordSourceNavigationDto) =>
                             void navigateToMemorySource(source)}
                         section={studioSection}
-                        onOpenSection={(next: StudioSection) => (studioSection = next)}
+                        onOpenSection={openStudioSection}
+                        showIndexHeader={isDesktop}
                     />
                 </div>
             {:else}
                 {#if settingsSection !== null}
-                    <header class="sub-header">
+                    <header class="mobile-top-bar sub-header">
                         <button
-                            class="icon-button ghost back-button"
+                            class="icon-button ghost mobile-top-action mobile-top-action-left back-button"
                             type="button"
                             aria-label={$tr('app.nav.back')}
                             onclick={() => (settingsSection = null)}
                         >
-                            <span aria-hidden="true">‹</span>
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M19 12H5m7-7-7 7 7 7" />
+                            </svg>
                         </button>
                         <h1>{$tr(`settings.section.${settingsSection}.title`)}</h1>
                     </header>
@@ -384,7 +472,7 @@
         </main>
     {/if}
 
-    {#if !isDesktop && settingsSection === null && studioSection === null}
+    {#if !isDesktop && studioSection === null && !(view === 'chat' && chatThreadOpen)}
         <nav class="tab-bar" aria-label={$tr('app.nav.label')}>
             <button
                 class="tab"

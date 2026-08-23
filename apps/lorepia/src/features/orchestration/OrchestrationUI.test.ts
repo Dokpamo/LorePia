@@ -2070,7 +2070,35 @@ describe('OrchestrationStudio', () => {
             controller: controller(),
         });
 
-        expect(screen.getByRole('heading', { name: '프롬프트 제작실' })).toBeInTheDocument();
+        expect(screen.getByRole('region', { name: '프롬프트' })).toBeInTheDocument();
+        expect(screen.queryByRole('heading', { name: '프롬프트 제작실' })).not.toBeInTheDocument();
+    });
+
+    it('groups every create destination into one settings-style list', async () => {
+        const onOpenSection = vi.fn();
+        const rendered = render(OrchestrationStudio, {
+            section: null,
+            appState: appState(),
+            orchestrationState: orchestrationState(),
+            controller: controller(),
+            onOpenSection,
+        });
+
+        expect(screen.getByRole('heading', { name: '창작 스튜디오' })).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: '새로고침' })).not.toBeInTheDocument();
+
+        const feature = screen.getByRole('button', { name: /프롬프트 설계/ });
+        expect(feature).toHaveClass('setting-row', 'studio-destination-row');
+        const destinationList = rendered.container.querySelector<HTMLElement>(
+            '.setting-list.studio-destination-list',
+        );
+        if (destinationList === null) throw new Error('studio destination list is missing');
+        expect(destinationList).toContainElement(feature);
+        expect(within(destinationList).getAllByRole('button')).toHaveLength(4);
+        expect(destinationList.querySelectorAll('.setting-icon')).toHaveLength(4);
+
+        await fireEvent.click(feature);
+        expect(onOpenSection).toHaveBeenCalledWith('prompt');
     });
 
     it('requires bounded dimensions and disables fallback routes for memory embedding profiles', async () => {

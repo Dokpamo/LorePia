@@ -189,6 +189,49 @@
     const visibleMessages = $derived(
         messageCollection.items.slice(virtualWindow.start, virtualWindow.end),
     );
+
+    const KOREAN_WEEKDAYS = ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일'];
+
+    function parsedMessageDate(value: string): Date | null {
+        const date = new Date(value);
+        return Number.isNaN(date.getTime()) ? null : date;
+    }
+
+    function messageDayKey(value: string): string {
+        const date = parsedMessageDate(value);
+        if (date === null) return value.slice(0, 10);
+        return [
+            String(date.getFullYear()),
+            String(date.getMonth() + 1).padStart(2, '0'),
+            String(date.getDate()).padStart(2, '0'),
+        ].join('-');
+    }
+
+    function formatMessageDay(value: string): string {
+        const date = parsedMessageDate(value);
+        if (date === null) return '날짜를 확인할 수 없음';
+        return `${String(date.getFullYear())}년 ${String(date.getMonth() + 1)}월 ${String(
+            date.getDate(),
+        )}일 ${KOREAN_WEEKDAYS[date.getDay()] ?? ''}`;
+    }
+
+    function formatMessageTime(value: string): string {
+        const date = parsedMessageDate(value);
+        if (date === null) return '--:--';
+        return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(
+            2,
+            '0',
+        )}`;
+    }
+
+    function startsMessageDay(message: MessageDto, globalIndex: number): boolean {
+        if (globalIndex === 0) return true;
+        const previous = messageCollection.items[globalIndex - 1];
+        return (
+            previous === undefined ||
+            messageDayKey(previous.created_at) !== messageDayKey(message.created_at)
+        );
+    }
     const hasLiveResponse = $derived(
         appState.chat.live_assistant_message_id !== null ||
             appState.chat.streaming_text !== '' ||
@@ -809,23 +852,29 @@
 
 <section class="pane chat-pane" aria-labelledby="chat-title">
     {#if appState.selected_conversation === null}
+        <header class="mobile-top-bar chat-header empty-chat-header">
+            <div class="chat-identity">
+                <h2 id="chat-title">채팅</h2>
+            </div>
+        </header>
         <div class="chat-placeholder state-panel empty">
             <span class="large-mark" aria-hidden="true">✦</span>
             <strong>대화를 선택하세요.</strong>
-            <p>메시지와 생성 상태는 로컬 Core에서 복원됩니다.</p>
             <button class="primary" type="button" onclick={onOpenHome}> 대화 목록 열기 </button>
         </div>
     {:else}
-        <header class="chat-header">
+        <header class="mobile-top-bar chat-header">
+            <button
+                class="icon-button ghost mobile-top-action mobile-top-action-left back-button"
+                type="button"
+                aria-label="대화 목록으로"
+                onclick={onOpenHome}
+            >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M19 12H5m7-7-7 7 7 7" />
+                </svg>
+            </button>
             <div class="chat-identity">
-                <button
-                    class="icon-button ghost back-button"
-                    type="button"
-                    aria-label="대화 목록으로"
-                    onclick={onOpenHome}
-                >
-                    <span aria-hidden="true">‹</span>
-                </button>
                 <span class="avatar" aria-hidden="true"
                     >{(appState.selected_character?.name ?? '?').slice(0, 1)}</span
                 >
@@ -1127,6 +1176,8 @@
                     ) + 'px'}
                 >
                     {#each visibleMessages as message, localIndex (message.id)}
+                        {@const globalIndex = virtualWindow.start + localIndex}
+                        {@const showsDay = startsMessageDay(message, globalIndex)}
                         {@const turnLabel =
                             message.role === 'user'
                                 ? '내 메시지'
@@ -1135,6 +1186,7 @@
                                   : '시스템 메시지'}
                         <li
                             class:from-user={message.role === 'user'}
+                            class:has-date-divider={showsDay}
                             class:memory-source-boundary={messageFocusRequest !== null &&
                                 (message.id === messageFocusRequest.start_message_id ||
                                     message.id === messageFocusRequest.end_message_id)}
@@ -1145,6 +1197,17 @@
                             aria-setsize={messageCollection.items.length}
                             aria-posinset={virtualWindow.start + localIndex + 1}
                         >
+                            {#if showsDay}
+                                <div
+                                    class="message-date-divider"
+                                    role="separator"
+                                    aria-label={formatMessageDay(message.created_at)}
+                                >
+                                    <time datetime={messageDayKey(message.created_at)}>
+                                        {formatMessageDay(message.created_at)}
+                                    </time>
+                                </div>
+                            {/if}
                             <span class="message-avatar" aria-hidden="true"
                                 >{message.role === 'user'
                                     ? '나'
@@ -1194,6 +1257,9 @@
                                         </div>
                                     </form>
                                 </article>
+                                <time class="message-time" datetime={message.created_at}>
+                                    {formatMessageTime(message.created_at)}
+                                </time>
                             {:else}
                                 <article class="message-body" aria-label={turnLabel}>
                                     <MarkdownText text={message.content} />
@@ -1201,6 +1267,9 @@
                                         <span class="message-status">{message.status}</span>
                                     {/if}
                                 </article>
+                                <time class="message-time" datetime={message.created_at}>
+                                    {formatMessageTime(message.created_at)}
+                                </time>
                                 <div class="message-actions" aria-label="메시지 작업">
                                     <button type="button" onclick={() => void copyMessage(message)}>
                                         복사
@@ -1347,38 +1416,43 @@
             }}
         >
             <label class="sr-only" for="chat-draft">메시지</label>
-            <textarea
-                id="chat-draft"
-                bind:this={composerTextarea}
-                bind:value={draft}
-                rows="1"
-                maxlength="131072"
-                placeholder="메시지를 입력하세요"
-                disabled={appState.chat.phase === 'loading' ||
-                    appState.chat.active_generation_id !== null ||
-                    appState.conversation_state === null}
-                oncompositionstart={() => (compositionActive = true)}
-                oncompositionend={() => (compositionActive = false)}
-                onkeydown={onComposerKeydown}></textarea>
-            {#if appState.chat.active_generation_id !== null}
-                <button
-                    class="danger compact"
-                    type="button"
-                    aria-label="응답 생성 취소"
-                    onclick={() => void controller.cancelGeneration()}
-                >
-                    중지
-                </button>
-            {:else}
-                <button
-                    class="primary send-button"
-                    type="submit"
-                    disabled={draft.trim().length === 0 || sending}
-                    aria-label="메시지 보내기"
-                >
-                    ↑
-                </button>
-            {/if}
+            <div class="composer-field">
+                <textarea
+                    id="chat-draft"
+                    bind:this={composerTextarea}
+                    bind:value={draft}
+                    rows="1"
+                    maxlength="131072"
+                    placeholder="메시지"
+                    disabled={appState.chat.phase === 'loading' ||
+                        appState.chat.active_generation_id !== null ||
+                        appState.conversation_state === null}
+                    oncompositionstart={() => (compositionActive = true)}
+                    oncompositionend={() => (compositionActive = false)}
+                    onkeydown={onComposerKeydown}></textarea>
+                {#if appState.chat.active_generation_id !== null}
+                    <button
+                        class="danger compact"
+                        type="button"
+                        aria-label="응답 생성 취소"
+                        onclick={() => void controller.cancelGeneration()}
+                    >
+                        중지
+                    </button>
+                {:else}
+                    <button
+                        class="primary send-button"
+                        type="submit"
+                        disabled={draft.trim().length === 0 || sending}
+                        aria-label="메시지 보내기"
+                    >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M4 12 20 4l-5.2 16-3.2-6.4L4 12Z" />
+                            <path d="m11.6 13.6 4.3-4.3" />
+                        </svg>
+                    </button>
+                {/if}
+            </div>
         </form>
     {/if}
 </section>

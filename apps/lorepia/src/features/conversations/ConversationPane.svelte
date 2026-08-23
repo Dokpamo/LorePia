@@ -7,9 +7,20 @@
         state: LorepiaAppState;
         controller: LorepiaAppController;
         onOpenChat: () => void;
+        rootView?: boolean;
     }
 
-    let { state, controller, onOpenChat }: Props = $props();
+    let { state: appState, controller, onOpenChat, rootView = false }: Props = $props();
+    let searchQuery = $state('');
+    const visibleConversations = $derived(
+        appState.conversations.items.filter((conversation) => {
+            const query = searchQuery.trim().toLocaleLowerCase('ko-KR');
+            if (query === '') return true;
+            return `${conversation.title} ${appState.selected_character?.name ?? ''}`
+                .toLocaleLowerCase('ko-KR')
+                .includes(query);
+        }),
+    );
 
     async function selectConversation(conversation: ConversationDto): Promise<void> {
         if (await controller.selectConversation(conversation)) onOpenChat();
@@ -27,28 +38,59 @@
     }
 </script>
 
-<section class="pane conversation-pane" aria-labelledby="conversation-title">
+<section
+    class="pane conversation-pane"
+    class:root-view={rootView}
+    aria-labelledby={rootView ? 'conversation-root-title' : 'conversation-title'}
+>
+    {#if rootView}
+        <header class="mobile-top-bar mobile-root-header conversation-root-header">
+            <h1 id="conversation-root-title">채팅</h1>
+        </header>
+        <label class="conversation-search mobile-root-search">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="10.5" cy="10.5" r="6.5" />
+                <path d="m15.5 15.5 4.5 4.5" />
+            </svg>
+            <span class="sr-only">대화 검색</span>
+            <input
+                type="search"
+                aria-label="대화 검색"
+                placeholder="대화 검색"
+                bind:value={searchQuery}
+            />
+        </label>
+    {/if}
     <header class="pane-header">
         <h2 id="conversation-title" class="sr-only">{$tr('conversation.title')}</h2>
-        <button
-            class="compact"
-            type="button"
-            disabled={state.selected_character === null || state.greeting_catalog.phase !== 'ready'}
-            onclick={() => void openNewConversation()}
-        >
-            {$tr('conversation.new')}
-        </button>
+        {#if !rootView || appState.selected_character !== null}
+            <button
+                class="compact new-conversation-button"
+                class:mobile-root-fab={rootView}
+                type="button"
+                disabled={appState.selected_character === null ||
+                    appState.greeting_catalog.phase !== 'ready'}
+                onclick={() => void openNewConversation()}
+            >
+                <span
+                    class="new-conversation-mark"
+                    class:mobile-root-fab-mark={rootView}
+                    aria-hidden="true">+</span
+                >
+                <span class="new-conversation-label">{$tr('conversation.new')}</span>
+            </button>
+        {/if}
     </header>
 
-    {#if state.selected_character !== null}
-        {#if state.greeting_catalog.phase === 'loading'}
+    {#if !rootView && appState.selected_character !== null}
+        {#if appState.greeting_catalog.phase === 'loading'}
             <p class="greeting-status" role="status">{$tr('conversation.greeting.loading')}</p>
-        {:else if state.greeting_catalog.phase === 'error'}
+        {:else if appState.greeting_catalog.phase === 'error'}
             <p class="greeting-status error" role="alert">
-                {state.greeting_catalog.error}
+                {appState.greeting_catalog.error}
             </p>
-        {:else if state.greeting_catalog.value !== null}
-            {@const enabledGreetings = state.greeting_catalog.value.greetings.filter(
+        {:else if appState.greeting_catalog.value !== null}
+            {@const enabledGreetings = appState.greeting_catalog.value.greetings.filter(
                 (greeting) => greeting.enabled,
             )}
             <div class="greeting-picker">
@@ -57,14 +99,14 @@
                 >
                 <select
                     id="conversation-greeting-selector"
-                    value={state.greeting_catalog.selected_greeting_id ?? ''}
+                    value={appState.greeting_catalog.selected_greeting_id ?? ''}
                     disabled={enabledGreetings.length === 0}
                     onchange={(event) => controller.selectGreeting(event.currentTarget.value)}
                 >
                     {#if enabledGreetings.length === 0}
                         <option value="">{$tr('conversation.greeting.none')}</option>
                     {/if}
-                    {#each state.greeting_catalog.value.greetings as greeting (greeting.id)}
+                    {#each appState.greeting_catalog.value.greetings as greeting (greeting.id)}
                         <option value={greeting.id} disabled={!greeting.enabled}>
                             {greeting.id} · {greeting.kind === 'default'
                                 ? $tr('conversation.greeting.default')
@@ -79,46 +121,76 @@
         {/if}
     {/if}
 
-    {#if state.selected_character === null}
-        <div class="state-panel empty">
-            <strong>{$tr('conversation.empty.title')}</strong>
-            <p>{$tr('conversation.empty.hint')}</p>
-        </div>
-    {:else if state.conversations.phase === 'loading'}
+    {#if appState.selected_character === null}
+        {#if !rootView}
+            <div class="state-panel empty conversation-empty">
+                <strong>{$tr('conversation.empty.title')}</strong>
+            </div>
+        {/if}
+    {:else if appState.conversations.phase === 'loading'}
         <div class="state-panel" role="status">{$tr('conversation.loading')}</div>
-    {:else if state.conversations.phase === 'error'}
-        <div class="state-panel error" role="alert">{state.conversations.error}</div>
-    {:else if state.conversations.items.length === 0}
-        <div class="state-panel empty">
-            <strong>{$tr('conversation.none.title')}</strong>
-            <button
-                class="primary"
-                type="button"
-                disabled={state.greeting_catalog.phase !== 'ready'}
-                onclick={() => void openNewConversation()}
-            >
-                {$tr('conversation.none.start')}
-            </button>
+    {:else if appState.conversations.phase === 'error'}
+        <div class="state-panel error" role="alert">{appState.conversations.error}</div>
+    {:else if appState.conversations.items.length === 0}
+        {#if !rootView}
+            <div class="state-panel empty conversation-empty">
+                <strong>{$tr('conversation.none.title')}</strong>
+                <button
+                    class="primary"
+                    type="button"
+                    disabled={appState.greeting_catalog.phase !== 'ready'}
+                    onclick={() => void openNewConversation()}
+                >
+                    {$tr('conversation.none.start')}
+                </button>
+            </div>
+        {/if}
+    {:else if visibleConversations.length === 0}
+        <div class="state-panel empty conversation-search-empty">
+            <strong>일치하는 대화가 없습니다.</strong>
+            <button type="button" onclick={() => (searchQuery = '')}>검색 지우기</button>
         </div>
     {:else}
         <ul
             class="entity-list"
-            aria-label={$tr('conversation.list.label', { name: state.selected_character.name })}
+            aria-label={$tr('conversation.list.label', { name: appState.selected_character.name })}
         >
-            {#each state.conversations.items as conversation (conversation.id)}
+            {#each visibleConversations as conversation (conversation.id)}
                 <li>
                     <button
                         type="button"
                         class="entity-row conversation-row"
-                        class:active={state.selected_conversation?.id === conversation.id}
-                        aria-pressed={state.selected_conversation?.id === conversation.id}
+                        class:mobile-root-row={rootView}
+                        class:active={appState.selected_conversation?.id === conversation.id}
+                        aria-pressed={appState.selected_conversation?.id === conversation.id}
                         onclick={() => void selectConversation(conversation)}
                     >
-                        <span class="entity-copy">
-                            <strong>{conversation.title || state.selected_character.name}</strong>
-                            <span>{relativeDate(conversation.updated_at)}</span>
-                        </span>
-                        <span aria-hidden="true">›</span>
+                        {#if rootView}
+                            <span class="avatar" aria-hidden="true"
+                                >{appState.selected_character.name.slice(0, 1)}</span
+                            >
+                            <span class="entity-copy conversation-copy">
+                                <span class="conversation-line">
+                                    <strong
+                                        >{conversation.title ||
+                                            appState.selected_character.name}</strong
+                                    >
+                                    <time datetime={conversation.updated_at}
+                                        >{relativeDate(conversation.updated_at)}</time
+                                    >
+                                </span>
+                                <span>{appState.selected_character.name}과의 대화</span>
+                            </span>
+                        {:else}
+                            <span class="entity-copy">
+                                <strong
+                                    >{conversation.title ||
+                                        appState.selected_character.name}</strong
+                                >
+                                <span>{relativeDate(conversation.updated_at)}</span>
+                            </span>
+                            <span aria-hidden="true">›</span>
+                        {/if}
                     </button>
                 </li>
             {/each}
@@ -127,6 +199,56 @@
 </section>
 
 <style>
+    .new-conversation-mark {
+        display: none;
+    }
+
+    .conversation-pane.root-view .pane-header {
+        min-height: 0;
+        padding: 0;
+    }
+
+    .conversation-pane.root-view .entity-list {
+        padding: 0 8px calc(var(--mobile-nav) + 92px + env(safe-area-inset-bottom));
+        gap: 0;
+    }
+
+    .conversation-copy {
+        grid-auto-flow: row;
+        align-items: stretch;
+        justify-content: initial;
+        gap: 3px;
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .conversation-line {
+        display: flex;
+        min-width: 0;
+        align-items: baseline;
+        justify-content: space-between;
+        color: var(--ink);
+        gap: 10px;
+    }
+
+    .conversation-line strong {
+        overflow: hidden;
+        font-size: 1.0625rem;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .conversation-line time {
+        flex: none;
+        color: var(--ink-muted);
+        font-size: 0.75rem;
+    }
+
+    .conversation-search-empty {
+        display: grid;
+        justify-items: center;
+        gap: 10px;
+    }
+
     .greeting-picker {
         display: grid;
         gap: 6px;
@@ -163,5 +285,54 @@
 
     .greeting-status.error {
         color: var(--danger);
+    }
+
+    @media (max-width: 719px) {
+        :global(.navigator) .pane-header .new-conversation-button {
+            position: absolute;
+            z-index: 21;
+            right: 22px;
+            bottom: calc(var(--mobile-nav) + 26px + env(safe-area-inset-bottom));
+            display: grid;
+            width: 54px;
+            height: 54px;
+            min-height: 54px;
+            padding: 0;
+            border: 0;
+            border-radius: 50%;
+            background: var(--primary-bg);
+            box-shadow: var(--shadow-2);
+            color: var(--primary-ink);
+            place-items: center;
+        }
+
+        @media (hover: hover) and (pointer: fine) {
+            :global(.navigator) .pane-header .new-conversation-button:hover:not(:disabled) {
+                background: var(--primary-bg-hover);
+            }
+        }
+
+        :global(.navigator) .pane-header .new-conversation-button:disabled {
+            opacity: 0.45;
+        }
+
+        .new-conversation-mark {
+            display: block;
+            font-size: 1.75rem;
+            font-weight: 300;
+            line-height: 1;
+        }
+
+        .new-conversation-label {
+            position: absolute;
+            overflow: hidden;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            border: 0;
+            margin: -1px;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+        }
     }
 </style>

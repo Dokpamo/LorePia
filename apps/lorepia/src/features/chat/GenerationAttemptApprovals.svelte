@@ -329,8 +329,8 @@
     }
 
     .approve {
-        color: var(--ink-inverse);
-        background: var(--accent);
+        color: var(--primary-ink);
+        background: var(--primary-bg);
     }
 
     .reject,

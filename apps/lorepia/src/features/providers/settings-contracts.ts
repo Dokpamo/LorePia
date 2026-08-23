@@ -11,6 +11,8 @@ export const SETTINGS_SECTIONS = [
     'target',
     'connections',
     'templates',
+    'discovery',
+    'catalog',
     'advanced',
 ] as const;
 

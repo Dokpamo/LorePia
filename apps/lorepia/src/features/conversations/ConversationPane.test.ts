@@ -56,6 +56,71 @@ function readyState(): LorepiaAppState {
 }
 
 describe('ConversationPane greeting selector', () => {
+    it('keeps an empty chat root visually quiet until a character is selected', () => {
+        const state = structuredClone(INITIAL_APP_STATE);
+        const controller = {
+            selectConversation: vi.fn(() => Promise.resolve(false)),
+            openNewConversation: vi.fn(() => Promise.resolve(false)),
+        } as unknown as LorepiaAppController;
+
+        const rendered = render(ConversationPane, {
+            state,
+            controller,
+            onOpenChat: vi.fn(),
+            rootView: true,
+        });
+
+        expect(screen.queryByText('새 대화를 시작해 보세요.')).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: '캐릭터 보기' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: '새 대화' })).not.toBeInTheDocument();
+        expect(rendered.container.querySelector('.conversation-empty')).not.toBeInTheDocument();
+        expect(
+            screen.queryByText(
+                '홈에서 캐릭터를 추가하거나 선택하면 대화 목록이 여기에 표시됩니다.',
+            ),
+        ).not.toBeInTheDocument();
+    });
+
+    it('keeps new conversation in its floating position without an empty-state prompt', () => {
+        const state = readyState();
+        state.conversations.items = [];
+        const controller = {
+            selectConversation: vi.fn(() => Promise.resolve(false)),
+            openNewConversation: vi.fn(() => Promise.resolve(false)),
+        } as unknown as LorepiaAppController;
+
+        const rendered = render(ConversationPane, {
+            state,
+            controller,
+            onOpenChat: vi.fn(),
+            rootView: true,
+        });
+
+        const action = screen.getByRole('button', { name: '새 대화' });
+        expect(action).toHaveClass('mobile-root-fab');
+        expect(screen.queryByText('저장된 대화가 없습니다.')).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: '대화 시작' })).not.toBeInTheDocument();
+        expect(rendered.container.querySelector('.conversation-empty')).not.toBeInTheDocument();
+    });
+
+    it('exposes new conversation as the mobile primary action without changing its gate', () => {
+        const controller = {
+            selectGreeting: vi.fn(() => true),
+            openNewConversation: vi.fn(() => Promise.resolve(true)),
+            selectConversation: vi.fn(() => Promise.resolve(true)),
+        } as unknown as LorepiaAppController;
+
+        render(ConversationPane, {
+            state: readyState(),
+            controller,
+            onOpenChat: vi.fn(),
+        });
+
+        const action = screen.getByRole('button', { name: '새 대화' });
+        expect(action).toHaveClass('new-conversation-button');
+        expect(action.querySelector('[aria-hidden="true"]')).toHaveTextContent('+');
+    });
+
     it('renders only greeting ID/kind metadata and navigates only after successful opens', async () => {
         const selectGreeting = vi.fn(() => true);
         const openNewConversation = vi.fn(() => Promise.resolve(true));

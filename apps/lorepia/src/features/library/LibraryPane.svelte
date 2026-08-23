@@ -17,13 +17,28 @@
         controller: LorepiaAppController;
         client: ExportCapableClient;
         onOpenConversations: () => void;
+        rootView?: boolean;
     }
 
-    let { state: appState, controller, client, onOpenConversations }: Props = $props();
+    let {
+        state: appState,
+        controller,
+        client,
+        onOpenConversations,
+        rootView = false,
+    }: Props = $props();
     let exportingCharacterId = $state<string | null>(null);
     let exportReceipt = $state<ContentSourceExportReceiptDto | null>(null);
     let exportError = $state<string | null>(null);
     let exportAnnouncement = $state('');
+    let searchQuery = $state('');
+    const visibleCharacters = $derived.by(() => {
+        const query = searchQuery.trim().toLocaleLowerCase('ko-KR');
+        if (query === '') return appState.library.characters;
+        return appState.library.characters.filter((character) =>
+            `${character.name} ${character.description}`.toLocaleLowerCase('ko-KR').includes(query),
+        );
+    });
 
     function selectCharacter(character: CharacterDto): void {
         void controller.selectCharacter(character).then(onOpenConversations);
@@ -110,16 +125,29 @@
     }
 </script>
 
-<section class="pane library-pane" aria-labelledby="library-title">
+<section class="pane library-pane" class:root-view={rootView} aria-labelledby="library-title">
     <header class="pane-header">
         <h1 id="library-title" class="sr-only">{$tr('library.title')}</h1>
-        <button class="compact" type="button" onclick={() => void controller.beginImport()}>
-            {$tr('library.import')}
-        </button>
-        {#if appState.selected_character !== null}
+        {#if !rootView || appState.library.characters.length > 0}
+            <button
+                class="compact import-character-button"
+                class:mobile-root-fab={rootView}
+                type="button"
+                aria-label={$tr('library.empty.import')}
+                onclick={() => void controller.beginImport()}
+            >
+                <span
+                    class="import-character-mark"
+                    class:mobile-root-fab-mark={rootView}
+                    aria-hidden="true">+</span
+                >
+                <span class="import-character-label">{$tr('library.import')}</span>
+            </button>
+        {/if}
+        {#if appState.selected_character !== null && visibleCharacters.some((character) => character.id === appState.selected_character?.id)}
             {@const selected = appState.selected_character}
             <button
-                class="compact"
+                class="compact export-character-button"
                 type="button"
                 aria-label={$tr('library.export.label', { name: selected.name.slice(0, 256) })}
                 disabled={exportingCharacterId !== null}
@@ -152,6 +180,21 @@
         {/if}
     </div>
 
+    <label class="library-search" class:mobile-root-search={rootView}>
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="10.5" cy="10.5" r="6.5" />
+            <path d="m15.5 15.5 4.5 4.5" />
+        </svg>
+        <span class="sr-only">{$tr('library.search.label')}</span>
+        <input
+            type="search"
+            aria-label={$tr('library.search.label')}
+            placeholder={$tr('library.search.placeholder')}
+            disabled={appState.library.phase === 'loading'}
+            bind:value={searchQuery}
+        />
+    </label>
+
     {#if appState.library.phase === 'loading'}
         <div class="state-panel" role="status">{$tr('library.loading')}</div>
     {:else if appState.library.phase === 'error'}
@@ -162,21 +205,38 @@
             >
         </div>
     {:else if appState.library.characters.length === 0}
-        <div class="state-panel empty">
-            <strong>{$tr('library.empty.title')}</strong>
-            <p>{$tr('library.empty.hint')}</p>
-            <button class="primary" type="button" onclick={() => void controller.beginImport()}>
-                {$tr('library.empty.import')}
+        {#if rootView}
+            <div class="mobile-root-contact-action">
+                <button
+                    class="primary mobile-root-contact-button"
+                    type="button"
+                    onclick={() => void controller.beginImport()}
+                >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <circle cx="8" cy="7.5" r="3" />
+                        <path d="M2.5 18c.8-3.7 2.6-5.5 5.5-5.5 1.3 0 2.4.4 3.3 1.1" />
+                        <path d="M17.5 9.5v7M14 13h7" />
+                    </svg>
+                    <span>{$tr('library.empty.import')}</span>
+                </button>
+            </div>
+        {/if}
+    {:else if visibleCharacters.length === 0}
+        <div class="state-panel empty search-empty">
+            <strong>{$tr('library.search.empty')}</strong>
+            <button type="button" onclick={() => (searchQuery = '')}>
+                {$tr('library.search.clear')}
             </button>
         </div>
     {:else}
         <ul class="entity-list" aria-label={$tr('library.list.label')}>
-            {#each appState.library.characters as character (character.id)}
+            {#each visibleCharacters as character (character.id)}
                 <li>
                     <button
                         type="button"
                         class:active={appState.selected_character?.id === character.id}
                         class="entity-row"
+                        class:mobile-root-row={rootView}
                         aria-pressed={appState.selected_character?.id === character.id}
                         onclick={() => selectCharacter(character)}
                     >
@@ -213,6 +273,60 @@
         display: none;
     }
 
+    .import-character-mark {
+        display: none;
+    }
+
+    .library-search {
+        display: flex;
+        min-height: 44px;
+        flex: none;
+        align-items: center;
+        padding: 0 clamp(10px, 3.204vw, 14px);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-pill);
+        margin: 2px 14px 8px;
+        background: var(--surface-raised);
+        box-shadow: var(--shadow-1);
+        color: var(--ink-muted);
+        gap: clamp(8px, 2.288vw, 10px);
+    }
+
+    .library-search:focus-within {
+        border-color: var(--accent);
+    }
+
+    .library-search svg {
+        width: clamp(16px, 4.577vw, 20px);
+        height: clamp(16px, 4.577vw, 20px);
+        flex: none;
+        fill: none;
+        stroke: currentcolor;
+        stroke-linecap: round;
+        stroke-width: 1.8;
+    }
+
+    .library-search input {
+        width: 100%;
+        min-height: 42px;
+        padding: 0;
+        border: 0;
+        outline: 0;
+        background: transparent;
+        color: var(--ink);
+        font-size: 0.9375rem;
+    }
+
+    .library-search input::placeholder {
+        color: var(--ink-subtle);
+    }
+
+    .search-empty {
+        display: grid;
+        justify-items: center;
+        gap: 10px;
+    }
+
     .export-receipt {
         margin: 0 10px 8px;
         padding: 10px 12px;
@@ -232,15 +346,29 @@
         font-size: 0.82rem;
     }
 
-    /*
-     * Export is a rare, deliberate action. Keeping it hidden until the row is
-     * hovered or focused lets the list read as a roster of characters instead
-     * of a table of controls, without removing it from the tab order.
-     */
+    .library-pane.root-view .pane-header {
+        min-height: 0;
+        padding: 0;
+    }
 
-    @media (hover: none) {
-        .character-row > :global(button:last-child) {
-            opacity: 1;
-        }
+    .library-pane.root-view .export-character-button {
+        display: none;
+    }
+
+    .library-pane.root-view .import-character-label {
+        position: absolute;
+        overflow: hidden;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        border: 0;
+        margin: -1px;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+    }
+
+    .library-pane.root-view .entity-list {
+        padding: 0 8px calc(var(--mobile-nav) + 92px + env(safe-area-inset-bottom));
+        gap: 0;
     }
 </style>

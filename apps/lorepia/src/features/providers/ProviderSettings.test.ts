@@ -7,11 +7,183 @@ import {
     type LorepiaAppState,
 } from '../../app/app-controller';
 import type { LorepiaClient } from '../../lib/ipc/contracts';
+import { setThemePreference } from '../../lib/theme';
+import '../../styles/app.css';
+import appCss from '../../styles/app.css?raw';
 import ProviderSettings from './ProviderSettings.svelte';
 
 afterEach(() => {
     cleanup();
+    setThemePreference('system');
+    delete document.documentElement.dataset.theme;
+    document.documentElement.removeAttribute('style');
     vi.restoreAllMocks();
+});
+
+describe('ProviderSettings mobile settings language', () => {
+    it('shows concise current values without the old explanatory subtitles', () => {
+        const appState = structuredClone(INITIAL_APP_STATE);
+        appState.providers.phase = 'ready';
+        const controller = new LorepiaAppController({} as LorepiaClient);
+        setThemePreference('light');
+
+        const rendered = render(ProviderSettings, { appState, controller, section: null });
+        const identity = rendered.container.querySelector<HTMLElement>('.settings-identity');
+        const card = rendered.container.querySelector<HTMLElement>('.setting-list');
+        if (identity === null || card === null) throw new Error('settings hierarchy is missing');
+
+        expect(screen.getByRole('region', { name: '설정' })).toBeInTheDocument();
+        expect(screen.queryByRole('heading', { name: '설정' })).not.toBeInTheDocument();
+        expect(within(identity).getByRole('heading', { name: 'LorePia' })).toBeInTheDocument();
+        expect(within(identity).queryByText('로컬 Core')).not.toBeInTheDocument();
+        expect(
+            within(identity).queryByText('설정과 자격증명은 이 기기에 보관됩니다.'),
+        ).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: '새로고침' })).not.toBeInTheDocument();
+        expect(screen.getByRole('button', { name: '설정 더보기' })).toBeInTheDocument();
+        expect(rendered.container.querySelector('.settings-avatar-badge')).toBeInTheDocument();
+        expect(within(card).getAllByRole('button')).toHaveLength(8);
+        expect(within(card).getByRole('button', { name: /검색과 동기화/ })).toBeInTheDocument();
+        expect(within(card).getByRole('button', { name: /제공자 카탈로그/ })).toBeInTheDocument();
+        expect(card.querySelectorAll('.setting-value')).toHaveLength(8);
+        const settingIcons = [...card.querySelectorAll<HTMLElement>('.setting-icon')];
+        expect(settingIcons).toHaveLength(8);
+        expect(settingIcons.every((icon) => icon.querySelector('svg') !== null)).toBe(true);
+        expect(card.querySelector('[data-tone]')).not.toBeInTheDocument();
+        expect(within(card).getByText('라이트')).toBeInTheDocument();
+        expect(card.querySelector('.setting-copy small')).not.toBeInTheDocument();
+        expect(within(card).queryByText('라이트·다크·시스템')).not.toBeInTheDocument();
+        expect(within(card).queryByText('대화에서 나를 어떻게 부를지')).not.toBeInTheDocument();
+        expect(
+            identity.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING,
+        ).toBeTruthy();
+        controller.destroy();
+    });
+
+    it('enters a dedicated value screen instead of opening a mini dialog', async () => {
+        const appState = structuredClone(INITIAL_APP_STATE);
+        appState.providers.phase = 'ready';
+        const controller = new LorepiaAppController({} as LorepiaClient);
+        const onOpenSection = vi.fn();
+        const rendered = render(ProviderSettings, {
+            appState,
+            controller,
+            section: null,
+            onOpenSection,
+        });
+
+        const appearanceRow = screen.getByRole('button', { name: /화면 모드/ });
+        await fireEvent.click(appearanceRow);
+        expect(onOpenSection).toHaveBeenCalledWith('appearance');
+
+        await rendered.rerender({
+            appState,
+            controller,
+            section: 'appearance',
+            onOpenSection,
+        });
+
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+        const screenRegion = screen.getByRole('region', { name: '화면 모드' });
+        const detailScroll =
+            rendered.container.querySelector<HTMLElement>('.settings-detail-scroll');
+        if (detailScroll === null) throw new Error('settings detail scroll is missing');
+        expect(getComputedStyle(detailScroll).alignContent).toBe('start');
+        expect(screen.queryByRole('button', { name: /화면 모드 라이트/ })).not.toBeInTheDocument();
+        expect(
+            within(screenRegion).queryByText(/시스템을 고르면 운영체제 설정을 따라갑니다/),
+        ).not.toBeInTheDocument();
+
+        await fireEvent.click(within(screenRegion).getByRole('button', { name: '다크' }));
+        await rendered.rerender({ appState, controller, section: null, onOpenSection });
+
+        expect(screen.getByRole('button', { name: /화면 모드 다크/ })).toBeInTheDocument();
+        controller.destroy();
+    });
+
+    it('keeps the settings root toolbar to the overflow action', () => {
+        const appState = structuredClone(INITIAL_APP_STATE);
+        appState.providers.phase = 'ready';
+        const controller = new LorepiaAppController({} as LorepiaClient);
+
+        const rendered = render(ProviderSettings, { appState, controller, section: null });
+
+        const toolbar = screen.getByRole('toolbar', { name: '설정 도구' });
+        const scrollRegion = rendered.container.querySelector('.settings-home-scroll');
+        if (scrollRegion === null) throw new Error('settings home scroll is missing');
+        expect(
+            within(toolbar).queryByRole('button', { name: '설정 검색' }),
+        ).not.toBeInTheDocument();
+        expect(within(toolbar).queryByRole('searchbox')).not.toBeInTheDocument();
+        expect(within(toolbar).getByRole('button', { name: '설정 더보기' })).toBeVisible();
+        expect(toolbar.parentElement).toBe(scrollRegion.parentElement);
+        expect(toolbar.nextElementSibling).toBe(scrollRegion);
+        controller.destroy();
+    });
+
+    it('uses the overflow action for real settings shortcuts', async () => {
+        const appState = structuredClone(INITIAL_APP_STATE);
+        appState.providers.phase = 'ready';
+        const controller = new LorepiaAppController({} as LorepiaClient);
+        const onOpenSection = vi.fn();
+
+        render(ProviderSettings, { appState, controller, section: null, onOpenSection });
+
+        await fireEvent.click(screen.getByRole('button', { name: '설정 더보기' }));
+        const menu = screen.getByRole('menu', { name: '설정 바로가기' });
+        await fireEvent.click(within(menu).getByRole('menuitem', { name: '화면 모드' }));
+
+        expect(onOpenSection).toHaveBeenCalledWith('appearance');
+        expect(screen.queryByRole('menu', { name: '설정 바로가기' })).not.toBeInTheDocument();
+        controller.destroy();
+    });
+
+    it('groups destination buttons into one rounded settings panel', () => {
+        expect(appCss).toMatch(/\.setting-list\s*\{[^}]*padding:\s*0;/s);
+        expect(appCss).toMatch(
+            /\.setting-list\s*\{[^}]*border-radius:\s*clamp\(20px,\s*6\.59vw,\s*24px\);[^}]*margin:\s*0 clamp\(3px,\s*0\.686vw,\s*3px\);[^}]*background:\s*var\(--bg\);[^}]*box-shadow:\s*var\(--shadow-1\);[^}]*gap:\s*clamp\(2px,\s*0\.686vw,\s*3px\);[^}]*overflow:\s*hidden;/s,
+        );
+        expect(appCss).toMatch(
+            /\.setting-row\s*\{[^}]*min-height:\s*clamp\(54px,\s*15\.561vw,\s*68px\);[^}]*border:\s*0;[^}]*border-radius:\s*clamp\(3px,\s*0\.915vw,\s*4px\);[^}]*background:\s*var\(--surface-raised\);[^}]*box-shadow:\s*none;[^}]*gap:\s*clamp\(19px,\s*5\.492vw,\s*24px\);/s,
+        );
+        expect(appCss).toMatch(/\.setting-copy\s*\{[^}]*flex:\s*1;/s);
+    });
+
+    it('keeps the shared panel and its inset rows visually distinct', () => {
+        const appState = structuredClone(INITIAL_APP_STATE);
+        appState.providers.phase = 'ready';
+        const controller = new LorepiaAppController({} as LorepiaClient);
+
+        const rendered = render(ProviderSettings, { appState, controller, section: null });
+        const pane = rendered.container.querySelector<HTMLElement>('.provider-pane');
+        const list = rendered.container.querySelector<HTMLElement>('.setting-list');
+        const button = rendered.container.querySelector<HTMLElement>('.setting-row');
+        if (pane === null || list === null || button === null) {
+            throw new Error('settings surfaces are missing');
+        }
+
+        expect(pane).toHaveClass('provider-pane');
+        expect(list).toHaveClass('setting-list');
+        expect(appCss).toMatch(/\.provider-pane\s*\{[^}]*background:\s*var\(--bg\)/s);
+        expect(appCss).toMatch(/\.setting-list\s*\{[^}]*background:\s*var\(--bg\)/s);
+        expect(appCss).toMatch(/\.setting-row\s*\{[^}]*background:\s*var\(--surface-raised\)/s);
+        controller.destroy();
+    });
+
+    it('presents the partial-generation preference as a trailing mobile switch', () => {
+        const appState = legacyProviderState();
+        const controller = new LorepiaAppController({} as LorepiaClient);
+
+        render(ProviderSettings, { appState, controller, section: 'target' });
+
+        const toggle = screen.getByRole('switch', {
+            name: '취소·오류 시 생성된 일부 응답을 보존',
+        });
+        expect(toggle).toBeChecked();
+        expect(toggle).toHaveClass('settings-switch');
+        expect(toggle.closest('label')).toHaveClass('settings-control-row');
+        controller.destroy();
+    });
 });
 
 function legacyProviderState(): LorepiaAppState {

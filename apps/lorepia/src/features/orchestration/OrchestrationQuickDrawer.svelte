@@ -107,14 +107,19 @@
 
 <div class="quick-orchestration">
     <button
-        class="orchestration-toggle"
+        class="orchestration-toggle mobile-top-action mobile-top-action-right"
         type="button"
         bind:this={toggleButton}
+        aria-label={$tr('quick.toggle')}
         aria-expanded={open}
         aria-controls="orchestration-quick-drawer"
         onclick={() => void setOpen(!open)}
     >
-        {$tr('quick.toggle')}
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 7h10M18 7h2M4 17h2M10 17h10" />
+            <circle cx="16" cy="7" r="2.4" />
+            <circle cx="8" cy="17" r="2.4" />
+        </svg>
         {#if orchestrationState.dirty_room_config}
             <span class="dirty-dot" aria-label={$tr('quick.dirty')}></span>
         {/if}
@@ -427,17 +432,38 @@
     }
 
     .orchestration-toggle {
-        display: inline-flex;
-        gap: 7px;
-        align-items: center;
-        white-space: nowrap;
+        position: relative;
+        display: grid;
+        width: var(--mobile-top-action);
+        height: var(--mobile-top-action);
+        min-width: var(--mobile-top-action);
+        min-height: var(--mobile-top-action);
+        padding: 0;
+        border: 0;
+        border-radius: 50%;
+        background: var(--surface-raised);
+        box-shadow: var(--shadow-1);
+        place-items: center;
+    }
+
+    .orchestration-toggle svg {
+        width: 24px;
+        height: 24px;
+        fill: none;
+        stroke: currentcolor;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        stroke-width: 1.8;
     }
 
     .dirty-dot {
+        position: absolute;
+        top: 6px;
+        right: 6px;
         width: 7px;
         height: 7px;
         border-radius: 999px;
-        background: var(--accent);
+        background: var(--brand-neon-pink);
     }
 
     .quick-drawer {
@@ -453,7 +479,7 @@
         border: 1px solid var(--line);
         border-radius: var(--radius-md);
         background: var(--surface-raised);
-        box-shadow: 0 18px 52px rgb(18 25 38 / 20%);
+        box-shadow: var(--shadow-3);
     }
 
     .quick-drawer > header,

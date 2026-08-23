@@ -301,7 +301,7 @@
     }
 
     .asset-error {
-        color: #8c2131;
+        color: var(--danger);
     }
 
     .asset-metadata {
@@ -310,8 +310,8 @@
         bottom: 0.4rem;
         padding: 0.2rem 0.35rem;
         border-radius: 0.35rem;
-        color: white;
-        background: rgb(0 0 0 / 68%);
+        color: var(--ink-inverse);
+        background: color-mix(in srgb, var(--brand-ink) 68%, transparent);
         font-size: 0.7rem;
     }
 </style>
