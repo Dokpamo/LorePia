@@ -1,6 +1,8 @@
 <script lang="ts">
     import { onMount, untrack } from 'svelte';
 
+    import DetailActionBar from '../../components/detail/DetailActionBar.svelte';
+
     import type {
         OrchestrationModuleScope,
         OrchestrationVariableRefDto,
@@ -24,19 +26,35 @@
     const MAX_VISIBLE_VARIABLE_VALUE_CHARACTERS = 160;
     const MAX_VISIBLE_STRING_LIST_VALUES = 12;
 
+    export type ModuleLifecycleSubpage =
+        | 'modules'
+        | 'modules:candidates'
+        | 'modules:bindings'
+        | 'modules:activation'
+        | 'modules:deactivation'
+        | 'modules:rollback';
+
     interface Props {
         client?: Partial<ContentModuleLifecycleClientApi>;
         conversationId: string | null;
         branchId: string | null;
+        detailPage?: string | null;
     }
 
-    let { client = {}, conversationId, branchId }: Props = $props();
+    let {
+        client = {},
+        conversationId,
+        branchId,
+        detailPage = $bindable<string | null | undefined>(),
+    }: Props = $props();
     const controller = untrack(() => new ContentModuleLifecycleController(client));
     let lifecycleState = $state<ContentModuleLifecycleState>(
         structuredClone(INITIAL_CONTENT_MODULE_LIFECYCLE_STATE),
     );
     let contextKey = '';
     let rollbackPackageApprovalChoices = $state<Record<string, string>>({});
+    let reviewReturnPage = $state<ModuleLifecycleSubpage>('modules:candidates');
+    let previousLifecyclePage = $state<ModuleLifecycleSubpage>('modules');
 
     const busy = $derived(
         lifecycleState.phase === 'loading' ||
@@ -70,6 +88,13 @@
             activation.request.binding.package_import_approval_id !== null
         );
     });
+    const lifecyclePage = $derived.by<ModuleLifecycleSubpage>(() => {
+        if (detailPage?.startsWith('modules:activation')) return 'modules:activation';
+        return detailPage?.startsWith('modules:')
+            ? (detailPage as ModuleLifecycleSubpage)
+            : 'modules';
+    });
+    const legacyFlatMode = $derived(detailPage === undefined);
 
     $effect(() => {
         const nextKey =
@@ -78,6 +103,17 @@
         contextKey = nextKey;
         rollbackPackageApprovalChoices = {};
         void controller.loadContext(conversationId, branchId);
+    });
+
+    $effect(() => {
+        const nextPage = lifecyclePage;
+        const leftReview =
+            (previousLifecyclePage === 'modules:activation' ||
+                previousLifecyclePage === 'modules:deactivation' ||
+                previousLifecyclePage === 'modules:rollback') &&
+            nextPage !== previousLifecyclePage;
+        previousLifecyclePage = nextPage;
+        if (leftReview) controller.clearReview();
     });
 
     onMount(() => {
@@ -200,26 +236,36 @@
                 return `해결되지 않은 충돌: ${componentLabel(blocker.component)}`;
         }
     }
+
+    function openActivation(moduleId: string, bindingId?: string): void {
+        controller.beginActivation(moduleId, bindingId);
+        reviewReturnPage = bindingId ? 'modules:bindings' : 'modules:candidates';
+        detailPage = bindingId ? 'modules:activation:bindings' : 'modules:activation';
+    }
+
+    function openDeactivation(bindingId: string): void {
+        void controller.reviewDeactivation(bindingId);
+        reviewReturnPage = 'modules:bindings';
+        detailPage = 'modules:deactivation';
+    }
+
+    function openRollback(
+        bindingId: string,
+        revisionId: string,
+        packageApprovalId: string | null,
+    ): void {
+        void controller.reviewRollback(bindingId, revisionId, packageApprovalId);
+        reviewReturnPage = 'modules:bindings';
+        detailPage = 'modules:rollback';
+    }
+
+    function closeReview(destination: ModuleLifecycleSubpage): void {
+        detailPage = destination;
+    }
 </script>
 
-<section class="module-lifecycle" aria-labelledby="module-lifecycle-title">
-    <div class="lifecycle-heading">
-        <div>
-            <h3 id="module-lifecycle-title">콘텐츠 모듈 활성화·롤백</h3>
-            <p>
-                Core가 계산한 불변 리비전, 충돌 후보, 패키지 승인, 상태 리비전을 검토한 뒤 해시로
-                고정해 적용합니다.
-            </p>
-        </div>
-        <button
-            type="button"
-            disabled={busy || conversationId === null || branchId === null}
-            onclick={() => void controller.loadContext(conversationId, branchId)}
-        >
-            후보·바인딩 새로고침
-        </button>
-    </div>
-
+{#snippet lifecycleContent()}
+    <h3 id="module-lifecycle-title" class="sr-only">콘텐츠 모듈 활성화·롤백</h3>
     <p class="sr-only" aria-live="polite">{lifecycleState.announcement}</p>
 
     {#if conversationId === null || branchId === null}
@@ -240,7 +286,46 @@
         </p>
     {/if}
 
-    {#if lifecycleState.candidates.length > 0}
+    {#if !legacyFlatMode && lifecyclePage === 'modules'}
+        <ul class="setting-list lifecycle-index" aria-label="콘텐츠 모듈 도구">
+            <li>
+                <button
+                    class="setting-row lifecycle-index-row"
+                    type="button"
+                    onclick={() => (detailPage = 'modules:candidates')}
+                >
+                    <span class="setting-content">
+                        <span class="setting-copy">
+                            <strong>활성화 후보</strong>
+                            <small>
+                                불변 리비전 {lifecycleState.candidates.length}개를 검토하고
+                                활성화합니다.
+                            </small>
+                        </span>
+                    </span>
+                </button>
+            </li>
+            <li>
+                <button
+                    class="setting-row lifecycle-index-row"
+                    type="button"
+                    onclick={() => (detailPage = 'modules:bindings')}
+                >
+                    <span class="setting-content">
+                        <span class="setting-copy">
+                            <strong>모듈 바인딩</strong>
+                            <small>
+                                저장된 바인딩 {lifecycleState.bindings.length}개와 롤백 가능한
+                                리비전을 관리합니다.
+                            </small>
+                        </span>
+                    </span>
+                </button>
+            </li>
+        </ul>
+    {/if}
+
+    {#if (legacyFlatMode || lifecyclePage === 'modules:candidates') && lifecycleState.candidates.length > 0}
         <section aria-labelledby="module-candidates-title">
             <div class="subheading">
                 <h4 id="module-candidates-title">활성화 후보</h4>
@@ -300,7 +385,7 @@
                             disabled={busy ||
                                 !candidate.local_use_allowed ||
                                 candidate.source_kind === 'application_built_in'}
-                            onclick={() => controller.beginActivation(candidate.module_id)}
+                            onclick={() => openActivation(candidate.module_id)}
                         >
                             {candidate.source_kind === 'application_built_in'
                                 ? '앱 정책으로 사용자 활성화 불가'
@@ -310,11 +395,11 @@
                 {/each}
             </div>
         </section>
-    {:else if lifecycleState.phase === 'ready'}
+    {:else if (legacyFlatMode || lifecyclePage === 'modules:candidates') && lifecycleState.phase === 'ready'}
         <p class="lifecycle-note">현재 컨텍스트에서 검토할 모듈 후보가 없습니다.</p>
     {/if}
 
-    {#if activation !== null}
+    {#if (legacyFlatMode || lifecyclePage === 'modules:activation') && activation !== null}
         <section class="review-surface" aria-labelledby="module-activation-draft-title">
             <div class="subheading">
                 <div>
@@ -326,9 +411,6 @@
                         동안 유지됩니다.
                     </p>
                 </div>
-                <button type="button" disabled={busy} onclick={() => controller.clearReview()}>
-                    닫기
-                </button>
             </div>
             <div class="draft-grid">
                 <label>
@@ -408,14 +490,6 @@
                     승인합니다.
                 </p>
             {/if}
-            <button
-                type="button"
-                disabled={busy || !activationCanReview}
-                onclick={() => void controller.reviewActivation()}
-            >
-                불변 리비전·라이선스·충돌 검토
-            </button>
-
             {#if activation.review !== null}
                 {@const review = activation.review}
                 <section class="hash-review" aria-labelledby="module-activation-review-title">
@@ -550,13 +624,6 @@
                             {/each}
                         </div>
                     {/if}
-                    <button
-                        type="button"
-                        disabled={busy || !activationConflictsResolved}
-                        onclick={() => void controller.resolveActivation()}
-                    >
-                        선택한 충돌 해법으로 계획 만들기
-                    </button>
                 </section>
             {/if}
 
@@ -712,16 +779,6 @@
                             </p>
                         {/if}
                     </section>
-                    <button
-                        class="primary"
-                        type="button"
-                        disabled={busy}
-                        onclick={() => void controller.activateReviewedPlan()}
-                    >
-                        {activation.approval_id === null
-                            ? '이 검토·계획 해시로 활성화 승인'
-                            : '동일한 승인 ID로 결과 다시 확인'}
-                    </button>
                     {#if activation.approval_id !== null}
                         <p class="lifecycle-note">
                             재시도 승인 ID <code>{activation.approval_id}</code>
@@ -746,144 +803,152 @@
         </section>
     {/if}
 
-    <section aria-labelledby="active-module-bindings-title">
-        <div class="subheading">
-            <h4 id="active-module-bindings-title">저장된 모듈 바인딩과 불변 리비전</h4>
-            <span>{lifecycleState.bindings.length}개</span>
-        </div>
-        {#if lifecycleState.bindings.length === 0}
-            <p class="lifecycle-note">현재 컨텍스트와 관련된 저장 바인딩이 없습니다.</p>
-        {:else}
-            <div class="binding-list">
-                {#each lifecycleState.bindings as item (item.binding.binding.id)}
-                    {@const reactivationCandidate = lifecycleState.candidates.find(
-                        (candidate) => candidate.module_id === item.binding.binding.module_id,
-                    )}
-                    <article class="binding-card">
-                        <header>
-                            <div>
-                                <strong>{item.module_name}</strong>
-                                <span>
-                                    {scopeLabel(item.binding.binding.scope)} ·
-                                    {dispositionLabel(item.disposition)} · CAS
-                                    {item.binding.state_revision}
-                                </span>
-                            </div>
-                            <code>{shortHash(item.revision_source_sha256)}</code>
-                        </header>
-                        <p>
-                            현재 해석 리비전 <code>{item.binding.binding.revision_id}</code> ·
-                            마지막 승인 리비전 <code>{item.approved_revision_id}</code>
-                        </p>
-                        {#if item.disposition === 'needs_reapproval'}
-                            <p class="lifecycle-note" role="note">
-                                활성 리비전이 마지막 승인 이후 변경되었습니다. 새 리비전은 다시
-                                검토·승인하기 전까지 런타임에 적용되지 않습니다.
+    {#if legacyFlatMode || lifecyclePage === 'modules:bindings'}
+        <section aria-labelledby="active-module-bindings-title">
+            <div class="subheading">
+                <h4 id="active-module-bindings-title">저장된 모듈 바인딩과 불변 리비전</h4>
+                <span>{lifecycleState.bindings.length}개</span>
+            </div>
+            {#if lifecycleState.bindings.length === 0}
+                <p class="lifecycle-note">현재 컨텍스트와 관련된 저장 바인딩이 없습니다.</p>
+            {:else}
+                <div class="binding-list">
+                    {#each lifecycleState.bindings as item (item.binding.binding.id)}
+                        {@const reactivationCandidate = lifecycleState.candidates.find(
+                            (candidate) => candidate.module_id === item.binding.binding.module_id,
+                        )}
+                        <article class="binding-card">
+                            <header>
+                                <div>
+                                    <strong>{item.module_name}</strong>
+                                    <span>
+                                        {scopeLabel(item.binding.binding.scope)} ·
+                                        {dispositionLabel(item.disposition)} · CAS
+                                        {item.binding.state_revision}
+                                    </span>
+                                </div>
+                                <code>{shortHash(item.revision_source_sha256)}</code>
+                            </header>
+                            <p>
+                                현재 해석 리비전 <code>{item.binding.binding.revision_id}</code> ·
+                                마지막 승인 리비전 <code>{item.approved_revision_id}</code>
                             </p>
-                        {/if}
-                        {#if reactivationCandidate && reactivationCandidate.source_kind !== 'application_built_in'}
+                            {#if item.disposition === 'needs_reapproval'}
+                                <p class="lifecycle-note" role="note">
+                                    활성 리비전이 마지막 승인 이후 변경되었습니다. 새 리비전은 다시
+                                    검토·승인하기 전까지 런타임에 적용되지 않습니다.
+                                </p>
+                            {/if}
+                            {#if reactivationCandidate && reactivationCandidate.source_kind !== 'application_built_in'}
+                                <button
+                                    type="button"
+                                    disabled={busy || !reactivationCandidate.local_use_allowed}
+                                    onclick={() =>
+                                        openActivation(
+                                            reactivationCandidate.module_id,
+                                            item.binding.binding.id,
+                                        )}
+                                >
+                                    이 바인딩을 후보 리비전으로 다시 검토
+                                </button>
+                            {/if}
                             <button
                                 type="button"
-                                disabled={busy || !reactivationCandidate.local_use_allowed}
-                                onclick={() =>
-                                    controller.beginActivation(
-                                        reactivationCandidate.module_id,
-                                        item.binding.binding.id,
-                                    )}
+                                disabled={busy}
+                                aria-label={`${item.module_name} 바인딩 비활성화 검토`}
+                                onclick={() => openDeactivation(item.binding.binding.id)}
                             >
-                                이 바인딩을 후보 리비전으로 다시 검토
+                                이 바인딩 비활성화 검토
                             </button>
-                        {/if}
-                        <button
-                            type="button"
-                            disabled={busy}
-                            aria-label={`${item.module_name} 바인딩 비활성화 검토`}
-                            onclick={() =>
-                                void controller.reviewDeactivation(item.binding.binding.id)}
-                        >
-                            이 바인딩 비활성화 검토
-                        </button>
-                        {#if item.revisions_truncated}
-                            <p class="lifecycle-note">최신 100개 리비전만 표시합니다.</p>
-                        {/if}
-                        <ul class="revision-list">
-                            {#each item.revisions as revision (revision.revision_id)}
-                                {@const approvalKey = rollbackApprovalKey(
-                                    item.binding.binding.id,
-                                    revision.revision_id,
-                                )}
-                                {@const importedTarget =
-                                    revision.source_kind === 'imported_package'}
-                                <li>
-                                    <span>
-                                        {revision.name} · v{revision.version} ·
-                                        <code>{revision.revision_id}</code> ·
-                                        {shortHash(revision.source_sha256)}
-                                    </span>
-                                    {#if revision.revision_id === item.approved_revision_id}
-                                        <span class="current-badge">마지막 승인</span>
-                                    {/if}
-                                    {#if revision.active}
-                                        <span class="current-badge">모듈 최신</span>
-                                    {/if}
-                                    {#if revision.revision_id !== item.approved_revision_id}
-                                        {#if importedTarget}
-                                            <label>
-                                                <span>대상 리비전 패키지 승인</span>
-                                                <select
-                                                    aria-label={`${item.module_name} ${revision.revision_id} 대상 리비전 패키지 승인`}
-                                                    value={rollbackPackageApprovalChoices[
-                                                        approvalKey
-                                                    ] ?? ''}
-                                                    disabled={busy || !revision.rollback_allowed}
-                                                    onchange={(event) => {
-                                                        rollbackPackageApprovalChoices[
-                                                            approvalKey
-                                                        ] = event.currentTarget.value;
-                                                    }}
-                                                >
-                                                    <option value="">명시적으로 선택하세요</option>
-                                                    {#each revision.completed_package_approvals as approval (approval.approval_id)}
-                                                        <option value={approval.approval_id}>
-                                                            {approval.package_id} ·
-                                                            {approval.approval_id} ·
-                                                            {shortHash(approval.approval_sha256)}
-                                                        </option>
-                                                    {/each}
-                                                </select>
-                                            </label>
+                            {#if item.revisions_truncated}
+                                <p class="lifecycle-note">최신 100개 리비전만 표시합니다.</p>
+                            {/if}
+                            <ul class="revision-list">
+                                {#each item.revisions as revision (revision.revision_id)}
+                                    {@const approvalKey = rollbackApprovalKey(
+                                        item.binding.binding.id,
+                                        revision.revision_id,
+                                    )}
+                                    {@const importedTarget =
+                                        revision.source_kind === 'imported_package'}
+                                    <li>
+                                        <span>
+                                            {revision.name} · v{revision.version} ·
+                                            <code>{revision.revision_id}</code> ·
+                                            {shortHash(revision.source_sha256)}
+                                        </span>
+                                        {#if revision.revision_id === item.approved_revision_id}
+                                            <span class="current-badge">마지막 승인</span>
                                         {/if}
-                                        <button
-                                            type="button"
-                                            disabled={busy ||
-                                                !revision.rollback_allowed ||
-                                                (importedTarget &&
-                                                    !rollbackPackageApprovalChoices[approvalKey])}
-                                            aria-label={`${item.module_name} ${revision.revision_id} 롤백 검토`}
-                                            onclick={() =>
-                                                void controller.reviewRollback(
-                                                    item.binding.binding.id,
-                                                    revision.revision_id,
-                                                    importedTarget
-                                                        ? (rollbackPackageApprovalChoices[
-                                                              approvalKey
-                                                          ] ?? null)
-                                                        : null,
-                                                )}
-                                        >
-                                            롤백 검토
-                                        </button>
-                                    {/if}
-                                </li>
-                            {/each}
-                        </ul>
-                    </article>
-                {/each}
-            </div>
-        {/if}
-    </section>
+                                        {#if revision.active}
+                                            <span class="current-badge">모듈 최신</span>
+                                        {/if}
+                                        {#if revision.revision_id !== item.approved_revision_id}
+                                            {#if importedTarget}
+                                                <label>
+                                                    <span>대상 리비전 패키지 승인</span>
+                                                    <select
+                                                        aria-label={`${item.module_name} ${revision.revision_id} 대상 리비전 패키지 승인`}
+                                                        value={rollbackPackageApprovalChoices[
+                                                            approvalKey
+                                                        ] ?? ''}
+                                                        disabled={busy ||
+                                                            !revision.rollback_allowed}
+                                                        onchange={(event) => {
+                                                            rollbackPackageApprovalChoices[
+                                                                approvalKey
+                                                            ] = event.currentTarget.value;
+                                                        }}
+                                                    >
+                                                        <option value=""
+                                                            >명시적으로 선택하세요</option
+                                                        >
+                                                        {#each revision.completed_package_approvals as approval (approval.approval_id)}
+                                                            <option value={approval.approval_id}>
+                                                                {approval.package_id} ·
+                                                                {approval.approval_id} ·
+                                                                {shortHash(
+                                                                    approval.approval_sha256,
+                                                                )}
+                                                            </option>
+                                                        {/each}
+                                                    </select>
+                                                </label>
+                                            {/if}
+                                            <button
+                                                type="button"
+                                                disabled={busy ||
+                                                    !revision.rollback_allowed ||
+                                                    (importedTarget &&
+                                                        !rollbackPackageApprovalChoices[
+                                                            approvalKey
+                                                        ])}
+                                                aria-label={`${item.module_name} ${revision.revision_id} 롤백 검토`}
+                                                onclick={() =>
+                                                    openRollback(
+                                                        item.binding.binding.id,
+                                                        revision.revision_id,
+                                                        importedTarget
+                                                            ? (rollbackPackageApprovalChoices[
+                                                                  approvalKey
+                                                              ] ?? null)
+                                                            : null,
+                                                    )}
+                                            >
+                                                롤백 검토
+                                            </button>
+                                        {/if}
+                                    </li>
+                                {/each}
+                            </ul>
+                        </article>
+                    {/each}
+                </div>
+            {/if}
+        </section>
+    {/if}
 
-    {#if deactivation?.review !== null && deactivation !== null}
+    {#if (legacyFlatMode || lifecyclePage === 'modules:deactivation') && deactivation?.review !== null && deactivation !== null}
         {@const deactivationReview = deactivation.review}
         <section class="review-surface" aria-labelledby="module-deactivation-review-title">
             <div class="subheading">
@@ -894,9 +959,6 @@
                         <code>{deactivationReview.binding.id}</code>
                     </p>
                 </div>
-                <button type="button" disabled={busy} onclick={() => controller.clearReview()}>
-                    닫기
-                </button>
             </div>
             <dl class="hash-grid">
                 <div>
@@ -928,15 +990,6 @@
                 이 작업은 현재 범위의 바인딩만 CAS로 삭제합니다. 모듈과 불변 리비전 자체는 삭제하지
                 않습니다.
             </p>
-            <button
-                class="danger"
-                type="button"
-                disabled={busy || deactivation.receipt !== null}
-                onclick={() => void controller.deactivateReviewedBinding()}
-            >
-                이 검토 해시로 바인딩 비활성화
-            </button>
-
             {#if deactivation.receipt !== null}
                 <section class="receipt" aria-labelledby="module-deactivation-receipt-title">
                     <h5 id="module-deactivation-receipt-title">검증된 비활성화 영수증</h5>
@@ -956,7 +1009,7 @@
         </section>
     {/if}
 
-    {#if rollback?.review !== null && rollback !== null}
+    {#if (legacyFlatMode || lifecyclePage === 'modules:rollback') && rollback?.review !== null && rollback !== null}
         {@const rollbackReview = rollback.review}
         <section class="review-surface" aria-labelledby="module-rollback-review-title">
             <div class="subheading">
@@ -967,9 +1020,6 @@
                         <code>{rollbackReview.review.rollback.target_revision_id}</code>
                     </p>
                 </div>
-                <button type="button" disabled={busy} onclick={() => controller.clearReview()}>
-                    닫기
-                </button>
             </div>
             <dl class="hash-grid">
                 <div>
@@ -1059,16 +1109,6 @@
                     {/each}
                 </div>
             {/if}
-            <button
-                type="button"
-                disabled={busy ||
-                    !rollbackReview.review.rollback.eligible ||
-                    !rollbackConflictsResolved}
-                onclick={() => void controller.resolveRollback()}
-            >
-                검토한 diff·충돌로 원자적 롤백 계획 만들기
-            </button>
-
             {#if rollback.plan !== null}
                 <section class="hash-review" aria-labelledby="module-rollback-plan-title">
                     <h5 id="module-rollback-plan-title">승인할 롤백 계획</h5>
@@ -1078,16 +1118,6 @@
                     <p>
                         재활성화 <code>{rollback.plan.activation.plan_sha256}</code>
                     </p>
-                    <button
-                        class="danger"
-                        type="button"
-                        disabled={busy}
-                        onclick={() => void controller.applyReviewedRollback()}
-                    >
-                        {rollback.approval_id === null
-                            ? '이 롤백·활성화 해시로 승인'
-                            : '동일한 승인 ID로 결과 다시 확인'}
-                    </button>
                     {#if rollback.approval_id !== null}
                         <p class="lifecycle-note">
                             재시도 승인 ID <code>{rollback.approval_id}</code>
@@ -1111,18 +1141,188 @@
             {/if}
         </section>
     {/if}
+
+    {#if lifecyclePage === 'modules:activation' && activation === null}
+        <p class="lifecycle-note">활성화 후보를 선택하면 검토 화면이 열립니다.</p>
+    {:else if lifecyclePage === 'modules:deactivation' && deactivation?.review === null}
+        <p class="lifecycle-note" role="status">비활성화 검토를 준비하고 있습니다.</p>
+    {:else if lifecyclePage === 'modules:rollback' && rollback?.review === null}
+        <p class="lifecycle-note" role="status">롤백 검토를 준비하고 있습니다.</p>
+    {/if}
+{/snippet}
+
+{#snippet lifecycleActions()}
+    {#if lifecyclePage === 'modules' || lifecyclePage === 'modules:candidates' || lifecyclePage === 'modules:bindings'}
+        <DetailActionBar className="lifecycle-action-bar" ariaLabel="콘텐츠 모듈 목록 작업" fixed>
+            <button
+                class="primary detail-action detail-action--wide"
+                type="button"
+                disabled={busy || conversationId === null || branchId === null}
+                onclick={() => void controller.loadContext(conversationId, branchId)}
+            >
+                후보·바인딩 새로고침
+            </button>
+        </DetailActionBar>
+    {:else if lifecyclePage === 'modules:activation' && activation !== null}
+        <DetailActionBar className="lifecycle-action-bar" ariaLabel="모듈 활성화 작업" fixed>
+            <button
+                class="detail-action"
+                type="button"
+                disabled={busy}
+                onclick={() => closeReview(reviewReturnPage)}
+            >
+                닫기
+            </button>
+            {#if activation.plan !== null}
+                <button
+                    class="primary detail-action detail-action--grow"
+                    type="button"
+                    aria-label={activation.approval_id === null
+                        ? '이 검토·계획 해시로 활성화 승인'
+                        : '동일한 승인 ID로 결과 다시 확인'}
+                    disabled={busy}
+                    onclick={() => void controller.activateReviewedPlan()}
+                >
+                    {activation.approval_id === null ? '활성화 승인' : '결과 확인'}
+                </button>
+            {:else if activation.review !== null}
+                <button
+                    class="primary detail-action detail-action--grow"
+                    type="button"
+                    aria-label="선택한 충돌 해법으로 계획 만들기"
+                    disabled={busy || !activationConflictsResolved}
+                    onclick={() => void controller.resolveActivation()}
+                >
+                    계획 만들기
+                </button>
+            {:else}
+                <button
+                    class="primary detail-action detail-action--grow"
+                    type="button"
+                    aria-label="불변 리비전·라이선스·충돌 검토"
+                    disabled={busy || !activationCanReview}
+                    onclick={() => void controller.reviewActivation()}
+                >
+                    활성화 검토
+                </button>
+            {/if}
+        </DetailActionBar>
+    {:else if lifecyclePage === 'modules:deactivation' && deactivation?.review !== null && deactivation !== null}
+        <DetailActionBar className="lifecycle-action-bar" ariaLabel="모듈 비활성화 작업" fixed>
+            <button
+                class="danger detail-action detail-action--destructive"
+                type="button"
+                aria-label="이 검토 해시로 바인딩 비활성화"
+                disabled={busy || deactivation.receipt !== null}
+                onclick={() => void controller.deactivateReviewedBinding()}
+            >
+                비활성화
+            </button>
+            <button
+                class="detail-action detail-action--grow"
+                type="button"
+                disabled={busy}
+                onclick={() => closeReview('modules:bindings')}
+            >
+                닫기
+            </button>
+        </DetailActionBar>
+    {:else if lifecyclePage === 'modules:rollback' && rollback?.review !== null && rollback !== null}
+        <DetailActionBar className="lifecycle-action-bar" ariaLabel="모듈 롤백 작업" fixed>
+            {#if rollback.plan !== null}
+                <button
+                    class="danger detail-action detail-action--destructive"
+                    type="button"
+                    aria-label={rollback.approval_id === null
+                        ? '이 롤백·활성화 해시로 승인'
+                        : '동일한 승인 ID로 결과 다시 확인'}
+                    disabled={busy}
+                    onclick={() => void controller.applyReviewedRollback()}
+                >
+                    {rollback.approval_id === null ? '롤백 승인' : '결과 확인'}
+                </button>
+            {:else}
+                <button
+                    class="primary detail-action"
+                    type="button"
+                    aria-label="검토한 diff·충돌로 원자적 롤백 계획 만들기"
+                    disabled={busy ||
+                        !rollback.review.review.rollback.eligible ||
+                        !rollbackConflictsResolved}
+                    onclick={() => void controller.resolveRollback()}
+                >
+                    롤백 계획
+                </button>
+            {/if}
+            <button
+                class="detail-action detail-action--grow"
+                type="button"
+                disabled={busy}
+                onclick={() => closeReview('modules:bindings')}
+            >
+                닫기
+            </button>
+        </DetailActionBar>
+    {/if}
+{/snippet}
+
+<section class="module-lifecycle" aria-labelledby="module-lifecycle-title">
+    {@render lifecycleContent()}
+    {@render lifecycleActions()}
 </section>
 
 <style>
     .module-lifecycle {
         display: grid;
-        gap: 1rem;
-        padding: 1rem;
-        border: 1px solid var(--line);
-        border-radius: 0.9rem;
+        width: 100%;
+        min-width: 0;
+        min-height: 0;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        gap: 16px;
     }
 
-    .lifecycle-heading,
+    .lifecycle-index {
+        width: 100%;
+        margin: 0;
+    }
+
+    .lifecycle-index-row {
+        min-height: clamp(62px, 17.849vw, 78px);
+    }
+
+    .lifecycle-index-row .setting-copy {
+        display: grid;
+        min-width: 0;
+        gap: 5px;
+        text-align: left;
+    }
+
+    .lifecycle-index-row :is(strong, small) {
+        overflow: hidden;
+        font-size: var(--detail-support-type);
+        line-height: 1.35;
+        text-overflow: ellipsis;
+    }
+
+    .lifecycle-index-row strong {
+        color: var(--ink);
+        font-weight: 550;
+        white-space: nowrap;
+    }
+
+    .lifecycle-index-row small {
+        display: -webkit-box;
+        color: var(--ink-muted);
+        font-weight: 550;
+        overflow-wrap: anywhere;
+        white-space: normal;
+        line-clamp: 3;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 3;
+    }
+
     .subheading,
     .candidate-card header,
     .binding-card header {
@@ -1132,7 +1332,6 @@
         gap: 1rem;
     }
 
-    .lifecycle-heading h3,
     .subheading h4,
     .hash-review h5,
     .diff h5,
@@ -1144,7 +1343,6 @@
         margin: 0.2rem 0 0;
     }
 
-    .lifecycle-heading p,
     .subheading p {
         margin: 0.35rem 0 0;
     }
@@ -1152,22 +1350,39 @@
     .candidate-grid,
     .binding-list {
         display: grid;
-        gap: 0.8rem;
-        margin-top: 0.75rem;
+        gap: 0;
+        margin-top: 8px;
     }
 
     .candidate-card,
-    .binding-card,
+    .binding-card {
+        display: grid;
+        gap: 12px;
+        padding: 16px 0;
+        border: 0;
+        border-bottom: 1px solid var(--line);
+        border-radius: 0;
+        background: transparent;
+    }
+
     .review-surface,
     .hash-review,
     .diff,
     .receipt {
         display: grid;
-        gap: 0.75rem;
-        padding: 0.9rem;
-        border: 1px solid var(--line);
-        border-radius: 0.7rem;
-        background: var(--surface-raised);
+        min-width: 0;
+        gap: 14px;
+        padding: 0;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+    }
+
+    .hash-review,
+    .diff,
+    .receipt {
+        padding-top: 16px;
+        border-top: 1px solid var(--line);
     }
 
     .candidate-card header div,
@@ -1189,26 +1404,34 @@
     .hash-grid,
     .hash-review dl {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(min(12rem, 100%), 1fr));
-        gap: 0.6rem;
+        grid-template-columns: 1fr;
+        gap: 0;
         margin: 0;
     }
 
     .gate-grid div,
     .hash-grid div,
     .hash-review dl div {
-        display: grid;
-        gap: 0.2rem;
+        display: flex;
         min-width: 0;
+        align-items: baseline;
+        justify-content: space-between;
+        padding: 10px 0;
+        border-bottom: 1px solid var(--line);
+        gap: 16px;
     }
 
     dt {
         color: var(--ink-muted);
-        font-size: 0.85rem;
+        font-size: var(--detail-support-type);
+        font-weight: 700;
     }
 
     dd {
         margin: 0;
+        color: var(--ink);
+        font-size: var(--detail-support-type);
+        text-align: right;
         overflow-wrap: anywhere;
     }
 
@@ -1219,20 +1442,53 @@
     .draft-grid,
     .conflict-list {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(min(14rem, 100%), 1fr));
-        gap: 0.75rem;
+        grid-template-columns: 1fr;
+        gap: 14px;
     }
 
     .draft-grid label,
     .conflict-list label {
         display: grid;
-        gap: 0.35rem;
+        gap: 7px;
+        color: var(--ink-muted);
+        font-size: var(--detail-support-type);
+        font-weight: 700;
     }
 
     select,
     input {
         width: 100%;
+        min-width: 0;
+        min-height: clamp(48px, 13.73vw, 60px);
         box-sizing: border-box;
+        padding: clamp(12px, 3.432vw, 15px);
+        border: 1.5px solid var(--line);
+        border-radius: var(--radius-md);
+        -webkit-appearance: none;
+        appearance: none;
+        background: color-mix(in srgb, var(--surface-sunken) 26%, var(--surface-raised));
+        box-shadow: inset 0 1px 2px rgb(16 18 24 / 3%);
+        caret-color: var(--accent);
+        color: var(--ink);
+        font-size: var(--detail-support-type);
+        line-height: 1.5;
+        transition:
+            background-color 140ms ease,
+            box-shadow 140ms ease;
+    }
+
+    :is(select, input):hover:not(:focus, :disabled) {
+        border-color: var(--line);
+    }
+
+    :is(select, input):focus {
+        border-color: var(--accent);
+        outline: none;
+    }
+
+    :is(select, input):disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
     }
 
     .revision-list {
@@ -1264,11 +1520,9 @@
     }
 
     .revision-list li {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 0.75rem;
-        padding-block: 0.45rem;
+        display: grid;
+        gap: 10px;
+        padding-block: 12px;
         border-top: 1px solid var(--line);
     }
 
@@ -1289,10 +1543,26 @@
     }
 
     .receipt {
-        border-color: var(--success);
+        color: var(--ink);
     }
 
     code {
         overflow-wrap: anywhere;
+    }
+
+    .candidate-card > button,
+    .binding-card > button,
+    .revision-list button {
+        justify-self: stretch;
+        min-height: 44px;
+    }
+
+    @container view (min-width: 700px) {
+        .gate-grid,
+        .hash-grid,
+        .hash-review dl {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            column-gap: 24px;
+        }
     }
 </style>

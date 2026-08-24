@@ -93,14 +93,6 @@ function controllerFixture() {
     };
 }
 
-function closestDetails(element: HTMLElement): HTMLElement {
-    const details = element.closest('details');
-    if (!(details instanceof HTMLElement)) {
-        throw new Error('expected a details ancestor');
-    }
-    return details;
-}
-
 function deferred<Value>(): {
     promise: Promise<Value>;
     resolve: (value: Value) => void;
@@ -120,26 +112,49 @@ describe('CreatorDocumentEditors', () => {
             controller: fixture.controller,
         });
 
-        const knowledgeFamily = closestDetails(screen.getByText('지식 책'));
-        await fireEvent.click(within(knowledgeFamily).getByText('지식 책'));
-        await fireEvent.input(within(knowledgeFamily).getByLabelText('새 지식 책 ID'), {
+        await fireEvent.click(screen.getByRole('button', { name: /^지식 책/ }));
+        const knowledgeListActions = screen.getByRole('toolbar', { name: '지식 책 작업' });
+        expect(knowledgeListActions).toHaveClass('fixed');
+        await fireEvent.click(
+            within(knowledgeListActions).getByRole('button', { name: '문서 추가하기' }),
+        );
+
+        await fireEvent.input(screen.getByLabelText('새 지식 책 ID'), {
             target: { value: 'knowledge-new' },
         });
-        await fireEvent.click(within(knowledgeFamily).getByRole('button', { name: '새 문서' }));
+        const knowledgeCreateActions = screen.getByRole('toolbar', {
+            name: '지식 책 만들기 작업',
+        });
+        expect(knowledgeCreateActions).toHaveClass('fixed');
+        await fireEvent.click(
+            within(knowledgeCreateActions).getByRole('button', { name: '문서 만들기' }),
+        );
         expect(fixture.addCreatorDocumentDraft).toHaveBeenCalledWith(
             'knowledge_book',
             'knowledge-new',
         );
 
-        await fireEvent.click(screen.getByText('memory-default'));
-        const memoryEditor = closestDetails(screen.getByText('memory-default'));
-        const editedMemory = { ...MEMORY_PROFILE, name: 'Edited memory' };
-        await fireEvent.input(within(memoryEditor).getByLabelText('안전 문서 JSON'), {
-            target: { value: JSON.stringify(editedMemory) },
+        cleanup();
+        render(CreatorDocumentEditors, {
+            orchestrationState: readyState(),
+            controller: fixture.controller,
         });
-        await fireEvent.click(
-            within(memoryEditor).getByRole('button', { name: 'Core 검증 후 저장' }),
+
+        await fireEvent.click(screen.getByRole('button', { name: /^메모리 프로필/ }));
+        await fireEvent.click(screen.getByRole('button', { name: /^memory-default/ }));
+        const memoryEditor = screen.getByRole('form', { name: '메모리 프로필 JSON 편집' });
+        const editedMemory = { ...MEMORY_PROFILE, name: 'Edited memory' };
+        await fireEvent.input(
+            within(memoryEditor).getByRole('textbox', { name: /^안전 문서 JSON/ }),
+            {
+                target: { value: JSON.stringify(editedMemory) },
+            },
         );
+        const memoryEditActions = screen.getByRole('toolbar', {
+            name: '메모리 프로필 편집 작업',
+        });
+        expect(memoryEditActions).toHaveClass('fixed');
+        await fireEvent.click(within(memoryEditActions).getByRole('button', { name: '저장' }));
         await waitFor(() =>
             expect(fixture.replaceCreatorDocument).toHaveBeenCalledWith(
                 'memory_profile',
@@ -152,8 +167,14 @@ describe('CreatorDocumentEditors', () => {
             MEMORY_PROFILE.id,
         );
 
-        await fireEvent.click(within(memoryEditor).getByRole('button', { name: '삭제' }));
-        await fireEvent.click(within(memoryEditor).getByRole('button', { name: '삭제 확인' }));
+        await fireEvent.click(screen.getByRole('button', { name: /^memory-default/ }));
+        const memoryDeleteActions = screen.getByRole('toolbar', {
+            name: '메모리 프로필 편집 작업',
+        });
+        await fireEvent.click(within(memoryDeleteActions).getByRole('button', { name: '삭제' }));
+        await fireEvent.click(
+            within(memoryDeleteActions).getByRole('button', { name: '삭제 확인' }),
+        );
         await waitFor(() =>
             expect(fixture.deleteCreatorDocument).toHaveBeenCalledWith(
                 'memory_profile',
@@ -169,24 +190,28 @@ describe('CreatorDocumentEditors', () => {
             controller: fixture.controller,
         });
 
-        await fireEvent.click(screen.getByText('module-default'));
-        const moduleEditor = closestDetails(screen.getByText('module-default'));
-        await fireEvent.input(within(moduleEditor).getByLabelText('안전 문서 JSON'), {
-            target: {
-                value: JSON.stringify({
-                    ...CONTENT_MODULE,
-                    asset_ids: ['asset-not-resolved'],
-                }),
+        await fireEvent.click(screen.getByRole('button', { name: /^콘텐츠 모듈/ }));
+        await fireEvent.click(screen.getByRole('button', { name: /^module-default/ }));
+        const moduleEditor = screen.getByRole('form', { name: '콘텐츠 모듈 JSON 편집' });
+        await fireEvent.input(
+            within(moduleEditor).getByRole('textbox', { name: /^안전 문서 JSON/ }),
+            {
+                target: {
+                    value: JSON.stringify({
+                        ...CONTENT_MODULE,
+                        asset_ids: ['asset-not-resolved'],
+                    }),
+                },
             },
-        });
-        await fireEvent.click(
-            within(moduleEditor).getByRole('button', { name: 'Core 검증 후 저장' }),
         );
+        const moduleEditActions = screen.getByRole('toolbar', {
+            name: '콘텐츠 모듈 편집 작업',
+        });
+        expect(moduleEditActions).toHaveClass('fixed');
+        await fireEvent.click(within(moduleEditActions).getByRole('button', { name: '저장' }));
 
         expect(
-            await within(moduleEditor).findByText(
-                '현재 안전 CRUD 경로에서는 asset_ids가 빈 배열이어야 합니다.',
-            ),
+            await screen.findByText('현재 안전 CRUD 경로에서는 asset_ids가 빈 배열이어야 합니다.'),
         ).toBeVisible();
         expect(fixture.replaceCreatorDocument).not.toHaveBeenCalled();
         expect(fixture.saveCreatorDocument).not.toHaveBeenCalled();
@@ -201,17 +226,20 @@ describe('CreatorDocumentEditors', () => {
             controller: fixture.controller,
         });
 
-        await fireEvent.click(screen.getByText('memory-default'));
-        const memoryEditor = closestDetails(screen.getByText('memory-default'));
-        const editor = within(memoryEditor).getByLabelText('안전 문서 JSON');
+        await fireEvent.click(screen.getByRole('button', { name: /^메모리 프로필/ }));
+        await fireEvent.click(screen.getByRole('button', { name: /^memory-default/ }));
+        const memoryEditor = screen.getByRole('form', { name: '메모리 프로필 JSON 편집' });
+        const editor = within(memoryEditor).getByRole('textbox', { name: /^안전 문서 JSON/ });
         const submitted = { ...MEMORY_PROFILE, name: 'Submitted memory' };
         const newerDraft = { ...submitted, summary_schema: 'newer-unsaved-schema' };
         await fireEvent.input(editor, {
             target: { value: JSON.stringify(submitted) },
         });
-        await fireEvent.click(
-            within(memoryEditor).getByRole('button', { name: 'Core 검증 후 저장' }),
-        );
+        const memoryEditActions = screen.getByRole('toolbar', {
+            name: '메모리 프로필 편집 작업',
+        });
+        expect(memoryEditActions).toHaveClass('fixed');
+        await fireEvent.click(within(memoryEditActions).getByRole('button', { name: '저장' }));
         await waitFor(() =>
             expect(fixture.saveCreatorDocument).toHaveBeenCalledWith(
                 'memory_profile',
@@ -224,7 +252,11 @@ describe('CreatorDocumentEditors', () => {
         });
         pendingSave.resolve(true);
 
-        await waitFor(() => expect(editor).toHaveValue(JSON.stringify(newerDraft)));
+        await screen.findByRole('toolbar', { name: '메모리 프로필 작업' });
+        await fireEvent.click(screen.getByRole('button', { name: /^memory-default/ }));
+        expect(screen.getByRole('textbox', { name: /^안전 문서 JSON/ })).toHaveValue(
+            JSON.stringify(newerDraft),
+        );
         expect(fixture.replaceCreatorDocument).toHaveBeenCalledOnce();
         expect(fixture.replaceCreatorDocument).toHaveBeenCalledWith(
             'memory_profile',

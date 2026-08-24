@@ -1,22 +1,48 @@
 <script lang="ts">
+    import {
+        BriefcaseBusiness,
+        Check,
+        CircleDot,
+        Compass,
+        EllipsisVertical,
+        GitBranch,
+        LayoutTemplate,
+        Link2,
+        ListChecks,
+        Route,
+        Scale,
+        Search,
+        SlidersHorizontal,
+        SunMoon,
+        UserRound,
+    } from '@lucide/svelte';
+    import { setContext } from 'svelte';
     import { tr } from '../../lib/i18n';
     import { setThemePreference, themePreference } from '../../lib/theme';
+    import lorepiaLogoMark from '../../assets/lorepia-logo-mark.png';
     import type { LorepiaAppController, LorepiaAppState } from '../../app/app-controller';
     import type {
+        AuthBindingDto,
         CredentialTargetDto,
+        ParameterLiteralDto,
         ProviderConnectionDto,
         ProviderProfileDto,
+        ProviderTemplateDto,
     } from '../../lib/ipc/contracts';
     import PersonaPanel from '../personas/PersonaPanel.svelte';
     import type { PersonaController, PersonaState } from '../personas/persona-controller';
-    import type { SettingsSection } from './settings-contracts';
+    import OpenSourceLicenses from '../licenses/OpenSourceLicenses.svelte';
+    import DetailActionBar from '../../components/detail/DetailActionBar.svelte';
+    import {
+        DETAIL_SCROLL_CONTEXT,
+        type DetailScrollListener,
+    } from '../../components/detail/detail-scroll';
+    import type { SettingsDetailPage, SettingsSection } from './settings-contracts';
     import CapabilityPanel from './CapabilityPanel.svelte';
     import CatalogPanel from './CatalogPanel.svelte';
     import DiscoveryPanel from './DiscoveryPanel.svelte';
     import ModelSyncPanel from './ModelSyncPanel.svelte';
     import ProviderCrudPanel from './ProviderCrudPanel.svelte';
-
-    const MOBILE_TOP_FADE_DISTANCE_PX = 48;
 
     interface Props {
         appState: LorepiaAppState;
@@ -25,6 +51,11 @@
         controller: LorepiaAppController;
         personaState?: PersonaState;
         personaController?: PersonaController;
+        personaEditorMode?: 'create' | 'edit' | null;
+        detailPage?: SettingsDetailPage;
+        editorMode?: string | null;
+        editorTitle?: string;
+        onDetailScroll?: DetailScrollListener;
     }
 
     let {
@@ -32,9 +63,18 @@
         controller,
         personaState,
         personaController,
+        personaEditorMode = $bindable(null),
+        detailPage = $bindable(null),
+        editorMode = $bindable(null),
+        editorTitle = $bindable(''),
         section = null,
         onOpenSection = () => undefined,
+        onDetailScroll = () => undefined,
     }: Props = $props();
+
+    setContext<DetailScrollListener>(DETAIL_SCROLL_CONTEXT, (scrollTop) => {
+        onDetailScroll(scrollTop);
+    });
 
     /* The index is also a compact status surface, so every destination names its current value. */
     const entries = $derived([
@@ -46,39 +86,94 @@
         { id: 'discovery' as const },
         { id: 'catalog' as const },
         { id: 'advanced' as const },
+        { id: 'licenses' as const },
     ]);
     let settingsMenuOpen = $state(false);
     let savingKey = $state<string | null>(null);
     let selectingProfileId = $state<string | null>(null);
     let settingsBusy = $state(false);
+    let credentialDeleteConfirmationKey = $state<string | null>(null);
     let selectedRouteId = $state('');
     let selectedPresetId = $state('');
+    let preservePartialGenerations = $state(false);
+    let targetSelectionDirty = $state(false);
+    let settingsScrollElement = $state<HTMLDivElement>();
     let syncedTargetKey = '';
+    let settingsRouteKey = '';
 
+    const retainedLegacyProfileIds = $derived(
+        new Set(appState.providers.workspace.legacy_profiles.map((profile) => profile.id)),
+    );
+    const selectableRoutes = $derived(
+        appState.providers.workspace.routes.filter(
+            (route) => !retainedLegacyProfileIds.has(route.connection_id),
+        ),
+    );
     const selectedRoutePresets = $derived(
         appState.providers.workspace.presets.filter(
             (preset) => preset.model_route_id === selectedRouteId,
         ),
     );
+    const targetDraftValid = $derived(
+        (selectedRouteId === '' && selectedPresetId === '') ||
+            (selectableRoutes.some((route) => route.id === selectedRouteId) &&
+                selectedRoutePresets.some((preset) => preset.id === selectedPresetId)),
+    );
+    const targetDraftHasChanges = $derived(
+        targetSelectionDirty ||
+            preservePartialGenerations !==
+                appState.providers.workspace.settings.preserve_partial_generations,
+    );
 
     function handleSettingsDetailScroll(event: Event): void {
         const scroller = event.currentTarget as HTMLDivElement;
-        const alpha = Math.min(
-            1,
-            Math.max(0, 1 - scroller.scrollTop / MOBILE_TOP_FADE_DISTANCE_PX),
-        );
-        scroller.style.setProperty('--mobile-top-mask-alpha', String(alpha));
+        onDetailScroll(scroller.scrollTop);
     }
 
     $effect(() => {
         const settings = appState.providers.workspace.settings;
-        const key = `${settings.selected_model_route_id ?? ''}:${
+        const key = `${section === 'target' ? 'target' : 'other'}:${
+            settings.selected_provider_profile_id ?? ''
+        }:${settings.selected_model_route_id ?? ''}:${
             settings.selected_generation_preset_id ?? ''
-        }`;
+        }:${String(settings.preserve_partial_generations)}:${selectableRoutes
+            .map((route) => route.id)
+            .join(',')}:${appState.providers.workspace.presets
+            .map((preset) => `${preset.id}:${preset.model_route_id}`)
+            .join(',')}`;
         if (key === syncedTargetKey) return;
         syncedTargetKey = key;
-        selectedRouteId = settings.selected_model_route_id ?? '';
-        selectedPresetId = settings.selected_generation_preset_id ?? '';
+        const persistedRouteId =
+            settings.selected_provider_profile_id === null
+                ? (settings.selected_model_route_id ?? '')
+                : '';
+        const persistedPresetId =
+            settings.selected_provider_profile_id === null
+                ? (settings.selected_generation_preset_id ?? '')
+                : '';
+        selectedRouteId = selectableRoutes.some((route) => route.id === persistedRouteId)
+            ? persistedRouteId
+            : '';
+        selectedPresetId = appState.providers.workspace.presets.some(
+            (preset) =>
+                preset.id === persistedPresetId && preset.model_route_id === selectedRouteId,
+        )
+            ? persistedPresetId
+            : '';
+        preservePartialGenerations = settings.preserve_partial_generations;
+        targetSelectionDirty = false;
+    });
+
+    $effect(() => {
+        const nextKey = `${section ?? ''}:${detailPage ?? ''}:${editorMode ?? ''}`;
+        if (nextKey === settingsRouteKey) return;
+        settingsRouteKey = nextKey;
+        queueMicrotask(() => {
+            const scroller = settingsScrollElement;
+            if (!scroller) return;
+            scroller.scrollTop = 0;
+            onDetailScroll(0);
+        });
     });
 
     function connectionTarget(connectionId: string): CredentialTargetDto {
@@ -117,6 +212,17 @@
         }
     }
 
+    async function deleteCredential(target: CredentialTargetDto): Promise<void> {
+        const key = targetKey(target);
+        savingKey = key;
+        try {
+            await controller.deleteProviderCredential(target);
+            credentialDeleteConfirmationKey = null;
+        } finally {
+            savingKey = null;
+        }
+    }
+
     async function selectLegacyProfile(profileId: string): Promise<void> {
         if (settingsBusy) return;
         settingsBusy = true;
@@ -129,24 +235,32 @@
         }
     }
 
-    async function selectGenerationTarget(
-        modelRouteId: string | null,
-        generationPresetId: string | null,
-    ): Promise<void> {
+    async function saveGenerationTarget(): Promise<void> {
         if (settingsBusy) return;
+        if (!targetDraftHasChanges || !targetDraftValid) return;
+        const routeId = selectedRouteId === '' ? null : selectedRouteId;
+        const presetId = selectedPresetId === '' ? null : selectedPresetId;
+        const preservePartial = preservePartialGenerations;
+        const preserveChanged =
+            preservePartial !== appState.providers.workspace.settings.preserve_partial_generations;
         settingsBusy = true;
         try {
-            await controller.selectProviderGenerationTarget(modelRouteId, generationPresetId);
+            const targetSaved = targetSelectionDirty
+                ? await controller.selectProviderGenerationTarget(routeId, presetId)
+                : true;
+            if (targetSaved && preserveChanged) {
+                await controller.setPreservePartialGenerations(preservePartial);
+            }
         } finally {
             settingsBusy = false;
         }
     }
 
-    async function setPreservePartialGenerations(preserve: boolean): Promise<void> {
+    async function openTargetPreview(): Promise<void> {
         if (settingsBusy) return;
         settingsBusy = true;
         try {
-            await controller.setPreservePartialGenerations(preserve);
+            if (await controller.previewSelectedProviderRequest()) detailPage = 'preview';
         } finally {
             settingsBusy = false;
         }
@@ -173,11 +287,58 @@
         selectedPresetId =
             appState.providers.workspace.presets.find((preset) => preset.model_route_id === routeId)
                 ?.id ?? '';
+        targetSelectionDirty = true;
+    }
+
+    function clearGenerationTargetDraft(): void {
+        selectedRouteId = '';
+        selectedPresetId = '';
+        targetSelectionDirty = true;
     }
 
     function openSettingsShortcut(next: SettingsSection): void {
         settingsMenuOpen = false;
         onOpenSection(next);
+    }
+
+    function openDetailPage(next: string, title = ''): void {
+        editorMode = null;
+        editorTitle = title;
+        detailPage = next;
+    }
+
+    function selectedTemplate(): ProviderTemplateDto | undefined {
+        if (!detailPage?.startsWith('template:')) return undefined;
+        return appState.providers.workspace.templates.find(
+            (template) => template.id === detailPage?.slice('template:'.length),
+        );
+    }
+
+    function authBindingLabel(binding: AuthBindingDto): string {
+        if (binding.kind === 'none') return '없음';
+        if (binding.kind === 'bearer_header') return 'Bearer 인증 헤더';
+        return `${binding.header_name} 헤더 API 키`;
+    }
+
+    function formatParameterLiteral(literal: ParameterLiteralDto): string {
+        if (literal.type === 'string_list' || literal.type === 'stop_sequence_list') {
+            return literal.value.join(', ');
+        }
+        return String(literal.value);
+    }
+
+    function selectedConnection(): ProviderConnectionDto | undefined {
+        if (!detailPage?.startsWith('connection:')) return undefined;
+        return appState.providers.workspace.connections.find(
+            (connection) => connection.id === detailPage?.slice('connection:'.length),
+        );
+    }
+
+    function selectedLegacyProfile(): ProviderProfileDto | undefined {
+        if (!detailPage?.startsWith('legacy:')) return undefined;
+        return appState.providers.workspace.legacy_profiles.find(
+            (profile) => profile.id === detailPage?.slice('legacy:'.length),
+        );
     }
 
     function settingValue(id: SettingsSection): string {
@@ -190,7 +351,7 @@
                       ? '라이트'
                       : '다크';
             case 'persona':
-                return personaState?.selection?.selected_persona?.value.name ?? '선택 안 함';
+                return `${String(personaState?.personas.length ?? 0)}개`;
             case 'target': {
                 const legacyProfile = workspace.legacy_profiles.find(
                     (profile) => profile.id === workspace.settings.selected_provider_profile_id,
@@ -222,40 +383,46 @@
                     : `${String(workspace.catalog_status.active_revision)}차`;
             case 'advanced':
                 return `${String(workspace.routes.length)}개 라우트`;
+            case 'licenses':
+                return 'ISC · MIT';
         }
     }
 </script>
 
 {#snippet tileMark(id: SettingsSection)}
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-        {#if id === 'appearance'}
-            <circle cx="12" cy="12" r="8" />
-            <path d="M12 4v16" />
-        {:else if id === 'persona'}
-            <circle cx="12" cy="8.5" r="3.5" />
-            <path d="M5 19.5a7 7 0 0 1 14 0" />
-        {:else if id === 'target'}
-            <circle cx="12" cy="12" r="8" />
-            <circle cx="12" cy="12" r="3" />
-        {:else if id === 'connections'}
-            <path
-                d="M9.5 14.5 6.8 17.2a3.8 3.8 0 0 1-5.4-5.4l2.7-2.7M14.5 9.5l2.7-2.7a3.8 3.8 0 0 1 5.4 5.4l-2.7 2.7M9 15l6-6"
-            />
-        {:else if id === 'templates'}
-            <path d="M4 6h16v12H4z" />
-            <path d="M4 10h16" />
-        {:else if id === 'discovery'}
-            <circle cx="10.5" cy="10.5" r="6.5" />
-            <path d="m15.5 15.5 4.5 4.5" />
-        {:else if id === 'catalog'}
-            <path d="M4 7h16v12H4z" />
-            <path d="M8 4h8v3M8 11h8M8 15h5" />
-        {:else}
-            <path d="M5 8h9M18 8h1M5 16h1M10 16h9" />
-            <circle cx="16" cy="8" r="2" />
-            <circle cx="8" cy="16" r="2" />
-        {/if}
-    </svg>
+    {#if id === 'appearance'}
+        <SunMoon aria-hidden="true" />
+    {:else if id === 'persona'}
+        <UserRound aria-hidden="true" />
+    {:else if id === 'target'}
+        <CircleDot aria-hidden="true" />
+    {:else if id === 'connections'}
+        <Link2 aria-hidden="true" />
+    {:else if id === 'templates'}
+        <LayoutTemplate aria-hidden="true" />
+    {:else if id === 'discovery'}
+        <Search aria-hidden="true" />
+    {:else if id === 'catalog'}
+        <BriefcaseBusiness aria-hidden="true" />
+    {:else if id === 'advanced'}
+        <SlidersHorizontal aria-hidden="true" />
+    {:else}
+        <Scale aria-hidden="true" />
+    {/if}
+{/snippet}
+
+{#snippet providerPhaseState()}
+    {#if appState.providers.phase === 'loading'}
+        <div class="provider-state" role="status">프로바이더 상태를 불러오는 중입니다.</div>
+    {:else if appState.providers.phase === 'error'}
+        <div class="provider-state error" role="alert">
+            <strong>프로바이더 상태를 불러오지 못했습니다.</strong>
+            <p>{appState.providers.error}</p>
+            <button type="button" onclick={() => void controller.loadProviders()}>
+                다시 시도
+            </button>
+        </div>
+    {/if}
 {/snippet}
 
 <section
@@ -271,25 +438,23 @@
                 type="button"
                 aria-label="설정 더보기"
                 aria-expanded={settingsMenuOpen}
+                aria-controls="settings-shortcuts"
                 onclick={() => (settingsMenuOpen = !settingsMenuOpen)}
             >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <circle cx="12" cy="5" r="1.5" class="filled-mark" />
-                    <circle cx="12" cy="12" r="1.5" class="filled-mark" />
-                    <circle cx="12" cy="19" r="1.5" class="filled-mark" />
-                </svg>
+                <EllipsisVertical aria-hidden="true" />
             </button>
             {#if settingsMenuOpen}
-                <div class="settings-shortcuts" role="menu" aria-label="설정 바로가기">
-                    <button
-                        type="button"
-                        role="menuitem"
-                        onclick={() => openSettingsShortcut('appearance')}>화면 모드</button
+                <div
+                    id="settings-shortcuts"
+                    class="settings-shortcuts"
+                    role="group"
+                    aria-label="설정 바로가기"
+                >
+                    <button type="button" onclick={() => openSettingsShortcut('appearance')}
+                        >화면 모드</button
                     >
-                    <button
-                        type="button"
-                        role="menuitem"
-                        onclick={() => openSettingsShortcut('advanced')}>고급 설정</button
+                    <button type="button" onclick={() => openSettingsShortcut('advanced')}
+                        >고급 설정</button
                     >
                 </div>
             {/if}
@@ -297,13 +462,12 @@
         <div class="provider-scroll settings-home-scroll">
             <section class="settings-identity" aria-labelledby="settings-identity-title">
                 <span class="settings-avatar-wrap" aria-hidden="true">
-                    <span class="settings-avatar">L</span>
+                    <span
+                        class="settings-avatar brand-logo-mark"
+                        style:--logo-mask={`url("${lorepiaLogoMark}")`}
+                    ></span>
                     <span class="settings-avatar-badge">
-                        <svg viewBox="0 0 24 24">
-                            <path d="M4 7h10M18 7h2M4 17h2M10 17h10" />
-                            <circle cx="16" cy="7" r="2.4" />
-                            <circle cx="8" cy="17" r="2.4" />
-                        </svg>
+                        <SlidersHorizontal />
                     </span>
                 </span>
                 <div class="settings-identity-copy">
@@ -330,13 +494,6 @@
                                 </span>
                                 <span class="setting-trailing">
                                     <span class="setting-value">{settingValue(entry.id)}</span>
-                                    <svg
-                                        class="setting-chevron"
-                                        viewBox="0 0 20 20"
-                                        aria-hidden="true"
-                                    >
-                                        <path d="m7.5 4.5 5 5-5 5" />
-                                    </svg>
                                 </span>
                             </span>
                         </button>
@@ -344,50 +501,116 @@
                 {/each}
             </ul>
         </div>
+    {:else if section === 'persona'}
+        {#if personaState && personaController}
+            <PersonaPanel
+                {personaState}
+                controller={personaController}
+                bind:editorMode={personaEditorMode}
+            />
+        {/if}
+    {:else if section !== 'appearance' && section !== 'licenses' && appState.providers.phase !== 'ready'}
+        <div
+            bind:this={settingsScrollElement}
+            class="provider-scroll settings-detail-scroll"
+            onscroll={handleSettingsDetailScroll}
+        >
+            {@render providerPhaseState()}
+        </div>
+    {:else if section === 'catalog'}
+        <CatalogPanel {appState} {controller} bind:detailPage />
+    {:else if section === 'discovery' && detailPage === 'provider-discovery'}
+        <DiscoveryPanel
+            {appState}
+            {controller}
+            bind:nestedPage={editorMode}
+            bind:nestedTitle={editorTitle}
+        />
+    {:else if section === 'discovery' && detailPage === 'model-sync'}
+        <ModelSyncPanel
+            {appState}
+            {controller}
+            bind:nestedPage={editorMode}
+            bind:nestedTitle={editorTitle}
+        />
+    {:else if section === 'advanced' && detailPage === 'capabilities'}
+        <CapabilityPanel {appState} {controller} bind:detailMode={editorMode} />
+    {:else if section === 'advanced' && (detailPage === 'connections' || detailPage === 'routes' || detailPage === 'presets')}
+        <ProviderCrudPanel
+            {appState}
+            {controller}
+            resourcePage={detailPage}
+            bind:detailMode={editorMode}
+            bind:detailTitle={editorTitle}
+        />
+    {:else if section === 'licenses'}
+        <div
+            bind:this={settingsScrollElement}
+            class="provider-scroll settings-detail-scroll"
+            onscroll={handleSettingsDetailScroll}
+        >
+            <OpenSourceLicenses />
+        </div>
     {:else}
-        <div class="provider-scroll settings-detail-scroll" onscroll={handleSettingsDetailScroll}>
+        <div
+            bind:this={settingsScrollElement}
+            class="provider-scroll settings-detail-scroll"
+            class:detail-scroll-has-actions={(section === 'target' && detailPage === null) ||
+                (section === 'connections' && detailPage !== null)}
+            onscroll={handleSettingsDetailScroll}
+        >
             {#if section === 'appearance'}
-                <section class="settings-section appearance-settings" aria-label="화면 모드 값">
-                    <div class="segmented theme-picker" role="group" aria-label="화면 모드 선택">
+                <ul class="setting-list detail-choice-list" aria-label="화면 모드 선택">
+                    <li>
                         <button
                             type="button"
-                            class:active={$themePreference === 'system'}
+                            class="setting-row detail-choice-row"
                             aria-pressed={$themePreference === 'system'}
                             onclick={() => setThemePreference('system')}
                         >
-                            시스템
+                            <span class="setting-content">
+                                <span class="setting-copy"><strong>시스템</strong></span>
+                                {#if $themePreference === 'system'}
+                                    <Check class="detail-check" aria-hidden="true" />
+                                {/if}
+                            </span>
                         </button>
+                    </li>
+                    <li>
                         <button
                             type="button"
-                            class:active={$themePreference === 'light'}
+                            class="setting-row detail-choice-row"
                             aria-pressed={$themePreference === 'light'}
                             onclick={() => setThemePreference('light')}
                         >
-                            라이트
+                            <span class="setting-content">
+                                <span class="setting-copy"><strong>라이트</strong></span>
+                                {#if $themePreference === 'light'}
+                                    <Check class="detail-check" aria-hidden="true" />
+                                {/if}
+                            </span>
                         </button>
+                    </li>
+                    <li>
                         <button
                             type="button"
-                            class:active={$themePreference === 'dark'}
+                            class="setting-row detail-choice-row"
                             aria-pressed={$themePreference === 'dark'}
                             onclick={() => setThemePreference('dark')}
                         >
-                            다크
+                            <span class="setting-content">
+                                <span class="setting-copy"><strong>다크</strong></span>
+                                {#if $themePreference === 'dark'}
+                                    <Check class="detail-check" aria-hidden="true" />
+                                {/if}
+                            </span>
                         </button>
-                    </div>
-                </section>
+                    </li>
+                </ul>
             {/if}
-            {#if section === 'persona'}
-                {#if personaState && personaController}
-                    <PersonaPanel
-                        {personaState}
-                        controller={personaController}
-                        conversationTitle={appState.selected_conversation?.title ?? null}
-                    />
-                {/if}
-            {/if}
-            {#if appState.providers.phase === 'loading'}
+            {#if section !== 'appearance' && appState.providers.phase === 'loading'}
                 <div class="provider-state" role="status">프로바이더 상태를 불러오는 중입니다.</div>
-            {:else if appState.providers.phase === 'error'}
+            {:else if section !== 'appearance' && appState.providers.phase === 'error'}
                 <div class="provider-state error" role="alert">
                     <strong>프로바이더 상태를 불러오지 못했습니다.</strong>
                     <p>{appState.providers.error}</p>
@@ -395,60 +618,50 @@
                         다시 시도
                     </button>
                 </div>
-            {:else}
+            {:else if section !== 'appearance'}
                 {@const workspace = appState.providers.workspace}
-                {@const retainedLegacyProfileIds = new Set(
-                    workspace.legacy_profiles.map((profile) => profile.id),
-                )}
-                {#if section === 'target'}
-                    <section class="settings-section" aria-labelledby="default-target-title">
-                        <div class="section-heading">
-                            <div>
-                                <p class="eyebrow">Generation target</p>
-                                <h2 id="default-target-title">저장된 기본 생성 대상</h2>
-                            </div>
-                            <button
-                                type="button"
-                                disabled={workspace.settings.selected_model_route_id === null}
-                                onclick={() => void controller.previewSelectedProviderRequest()}
-                            >
-                                요청 구조 미리보기
-                            </button>
-                        </div>
-
+                {#if section === 'target' && detailPage === 'preview'}
+                    <section class="detail-read-page" aria-label="민감값이 제거된 요청 구조">
+                        {#if workspace.request_preview}
+                            <dl class="detail-value-list">
+                                <div>
+                                    <dt>Method</dt>
+                                    <dd>{workspace.request_preview.method}</dd>
+                                </div>
+                                <div>
+                                    <dt>Origin</dt>
+                                    <dd>{workspace.request_preview.origin}</dd>
+                                </div>
+                                <div>
+                                    <dt>Path</dt>
+                                    <dd>{workspace.request_preview.path}</dd>
+                                </div>
+                                <div>
+                                    <dt>Headers</dt>
+                                    <dd>
+                                        {workspace.request_preview.header_names.join(', ') ||
+                                            '없음'}
+                                    </dd>
+                                </div>
+                            </dl>
+                            <p class="inline-note">
+                                메시지 본문과 자격증명 값은 이 미리보기에 포함되지 않습니다.
+                            </p>
+                        {:else}
+                            <p class="inline-note">표시할 요청 구조가 없습니다.</p>
+                        {/if}
+                    </section>
+                {:else if section === 'target'}
+                    <section class="detail-form-page target-page" aria-label="기본 생성 대상 편집">
                         {#if workspace.settings.selected_provider_profile_id !== null}
                             <p class="inline-note">
                                 기존 프로바이더 프로필을 기본 대상으로 사용 중입니다.
                             </p>
-                        {:else if workspace.settings.selected_model_route_id !== null && workspace.settings.selected_generation_preset_id !== null}
-                            {@const selectedRoute = workspace.routes.find(
-                                (route) => route.id === workspace.settings.selected_model_route_id,
-                            )}
-                            {@const selectedPreset = workspace.presets.find(
-                                (preset) =>
-                                    preset.id === workspace.settings.selected_generation_preset_id,
-                            )}
-                            <dl class="summary-grid">
-                                <div>
-                                    <dt>모델</dt>
-                                    <dd>
-                                        {selectedRoute?.display_name ??
-                                            selectedRoute?.model_id ??
-                                            '알 수 없음'}
-                                    </dd>
-                                </div>
-                                <div>
-                                    <dt>프리셋</dt>
-                                    <dd>{selectedPreset?.display_name ?? '알 수 없음'}</dd>
-                                </div>
-                            </dl>
-                        {:else}
-                            <p class="inline-note warning">
-                                Core에 저장된 기본 생성 대상이 없습니다.
-                            </p>
+                        {:else if workspace.settings.selected_model_route_id === null}
+                            <p class="inline-note warning">저장된 기본 생성 대상이 없습니다.</p>
                         {/if}
 
-                        <div class="target-form">
+                        <div class="target-form detail-form">
                             <label>
                                 <span>모델 라우트</span>
                                 <select
@@ -457,18 +670,22 @@
                                     onchange={(event) => changeRoute(event.currentTarget.value)}
                                 >
                                     <option value="">선택 안 함</option>
-                                    {#each workspace.routes.filter((route) => !retainedLegacyProfileIds.has(route.connection_id)) as route (route.id)}
-                                        <option value={route.id}>
-                                            {route.display_name ?? route.model_id}
-                                        </option>
+                                    {#each selectableRoutes as route (route.id)}
+                                        <option value={route.id}
+                                            >{route.display_name ?? route.model_id}</option
+                                        >
                                     {/each}
                                 </select>
                             </label>
                             <label>
                                 <span>생성 프리셋</span>
                                 <select
-                                    bind:value={selectedPresetId}
+                                    value={selectedPresetId}
                                     disabled={settingsBusy || selectedRouteId === ''}
+                                    onchange={(event) => {
+                                        selectedPresetId = event.currentTarget.value;
+                                        targetSelectionDirty = true;
+                                    }}
                                 >
                                     <option value="">선택 안 함</option>
                                     {#each selectedRoutePresets as preset (preset.id)}
@@ -476,34 +693,8 @@
                                     {/each}
                                 </select>
                             </label>
-                            <div class="target-actions">
-                                <button
-                                    class="primary"
-                                    type="button"
-                                    disabled={settingsBusy ||
-                                        selectedRouteId === '' ||
-                                        selectedPresetId === ''}
-                                    onclick={() =>
-                                        void selectGenerationTarget(
-                                            selectedRouteId,
-                                            selectedPresetId,
-                                        )}
-                                >
-                                    기본 대상으로 저장
-                                </button>
-                                <button
-                                    type="button"
-                                    disabled={settingsBusy}
-                                    onclick={() => {
-                                        selectedRouteId = '';
-                                        selectedPresetId = '';
-                                        void selectGenerationTarget(null, null);
-                                    }}
-                                >
-                                    기본 대상 해제
-                                </button>
-                            </div>
                         </div>
+
                         <label class="settings-control-row">
                             <span class="settings-control-copy">
                                 <strong>부분 응답 보존</strong>
@@ -514,260 +705,495 @@
                                 type="checkbox"
                                 role="switch"
                                 aria-label="취소·오류 시 생성된 일부 응답을 보존"
-                                checked={workspace.settings.preserve_partial_generations}
+                                checked={preservePartialGenerations}
                                 disabled={settingsBusy}
-                                onchange={(event) =>
-                                    void setPreservePartialGenerations(event.currentTarget.checked)}
+                                onchange={(event) => {
+                                    preservePartialGenerations = event.currentTarget.checked;
+                                }}
                             />
                         </label>
 
-                        {#if workspace.request_preview}
-                            <article class="preview-card" aria-labelledby="request-preview-title">
-                                <h3 id="request-preview-title">민감값이 제거된 요청 구조</h3>
-                                <dl>
-                                    <div>
-                                        <dt>Method</dt>
-                                        <dd>{workspace.request_preview.method}</dd>
-                                    </div>
-                                    <div>
-                                        <dt>Origin</dt>
-                                        <dd>{workspace.request_preview.origin}</dd>
-                                    </div>
-                                    <div>
-                                        <dt>Path</dt>
-                                        <dd>{workspace.request_preview.path}</dd>
-                                    </div>
-                                    <div>
-                                        <dt>Headers</dt>
-                                        <dd>
-                                            {workspace.request_preview.header_names.join(', ') ||
-                                                '없음'}
-                                        </dd>
-                                    </div>
-                                </dl>
-                                <p>메시지 본문과 자격증명 값은 이 미리보기에 포함되지 않습니다.</p>
-                            </article>
-                        {/if}
+                        <button
+                            class="detail-secondary-action"
+                            type="button"
+                            disabled={settingsBusy ||
+                                workspace.settings.selected_provider_profile_id !== null ||
+                                workspace.settings.selected_model_route_id === null ||
+                                selectedRouteId !== workspace.settings.selected_model_route_id ||
+                                selectedPresetId !==
+                                    workspace.settings.selected_generation_preset_id}
+                            onclick={() => void openTargetPreview()}>요청 구조 미리보기</button
+                        >
                     </section>
                 {/if}
                 {#if section === 'connections'}
-                    <section class="settings-section" aria-labelledby="connections-title">
-                        <div class="section-heading">
-                            <div>
-                                <p class="eyebrow">Connections</p>
-                                <h2 id="connections-title">연결과 자격증명</h2>
-                            </div>
-                            <span class="count-badge">{workspace.connections.length}개</span>
-                        </div>
-
-                        {#if workspace.connections.length === 0 && workspace.legacy_profiles.length === 0}
-                            <p class="inline-note">Core에 저장된 프로바이더 연결이 없습니다.</p>
-                        {:else}
-                            <div class="card-grid">
-                                {#each workspace.connections as connection (connection.id)}
-                                    {@const target = connectionTarget(connection.id)}
-                                    {@const key = targetKey(target)}
-                                    <article class="provider-card">
-                                        <header>
-                                            <div>
-                                                <h3>{connection.display_name}</h3>
-                                                <p>
-                                                    {connection.template_id} · {connection.status}
-                                                </p>
-                                            </div>
-                                            {#if !retainedLegacyProfileIds.has(connection.id)}
-                                                <span class="status-pill">{statusLabel(key)}</span>
-                                            {/if}
-                                        </header>
-                                        <dl class="compact-list">
-                                            <div>
-                                                <dt>Template</dt>
-                                                <dd>{connection.template_id}</dd>
-                                            </div>
-                                            <div>
-                                                <dt>Network</dt>
-                                                <dd>{connection.network_mode}</dd>
-                                            </div>
-                                            <div>
-                                                <dt>Timeout</dt>
-                                                <dd>{connection.timeout_seconds}초</dd>
-                                            </div>
-                                        </dl>
-
-                                        {#if connection.credential_binding_required && !retainedLegacyProfileIds.has(connection.id)}
-                                            <div
-                                                class="credential-form"
-                                                aria-label={`${connection.display_name} 자격증명`}
-                                            >
-                                                <p>
-                                                    자격증명을 클립보드에 복사한 뒤 네이티브 캡처를
-                                                    누르세요. 값은 WebView에 전달되지 않습니다.
-                                                </p>
-                                                <div>
-                                                    <button
-                                                        class="primary"
-                                                        type="button"
-                                                        disabled={savingKey === key}
-                                                        onclick={() =>
-                                                            void captureCredential(target)}
-                                                    >
-                                                        클립보드에서 안전하게 캡처
-                                                    </button>
-                                                    <button
-                                                        class="danger"
-                                                        type="button"
-                                                        disabled={workspace.credential_statuses[
-                                                            key
-                                                        ] === 'missing'}
-                                                        onclick={() =>
-                                                            void controller.deleteProviderCredential(
-                                                                target,
-                                                            )}
-                                                    >
-                                                        삭제
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        {/if}
-
-                                        {#if routesFor(connection).length > 0}
-                                            <details>
-                                                <summary
-                                                    >모델 라우트 {routesFor(connection)
-                                                        .length}개</summary
+                    {@const connection = selectedConnection()}
+                    {@const legacyProfile = selectedLegacyProfile()}
+                    {#if connection}
+                        {@const target = connectionTarget(connection.id)}
+                        {@const key = targetKey(target)}
+                        <section
+                            class="detail-read-page connection-detail"
+                            aria-label={connection.display_name}
+                        >
+                            <dl class="detail-value-list">
+                                <div>
+                                    <dt>템플릿</dt>
+                                    <dd>{connection.template_id}</dd>
+                                </div>
+                                <div>
+                                    <dt>상태</dt>
+                                    <dd>{connection.status}</dd>
+                                </div>
+                                <div>
+                                    <dt>네트워크</dt>
+                                    <dd>{connection.network_mode}</dd>
+                                </div>
+                                <div>
+                                    <dt>시간 제한</dt>
+                                    <dd>{connection.timeout_seconds}초</dd>
+                                </div>
+                                <div>
+                                    <dt>자격증명</dt>
+                                    <dd>{statusLabel(key)}</dd>
+                                </div>
+                            </dl>
+                            {#if routesFor(connection).length > 0}
+                                <section class="detail-subsection" aria-label="모델 라우트">
+                                    <h3>모델 라우트</h3>
+                                    <ul class="detail-plain-list">
+                                        {#each routesFor(connection) as route (route.id)}
+                                            <li>
+                                                <strong
+                                                    >{route.display_name ?? route.model_id}</strong
                                                 >
-                                                <ul class="route-list">
-                                                    {#each routesFor(connection) as route (route.id)}
-                                                        <li>
-                                                            <strong
-                                                                >{route.display_name ??
-                                                                    route.model_id}</strong
-                                                            >
-                                                            <span
-                                                                >{route.status} · {route.metadata_source}</span
-                                                            >
-                                                            <small>
-                                                                {presetsFor(route.id).length === 0
-                                                                    ? '프리셋 없음'
-                                                                    : `프리셋: ${presetsFor(
-                                                                          route.id,
-                                                                      )
-                                                                          .map(
-                                                                              (preset) =>
-                                                                                  preset.display_name,
-                                                                          )
-                                                                          .join(', ')}`}
-                                                            </small>
-                                                        </li>
-                                                    {/each}
-                                                </ul>
-                                            </details>
-                                        {/if}
-                                    </article>
-                                {/each}
-
-                                {#each workspace.legacy_profiles as profile (profile.id)}
-                                    {@const target = profileTarget(profile.id)}
-                                    {@const key = targetKey(target)}
-                                    <article class="provider-card legacy">
-                                        <header>
-                                            <div>
-                                                <h3>{profile.display_name}</h3>
-                                                <p>기존 프로필 · {profile.model}</p>
-                                            </div>
-                                            {#if profileSelected(profile)}
-                                                <span class="status-pill selected">기본 대상</span>
-                                            {/if}
-                                        </header>
-                                        <div class="legacy-actions">
-                                            <button
-                                                class="primary"
-                                                type="button"
-                                                disabled={settingsBusy || profileSelected(profile)}
-                                                onclick={() => void selectLegacyProfile(profile.id)}
+                                                <span>{route.status} · {route.metadata_source}</span
+                                                >
+                                                <small
+                                                    >{presetsFor(route.id).length === 0
+                                                        ? '프리셋 없음'
+                                                        : presetsFor(route.id)
+                                                              .map((preset) => preset.display_name)
+                                                              .join(', ')}</small
+                                                >
+                                            </li>
+                                        {/each}
+                                    </ul>
+                                </section>
+                            {/if}
+                            {#if connection.credential_binding_required && !retainedLegacyProfileIds.has(connection.id)}
+                                <p class="inline-note">
+                                    자격증명은 클립보드에서 네이티브로 캡처하며 WebView에 전달되지
+                                    않습니다.
+                                </p>
+                            {/if}
+                        </section>
+                    {:else if legacyProfile}
+                        {@const target = profileTarget(legacyProfile.id)}
+                        {@const key = targetKey(target)}
+                        <section
+                            class="detail-read-page connection-detail"
+                            aria-label={legacyProfile.display_name}
+                        >
+                            <dl class="detail-value-list">
+                                <div>
+                                    <dt>종류</dt>
+                                    <dd>기존 프로필</dd>
+                                </div>
+                                <div>
+                                    <dt>모델</dt>
+                                    <dd>{legacyProfile.model}</dd>
+                                </div>
+                                <div>
+                                    <dt>자격증명</dt>
+                                    <dd>{statusLabel(key)}</dd>
+                                </div>
+                            </dl>
+                            <button
+                                class="detail-secondary-action"
+                                type="button"
+                                disabled={settingsBusy || profileSelected(legacyProfile)}
+                                onclick={() => void selectLegacyProfile(legacyProfile.id)}
+                                >{profileSelected(legacyProfile)
+                                    ? '기본 대상으로 사용 중'
+                                    : selectingProfileId === legacyProfile.id
+                                      ? '기본 대상으로 설정 중'
+                                      : '기본 대상으로 선택'}</button
+                            >
+                            <p class="inline-note">
+                                자격증명은 클립보드에서 네이티브로 캡처하며 WebView에 전달되지
+                                않습니다.
+                            </p>
+                        </section>
+                    {:else if workspace.connections.length === 0 && workspace.legacy_profiles.length === 0}
+                        <p class="inline-note">저장된 프로바이더 연결이 없습니다.</p>
+                    {:else}
+                        <div class="setting-list detail-record-list" aria-label="연결 목록">
+                            {#each workspace.connections as connectionItem (connectionItem.id)}
+                                {@const target = connectionTarget(connectionItem.id)}
+                                <button
+                                    class="setting-row detail-record-row"
+                                    type="button"
+                                    onclick={() =>
+                                        openDetailPage(`connection:${connectionItem.id}`)}
+                                >
+                                    <span class="setting-content">
+                                        <span class="setting-copy detail-row-copy">
+                                            <strong>{connectionItem.display_name}</strong>
+                                            <small
+                                                >{connectionItem.template_id} · {connectionItem.status}</small
                                             >
-                                                {profileSelected(profile)
-                                                    ? '기본 대상으로 사용 중'
-                                                    : selectingProfileId === profile.id
-                                                      ? '기본 대상으로 설정 중'
-                                                      : '기본 대상으로 선택'}
-                                            </button>
-                                        </div>
-                                        <div
-                                            class="credential-form"
-                                            aria-label={`${profile.display_name} 자격증명`}
+                                        </span>
+                                        <span class="setting-value"
+                                            >{statusLabel(targetKey(target))}</span
                                         >
-                                            <p>
-                                                자격증명을 클립보드에 복사한 뒤 네이티브 캡처를
-                                                누르세요. 값은 WebView에 전달되지 않습니다.
-                                            </p>
-                                            <div>
-                                                <button
-                                                    class="primary"
-                                                    type="button"
-                                                    disabled={savingKey === key}
-                                                    onclick={() => void captureCredential(target)}
-                                                >
-                                                    클립보드에서 안전하게 캡처
-                                                </button>
-                                                <button
-                                                    class="danger"
-                                                    type="button"
-                                                    disabled={workspace.credential_statuses[key] ===
-                                                        'missing'}
-                                                    onclick={() =>
-                                                        void controller.deleteProviderCredential(
-                                                            target,
-                                                        )}
-                                                >
-                                                    삭제
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </article>
-                                {/each}
-                            </div>
-                        {/if}
-                    </section>
+                                    </span>
+                                </button>
+                            {/each}
+                            {#each workspace.legacy_profiles as profile (profile.id)}
+                                <button
+                                    class="setting-row detail-record-row"
+                                    type="button"
+                                    onclick={() => openDetailPage(`legacy:${profile.id}`)}
+                                >
+                                    <span class="setting-content">
+                                        <span class="setting-copy detail-row-copy">
+                                            <strong>{profile.display_name}</strong>
+                                            <small>기존 프로필 · {profile.model}</small>
+                                        </span>
+                                        <span class="setting-value"
+                                            >{profileSelected(profile)
+                                                ? '기본 대상'
+                                                : statusLabel(
+                                                      targetKey(profileTarget(profile.id)),
+                                                  )}</span
+                                        >
+                                    </span>
+                                </button>
+                            {/each}
+                        </div>
+                    {/if}
                 {/if}
                 {#if section === 'templates'}
-                    <section class="settings-section" aria-labelledby="templates-title">
-                        <div class="section-heading">
-                            <div>
-                                <p class="eyebrow">Catalog projection</p>
-                                <h2 id="templates-title">사용 가능한 템플릿</h2>
-                            </div>
-                            <span class="count-badge">{workspace.templates.length}개</span>
-                        </div>
-                        {#if workspace.templates.length === 0}
-                            <p class="inline-note">현재 사용할 수 있는 템플릿이 없습니다.</p>
-                        {:else}
-                            <ul class="template-list">
-                                {#each workspace.templates as template (template.id)}
-                                    <li>
-                                        <strong>{template.display_name}</strong>
-                                        <span
-                                            >{template.api_family} · v{template.manifest_version}</span
-                                        >
-                                    </li>
-                                {/each}
-                            </ul>
-                        {/if}
-                    </section>
+                    {@const template = selectedTemplate()}
+                    {#if template}
+                        <section
+                            class="detail-read-page template-detail"
+                            aria-label={`${template.display_name} 템플릿 정보`}
+                        >
+                            <dl class="detail-value-list" aria-label="템플릿 기본 정보">
+                                <div>
+                                    <dt>템플릿 ID</dt>
+                                    <dd>{template.id}</dd>
+                                </div>
+                                <div>
+                                    <dt>원본</dt>
+                                    <dd>{template.source}</dd>
+                                </div>
+                                <div>
+                                    <dt>API 패밀리</dt>
+                                    <dd>{template.api_family}</dd>
+                                </div>
+                                <div>
+                                    <dt>매니페스트</dt>
+                                    <dd>v{template.manifest_version}</dd>
+                                </div>
+                                <div>
+                                    <dt>기본 API Origin</dt>
+                                    <dd>{template.default_api_origin ?? '사용자가 입력'}</dd>
+                                </div>
+                                <div>
+                                    <dt>기본 네트워크</dt>
+                                    <dd>{template.default_network_mode}</dd>
+                                </div>
+                                <div>
+                                    <dt>인증 방식</dt>
+                                    <dd>{authBindingLabel(template.auth_binding)}</dd>
+                                </div>
+                                <div>
+                                    <dt>자격증명</dt>
+                                    <dd>{template.credential_required ? '필요' : '필요 없음'}</dd>
+                                </div>
+                                <div>
+                                    <dt>모델 목록</dt>
+                                    <dd>
+                                        {template.supports_model_listing ? '지원' : '지원 안 함'}
+                                    </dd>
+                                </div>
+                            </dl>
+
+                            <section
+                                class="detail-subsection"
+                                aria-labelledby="template-fields-title"
+                            >
+                                <h3 id="template-fields-title">연결 필드</h3>
+                                {#if template.connection_fields.length === 0}
+                                    <p class="inline-note">추가 연결 필드가 없습니다.</p>
+                                {:else}
+                                    <dl class="detail-value-list template-spec-list">
+                                        {#each template.connection_fields as field (field.key)}
+                                            <div>
+                                                <dt>{field.label_key}</dt>
+                                                <dd>
+                                                    <span
+                                                        >{field.key} · {field.value_type} · {field.required
+                                                            ? '필수'
+                                                            : '선택'}</span
+                                                    >
+                                                    {#if field.description_key}
+                                                        <small>{field.description_key}</small>
+                                                    {/if}
+                                                </dd>
+                                            </div>
+                                        {/each}
+                                    </dl>
+                                {/if}
+                            </section>
+
+                            <section
+                                class="detail-subsection"
+                                aria-labelledby="template-parameters-title"
+                            >
+                                <h3 id="template-parameters-title">생성 파라미터</h3>
+                                {#if template.parameters.length === 0}
+                                    <p class="inline-note">정의된 생성 파라미터가 없습니다.</p>
+                                {:else}
+                                    <dl class="detail-value-list template-spec-list">
+                                        {#each template.parameters as parameter (parameter.id)}
+                                            <div>
+                                                <dt>{parameter.label_key}</dt>
+                                                <dd>
+                                                    <span
+                                                        >{parameter.id} · {parameter.value_type} · {parameter.level}</span
+                                                    >
+                                                    <small
+                                                        >기본 {parameter.default_mode} · 전달 {parameter
+                                                            .provider_mapping.target}:{parameter
+                                                            .provider_mapping.field_name}</small
+                                                    >
+                                                    {#if parameter.allowed_values.length > 0}
+                                                        <small
+                                                            >허용값: {parameter.allowed_values
+                                                                .map((choice) =>
+                                                                    formatParameterLiteral(
+                                                                        choice.value,
+                                                                    ),
+                                                                )
+                                                                .join(', ')}</small
+                                                        >
+                                                    {/if}
+                                                    {#if parameter.minimum !== null || parameter.maximum !== null || parameter.step !== null}
+                                                        <small
+                                                            >범위 {parameter.minimum ??
+                                                                '제한 없음'}–{parameter.maximum ??
+                                                                '제한 없음'} · 단계 {parameter.step ??
+                                                                '기본값'}</small
+                                                        >
+                                                    {/if}
+                                                    {#if parameter.visibility}
+                                                        <small
+                                                            >표시 조건: {parameter.visibility
+                                                                .parameter_id}
+                                                            {parameter.visibility.operator}
+                                                            {formatParameterLiteral(
+                                                                parameter.visibility.value,
+                                                            )}</small
+                                                        >
+                                                    {/if}
+                                                    {#if parameter.conflicts.length > 0}
+                                                        <small
+                                                            >충돌 규칙 {parameter.conflicts
+                                                                .length}개</small
+                                                        >
+                                                    {/if}
+                                                </dd>
+                                            </div>
+                                        {/each}
+                                    </dl>
+                                {/if}
+                            </section>
+                        </section>
+                    {:else if detailPage?.startsWith('template:')}
+                        <p class="inline-note">선택한 템플릿을 찾을 수 없습니다.</p>
+                    {:else if workspace.templates.length === 0}
+                        <p class="inline-note">현재 사용할 수 있는 템플릿이 없습니다.</p>
+                    {:else}
+                        <ul class="setting-list detail-record-list" aria-label="템플릿 목록">
+                            {#each workspace.templates as template (template.id)}
+                                <li>
+                                    <button
+                                        class="setting-row detail-record-row"
+                                        type="button"
+                                        onclick={() =>
+                                            openDetailPage(
+                                                `template:${template.id}`,
+                                                template.display_name,
+                                            )}
+                                    >
+                                        <span class="setting-content">
+                                            <span class="setting-copy detail-row-copy">
+                                                <strong>{template.display_name}</strong>
+                                                <small
+                                                    >{template.api_family} · v{template.manifest_version}</small
+                                                >
+                                            </span>
+                                            <span class="setting-value"
+                                                >필드 {template.connection_fields.length} · 파라미터 {template
+                                                    .parameters.length}</span
+                                            >
+                                        </span>
+                                    </button>
+                                </li>
+                            {/each}
+                        </ul>
+                    {/if}
                 {/if}
                 {#if section === 'discovery'}
-                    <DiscoveryPanel {appState} {controller} />
-                    <ModelSyncPanel {appState} {controller} />
-                {/if}
-                {#if section === 'catalog'}
-                    <CatalogPanel {appState} {controller} />
+                    {#if detailPage === null}
+                        <div class="setting-list detail-tool-list" aria-label="검색과 동기화 도구">
+                            <button
+                                class="setting-row"
+                                type="button"
+                                onclick={() => openDetailPage('provider-discovery')}
+                            >
+                                <span class="setting-icon" aria-hidden="true"><Compass /></span>
+                                <span class="setting-content">
+                                    <span class="setting-copy detail-row-copy">
+                                        <strong>프로바이더 탐색</strong>
+                                        <small>연결을 찾고 검토해 추가합니다.</small>
+                                    </span>
+                                </span>
+                            </button>
+                            <button
+                                class="setting-row"
+                                type="button"
+                                onclick={() => openDetailPage('model-sync')}
+                            >
+                                <span class="setting-icon" aria-hidden="true"><ListChecks /></span>
+                                <span class="setting-content">
+                                    <span class="setting-copy detail-row-copy">
+                                        <strong>모델 동기화</strong>
+                                        <small>연결에서 사용할 모델을 검토합니다.</small>
+                                    </span>
+                                </span>
+                            </button>
+                        </div>
+                    {/if}
                 {/if}
                 {#if section === 'advanced'}
-                    <ProviderCrudPanel {appState} {controller} />
-                    <CapabilityPanel {appState} {controller} />
+                    <div class="setting-list detail-tool-list" aria-label="고급 설정 도구">
+                        <button
+                            class="setting-row"
+                            type="button"
+                            onclick={() => openDetailPage('connections')}
+                        >
+                            <span class="setting-icon" aria-hidden="true"><Link2 /></span>
+                            <span class="setting-content"
+                                ><span class="setting-copy"><strong>연결 관리</strong></span><span
+                                    class="setting-value">{workspace.connections.length}개</span
+                                ></span
+                            >
+                        </button>
+                        <button
+                            class="setting-row"
+                            type="button"
+                            onclick={() => openDetailPage('routes')}
+                        >
+                            <span class="setting-icon" aria-hidden="true"><Route /></span>
+                            <span class="setting-content"
+                                ><span class="setting-copy"><strong>모델 라우트</strong></span><span
+                                    class="setting-value">{workspace.routes.length}개</span
+                                ></span
+                            >
+                        </button>
+                        <button
+                            class="setting-row"
+                            type="button"
+                            onclick={() => openDetailPage('presets')}
+                        >
+                            <span class="setting-icon" aria-hidden="true"><GitBranch /></span>
+                            <span class="setting-content"
+                                ><span class="setting-copy"><strong>생성 프리셋</strong></span><span
+                                    class="setting-value">{workspace.presets.length}개</span
+                                ></span
+                            >
+                        </button>
+                        <button
+                            class="setting-row"
+                            type="button"
+                            onclick={() => openDetailPage('capabilities')}
+                        >
+                            <span class="setting-icon" aria-hidden="true"
+                                ><SlidersHorizontal /></span
+                            >
+                            <span class="setting-content"
+                                ><span class="setting-copy"><strong>모델 기능</strong></span></span
+                            >
+                        </button>
+                    </div>
                 {/if}
             {/if}
         </div>
+        {#if section === 'target' && detailPage === null && appState.providers.phase === 'ready'}
+            <DetailActionBar ariaLabel="기본 생성 대상 작업">
+                <button
+                    class="detail-action detail-action--borderless"
+                    type="button"
+                    disabled={settingsBusy}
+                    onclick={clearGenerationTargetDraft}>해제</button
+                >
+                <button
+                    class="primary detail-action detail-action--grow"
+                    type="button"
+                    disabled={settingsBusy || !targetDraftValid || !targetDraftHasChanges}
+                    onclick={() => void saveGenerationTarget()}>저장</button
+                >
+            </DetailActionBar>
+        {/if}
+        {#if section === 'connections' && appState.providers.phase === 'ready'}
+            {@const connection = selectedConnection()}
+            {@const legacyProfile = selectedLegacyProfile()}
+            {@const credentialTarget = connection
+                ? connectionTarget(connection.id)
+                : legacyProfile
+                  ? profileTarget(legacyProfile.id)
+                  : null}
+            {#if credentialTarget && (!connection || (connection.credential_binding_required && !appState.providers.workspace.legacy_profiles.some((profile) => profile.id === connection.id)))}
+                {@const key = targetKey(credentialTarget)}
+                <DetailActionBar ariaLabel="자격증명 작업">
+                    {#if credentialDeleteConfirmationKey === key}
+                        <button
+                            class="danger detail-action detail-action--destructive"
+                            type="button"
+                            disabled={savingKey === key}
+                            onclick={() => void deleteCredential(credentialTarget)}
+                            >삭제 확인</button
+                        >
+                        <button
+                            class="detail-action detail-action--grow"
+                            type="button"
+                            disabled={savingKey === key}
+                            onclick={() => (credentialDeleteConfirmationKey = null)}>취소</button
+                        >
+                    {:else}
+                        <button
+                            class="detail-action detail-action--destructive detail-action--borderless"
+                            type="button"
+                            disabled={appState.providers.workspace.credential_statuses[key] ===
+                                'missing' || savingKey === key}
+                            onclick={() => (credentialDeleteConfirmationKey = key)}>삭제</button
+                        >
+                        <button
+                            class="primary detail-action detail-action--grow"
+                            type="button"
+                            disabled={savingKey === key}
+                            onclick={() => void captureCredential(credentialTarget)}
+                            >자격증명 캡처</button
+                        >
+                    {/if}
+                </DetailActionBar>
+            {/if}
+        {/if}
     {/if}
 </section>
 
@@ -804,8 +1230,16 @@
         padding-bottom: 24px;
     }
 
+    .settings-detail-scroll.detail-scroll-has-actions {
+        padding-bottom: calc(var(--mobile-nav) + 36px + env(safe-area-inset-bottom));
+    }
+
     :global(.app-shell[data-layout='mobile']) .settings-detail-scroll {
-        padding-bottom: calc(var(--mobile-nav) + 28px + env(safe-area-inset-bottom));
+        padding-bottom: calc(24px + env(safe-area-inset-bottom));
+    }
+
+    :global(.app-shell[data-layout='mobile']) .settings-detail-scroll.detail-scroll-has-actions {
+        padding-bottom: calc(var(--mobile-nav) + 36px + env(safe-area-inset-bottom));
     }
 
     :global(.app-shell[data-layout='mobile']) .provider-scroll.settings-home-scroll {
@@ -822,11 +1256,6 @@
     .settings-tool-button {
         color: var(--ink);
         pointer-events: auto;
-    }
-
-    .settings-tool-button .filled-mark {
-        fill: currentcolor;
-        stroke: none;
     }
 
     .settings-shortcuts {
@@ -869,20 +1298,20 @@
         width: clamp(87px, 24.714vw, 108px);
         height: clamp(87px, 24.714vw, 108px);
         flex: none;
+        overflow: hidden;
+        border: 1px solid var(--accent-line);
+        border-radius: 50%;
+        background: var(--brand-logo-bg);
+        box-shadow: var(--shadow-2);
     }
 
     .settings-avatar {
-        display: grid;
+        position: absolute;
+        inset: 0;
+        display: block;
         width: 100%;
         height: 100%;
-        border: 1px solid var(--accent-line);
         border-radius: 50%;
-        background: var(--primary-bg);
-        box-shadow: var(--shadow-2);
-        color: var(--primary-ink);
-        font-size: 2.125rem;
-        font-weight: 750;
-        place-items: center;
     }
 
     .settings-avatar-badge {
@@ -899,7 +1328,7 @@
         place-items: center;
     }
 
-    .settings-avatar-badge svg {
+    .settings-avatar-badge :global(svg) {
         width: 20px;
         height: 20px;
         fill: none;
@@ -934,19 +1363,150 @@
             min-height: 0;
             flex: none;
             justify-content: flex-start;
+            /* The fixed tab bar overlays the page, so keep a real scroll tail after the last row. */
+            margin-bottom: calc(var(--mobile-nav) + 26px + env(safe-area-inset-bottom));
         }
     }
 
-    .section-heading {
-        margin-bottom: 16px;
+    .detail-choice-list,
+    .detail-record-list,
+    .detail-tool-list {
+        width: 100%;
+        margin: 0;
     }
 
-    .section-heading h2 {
-        font-size: 1.08rem;
+    .detail-choice-row .setting-content {
+        justify-content: space-between;
     }
 
-    .theme-picker {
-        margin-top: 12px;
+    :global(.detail-check) {
+        width: 21px;
+        height: 21px;
+        flex: none;
+        color: var(--accent);
+    }
+
+    .detail-form-page,
+    .detail-read-page,
+    .detail-subsection {
+        display: grid;
+        min-width: 0;
+        gap: 16px;
+    }
+
+    .detail-form,
+    .detail-form label {
+        display: grid;
+        gap: 7px;
+    }
+
+    .detail-form {
+        grid-template-columns: 1fr;
+        margin: 0;
+    }
+
+    .detail-form label {
+        color: var(--ink-muted);
+        font-size: var(--detail-support-type);
+        font-weight: 700;
+    }
+
+    .detail-form :is(input, select) {
+        width: 100%;
+        min-height: clamp(48px, 13.73vw, 60px);
+        padding: clamp(12px, 3.432vw, 15px);
+        border: 1.5px solid var(--line);
+        border-radius: var(--radius-md);
+        background: color-mix(in srgb, var(--surface-sunken) 26%, var(--surface-raised));
+        box-shadow: inset 0 1px 2px rgb(16 18 24 / 3%);
+        color: var(--ink);
+        font-size: var(--detail-support-type);
+    }
+
+    .detail-form :is(input, select):hover:not(:focus, :disabled) {
+        border-color: var(--line);
+    }
+
+    .detail-form :is(input, select):focus {
+        border-color: var(--accent);
+        outline: 0;
+    }
+
+    .detail-secondary-action {
+        width: 100%;
+        min-height: clamp(48px, 13.73vw, 60px);
+        justify-content: center;
+        border-color: var(--line);
+        font-size: var(--detail-support-type);
+        font-weight: 700;
+    }
+
+    .detail-value-list {
+        display: grid;
+        margin: 0;
+    }
+
+    .detail-value-list > div {
+        display: grid;
+        grid-template-columns: minmax(100px, 0.65fr) minmax(0, 1.35fr);
+        padding: 13px 2px;
+        border-bottom: 1px solid var(--line);
+        gap: 12px;
+    }
+
+    .template-spec-list dd {
+        display: grid;
+        min-width: 0;
+        gap: 4px;
+    }
+
+    .template-spec-list dd small {
+        color: var(--ink-muted);
+        font-size: var(--detail-support-type);
+        font-weight: 500;
+        line-height: 1.4;
+        overflow-wrap: anywhere;
+    }
+
+    .detail-row-copy {
+        display: grid;
+        min-width: 0;
+        gap: 5px;
+    }
+
+    .detail-row-copy :is(strong, small) {
+        overflow: hidden;
+        font-size: var(--detail-support-type);
+        line-height: 1.35;
+        text-overflow: ellipsis;
+    }
+
+    .detail-row-copy small {
+        display: -webkit-box;
+        color: var(--ink-muted);
+        font-weight: 500;
+        white-space: normal;
+        line-clamp: 3;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 3;
+    }
+
+    .detail-plain-list {
+        display: grid;
+        padding: 0;
+        margin: 0;
+        list-style: none;
+    }
+
+    .detail-plain-list li {
+        display: grid;
+        padding: 13px 2px;
+        border-bottom: 1px solid var(--line);
+        gap: 4px;
+    }
+
+    .detail-plain-list :is(span, small) {
+        color: var(--ink-muted);
     }
 
     .provider-state {
@@ -960,52 +1520,23 @@
         color: var(--danger);
     }
 
-    .summary-grid,
-    .preview-card dl,
-    .compact-list {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 10px;
-        margin: 0;
-    }
-
-    .summary-grid > div,
-    .preview-card,
-    .compact-list > div {
-        padding: 12px;
-        border-radius: 12px;
-        background: var(--surface-sunken);
-    }
-
     .target-form {
         display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 12px;
-        margin-top: 14px;
+        grid-template-columns: 1fr;
+        gap: 14px;
+        margin: 0;
     }
 
     .target-form label {
         display: grid;
         gap: 7px;
         color: var(--ink-muted);
-        font-size: 0.8rem;
+        font-size: var(--detail-support-type);
         font-weight: 700;
     }
 
     .target-form select {
         width: 100%;
-    }
-
-    .target-actions {
-        display: flex;
-        grid-column: 1 / -1;
-        gap: 8px;
-        flex-wrap: wrap;
-    }
-
-    .legacy-actions {
-        display: flex;
-        margin-top: 14px;
     }
 
     .settings-control-row {
@@ -1098,15 +1629,6 @@
         font-weight: 700;
     }
 
-    .preview-card {
-        margin-top: 14px;
-    }
-
-    .preview-card h3 {
-        margin: 0 0 12px;
-    }
-
-    .preview-card p,
     .inline-note {
         color: var(--ink-muted);
         line-height: 1.55;
@@ -1116,91 +1638,8 @@
         color: var(--warning);
     }
 
-    .card-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr));
-        gap: 12px;
-    }
-
-    .provider-card {
-        padding: 16px;
-        border: 1px solid var(--line);
-        border-radius: 14px;
-    }
-
-    .provider-card h3 {
-        font-size: 0.98rem;
-    }
-
-    .provider-card header p {
-        font-size: 0.78rem;
-    }
-
-    .compact-list {
-        margin-top: 14px;
-    }
-
-    .credential-form {
-        display: grid;
-        gap: 10px;
-        margin-top: 14px;
-    }
-
-    .credential-form > div {
-        display: flex;
-        gap: 8px;
-    }
-
-    .status-pill,
-    .count-badge {
-        padding: 5px 9px;
-        border-radius: 999px;
-        color: var(--ink-muted);
-        background: var(--surface-sunken);
-        font-size: 0.7rem;
-        font-weight: 800;
-    }
-
-    .status-pill.selected {
-        color: var(--accent);
-        background: var(--accent-soft);
-    }
-
-    details {
-        margin-top: 14px;
-        color: var(--ink-muted);
-    }
-
-    .route-list,
-    .template-list {
-        display: grid;
-        gap: 8px;
-        margin: 10px 0 0;
-        padding: 0;
-        list-style: none;
-    }
-
-    .route-list li,
-    .template-list li {
-        display: grid;
-        gap: 3px;
-        padding: 10px;
-        border-radius: 10px;
-        background: var(--surface-sunken);
-    }
-
-    .route-list span,
-    .route-list small,
-    .template-list span {
-        color: var(--ink-muted);
-        font-size: 0.74rem;
-    }
-
     @container view (max-width: 640px) {
-        .target-form,
-        .summary-grid,
-        .preview-card dl,
-        .compact-list {
+        .target-form {
             grid-template-columns: 1fr;
         }
     }

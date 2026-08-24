@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { MessageSquarePlus, Search } from '@lucide/svelte';
     import { tr } from '../../lib/i18n';
     import type { LorepiaAppState, LorepiaAppController } from '../../app/app-controller';
     import type { ConversationDto } from '../../lib/ipc/contracts';
@@ -48,10 +49,7 @@
             <h1 id="conversation-root-title">채팅</h1>
         </header>
         <label class="conversation-search mobile-root-search">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-                <circle cx="10.5" cy="10.5" r="6.5" />
-                <path d="m15.5 15.5 4.5 4.5" />
-            </svg>
+            <Search class="conversation-search-icon" aria-hidden="true" />
             <span class="sr-only">대화 검색</span>
             <input
                 type="search"
@@ -75,8 +73,10 @@
                 <span
                     class="new-conversation-mark"
                     class:mobile-root-fab-mark={rootView}
-                    aria-hidden="true">+</span
+                    aria-hidden="true"
                 >
+                    <MessageSquarePlus class="new-conversation-icon" />
+                </span>
                 <span class="new-conversation-label">{$tr('conversation.new')}</span>
             </button>
         {/if}
@@ -189,7 +189,6 @@
                                 >
                                 <span>{relativeDate(conversation.updated_at)}</span>
                             </span>
-                            <span aria-hidden="true">›</span>
                         {/if}
                     </button>
                 </li>
@@ -201,6 +200,11 @@
 <style>
     .new-conversation-mark {
         display: none;
+    }
+
+    .new-conversation-mark :global(.new-conversation-icon) {
+        width: 24px;
+        height: 24px;
     }
 
     .conversation-pane.root-view .pane-header {
@@ -317,10 +321,8 @@
         }
 
         .new-conversation-mark {
-            display: block;
-            font-size: 1.75rem;
-            font-weight: 300;
-            line-height: 1;
+            display: grid;
+            place-items: center;
         }
 
         .new-conversation-label {

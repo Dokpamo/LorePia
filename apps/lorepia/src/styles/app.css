@@ -5,72 +5,84 @@
  * narrow host, scales its principal measurements below that baseline, and is
  * centred without changing navigation structure in a wider desktop host.
  *
- * The colour source is the LorePia sibling palette: the original electric
- * yellow plus ten bright, playful, high-energy companions. Black marks on
- * vivid fills mirror the supplied cards; quiet warm neutrals keep those fills
- * legible instead of making every surface compete for attention.
+ * The colour source is the supplied desktop light/dark reference: warm paper
+ * whites by day and neutral charcoal at night. Each mode borrows the other's
+ * foreground instead of introducing a middle brand hue. The interface
+ * hierarchy comes from surface contrast, weight and inversion alone.
  */
 
 :root {
     color-scheme: light;
 
-    /* Original + ten named siblings from the supplied LorePia palette. */
-    --brand-original: #f1fb06;
-    --brand-acid-lime: #b8ff00;
-    --brand-apple-green: #63e85b;
-    --brand-emerald-mint: #42e6a4;
-    --brand-electric-cyan: #31dff3;
-    --brand-bright-sky-blue: #62b5ff;
-    --brand-blue-lavender: #8b8cff;
-    --brand-electric-violet: #b56bff;
-    --brand-neon-pink: #ff5aa5;
-    --brand-pop-coral: #ff6d62;
-    --brand-tangerine-orange: #ffaa24;
-    --brand-ink: #11110f;
+    /* LorePia Paper & Ink. Legacy aliases remain for component compatibility. */
+    --brand-paper: #f2f0ea;
+    --brand-paper-bright: #fbfcfa;
+    --brand-ink: #2b2a28;
+    --brand-night-navy: #151515;
+    --brand-moon: #edede9;
+    --brand-link: var(--brand-ink);
+    --brand-link-dark: var(--brand-moon);
+    --brand-summer-aqua: var(--brand-ink);
+    --brand-summer-blue: var(--brand-ink);
+    --brand-primary-solid: var(--brand-ink);
+    --brand-seafoam: #4f8b6e;
+    --brand-sun: #aa7429;
+    --brand-coral: #c74343;
+    --brand-cloud: var(--brand-paper-bright);
+    --brand-night-indigo: #2c2c2c;
+    --brand-night-cyan: var(--brand-moon);
+    --brand-night-periwinkle: #bbbaaf;
+    --brand-night-coral: #ef6a65;
+    --brand-summer-gradient: var(--brand-ink);
+    --brand-summer-gradient-hover: var(--brand-night-navy);
+    --brand-night-action-gradient: var(--brand-moon);
+    --brand-night-action-gradient-hover: #ffffff;
+    --brand-logo-bg: var(--brand-paper);
+    --brand-logo-ink: var(--brand-ink);
 
     /*
      * Surfaces, from furthest back to closest to the reader. The page is
      * tinted and the card is white — that difference is what makes a card read
      * as a card, and without it a border has to do the whole job alone.
      */
-    --bg: #f8f8f0;
-    --surface: #fffef8;
-    --surface-sunken: #efefe3;
-    --surface-raised: #fffef8;
-    --surface-hover: #f4f5d7;
-    --surface-active: #e9eca9;
+    --bg: #fbfcfa;
+    --surface: #ffffff;
+    --surface-sunken: #fafaf8;
+    --surface-raised: #ffffff;
+    --surface-hover: #f4f3ef;
+    --surface-active: #eae9e5;
 
     /* Text, from primary to incidental. */
     --ink: var(--brand-ink);
-    --ink-muted: #666659;
-    --ink-subtle: #989887;
-    --ink-inverse: #ffffff;
+    --ink-muted: #6f6d68;
+    --ink-subtle: #9a9892;
+    --ink-inverse: var(--brand-moon);
 
-    --line: #e7e7d7;
-    --line-strong: #d2d2bc;
+    --line: #e6e4df;
+    --line-strong: #d8d6d0;
 
     /* The two voices of the transcript. */
     --bubble-char-bg: var(--surface-raised);
-    --bubble-user-bg: var(--brand-blue-lavender);
+    --bubble-user-bg: var(--surface-active);
     --bubble-user-ink: var(--brand-ink);
 
-    /* Tangerine Orange is the identity fill; a dark mix keeps text accessible. */
-    --accent: color-mix(in srgb, var(--brand-tangerine-orange) 30%, var(--brand-ink));
-    --accent-hover: color-mix(in srgb, var(--brand-tangerine-orange) 22%, var(--brand-ink));
-    --accent-soft: var(--brand-tangerine-orange);
-    --accent-line: color-mix(in srgb, var(--brand-tangerine-orange) 70%, var(--line-strong));
-    --utility-blue: var(--brand-bright-sky-blue);
+    /* Solid semantic colors accompany the gradient identity where text or borders need one. */
+    --accent: var(--brand-ink);
+    --accent-hover: var(--brand-night-navy);
+    --accent-soft: var(--surface-active);
+    --accent-line: #bdbab2;
+    --utility-blue: var(--brand-primary-solid);
 
-    --primary-bg: var(--brand-tangerine-orange);
-    --primary-bg-hover: color-mix(in srgb, var(--brand-tangerine-orange) 84%, var(--brand-ink));
-    --primary-ink: var(--brand-ink);
+    --primary-bg: var(--brand-summer-gradient);
+    --primary-bg-hover: var(--brand-summer-gradient-hover);
+    --primary-ink: var(--brand-paper);
 
-    --danger: color-mix(in srgb, var(--brand-pop-coral) 58%, var(--brand-ink));
-    --danger-soft: color-mix(in srgb, var(--brand-pop-coral) 16%, var(--surface-raised));
-    --warning: color-mix(in srgb, var(--brand-tangerine-orange) 55%, var(--brand-ink));
-    --warning-soft: color-mix(in srgb, var(--brand-tangerine-orange) 18%, var(--surface-raised));
-    --success: color-mix(in srgb, var(--brand-apple-green) 55%, var(--brand-ink));
-    --success-soft: color-mix(in srgb, var(--brand-apple-green) 16%, var(--surface-raised));
+    --danger: var(--brand-coral);
+    --danger-soft: #f8e7e5;
+    --warning: #9b7414;
+    --warning-soft: #f8f0d5;
+    --success: var(--brand-seafoam);
+    --success-soft: #e4efe8;
 
     --radius-xs: clamp(7px, 1.831vw, 8px);
     --radius-sm: clamp(9px, 2.517vw, 11px);
@@ -78,9 +90,9 @@
     --radius-lg: clamp(16px, 4.577vw, 20px);
     --radius-pill: 999px;
 
-    --shadow-1: 0 1px 2px rgb(16 18 24 / 5%);
-    --shadow-2: 0 8px 32px rgb(16 18 24 / 9%);
-    --shadow-3: 0 24px 64px rgb(16 18 24 / 18%);
+    --shadow-1: 0 1px 2px rgb(43 42 40 / 5%);
+    --shadow-2: 0 8px 32px rgb(43 42 40 / 9%);
+    --shadow-3: 0 24px 64px rgb(43 42 40 / 18%);
 
     /* 437px is the measured comparison width; narrower hosts scale from it. */
     --touch: clamp(38px, 10.069vw, 44px);
@@ -95,6 +107,8 @@
     --mobile-search: clamp(39px, 10.984vw, 48px);
     --mobile-search-inset: clamp(10px, 3vw, 13px);
     --mobile-nav: clamp(53px, 15.103vw, 66px);
+    --detail-ui-type: clamp(16px, 4.119vw, 18px);
+    --detail-support-type: clamp(14px, 3.55vw, 16px);
 
     /*
      * Content measures. A full-bleed row spends its own padding to centre its
@@ -133,45 +147,44 @@
     :root:not([data-theme='light']) {
         color-scheme: dark;
 
-        --bg: #10100d;
-        --surface: #171712;
-        --surface-sunken: #1d1d16;
-        --surface-raised: #22221a;
-        --surface-hover: #2c2c20;
-        --surface-active: #383826;
+        --bg: var(--brand-night-navy);
+        --surface: #1d1d1d;
+        --surface-sunken: #121212;
+        --surface-raised: #1d1d1d;
+        --surface-hover: #282828;
+        --surface-active: #363636;
 
-        --ink: #fbfbf2;
-        --ink-muted: #b9b9a7;
-        --ink-subtle: #7f7f6d;
-        --ink-inverse: #ffffff;
+        --ink: var(--brand-moon);
+        --ink-muted: #bbbaaf;
+        --ink-subtle: #7d7c76;
+        --ink-inverse: var(--brand-night-navy);
 
-        --line: #323225;
-        --line-strong: #484834;
+        --line: #2c2c2c;
+        --line-strong: #3e3d3e;
 
         --bubble-char-bg: var(--surface-raised);
-        --bubble-user-bg: var(--brand-blue-lavender);
-        --bubble-user-ink: var(--brand-ink);
+        --bubble-user-bg: var(--brand-night-indigo);
+        --bubble-user-ink: var(--brand-moon);
 
-        --accent: var(--brand-tangerine-orange);
-        --accent-hover: color-mix(in srgb, var(--brand-tangerine-orange) 84%, var(--ink));
-        --accent-soft: color-mix(in srgb, var(--brand-tangerine-orange) 20%, var(--surface-raised));
-        --accent-line: color-mix(in srgb, var(--brand-tangerine-orange) 46%, var(--line));
-        --utility-blue: var(--brand-bright-sky-blue);
+        --accent: var(--brand-moon);
+        --accent-hover: #ffffff;
+        --accent-soft: var(--surface-active);
+        --accent-line: #5a5955;
+        --utility-blue: var(--brand-link-dark);
 
-        --primary-bg: var(--brand-tangerine-orange);
-        --primary-bg-hover: color-mix(in srgb, var(--brand-tangerine-orange) 84%, var(--brand-ink));
-        --primary-ink: var(--brand-ink);
+        --primary-bg: var(--brand-night-action-gradient);
+        --primary-bg-hover: var(--brand-night-action-gradient-hover);
+        --primary-ink: var(--brand-night-navy);
 
-        --danger: var(--brand-pop-coral);
-        --danger-soft: color-mix(in srgb, var(--brand-pop-coral) 16%, var(--surface-raised));
-        --warning: var(--brand-tangerine-orange);
-        --warning-soft: color-mix(
-            in srgb,
-            var(--brand-tangerine-orange) 18%,
-            var(--surface-raised)
-        );
-        --success: var(--brand-apple-green);
-        --success-soft: color-mix(in srgb, var(--brand-apple-green) 16%, var(--surface-raised));
+        --danger: var(--brand-night-coral);
+        --danger-soft: #402323;
+        --warning: #e0bd51;
+        --warning-soft: #35301d;
+        --success: #75b592;
+        --success-soft: #20352a;
+
+        --brand-logo-bg: var(--brand-night-navy);
+        --brand-logo-ink: var(--brand-moon);
 
         --shadow-1: 0 1px 2px rgb(0 0 0 / 45%);
         --shadow-2: 0 8px 32px rgb(0 0 0 / 55%);
@@ -182,41 +195,44 @@
 :root[data-theme='dark'] {
     color-scheme: dark;
 
-    --bg: #10100d;
-    --surface: #171712;
-    --surface-sunken: #1d1d16;
-    --surface-raised: #22221a;
-    --surface-hover: #2c2c20;
-    --surface-active: #383826;
+    --bg: var(--brand-night-navy);
+    --surface: #1d1d1d;
+    --surface-sunken: #121212;
+    --surface-raised: #1d1d1d;
+    --surface-hover: #282828;
+    --surface-active: #363636;
 
-    --ink: #fbfbf2;
-    --ink-muted: #b9b9a7;
-    --ink-subtle: #7f7f6d;
-    --ink-inverse: #ffffff;
+    --ink: var(--brand-moon);
+    --ink-muted: #bbbaaf;
+    --ink-subtle: #7d7c76;
+    --ink-inverse: var(--brand-night-navy);
 
-    --line: #323225;
-    --line-strong: #484834;
+    --line: #2c2c2c;
+    --line-strong: #3e3d3e;
 
     --bubble-char-bg: var(--surface-raised);
-    --bubble-user-bg: var(--brand-blue-lavender);
-    --bubble-user-ink: var(--brand-ink);
+    --bubble-user-bg: var(--brand-night-indigo);
+    --bubble-user-ink: var(--brand-moon);
 
-    --accent: var(--brand-tangerine-orange);
-    --accent-hover: color-mix(in srgb, var(--brand-tangerine-orange) 84%, var(--ink));
-    --accent-soft: color-mix(in srgb, var(--brand-tangerine-orange) 20%, var(--surface-raised));
-    --accent-line: color-mix(in srgb, var(--brand-tangerine-orange) 46%, var(--line));
-    --utility-blue: var(--brand-bright-sky-blue);
+    --accent: var(--brand-moon);
+    --accent-hover: #ffffff;
+    --accent-soft: var(--surface-active);
+    --accent-line: #5a5955;
+    --utility-blue: var(--brand-link-dark);
 
-    --primary-bg: var(--brand-tangerine-orange);
-    --primary-bg-hover: color-mix(in srgb, var(--brand-tangerine-orange) 84%, var(--brand-ink));
-    --primary-ink: var(--brand-ink);
+    --primary-bg: var(--brand-night-action-gradient);
+    --primary-bg-hover: var(--brand-night-action-gradient-hover);
+    --primary-ink: var(--brand-night-navy);
 
-    --danger: var(--brand-pop-coral);
-    --danger-soft: color-mix(in srgb, var(--brand-pop-coral) 16%, var(--surface-raised));
-    --warning: var(--brand-tangerine-orange);
-    --warning-soft: color-mix(in srgb, var(--brand-tangerine-orange) 18%, var(--surface-raised));
-    --success: var(--brand-apple-green);
-    --success-soft: color-mix(in srgb, var(--brand-apple-green) 16%, var(--surface-raised));
+    --danger: var(--brand-night-coral);
+    --danger-soft: #402323;
+    --warning: #e0bd51;
+    --warning-soft: #35301d;
+    --success: #75b592;
+    --success-soft: #20352a;
+
+    --brand-logo-bg: var(--brand-night-navy);
+    --brand-logo-ink: var(--brand-moon);
 
     --shadow-1: 0 1px 2px rgb(0 0 0 / 45%);
     --shadow-2: 0 8px 32px rgb(0 0 0 / 55%);
@@ -447,37 +463,36 @@ textarea {
  */
 .app-shell {
     position: relative;
-    display: grid;
+    display: flex;
     width: 100%;
     height: 100vh;
     height: 100dvh;
-    grid-template-columns: 0 minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr);
     margin-inline: 0;
     overflow: clip;
     background: var(--bg);
     contain: layout;
-    transition: grid-template-columns 240ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .app-shell[data-layout='mobile'] {
     width: min(100%, 899px);
     margin-inline: auto;
-    grid-template-columns: 0 minmax(0, 1fr);
+    --detail-action-center: 50vw;
+    --detail-action-workspace-width: min(100vw, 899px);
+    --detail-action-fixed-gutter: var(--gutter);
 }
 
 .app-shell[data-layout='desktop'] {
     width: 100%;
     margin-inline: 0;
-    grid-template-columns: var(--sidebar) minmax(0, 1fr);
-    transition-duration: 300ms;
-    transition-timing-function: cubic-bezier(0.22, 0.61, 0.36, 1);
     --gutter: max(14px, calc((100% - var(--reading)) / 2));
     --settings-gutter: max(16px, calc((100% - var(--settings)) / 2));
     --mobile-root-header: 60px;
     --mobile-top-action: 44px;
     --mobile-top-inset: 14px;
     --mobile-top-offset: 8px;
+    --detail-action-center: calc(var(--sidebar) + (100vw - var(--sidebar)) / 2);
+    --detail-action-workspace-width: calc(100vw - var(--sidebar));
+    --detail-action-fixed-gutter: 16px;
 }
 
 /* Keep native wheel and touch scrolling, but hide scrollbar chrome on mobile. */
@@ -508,12 +523,22 @@ textarea {
  * tab of their own.
  */
 .sidebar-rail {
+    width: 0;
     min-width: 0;
     min-height: 0;
+    flex: 0 0 0;
     overflow: hidden;
     box-shadow: inset -1px 0 var(--line);
-    grid-column: 1;
-    grid-row: 1;
+    transition:
+        width 240ms cubic-bezier(0.4, 0, 0.2, 1),
+        flex-basis 240ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.app-shell[data-layout='desktop'] .sidebar-rail {
+    width: var(--sidebar);
+    flex-basis: var(--sidebar);
+    transition-duration: 300ms;
+    transition-timing-function: cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
 .sidebar {
@@ -532,6 +557,38 @@ textarea {
     justify-content: space-between;
     padding: 8px 12px 8px 14px;
     gap: 8px;
+}
+
+.sidebar-logo {
+    position: relative;
+    display: grid;
+    width: 32px;
+    height: 32px;
+    flex: none;
+    overflow: hidden;
+    border-radius: var(--radius-sm);
+    background: var(--brand-logo-bg);
+    box-shadow: var(--shadow-1);
+    place-items: center;
+}
+
+.brand-logo-mark {
+    display: block;
+    width: 100%;
+    height: 100%;
+    background: var(--brand-logo-ink);
+    -webkit-mask-image: var(--logo-mask);
+    mask-image: var(--logo-mask);
+    -webkit-mask-position: center;
+    mask-position: center;
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+    -webkit-mask-size: cover;
+    mask-size: cover;
+}
+
+.sidebar-logo > .brand-logo-mark {
+    grid-area: 1 / 1;
 }
 
 .sidebar-foot {
@@ -566,14 +623,13 @@ textarea {
 .main {
     position: relative;
     display: flex;
+    width: 0;
     min-width: 0;
     min-height: 0;
     flex: 1;
     flex-direction: column;
     background: var(--bg);
     container: view / inline-size;
-    grid-column: 2;
-    grid-row: 1;
 }
 
 /* A view that renders its own pane fills the region rather than sitting in it. */
@@ -962,6 +1018,8 @@ textarea {
     min-height: 0;
     flex: 1;
     padding: 16px var(--settings-gutter) 24px;
+    overscroll-behavior: contain;
+    overflow-x: hidden;
     overflow-y: auto;
 }
 
@@ -969,9 +1027,42 @@ textarea {
     padding-bottom: calc(var(--mobile-nav) + 28px + env(safe-area-inset-bottom));
 }
 
+.view-scroll.studio-detail-scroll {
+    padding-bottom: 24px;
+}
+
+.app-shell[data-layout='mobile'] .view-scroll.studio-detail-scroll {
+    padding-bottom: calc(24px + env(safe-area-inset-bottom));
+}
+
+.view-scroll.studio-detail-scroll.studio-detail-has-actions,
+.app-shell[data-layout='mobile'] .view-scroll.studio-detail-scroll.studio-detail-has-actions {
+    padding-bottom: calc(var(--mobile-nav) + 28px + env(safe-area-inset-bottom));
+}
+
+/*
+ * Studio owns the vertical gesture, while its wide tables, diffs, and
+ * minimaps may still consume a horizontal pan. This avoids a pan-x-only child
+ * intersecting with the shell's default pan-y contract and cancelling both.
+ */
+.app-shell[data-layout='mobile'] .view-scroll.studio-detail-scroll,
+.app-shell[data-layout='mobile']
+    .view-scroll.studio-detail-scroll
+    :is(.data-table-wrap, .block-minimap ol, .safe-text-preview pre, .diff-preview pre) {
+    touch-action: pan-x pan-y;
+}
+
+.view-scroll.studio-detail-scroll
+    :is(.data-table-wrap, .block-minimap ol, .safe-text-preview pre, .diff-preview pre) {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-inline: contain;
+}
+
 /*
  * Pushed mobile screens have no header ledge. Their action and title remain
- * fixed in a transparent overlay while content dissolves beneath them.
+ * fixed in a transparent overlay while a separate background gradient lets
+ * scrolled content dissolve beneath them. Keeping the gradient off the
+ * scroller avoids WebKit mask compositing hiding the fixed header.
  */
 .app-shell[data-layout='mobile'] .sub-header {
     position: absolute;
@@ -983,28 +1074,31 @@ textarea {
 }
 
 .app-shell[data-layout='mobile'] .sub-header > .mobile-top-action {
-    position: relative;
-    z-index: 2;
     pointer-events: auto;
+}
+
+.app-shell[data-layout='mobile'] .sub-header::after {
+    position: absolute;
+    z-index: -1;
+    height: var(--mobile-top-fade);
+    background: linear-gradient(to bottom, var(--bg) 0, transparent 100%);
+    content: '';
+    inset: 0 0 auto;
+    opacity: var(--mobile-top-fade-progress, 0);
+    pointer-events: none;
 }
 
 .app-shell[data-layout='mobile'] :is(.studio-detail-scroll, .settings-detail-scroll) {
     padding-top: calc(
         env(safe-area-inset-top) + var(--mobile-top-offset) + var(--mobile-top-action) + 16px
     );
-    -webkit-mask-image: linear-gradient(
-        to bottom,
-        rgb(0 0 0 / var(--mobile-top-mask-alpha, 1)) 0,
-        #000 var(--mobile-top-fade)
+    scroll-padding-top: calc(
+        env(safe-area-inset-top) + var(--mobile-top-action) + var(--mobile-top-offset) + 8px
     );
-    mask-image: linear-gradient(
-        to bottom,
-        rgb(0 0 0 / var(--mobile-top-mask-alpha, 1)) 0,
-        #000 var(--mobile-top-fade)
-    );
-    -webkit-mask-repeat: no-repeat;
-    mask-repeat: no-repeat;
-    scroll-padding-top: calc(var(--mobile-top-action) + var(--mobile-top-offset) + 8px);
+}
+
+.sub-header h1:focus {
+    outline: none;
 }
 
 .app-shell[data-layout='mobile'] .mobile-root .entity-list {
@@ -1139,7 +1233,8 @@ textarea {
 }
 
 .home-view .section-toggle .chevron {
-    font-size: 1.5rem;
+    width: 24px;
+    height: 24px;
 }
 
 .home-view .pane-header {
@@ -1154,8 +1249,11 @@ textarea {
 }
 
 .section-toggle .chevron {
+    width: 16px;
+    height: 16px;
+    flex: none;
     color: var(--ink-subtle);
-    font-size: 0.875rem;
+    stroke-width: 2;
     transition: transform 140ms ease;
 }
 
@@ -1252,10 +1350,6 @@ textarea {
     grid-template-columns: minmax(0, 1fr) auto;
 }
 
-.conversation-row > span[aria-hidden='true']:last-child {
-    display: none;
-}
-
 /* People are circles here; a messenger's oldest convention. */
 .avatar,
 .review-avatar {
@@ -1298,16 +1392,16 @@ textarea {
 
 /* The mobile thread is a room layered over a quiet message canvas. */
 .app-shell[data-layout='mobile'][data-view='chat'] .chat-pane {
-    background-color: color-mix(in srgb, var(--brand-electric-cyan) 7%, var(--bg));
+    background-color: color-mix(in srgb, var(--ink) 2%, var(--bg));
     background-image:
         radial-gradient(
             circle at 18px 22px,
-            color-mix(in srgb, var(--brand-blue-lavender) 9%, transparent) 0 2px,
+            color-mix(in srgb, var(--ink) 4%, transparent) 0 2px,
             transparent 2.5px
         ),
         radial-gradient(
             circle at 64px 58px,
-            color-mix(in srgb, var(--brand-neon-pink) 7%, transparent) 0 3px,
+            color-mix(in srgb, var(--ink) 3%, transparent) 0 3px,
             transparent 3.5px
         );
     background-size: 92px 92px;
@@ -1791,6 +1885,12 @@ textarea {
     place-items: center;
 }
 
+.large-mark > svg {
+    width: 26px;
+    height: 26px;
+    stroke-width: 2;
+}
+
 /* ------------------------------------------------------------ composer */
 
 /*
@@ -2064,17 +2164,6 @@ textarea {
     white-space: nowrap;
 }
 
-.setting-chevron {
-    width: 16px;
-    height: 16px;
-    flex: none;
-    fill: none;
-    stroke: currentcolor;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-    stroke-width: 1.8;
-}
-
 /* A label belongs to the card it heads, so it sits inside its top edge. */
 .group-label {
     padding: 8px 16px 6px;
@@ -2096,12 +2185,19 @@ textarea {
     min-width: 0;
     grid-column: 2;
     padding-inline: 8px;
-    font-size: clamp(18px, 4.577vw, 20px);
+    font-size: var(--detail-ui-type);
     font-weight: 700;
     letter-spacing: -0.02em;
     text-align: center;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.app-shell[data-layout='mobile'] .sub-header h1 {
+    height: var(--mobile-top-action);
+    align-self: start;
+    margin-top: var(--mobile-top-offset);
+    line-height: var(--mobile-top-action);
 }
 
 .app-shell[data-layout='desktop'] .sub-header {

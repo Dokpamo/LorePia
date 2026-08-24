@@ -118,7 +118,7 @@ describe('ConversationPane greeting selector', () => {
 
         const action = screen.getByRole('button', { name: '새 대화' });
         expect(action).toHaveClass('new-conversation-button');
-        expect(action.querySelector('[aria-hidden="true"]')).toHaveTextContent('+');
+        expect(action.querySelector('svg.new-conversation-icon')).toBeInTheDocument();
     });
 
     it('renders only greeting ID/kind metadata and navigates only after successful opens', async () => {
@@ -159,7 +159,9 @@ describe('ConversationPane greeting selector', () => {
         expect(openNewConversation).toHaveBeenCalledOnce();
         expect(onOpenChat).toHaveBeenCalledOnce();
 
-        await fireEvent.click(screen.getByRole('button', { name: /첫 대화/ }));
+        const conversationButton = screen.getByRole('button', { name: /첫 대화/ });
+        expect(conversationButton.querySelector('[aria-hidden="true"]')).not.toBeInTheDocument();
+        await fireEvent.click(conversationButton);
         expect(selectConversation).toHaveBeenCalledWith(conversation);
         expect(onOpenChat).toHaveBeenCalledTimes(2);
     });

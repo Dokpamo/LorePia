@@ -14,6 +14,16 @@ export const SETTINGS_SECTIONS = [
     'discovery',
     'catalog',
     'advanced',
+    'licenses',
 ] as const;
 
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
+
+/**
+ * A pushed screen inside a settings destination.
+ *
+ * The owning panel interprets the value. Keeping the route in App means the
+ * fixed title and back button can pop one level before leaving the section,
+ * exactly like the Persona list/editor flow.
+ */
+export type SettingsDetailPage = string | null;

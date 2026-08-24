@@ -395,6 +395,40 @@ function client(
 afterEach(cleanup);
 
 describe('ContentModuleLifecyclePanel', () => {
+    it('pushes the module index into candidate and activation pages one level at a time', async () => {
+        vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue(BINDING_ID);
+        render(ContentModuleLifecyclePanel, {
+            props: {
+                client: client(),
+                conversationId: 'conversation-1',
+                branchId: 'branch-1',
+                detailPage: 'modules',
+            },
+        });
+
+        const candidatesDestination = await screen.findByRole('button', {
+            name: /^활성화 후보/,
+        });
+        expect(screen.getByRole('button', { name: /^모듈 바인딩/ })).toBeInTheDocument();
+
+        await fireEvent.click(candidatesDestination);
+        const activationDestination = await screen.findByRole('button', {
+            name: '이 불변 리비전 활성화 검토',
+        });
+        expect(screen.queryByRole('button', { name: /^모듈 바인딩/ })).not.toBeInTheDocument();
+
+        await fireEvent.click(activationDestination);
+        expect(
+            screen.getByRole('heading', { name: /가져온 합성 모듈 활성화 초안/ }),
+        ).toBeInTheDocument();
+        expect(screen.getByRole('toolbar', { name: '모듈 활성화 작업' })).toBeInTheDocument();
+
+        await fireEvent.click(screen.getByRole('button', { name: '닫기' }));
+        expect(
+            await screen.findByRole('button', { name: '이 불변 리비전 활성화 검토' }),
+        ).toBeInTheDocument();
+    });
+
     it('keeps local-use permission separate from sharing and requires an explicit completed import approval', async () => {
         vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue(BINDING_ID);
         const reviewContentModuleActivation = vi

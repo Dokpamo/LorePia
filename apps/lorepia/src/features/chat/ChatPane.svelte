@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { ArrowLeft, Send, Sparkles } from '@lucide/svelte';
     import MarkdownText from './MarkdownText.svelte';
     import { onMount, tick } from 'svelte';
     import type { KeyboardEventHandler } from 'svelte/elements';
@@ -858,7 +859,9 @@
             </div>
         </header>
         <div class="chat-placeholder state-panel empty">
-            <span class="large-mark" aria-hidden="true">✦</span>
+            <span class="large-mark" aria-hidden="true">
+                <Sparkles class="chat-placeholder-icon" />
+            </span>
             <strong>대화를 선택하세요.</strong>
             <button class="primary" type="button" onclick={onOpenHome}> 대화 목록 열기 </button>
         </div>
@@ -870,9 +873,7 @@
                 aria-label="대화 목록으로"
                 onclick={onOpenHome}
             >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M19 12H5m7-7-7 7 7 7" />
-                </svg>
+                <ArrowLeft class="chat-back-icon" aria-hidden="true" />
             </button>
             <div class="chat-identity">
                 <span class="avatar" aria-hidden="true"
@@ -1446,10 +1447,7 @@
                         disabled={draft.trim().length === 0 || sending}
                         aria-label="메시지 보내기"
                     >
-                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                            <path d="M4 12 20 4l-5.2 16-3.2-6.4L4 12Z" />
-                            <path d="m11.6 13.6 4.3-4.3" />
-                        </svg>
+                        <Send class="chat-send-icon" aria-hidden="true" />
                     </button>
                 {/if}
             </div>

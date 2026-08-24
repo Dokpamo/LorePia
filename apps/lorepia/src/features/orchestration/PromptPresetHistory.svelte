@@ -1,6 +1,7 @@
 <script lang="ts">
     import { onMount, untrack } from 'svelte';
 
+    import DetailActionBar from '../../components/detail/DetailActionBar.svelte';
     import type {
         LorepiaClient,
         PromptPresetHistoryClientApi,
@@ -18,7 +19,11 @@
         currentRevision: number | null;
         disabled?: boolean;
         onApplied?: (receipt: PromptPresetRollbackReceiptDto) => void | Promise<void>;
+        detailPage?: string | null;
     }
+
+    const HISTORY_ROUTE = 'history';
+    const REVIEW_ROUTE_PREFIX = 'history/review/';
 
     let {
         client,
@@ -26,6 +31,7 @@
         currentRevision,
         disabled = false,
         onApplied = () => undefined,
+        detailPage = $bindable(HISTORY_ROUTE),
     }: Props = $props();
     const controller = untrack(() => new PromptPresetHistoryController(client));
     let historyState = $state<PromptPresetHistoryState>(
@@ -42,6 +48,8 @@
         historyState.revisions.length > 0 &&
             historyState.revisions.every((revision) => !revision.rollback_allowed),
     );
+    const reviewRouteRevision = $derived(revisionFromReviewRoute(detailPage));
+    const showingReview = $derived(reviewRouteRevision !== null);
 
     $effect(() => {
         const nextKey = `${presetId ?? ''}:${String(currentRevision ?? '')}`;
@@ -64,27 +72,58 @@
         return `${value.slice(0, 12)}…${value.slice(-8)}`;
     }
 
+    function revisionFromReviewRoute(route: string | null): number | null {
+        if (!route?.startsWith(REVIEW_ROUTE_PREFIX)) return null;
+        const revision = Number(route.slice(REVIEW_ROUTE_PREFIX.length));
+        return Number.isSafeInteger(revision) && revision > 0 ? revision : null;
+    }
+
+    function reviewRoute(revision: number): string {
+        return `${REVIEW_ROUTE_PREFIX}${String(revision)}`;
+    }
+
+    function canReview(revision: PromptPresetHistoryState['revisions'][number]): boolean {
+        return (
+            revision.revision !== historyState.current_revision &&
+            revision.rollback_allowed &&
+            (historyState.current_revision === null ||
+                revision.revision < historyState.current_revision)
+        );
+    }
+
+    function reviewDisabled(revision: PromptPresetHistoryState['revisions'][number]): boolean {
+        return disabled || busy || !canReview(revision);
+    }
+
+    function reviewTitle(
+        revision: PromptPresetHistoryState['revisions'][number],
+    ): string | undefined {
+        if (revision.revision === historyState.current_revision) return '현재 리비전입니다.';
+        if (!revision.rollback_allowed) return '앱 내장 프리셋은 롤백할 수 없습니다.';
+        if (
+            historyState.current_revision !== null &&
+            revision.revision > historyState.current_revision
+        ) {
+            return '현재 상태보다 새로운 리비전입니다. 구성을 다시 불러오세요.';
+        }
+        return undefined;
+    }
+
+    async function openReview(revision: number): Promise<void> {
+        const reviewed = await controller.reviewTarget(revision);
+        if (reviewed) detailPage = reviewRoute(revision);
+    }
+
     async function applyRollback(): Promise<void> {
         const receipt = await controller.applyReviewedRollback();
-        if (receipt !== null) await onApplied(receipt);
+        if (receipt !== null) {
+            detailPage = HISTORY_ROUTE;
+            await onApplied(receipt);
+        }
     }
 </script>
 
-<section class="preset-history" aria-labelledby="prompt-preset-history-title">
-    <div class="history-heading">
-        <div>
-            <h4 id="prompt-preset-history-title">프롬프트 프리셋 리비전</h4>
-            <p>과거 문서를 직접 제출하지 않고 Core가 검증한 해시를 승인해 새 리비전을 만듭니다.</p>
-        </div>
-        <button
-            type="button"
-            disabled={busy || presetId === null || currentRevision === null}
-            onclick={() => void controller.load(presetId, currentRevision)}
-        >
-            이력 새로고침
-        </button>
-    </div>
-
+<section class="preset-history has-fixed-actions" aria-label="프롬프트 프리셋 리비전">
     <p class="sr-only" aria-live="polite">{historyState.announcement}</p>
 
     {#if disabled}
@@ -110,56 +149,79 @@
         <p class="history-note" role="note">최신 100개 리비전만 표시합니다.</p>
     {/if}
 
-    {#if historyState.revisions.length > 0}
-        <ol class="revision-list">
-            {#each [...historyState.revisions].reverse() as revision (revision.revision_id)}
-                <li class:current={revision.revision === historyState.current_revision}>
+    {#if !showingReview}
+        {#if historyState.receipt !== null}
+            <section class="rollback-receipt" aria-label="롤백 적용 영수증">
+                <p class="receipt-summary">
+                    대상 리비전 {historyState.receipt.target_revision}의 내용이 새 리비전
+                    {historyState.receipt.applied_revision}으로 저장되었습니다.
+                </p>
+                <dl class="detail-fields">
                     <div>
-                        <strong>리비전 {revision.revision}</strong>
-                        <span>{revision.name}</span>
-                        <small>
-                            {new Date(revision.created_at).toLocaleString()} ·
-                            {shortHash(revision.sha256)}
-                        </small>
+                        <dt>적용 리비전</dt>
+                        <dd><code>{historyState.receipt.applied_revision_id}</code></dd>
                     </div>
-                    {#if revision.revision === historyState.current_revision}
-                        <span class="current-badge">현재</span>
-                    {:else}
-                        <button
-                            type="button"
-                            disabled={disabled ||
-                                busy ||
-                                !revision.rollback_allowed ||
-                                (historyState.current_revision !== null &&
-                                    revision.revision > historyState.current_revision)}
-                            aria-label={`리비전 ${String(revision.revision)} 롤백 검토`}
-                            title={!revision.rollback_allowed
-                                ? '앱 내장 프리셋은 롤백할 수 없습니다.'
-                                : historyState.current_revision !== null &&
-                                    revision.revision > historyState.current_revision
-                                  ? '현재 상태보다 새로운 리비전입니다. 구성을 다시 불러오세요.'
-                                  : undefined}
-                            onclick={() => void controller.reviewTarget(revision.revision)}
-                        >
-                            변경 내역 검토
-                        </button>
-                    {/if}
-                </li>
-            {/each}
-        </ol>
-    {:else if historyState.phase === 'ready'}
-        <p class="history-note">저장된 프롬프트 프리셋 리비전이 없습니다.</p>
-    {/if}
+                    <div>
+                        <dt>적용 SHA-256</dt>
+                        <dd><code>{historyState.receipt.applied_sha256}</code></dd>
+                    </div>
+                    <div>
+                        <dt>승인 ID</dt>
+                        <dd><code>{historyState.receipt.approval_id}</code></dd>
+                    </div>
+                    <div>
+                        <dt>승인 SHA-256</dt>
+                        <dd><code>{historyState.receipt.approval_sha256}</code></dd>
+                    </div>
+                </dl>
+            </section>
+        {/if}
 
-    {#if historyState.review !== null && historyState.diff !== null}
+        {#if historyState.revisions.length > 0}
+            <ol class="setting-list revision-list" aria-label="프롬프트 프리셋 리비전">
+                {#each [...historyState.revisions].reverse() as revision (revision.revision_id)}
+                    <li>
+                        <button
+                            class="setting-row revision-row"
+                            class:current={revision.revision === historyState.current_revision}
+                            type="button"
+                            disabled={reviewDisabled(revision)}
+                            aria-current={revision.revision === historyState.current_revision
+                                ? 'true'
+                                : undefined}
+                            aria-label={revision.revision === historyState.current_revision
+                                ? `리비전 ${String(revision.revision)} 현재`
+                                : `리비전 ${String(revision.revision)} 롤백 검토`}
+                            title={reviewTitle(revision)}
+                            onclick={() => void openReview(revision.revision)}
+                        >
+                            <span class="setting-content">
+                                <span class="setting-copy revision-copy">
+                                    <strong>리비전 {revision.revision} · {revision.name}</strong>
+                                    <small>
+                                        {new Date(revision.created_at).toLocaleString()} ·
+                                        {shortHash(revision.sha256)}
+                                    </small>
+                                </span>
+                            </span>
+                            {#if revision.revision === historyState.current_revision}
+                                <span class="revision-state">현재</span>
+                            {/if}
+                        </button>
+                    </li>
+                {/each}
+            </ol>
+        {:else if historyState.phase === 'ready'}
+            <p class="history-note">저장된 프롬프트 프리셋 리비전이 없습니다.</p>
+        {/if}
+    {:else if historyState.review !== null && historyState.diff !== null}
         {@const review = historyState.review}
         {@const diff = historyState.diff}
-        <section class="rollback-review" aria-labelledby="prompt-rollback-review-title">
-            <h5 id="prompt-rollback-review-title">
-                리비전 {diff.from_revision} → {diff.to_revision} 롤백 검토
-            </h5>
-            <p>아래 검토 해시는 현재 프리셋, 대상 문서, 의존성, 바인딩 스냅샷을 함께 고정합니다.</p>
-            <dl>
+        <section
+            class="rollback-review"
+            aria-label={`리비전 ${String(diff.to_revision)} 롤백 검토`}
+        >
+            <dl class="detail-fields">
                 <div>
                     <dt>검토 해시</dt>
                     <dd><code>{review.review_sha256}</code></dd>
@@ -191,8 +253,10 @@
                     <dd><code>{diff.diff_sha256}</code></dd>
                 </div>
             </dl>
-            <div class="changed-paths">
-                <strong>변경 경로 {diff.changed_paths.length}개</strong>
+            <section class="changed-paths" aria-labelledby="prompt-rollback-changed-paths">
+                <h3 id="prompt-rollback-changed-paths">
+                    변경 경로 {diff.changed_paths.length}개
+                </h3>
                 {#if diff.changed_paths.length === 0}
                     <p>문서 필드 변경이 없습니다.</p>
                 {:else}
@@ -205,9 +269,27 @@
                 {#if diff.truncated}
                     <p class="history-note">표시 한도를 넘은 변경 경로가 더 있습니다.</p>
                 {/if}
-            </div>
+            </section>
+        </section>
+    {:else if historyState.phase !== 'reviewing'}
+        <p class="history-note">검토 내용을 다시 불러오세요.</p>
+    {/if}
+
+    {#if !showingReview}
+        <DetailActionBar fixed className="history-action-bar" ariaLabel="리비전 이력 작업">
             <button
-                class="apply-button"
+                class="primary detail-action detail-action--wide"
+                type="button"
+                disabled={busy || presetId === null || currentRevision === null}
+                onclick={() => void controller.load(presetId, currentRevision)}
+            >
+                이력 새로고침
+            </button>
+        </DetailActionBar>
+    {:else if historyState.review !== null && historyState.diff !== null}
+        <DetailActionBar fixed className="history-action-bar" ariaLabel="롤백 검토 작업">
+            <button
+                class="primary detail-action detail-action--wide"
                 type="button"
                 disabled={disabled || historyState.phase === 'applying'}
                 onclick={() => void applyRollback()}
@@ -218,110 +300,73 @@
                       ? '이 검토 해시로 롤백 승인'
                       : '동일한 승인 ID로 다시 확인'}
             </button>
-        </section>
-    {/if}
-
-    {#if historyState.receipt !== null}
-        <section class="rollback-receipt" aria-labelledby="prompt-rollback-receipt-title">
-            <h5 id="prompt-rollback-receipt-title">롤백 적용 영수증</h5>
-            <p>
-                대상 리비전 {historyState.receipt.target_revision}의 내용이 새 리비전
-                {historyState.receipt.applied_revision}으로 저장되었습니다.
-            </p>
-            <dl>
-                <div>
-                    <dt>적용 리비전</dt>
-                    <dd><code>{historyState.receipt.applied_revision_id}</code></dd>
-                </div>
-                <div>
-                    <dt>적용 SHA-256</dt>
-                    <dd><code>{historyState.receipt.applied_sha256}</code></dd>
-                </div>
-                <div>
-                    <dt>승인 ID</dt>
-                    <dd><code>{historyState.receipt.approval_id}</code></dd>
-                </div>
-                <div>
-                    <dt>승인 SHA-256</dt>
-                    <dd><code>{historyState.receipt.approval_sha256}</code></dd>
-                </div>
-            </dl>
-        </section>
+        </DetailActionBar>
     {/if}
 </section>
 
 <style>
     .preset-history {
         display: grid;
-        gap: 0.8rem;
-        margin-block: 1rem;
-        padding: 1rem;
-        border: 1px solid var(--line);
-        border-radius: 0.8rem;
-        background: color-mix(in srgb, var(--surface-raised) 94%, transparent);
-    }
-
-    .history-heading,
-    .revision-list li {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 1rem;
-    }
-
-    .history-heading h4,
-    .rollback-review h5,
-    .rollback-receipt h5 {
+        min-width: 0;
+        padding: 0;
+        border: 0;
         margin: 0;
-    }
-
-    .history-heading p,
-    .rollback-review > p,
-    .rollback-receipt > p {
-        margin: 0.25rem 0 0;
+        background: transparent;
+        gap: 18px;
     }
 
     .revision-list {
-        display: grid;
-        gap: 0.5rem;
-        margin: 0;
-        padding: 0;
-        list-style: none;
+        width: auto;
     }
 
-    .revision-list li {
-        padding: 0.7rem;
-        border: 1px solid var(--line);
-        border-radius: 0.6rem;
-    }
-
-    .revision-list li.current {
-        border-color: var(--accent);
-    }
-
-    .revision-list li > div {
-        display: grid;
-        gap: 0.15rem;
+    .revision-row {
         min-width: 0;
     }
 
-    .revision-list small,
-    .revision-list span {
-        overflow-wrap: anywhere;
+    .revision-row:disabled {
+        cursor: default;
+        opacity: 1;
     }
 
-    .current-badge {
-        padding: 0.2rem 0.5rem;
-        border-radius: 999px;
-        background: var(--accent-soft);
+    .revision-copy {
+        display: grid;
+        min-width: 0;
+        gap: 5px;
+    }
+
+    .revision-copy strong,
+    .revision-copy small {
+        overflow-wrap: anywhere;
+        line-height: 1.35;
+    }
+
+    .revision-copy strong {
+        color: var(--ink);
+        font-size: var(--detail-support-type);
+        font-weight: 550;
+    }
+
+    .revision-copy small {
+        color: var(--ink-muted);
+        font-size: var(--detail-support-type);
+        font-weight: 550;
+    }
+
+    .revision-state {
+        flex: none;
+        color: var(--warning);
+        font-size: var(--detail-support-type);
+        font-weight: 750;
     }
 
     .history-note,
     .history-error {
         margin: 0;
-        padding: 0.65rem;
-        border-radius: 0.5rem;
+        padding: 12px;
+        border-radius: 12px;
         background: var(--surface-sunken);
+        color: var(--ink-muted);
+        line-height: 1.5;
     }
 
     .history-error {
@@ -331,45 +376,75 @@
     .rollback-review,
     .rollback-receipt {
         display: grid;
-        gap: 0.75rem;
-        padding: 0.8rem;
-        border-radius: 0.6rem;
-        background: var(--surface-sunken);
+        min-width: 0;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        gap: 18px;
     }
 
-    dl {
+    .detail-fields {
         display: grid;
-        gap: 0.5rem;
         margin: 0;
     }
 
-    dl div {
+    .detail-fields > div {
         display: grid;
-        gap: 0.15rem;
+        grid-template-columns: minmax(112px, 0.65fr) minmax(0, 1.35fr);
+        align-items: start;
+        padding: 13px 2px;
+        border-bottom: 1px solid var(--line);
+        gap: 12px;
+    }
+
+    .detail-fields > div:first-child {
+        padding-top: 0;
     }
 
     dt {
+        color: var(--ink-muted);
+        font-size: var(--detail-support-type);
         font-weight: 700;
     }
 
     dd {
+        min-width: 0;
         margin: 0;
+        color: var(--ink);
+        font-size: var(--detail-support-type);
+        font-weight: 650;
         overflow-wrap: anywhere;
     }
 
     code {
+        font-size: 0.76rem;
+        white-space: pre-wrap;
         overflow-wrap: anywhere;
     }
 
-    .changed-paths ul {
-        max-height: 14rem;
-        overflow: auto;
-        margin: 0.4rem 0;
-        padding-inline-start: 1.4rem;
+    .receipt-summary,
+    .changed-paths p {
+        margin: 0;
+        color: var(--ink-muted);
+        line-height: 1.5;
     }
 
-    .apply-button {
-        justify-self: start;
+    .changed-paths {
+        display: grid;
+        padding-top: 18px;
+        border-top: 1px solid var(--line);
+        gap: 10px;
+    }
+
+    .changed-paths h3 {
+        margin: 0;
+        color: var(--ink);
+        font-size: var(--detail-support-type);
+    }
+
+    .changed-paths ul {
+        margin: 0;
+        padding-inline-start: 1.4rem;
     }
 
     .sr-only {
@@ -385,10 +460,9 @@
     }
 
     @container view (max-width: 680px) {
-        .history-heading,
-        .revision-list li {
-            align-items: stretch;
-            flex-direction: column;
+        .detail-fields > div {
+            grid-template-columns: 1fr;
+            gap: 5px;
         }
     }
 </style>

@@ -1,142 +1,206 @@
 <script lang="ts">
+    import { ListPlus } from '@lucide/svelte';
+    import { tick } from 'svelte';
+    import DetailActionBar from '../../components/detail/DetailActionBar.svelte';
+    import DetailPage from '../../components/detail/DetailPage.svelte';
     import { tr } from '../../lib/i18n';
     import type { LorepiaAppController, LorepiaAppState } from '../../app/app-controller';
+    import type { ModelSyncJobDto } from '../../lib/ipc/contracts';
 
     interface Props {
         appState: LorepiaAppState;
         controller: LorepiaAppController;
+        nestedPage?: string | null;
+        nestedTitle?: string;
     }
 
-    let { appState, controller }: Props = $props();
+    let {
+        appState,
+        controller,
+        nestedPage = $bindable(null),
+        nestedTitle = $bindable(''),
+    }: Props = $props();
     let selectedConnectionId = $state('');
     let busy = $state(false);
 
     const workspace = $derived(appState.providers.workspace);
+    const selectedJobId = $derived(
+        nestedPage?.startsWith('job:') ? nestedPage.slice('job:'.length) : null,
+    );
     const selectedJob = $derived(
-        workspace.model_sync_jobs.find((job) => job.id === workspace.selected_model_sync_job_id) ??
-            null,
+        workspace.model_sync_jobs.find((job) => job.id === selectedJobId) ?? null,
     );
     const selectedEvent = $derived(
         workspace.model_sync_event?.job_id === selectedJob?.id ? workspace.model_sync_event : null,
     );
+    const selectedConnectionExists = $derived(
+        workspace.connections.some((connection) => connection.id === selectedConnectionId),
+    );
 
-    async function startSync(): Promise<void> {
-        if (selectedConnectionId === '') return;
+    function connectionName(connectionId: string): string {
+        return (
+            workspace.connections.find((connection) => connection.id === connectionId)
+                ?.display_name ?? connectionId
+        );
+    }
+
+    async function run(action: () => Promise<void>): Promise<void> {
+        if (busy) return;
         busy = true;
         try {
-            await controller.startProviderModelSync(selectedConnectionId);
+            await action();
         } finally {
             busy = false;
         }
     }
 
-    async function refresh(jobId: string): Promise<void> {
-        busy = true;
-        try {
-            await controller.refreshProviderModelSync(jobId);
-        } finally {
-            busy = false;
+    async function startSync(): Promise<void> {
+        if (busy || !selectedConnectionExists) return;
+        const previousJobId = workspace.selected_model_sync_job_id;
+        await run(() => controller.startProviderModelSync(selectedConnectionId));
+        await tick();
+        const jobId = workspace.selected_model_sync_job_id;
+        const job = workspace.model_sync_jobs.find((candidate) => candidate.id === jobId);
+        if (jobId !== null && jobId !== previousJobId && job) {
+            nestedTitle = $tr('settings.page.discovery.sync_job');
+            nestedPage = `job:${jobId}`;
         }
+    }
+
+    function beginCreate(): void {
+        selectedConnectionId = '';
+        nestedTitle = $tr('settings.page.discovery.sync_create');
+        nestedPage = 'create';
+    }
+
+    function openJob(job: ModelSyncJobDto): void {
+        nestedTitle = $tr('settings.page.discovery.sync_job');
+        nestedPage = `job:${job.id}`;
+        void run(() => controller.refreshProviderModelSync(job.id));
     }
 
     function terminal(state: string): boolean {
         return ['completed', 'failed', 'cancelled'].includes(state);
     }
+
+    $effect(() => {
+        if (selectedConnectionId !== '' && !selectedConnectionExists) selectedConnectionId = '';
+    });
+
+    $effect(() => {
+        const page = nestedPage;
+        if (page === null) {
+            if (nestedTitle !== '') nestedTitle = '';
+            return;
+        }
+
+        if (page === 'create') {
+            const title = $tr('settings.page.discovery.sync_create');
+            if (nestedTitle !== title) nestedTitle = title;
+            return;
+        }
+
+        if (!page.startsWith('job:') || selectedJob === null) {
+            nestedPage = null;
+            nestedTitle = '';
+            return;
+        }
+
+        const title = $tr('settings.page.discovery.sync_job');
+        if (nestedTitle !== title) nestedTitle = title;
+    });
 </script>
 
-<section class="workflow-section" aria-labelledby="model-sync-title">
-    <header class="workflow-heading">
-        <div>
-            <p class="eyebrow">Durable model metadata job</p>
-            <h2 id="model-sync-title">{$tr('model_sync.title')}</h2>
-            <p>
-                {$tr('model_sync.hint')}
-            </p>
-        </div>
-    </header>
-
-    <form
-        class="start-row"
-        aria-label={$tr('model_sync.start.label')}
-        onsubmit={(event) => {
-            event.preventDefault();
-            void startSync();
-        }}
-    >
-        <label>
-            <span>{$tr('model_sync.connection')}</span>
-            <select bind:value={selectedConnectionId} required>
-                <option value="">{$tr('model_sync.select')}</option>
-                {#each workspace.connections as connection (connection.id)}
-                    <option value={connection.id}>{connection.display_name}</option>
-                {/each}
-            </select>
-        </label>
-        <button class="primary" type="submit" disabled={busy || selectedConnectionId === ''}>
-            {$tr('model_sync.start.label')}
-        </button>
-    </form>
-
-    {#if workspace.model_sync_jobs.length > 0}
-        <div class="job-picker">
+{#snippet detailContent()}
+    {#if nestedPage === 'create'}
+        <form
+            id="model-sync-start-form"
+            class="sync-start-form"
+            aria-label={$tr('model_sync.start.label')}
+            onsubmit={(event) => {
+                event.preventDefault();
+                void startSync();
+            }}
+        >
             <label>
-                <span>{$tr('model_sync.saved_jobs')}</span>
-                <select
-                    value={workspace.selected_model_sync_job_id ?? ''}
-                    onchange={(event) => {
-                        const id = event.currentTarget.value;
-                        if (id !== '') void refresh(id);
-                    }}
-                >
+                <span>{$tr('model_sync.connection')}</span>
+                <select bind:value={selectedConnectionId} required disabled={busy}>
                     <option value="">{$tr('model_sync.select')}</option>
-                    {#each workspace.model_sync_jobs as job (job.id)}
-                        <option value={job.id}>
-                            {job.connection_id} · {job.state} · r{job.revision}
-                        </option>
+                    {#each workspace.connections as connection (connection.id)}
+                        <option value={connection.id}>{connection.display_name}</option>
                     {/each}
                 </select>
             </label>
-            <button
-                type="button"
-                disabled={selectedJob === null || busy}
-                onclick={() => {
-                    if (selectedJob) void refresh(selectedJob.id);
-                }}
-            >
-                {$tr('model_sync.refresh_events')}
-            </button>
-        </div>
-    {/if}
+        </form>
 
-    {#if selectedJob}
-        <article class="job-card">
-            <header>
+        {#if workspace.connections.length === 0}
+            <p class="inline-note">먼저 프로바이더 연결을 추가해 주세요.</p>
+        {/if}
+    {:else if nestedPage === null}
+        {#if workspace.model_sync_jobs.length === 0}
+            <p class="inline-note">저장된 동기화 작업이 없습니다.</p>
+        {:else}
+            <ul class="setting-list sync-job-list" aria-label={$tr('model_sync.saved_jobs')}>
+                {#each workspace.model_sync_jobs as job (job.id)}
+                    <li>
+                        <button
+                            class="setting-row sync-job-row"
+                            type="button"
+                            disabled={busy}
+                            onclick={() => openJob(job)}
+                        >
+                            <span class="setting-content">
+                                <span class="setting-copy sync-job-copy">
+                                    <strong>{connectionName(job.connection_id)}</strong>
+                                    <small>{job.state} · r{job.revision}</small>
+                                </span>
+                                <span class="sync-job-updated">{job.updated_at}</span>
+                            </span>
+                        </button>
+                    </li>
+                {/each}
+            </ul>
+        {/if}
+    {:else if selectedJob}
+        <article
+            class="sync-job-detail"
+            aria-label={$tr('model_sync.job.label', {
+                connection: connectionName(selectedJob.connection_id),
+            })}
+        >
+            <dl class="detail-fields">
                 <div>
-                    <h3>{selectedJob.connection_id}</h3>
-                    <p>{selectedJob.state} · revision {selectedJob.revision}</p>
+                    <dt>{$tr('model_sync.connection')}</dt>
+                    <dd>{connectionName(selectedJob.connection_id)}</dd>
                 </div>
-                <button
-                    class="danger"
-                    type="button"
-                    disabled={busy || terminal(selectedJob.state)}
-                    onclick={() => void controller.cancelProviderModelSync(selectedJob.id)}
-                >
-                    {$tr('model_sync.cancel')}
-                </button>
-            </header>
+                <div>
+                    <dt>상태</dt>
+                    <dd>{selectedJob.state}</dd>
+                </div>
+                <div>
+                    <dt>리비전</dt>
+                    <dd>{selectedJob.revision}</dd>
+                </div>
+                <div>
+                    <dt>최근 갱신</dt>
+                    <dd>{selectedJob.updated_at}</dd>
+                </div>
+            </dl>
 
             {#if selectedEvent}
-                <div class="progress-block">
-                    <strong>{selectedEvent.progress.message_key}</strong>
+                <section class="progress-section" aria-label="동기화 진행 상황">
+                    <div class="progress-copy">
+                        <strong>{selectedEvent.progress.message_key}</strong>
+                        <span>
+                            {selectedEvent.progress.completed_steps} /
+                            {selectedEvent.progress.total_steps}
+                        </span>
+                    </div>
                     <progress
                         max={Math.max(1, selectedEvent.progress.total_steps)}
                         value={selectedEvent.progress.completed_steps}
                     ></progress>
-                    <span>
-                        {selectedEvent.progress.completed_steps} /
-                        {selectedEvent.progress.total_steps}
-                    </span>
-                </div>
+                </section>
             {/if}
 
             {#if selectedJob.failure}
@@ -147,9 +211,9 @@
 
             {#if selectedJob.review}
                 {@const review = selectedJob.review}
-                <section class="review-card" aria-labelledby="model-sync-review-title">
-                    <h4 id="model-sync-review-title">{$tr('model_sync.review.title')}</h4>
-                    <dl>
+                <section class="review-section" aria-labelledby="model-sync-review-title">
+                    <h2 id="model-sync-review-title">{$tr('model_sync.review.title')}</h2>
+                    <dl class="detail-fields review-fields">
                         <div>
                             <dt>{$tr('model_sync.review.new')}</dt>
                             <dd>
@@ -182,151 +246,291 @@
                                 })}
                             </dd>
                         </div>
+                        <div>
+                            <dt>출처</dt>
+                            <dd>
+                                {review.diff.provenance.source} ·
+                                {review.diff.provenance.endpoint_path} ·
+                                {review.diff.provenance.pages_fetched} page
+                            </dd>
+                        </div>
+                        <div>
+                            <dt>SHA-256</dt>
+                            <dd><code>{review.sha256}</code></dd>
+                        </div>
                     </dl>
-                    <p>
-                        {$tr('model_sync.review.source', { source: review.diff.provenance.source })}
-                        {review.diff.provenance.endpoint_path} ·
-                        {review.diff.provenance.pages_fetched} page
-                    </p>
-                    <code>{review.sha256}</code>
-                    <button
-                        class="primary"
-                        type="button"
-                        disabled={busy || selectedJob.state !== 'diff-ready-awaiting-review'}
-                        onclick={() => void controller.approveProviderModelSync(selectedJob.id)}
-                    >
-                        {$tr('model_sync.review.apply')}
-                    </button>
                 </section>
             {/if}
 
             {#if selectedJob.state === 'interrupted'}
-                <p class="notice">
-                    {$tr('model_sync.interrupted')}
-                </p>
+                <p class="notice">{$tr('model_sync.interrupted')}</p>
             {/if}
         </article>
     {/if}
-</section>
+{/snippet}
+
+{#snippet detailActions()}
+    {#if nestedPage === null}
+        <DetailActionBar className="model-sync-action-bar" ariaLabel="모델 동기화 목록 작업">
+            <button
+                class="primary detail-action detail-action--wide"
+                type="button"
+                disabled={busy}
+                onclick={beginCreate}
+            >
+                <ListPlus aria-hidden="true" />
+                새 모델 동기화
+            </button>
+        </DetailActionBar>
+    {:else if nestedPage === 'create'}
+        <DetailActionBar
+            className="model-sync-action-bar"
+            ariaLabel={$tr('model_sync.start.label')}
+        >
+            <button
+                class="primary detail-action detail-action--wide"
+                type="submit"
+                form="model-sync-start-form"
+                disabled={busy || !selectedConnectionExists}
+            >
+                <ListPlus aria-hidden="true" />
+                {$tr('model_sync.start.label')}
+            </button>
+        </DetailActionBar>
+    {:else if selectedJob && !terminal(selectedJob.state)}
+        <DetailActionBar className="model-sync-action-bar" ariaLabel="동기화 작업">
+            <button
+                class="danger detail-action detail-action--destructive detail-action--borderless"
+                type="button"
+                disabled={busy}
+                onclick={() => void run(() => controller.cancelProviderModelSync(selectedJob.id))}
+            >
+                {$tr('model_sync.cancel')}
+            </button>
+            {#if selectedJob.review}
+                <button
+                    class="primary detail-action detail-action--grow"
+                    type="button"
+                    disabled={busy || selectedJob.state !== 'diff-ready-awaiting-review'}
+                    onclick={() =>
+                        void run(() => controller.approveProviderModelSync(selectedJob.id))}
+                >
+                    {$tr('model_sync.review.apply')}
+                </button>
+            {:else}
+                <button
+                    class="primary detail-action detail-action--grow"
+                    type="button"
+                    disabled={busy}
+                    onclick={() =>
+                        void run(() => controller.refreshProviderModelSync(selectedJob.id))}
+                >
+                    {$tr('model_sync.refresh_events')}
+                </button>
+            {/if}
+        </DetailActionBar>
+    {/if}
+{/snippet}
+
+<DetailPage
+    className="model-sync-panel"
+    scrollClassName="provider-scroll settings-detail-scroll model-sync-scroll"
+    ariaLabel={$tr('model_sync.title')}
+    resetKey={nestedPage ?? 'index'}
+    hasActions={nestedPage === null ||
+        nestedPage === 'create' ||
+        (selectedJob !== null && !terminal(selectedJob.state))}
+    content={detailContent}
+    actions={detailActions}
+/>
 
 <style>
-    .workflow-section {
-        padding: 20px;
-        border: 1px solid var(--line);
-        border-radius: var(--radius-md);
-        background: var(--surface-raised);
-    }
-
-    .workflow-heading h2,
-    .job-card h3,
-    .review-card h4 {
-        margin: 3px 0;
-    }
-
-    .workflow-heading p:last-child,
-    .job-card header p,
-    .review-card p,
-    .notice {
-        margin: 5px 0 0;
-        color: var(--ink-muted);
-        line-height: 1.45;
-    }
-
-    .start-row,
-    .job-picker,
-    .job-card > header {
-        display: flex;
-        gap: 12px;
-        align-items: end;
-        justify-content: space-between;
-    }
-
-    .start-row,
-    .job-picker {
-        margin-top: 16px;
-    }
-
-    label {
+    .sync-start-form,
+    .sync-job-detail,
+    .review-section,
+    .progress-section {
         display: grid;
-        flex: 1;
-        gap: 6px;
+        min-width: 0;
+        gap: 16px;
+    }
+
+    .sync-start-form label {
+        display: grid;
+        gap: 7px;
         color: var(--ink-muted);
-        font-size: 0.78rem;
+        font-size: var(--detail-support-type);
         font-weight: 700;
     }
 
-    .job-card {
-        margin-top: 16px;
-        padding: 16px;
-        border: 1px solid var(--line);
-        border-radius: 14px;
-        background: var(--surface);
-    }
-
-    .progress-block {
-        display: grid;
-        grid-template-columns: auto 1fr auto;
-        gap: 10px;
-        align-items: center;
-        margin-top: 14px;
-    }
-
-    progress {
+    .sync-start-form select {
         width: 100%;
+        min-width: 0;
+        min-height: clamp(48px, 13.73vw, 60px);
+        padding: clamp(12px, 3.432vw, 15px);
+        border: 1.5px solid var(--line);
+        border-radius: var(--radius-md);
+        appearance: none;
+        background: color-mix(in srgb, var(--surface-sunken) 26%, var(--surface-raised));
+        box-shadow: inset 0 1px 2px rgb(16 18 24 / 3%);
+        color: var(--ink);
+        font-size: var(--detail-support-type);
+        line-height: 1.5;
     }
 
-    .review-card,
+    .sync-start-form select:hover:not(:focus, :disabled) {
+        border-color: var(--line);
+    }
+
+    .sync-start-form select:focus {
+        border-color: var(--accent);
+        outline: none;
+    }
+
+    .sync-start-form select:disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
+    }
+
+    .inline-note,
     .failure,
     .notice {
-        margin-top: 14px;
         padding: 12px;
         border-radius: 12px;
+        margin: 0;
         background: var(--surface-sunken);
+        color: var(--ink-muted);
+        font-size: var(--detail-support-type);
+        line-height: 1.5;
     }
 
     .failure {
         color: var(--danger);
     }
 
-    .review-card dl {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 8px;
+    .sync-job-list {
+        width: auto;
+        margin: 0;
     }
 
-    .review-card dl > div {
-        padding: 9px;
-        border-radius: 9px;
-        background: var(--surface);
+    .sync-job-copy {
+        display: grid;
+        min-width: 0;
+        gap: 5px;
+    }
+
+    .sync-job-copy > :is(strong, small),
+    .sync-job-updated {
+        overflow: hidden;
+        font-size: var(--detail-support-type);
+        line-height: 1.35;
+        text-overflow: ellipsis;
+    }
+
+    .sync-job-copy > strong {
+        color: var(--ink);
+        font-weight: 550;
+        white-space: nowrap;
+    }
+
+    .sync-job-copy > small,
+    .sync-job-updated {
+        color: var(--ink-muted);
+        font-weight: 500;
+    }
+
+    .sync-job-updated {
+        max-width: 42%;
+        flex: none;
+        text-align: right;
+        white-space: nowrap;
+    }
+
+    .detail-fields {
+        display: grid;
+        margin: 0;
+    }
+
+    .detail-fields > div {
+        display: grid;
+        grid-template-columns: minmax(112px, 0.65fr) minmax(0, 1.35fr);
+        align-items: start;
+        padding: 13px 2px;
+        border-bottom: 1px solid var(--line);
+        gap: 12px;
+    }
+
+    .detail-fields > div:first-child {
+        padding-top: 0;
     }
 
     dt {
         color: var(--ink-muted);
-        font-size: 0.7rem;
+        font-size: var(--detail-support-type);
+        font-weight: 700;
     }
 
     dd {
-        margin: 3px 0 0;
-        font-weight: 800;
+        min-width: 0;
+        margin: 0;
+        color: var(--ink);
+        font-size: var(--detail-support-type);
+        font-weight: 650;
+        overflow-wrap: anywhere;
     }
 
     code {
-        display: block;
-        margin: 10px 0;
+        font-size: 0.76rem;
+        white-space: pre-wrap;
         overflow-wrap: anywhere;
-        font-size: 0.72rem;
+    }
+
+    .progress-section,
+    .review-section {
+        padding-top: 18px;
+        border-top: 1px solid var(--line);
+    }
+
+    .progress-copy {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        color: var(--ink-muted);
+        font-size: var(--detail-support-type);
+        gap: 12px;
+    }
+
+    progress {
+        width: 100%;
+        accent-color: var(--accent);
+    }
+
+    .review-section h2 {
+        margin: 0;
+        color: var(--ink);
+        font-size: var(--detail-support-type);
+        font-weight: 700;
+        line-height: 1.35;
+    }
+
+    :global(.model-sync-action-bar svg) {
+        width: 20px;
+        height: 20px;
+        flex: none;
+        fill: none;
+        stroke: currentcolor;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        stroke-width: 1.8;
     }
 
     @container view (max-width: 640px) {
-        .start-row,
-        .job-picker,
-        .job-card > header {
-            align-items: stretch;
-            flex-direction: column;
+        .detail-fields > div {
+            grid-template-columns: 1fr;
+            gap: 5px;
         }
 
-        .review-card dl {
-            grid-template-columns: 1fr;
+        .sync-job-updated {
+            display: none;
         }
     }
 </style>

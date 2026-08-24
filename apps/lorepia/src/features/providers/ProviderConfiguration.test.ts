@@ -128,6 +128,9 @@ describe('direct provider configuration', () => {
         const remove = vi.spyOn(controller, 'deleteProviderConnection').mockResolvedValue(true);
         render(ProviderCrudPanel, { appState, controller });
 
+        await fireEvent.click(screen.getByRole('button', { name: '프로바이더 연결 1개 연결' }));
+        expect(screen.getByRole('toolbar', { name: '프로바이더 연결 작업' })).toBeInTheDocument();
+        await fireEvent.click(screen.getByRole('button', { name: '연결 추가하기' }));
         const createForm = screen.getByRole('form', { name: '프로바이더 연결 만들기' });
         await fireEvent.change(within(createForm).getByLabelText('템플릿'), {
             target: { value: TEMPLATE.id },
@@ -142,7 +145,7 @@ describe('direct provider configuration', () => {
         expect(createForm).toHaveTextContent(
             '자격증명은 이 화면이나 WebView 메모리에 들어오지 않습니다.',
         );
-        await fireEvent.click(within(createForm).getByRole('button', { name: '연결 만들기' }));
+        await fireEvent.click(screen.getByRole('button', { name: '연결 만들기' }));
 
         await waitFor(() => {
             expect(create).toHaveBeenCalledWith(
@@ -154,21 +157,23 @@ describe('direct provider configuration', () => {
             );
         });
 
-        const editForm = screen.getByRole('form', {
-            name: '프로바이더 연결 수정 또는 삭제',
-        });
-        await fireEvent.change(within(editForm).getByLabelText('연결 선택'), {
-            target: { value: CONNECTION.id },
-        });
-        const deleteButton = within(editForm).getByRole('button', {
-            name: '선택한 연결 삭제',
-        });
-        expect(deleteButton).toBeDisabled();
         await fireEvent.click(
-            within(editForm).getByLabelText('선택한 연결과 그 종속 설정의 삭제를 확인합니다.'),
+            screen.getByRole('button', {
+                name: 'Synthetic connection https://api.example',
+            }),
         );
-        expect(deleteButton).toBeEnabled();
-        await fireEvent.click(deleteButton);
+        expect(
+            screen.getByRole('toolbar', { name: '프로바이더 연결 편집 작업' }),
+        ).toBeInTheDocument();
+        expect(
+            screen.getByRole('form', {
+                name: '프로바이더 연결 수정 또는 삭제',
+            }),
+        ).toBeInTheDocument();
+        await fireEvent.click(screen.getByRole('button', { name: '삭제' }));
+        expect(remove).not.toHaveBeenCalled();
+        expect(screen.getByRole('button', { name: '삭제 확인' })).toBeEnabled();
+        await fireEvent.click(screen.getByRole('button', { name: '삭제 확인' }));
         expect(remove).toHaveBeenCalledWith(CONNECTION.id);
         controller.destroy();
     });
@@ -183,7 +188,9 @@ describe('direct provider configuration', () => {
         const preview = vi.spyOn(controller, 'previewProviderRequestCandidate').mockResolvedValue();
         render(ProviderCrudPanel, { appState, controller });
 
-        await fireEvent.click(screen.getByText('생성 프리셋'));
+        await fireEvent.click(screen.getByRole('button', { name: '생성 프리셋 0개 프리셋' }));
+        expect(screen.getByRole('toolbar', { name: '생성 프리셋 작업' })).toBeInTheDocument();
+        await fireEvent.click(screen.getByRole('button', { name: '프리셋 추가하기' }));
         const form = screen.getByRole('form', { name: '생성 프리셋 만들기 또는 수정' });
         await fireEvent.change(within(form).getByLabelText('모델 라우트'), {
             target: { value: ROUTE.id },
@@ -235,7 +242,7 @@ describe('direct provider configuration', () => {
 
         await fireEvent.click(within(form).getByRole('button', { name: '요청 구조 미리보기' }));
         await waitFor(() => expect(preview).toHaveBeenCalledWith(candidate));
-        await fireEvent.click(within(form).getByRole('button', { name: '프리셋 만들기' }));
+        await fireEvent.click(screen.getByRole('button', { name: '프리셋 만들기' }));
         await waitFor(() => expect(save).toHaveBeenCalledWith(candidate));
         controller.destroy();
     });
@@ -269,26 +276,26 @@ describe('direct provider configuration', () => {
             .mockResolvedValue(true);
         render(ProviderCrudPanel, { appState, controller });
 
-        await fireEvent.click(screen.getByText('모델 라우트', { selector: 'summary' }));
-        const routeForm = screen.getByRole('form', { name: '모델 라우트 수정 또는 삭제' });
-        expect(
-            within(routeForm).queryByRole('option', {
-                name: `Legacy model v2 · ${LEGACY_ROUTE.id}`,
+        await fireEvent.click(screen.getByRole('button', { name: '모델 라우트 1개 라우트' }));
+        expect(screen.queryByRole('button', { name: /Legacy model v2/u })).not.toBeInTheDocument();
+        await fireEvent.click(
+            screen.getByRole('button', {
+                name: 'Synthetic model open_ai_responses · model-1',
             }),
-        ).not.toBeInTheDocument();
-
-        await fireEvent.change(within(routeForm).getByLabelText('라우트 선택'), {
-            target: { value: ROUTE.id },
-        });
-        await fireEvent.click(
-            within(routeForm).getByLabelText('선택한 라우트와 그 종속 프리셋의 삭제를 확인합니다.'),
         );
-        await fireEvent.click(
-            within(routeForm).getByRole('button', { name: '선택한 라우트 삭제' }),
-        );
+        expect(
+            screen.getByRole('form', { name: '모델 라우트 수정 또는 삭제' }),
+        ).toBeInTheDocument();
+        await fireEvent.click(screen.getByRole('button', { name: '삭제' }));
+        expect(deleteRoute).not.toHaveBeenCalled();
+        await fireEvent.click(screen.getByRole('button', { name: '삭제 확인' }));
         expect(deleteRoute).toHaveBeenCalledWith(ROUTE.id);
 
-        await fireEvent.click(screen.getByText('생성 프리셋', { selector: 'summary' }));
+        cleanup();
+        render(ProviderCrudPanel, { appState, controller });
+        await fireEvent.click(screen.getByRole('button', { name: '생성 프리셋 0개 프리셋' }));
+        expect(screen.queryByRole('button', { name: /Legacy default/u })).not.toBeInTheDocument();
+        await fireEvent.click(screen.getByRole('button', { name: '프리셋 추가하기' }));
         const presetForm = screen.getByRole('form', {
             name: '생성 프리셋 만들기 또는 수정',
         });
@@ -301,23 +308,52 @@ describe('direct provider configuration', () => {
 });
 
 describe('capability overrides', () => {
+    it('restores the loaded route when a different route fails to load', async () => {
+        const appState = configuredState();
+        const secondRoute: ModelRouteDto = {
+            ...ROUTE,
+            id: 'route-2',
+            model_id: 'model-2',
+            display_name: 'Second model',
+        };
+        appState.providers.workspace.routes = [ROUTE, secondRoute];
+        appState.providers.workspace.selected_capability_model_route_id = ROUTE.id;
+        const controller = new LorepiaAppController({} as LorepiaClient);
+        const load = vi.spyOn(controller, 'loadProviderCapabilities').mockResolvedValue();
+
+        render(CapabilityPanel, { appState, controller });
+        const routeSelect = screen.getByLabelText('모델 라우트');
+        expect(routeSelect).toHaveValue(ROUTE.id);
+        await fireEvent.change(routeSelect, { target: { value: secondRoute.id } });
+
+        expect(load).toHaveBeenCalledWith(secondRoute.id);
+        await waitFor(() => expect(routeSelect).toHaveValue(ROUTE.id));
+        controller.destroy();
+    });
+
     it('loads effective state and only edits/deletes an explicit user override', async () => {
         const appState = configuredState();
         appState.providers.workspace.selected_capability_model_route_id = ROUTE.id;
-        appState.providers.workspace.capability_observations = [
-            {
-                id: 'override-1',
-                model_route_id: ROUTE.id,
-                key: 'streaming',
-                value: { type: 'boolean', value: false },
-                status: 'verified',
-                source: 'user_override',
-                confidence: 'high',
-                observed_at: '2026-08-02T00:00:00Z',
-                expires_at: null,
-                evidence_ref: null,
-            },
-        ];
+        const override = {
+            id: 'override-1',
+            model_route_id: ROUTE.id,
+            key: 'streaming',
+            value: { type: 'boolean' as const, value: false },
+            status: 'verified',
+            source: 'user_override',
+            confidence: 'high',
+            observed_at: '2026-08-02T00:00:00Z',
+            expires_at: null,
+            evidence_ref: null,
+        };
+        appState.providers.workspace.capability_observations = [override];
+        appState.providers.workspace.effective_capability = {
+            selected: override,
+            alternatives: [],
+            evaluated_at: '2026-08-02T00:00:00Z',
+            selected_is_stale: false,
+            has_conflict: false,
+        };
         const controller = new LorepiaAppController({} as LorepiaClient);
         const load = vi.spyOn(controller, 'loadProviderCapabilities').mockResolvedValue();
         const inspect = vi
@@ -327,13 +363,30 @@ describe('capability overrides', () => {
             .spyOn(controller, 'upsertProviderCapabilityOverride')
             .mockResolvedValue(true);
         const remove = vi.spyOn(controller, 'deleteProviderCapabilityOverride').mockResolvedValue();
-        render(CapabilityPanel, { appState, controller });
+        const rendered = render(CapabilityPanel, { appState, controller });
 
-        await fireEvent.click(screen.getByRole('button', { name: 'capability 새로고침' }));
+        expect(
+            screen.queryByRole('button', { name: 'capability 새로고침' }),
+        ).not.toBeInTheDocument();
+        const routeSelect = screen.getByLabelText('모델 라우트');
+        await fireEvent.change(routeSelect, { target: { value: '' } });
+        expect(load).not.toHaveBeenCalled();
+        await fireEvent.change(routeSelect, { target: { value: ROUTE.id } });
         expect(load).toHaveBeenCalledWith(ROUTE.id);
+        await fireEvent.click(screen.getByRole('button', { name: /유효 capability 스트리밍/ }));
+        expect(screen.getByRole('toolbar', { name: '유효 capability 작업' })).toBeInTheDocument();
+        expect(rendered.container.querySelector('dl.effective-result')).toBeInTheDocument();
+        expect(rendered.container.querySelector('.effective-result .metadata-grid')).toBeNull();
         await fireEvent.click(screen.getByRole('button', { name: '유효 값 확인' }));
         expect(inspect).toHaveBeenCalledWith('streaming');
+
+        cleanup();
+        render(CapabilityPanel, { appState, controller });
+        await fireEvent.click(screen.getByRole('button', { name: '사용자 override 1개' }));
         await fireEvent.click(screen.getByRole('button', { name: '이 override 수정' }));
+        expect(
+            screen.getByRole('toolbar', { name: '사용자 override 편집 작업' }),
+        ).toBeInTheDocument();
         await fireEvent.click(screen.getByRole('button', { name: '사용자 override 업데이트' }));
         await waitFor(() => {
             expect(save).toHaveBeenCalledWith({
@@ -345,8 +398,50 @@ describe('capability overrides', () => {
                 expires_at: null,
             });
         });
+        await fireEvent.click(screen.getByRole('button', { name: '이 override 수정' }));
         await fireEvent.click(screen.getByRole('button', { name: '사용자 override 삭제' }));
+        expect(remove).not.toHaveBeenCalled();
+        await fireEvent.click(screen.getByRole('button', { name: '사용자 override 삭제 확인' }));
         expect(remove).toHaveBeenCalledWith('override-1');
+        controller.destroy();
+    });
+
+    it('returns to the override list if the edited override disappears', async () => {
+        const appState = configuredState();
+        appState.providers.workspace.selected_capability_model_route_id = ROUTE.id;
+        appState.providers.workspace.capability_observations = [
+            {
+                id: 'override-stale',
+                model_route_id: ROUTE.id,
+                key: 'streaming',
+                value: { type: 'boolean', value: true },
+                status: 'verified',
+                source: 'user_override',
+                confidence: 'high',
+                observed_at: '2026-08-02T00:00:00Z',
+                expires_at: null,
+                evidence_ref: null,
+            },
+        ];
+        const controller = new LorepiaAppController({} as LorepiaClient);
+        const rendered = render(CapabilityPanel, { appState, controller });
+
+        await fireEvent.click(screen.getByRole('button', { name: '사용자 override 1개' }));
+        await fireEvent.click(screen.getByRole('button', { name: '이 override 수정' }));
+        expect(
+            screen.getByRole('toolbar', { name: '사용자 override 편집 작업' }),
+        ).toBeInTheDocument();
+
+        const updatedState = structuredClone(appState);
+        updatedState.providers.workspace.capability_observations = [];
+        await rendered.rerender({ appState: updatedState, controller });
+
+        await waitFor(() =>
+            expect(
+                screen.getByRole('toolbar', { name: '사용자 override 작업' }),
+            ).toBeInTheDocument(),
+        );
+        expect(screen.queryByRole('button', { name: '사용자 override 업데이트' })).toBeNull();
         controller.destroy();
     });
 });

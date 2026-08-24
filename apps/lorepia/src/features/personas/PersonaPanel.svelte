@@ -1,4 +1,7 @@
 <script lang="ts">
+    import { UserRoundPlus } from '@lucide/svelte';
+    import DetailActionBar from '../../components/detail/DetailActionBar.svelte';
+    import DetailPage from '../../components/detail/DetailPage.svelte';
     import { tr } from '../../lib/i18n';
     import type { PersonaController, PersonaState } from './persona-controller';
     import type { PersonaDto } from './persona-contracts';
@@ -6,10 +9,10 @@
     interface Props {
         personaState: PersonaState;
         controller: PersonaController;
-        conversationTitle?: string | null;
+        editorMode?: 'create' | 'edit' | null;
     }
 
-    let { personaState, controller, conversationTitle = null }: Props = $props();
+    let { personaState, controller, editorMode = $bindable(null) }: Props = $props();
     let editingPersona = $state.raw<PersonaDto | null>(null);
     let name = $state('');
     let description = $state('');
@@ -22,13 +25,26 @@
         name = '';
         description = '';
         deleteConfirmationId = null;
+        editorMode = 'create';
+    }
+
+    function closeEditor(): void {
+        editingPersona = null;
+        name = '';
+        description = '';
+        deleteConfirmationId = null;
+        editorMode = null;
     }
 
     function beginEdit(persona: PersonaDto): void {
-        editingPersona = structuredClone(persona);
+        editingPersona = {
+            ...persona,
+            value: { ...persona.value },
+        };
         name = persona.value.name;
         description = persona.value.description;
         deleteConfirmationId = null;
+        editorMode = 'edit';
     }
 
     async function save(): Promise<void> {
@@ -39,86 +55,41 @@
             editingPersona === null
                 ? await controller.create(trimmedName, trimmedDescription)
                 : await controller.updatePersona(editingPersona, trimmedName, trimmedDescription);
-        if (saved) beginCreate();
+        if (saved) closeEditor();
     }
+
+    async function deleteEditingPersona(): Promise<void> {
+        if (editingPersona === null) return;
+        const deleted = await controller.deletePersona(editingPersona);
+        if (deleted) closeEditor();
+    }
+
+    $effect(() => {
+        if (editorMode !== null) return;
+        editingPersona = null;
+        name = '';
+        description = '';
+        deleteConfirmationId = null;
+    });
 </script>
 
-<section class="settings-section persona-panel" aria-labelledby="persona-settings-title">
-    <div class="section-heading">
-        <div>
-            <p class="eyebrow">Local persona</p>
-            <h2 id="persona-settings-title">{$tr('persona.title')}</h2>
-            <p>{$tr('persona.hint')}</p>
-        </div>
-        <button
-            type="button"
-            disabled={busy}
-            onclick={() => void controller.loadContext(personaState.conversation_id)}
-        >
-            {$tr('common.refresh')}
-        </button>
-    </div>
-
+{#snippet detailContent()}
     {#if personaState.phase === 'unavailable'}
-        <p class="inline-note warning" role="status">{personaState.error}</p>
-    {:else}
-        <section class="persona-selection" aria-labelledby="persona-selection-title">
-            <div class="section-heading compact">
-                <div>
-                    <h3 id="persona-selection-title">{$tr('persona.selection.title')}</h3>
-                    <p>
-                        {conversationTitle ??
-                            (personaState.conversation_id === null
-                                ? $tr('persona.selection.none_conversation')
-                                : $tr('persona.selection.current'))}
-                    </p>
-                </div>
-                {#if personaState.selection?.selected_persona}
-                    <button
-                        type="button"
-                        disabled={busy}
-                        onclick={() => void controller.clearSelection()}
-                    >
-                        {$tr('persona.selection.clear')}
-                    </button>
-                {/if}
-            </div>
-            {#if personaState.conversation_id === null}
-                <p class="inline-note">{$tr('persona.selection.pick_conversation')}</p>
-            {:else if personaState.selection?.selected_persona}
-                {@const selected = personaState.selection.selected_persona}
-                <article class="persona-selected-card">
-                    <strong>{selected.value.name}</strong>
-                    <p>{selected.value.description || $tr('persona.description.empty')}</p>
-                    <small>
-                        {$tr('persona.selection.revision', { revision: selected.revision })}
-                    </small>
-                </article>
-            {:else}
-                <p class="inline-note">{$tr('persona.selection.empty')}</p>
-            {/if}
-        </section>
-
+        <div class="persona-feedback warning" role="status">
+            <p>{personaState.error}</p>
+        </div>
+    {:else if editorMode !== null}
         <form
-            class="persona-form"
-            aria-labelledby="persona-editor-title"
+            id="persona-editor-form"
+            class="persona-form persona-editor-page"
+            aria-label={editorMode === 'create'
+                ? $tr('persona.editor.new')
+                : $tr('persona.editor.edit')}
             onsubmit={(event) => {
                 event.preventDefault();
                 void save();
             }}
         >
-            <div class="section-heading compact">
-                <h3 id="persona-editor-title">
-                    {editingPersona === null
-                        ? $tr('persona.editor.new')
-                        : $tr('persona.editor.edit')}
-                </h3>
-                {#if editingPersona !== null}
-                    <button type="button" disabled={busy} onclick={beginCreate}
-                        >{$tr('persona.editor.create_button')}</button
-                    >
-                {/if}
-            </div>
             <label>
                 <span>{$tr('persona.editor.name')}</span>
                 <input
@@ -134,223 +105,257 @@
                 <textarea bind:value={description} rows="3" maxlength="4000" disabled={busy}
                 ></textarea>
             </label>
-            <button class="primary" type="submit" disabled={busy || name.trim() === ''}>
-                {editingPersona === null
-                    ? $tr('persona.editor.submit_create')
-                    : $tr('persona.editor.submit_update')}
-            </button>
         </form>
-
+    {:else}
         {#if personaState.phase === 'loading'}
-            <p class="inline-note" role="status">{$tr('persona.loading')}</p>
+            <div class="persona-feedback" role="status">
+                <p>{$tr('persona.loading')}</p>
+            </div>
         {:else if personaState.phase === 'error'}
-            <p class="inline-note warning" role="alert">{personaState.error}</p>
+            <div class="persona-feedback warning" role="alert">
+                <p>{personaState.error}</p>
+                <button
+                    type="button"
+                    onclick={() => void controller.loadContext(personaState.conversation_id)}
+                >
+                    {$tr('persona.error.reload')}
+                </button>
+            </div>
         {/if}
 
-        <div class="persona-list" aria-label={$tr('persona.list.label')}>
-            {#if personaState.personas.length === 0 && personaState.phase !== 'loading'}
-                <p class="inline-note">{$tr('persona.list.empty')}</p>
-            {/if}
-            {#each personaState.personas as persona (persona.value.id)}
-                {@const isSelected =
-                    personaState.selection?.selected_persona?.value.id === persona.value.id}
-                <article class="persona-card" class:selected={isSelected}>
-                    <header>
-                        <div>
-                            <h3>{persona.value.name}</h3>
-                            <p>{persona.value.description || $tr('persona.description.empty')}</p>
-                        </div>
-                        <span class="status-pill">r{persona.revision}</span>
-                    </header>
-                    {#if isSelected}
-                        <p class="persona-pin-note">
-                            {$tr('persona.list.pinned', {
-                                revision: personaState.selection?.selected_persona?.revision ?? 0,
-                            })}
-                        </p>
-                    {/if}
-                    <div class="persona-actions">
-                        <button
-                            class="primary"
-                            type="button"
-                            disabled={busy || personaState.conversation_id === null || isSelected}
-                            onclick={() => void controller.selectPersona(persona)}
-                        >
-                            {isSelected ? $tr('persona.list.in_use') : $tr('persona.list.select')}
-                        </button>
-                        <button type="button" disabled={busy} onclick={() => beginEdit(persona)}>
-                            {$tr('persona.list.edit')}
-                        </button>
-                        {#if deleteConfirmationId === persona.value.id}
-                            <button
-                                class="danger"
-                                type="button"
-                                disabled={busy}
-                                onclick={() => {
-                                    deleteConfirmationId = null;
-                                    void controller.deletePersona(persona);
-                                }}
-                            >
-                                {$tr('persona.list.confirm_delete')}
-                            </button>
-                            <button
-                                type="button"
-                                disabled={busy}
-                                onclick={() => (deleteConfirmationId = null)}
-                            >
-                                {$tr('persona.list.cancel')}
-                            </button>
-                        {:else}
-                            <button
-                                type="button"
-                                disabled={busy}
-                                onclick={() => (deleteConfirmationId = persona.value.id)}
-                            >
-                                {$tr('persona.list.delete')}
-                            </button>
-                        {/if}
-                    </div>
-                </article>
-            {/each}
-            {#if personaState.next_cursor !== null}
-                <button
-                    class="persona-load-more"
-                    type="button"
-                    disabled={busy}
-                    onclick={() => void controller.loadMore()}
-                >
-                    {$tr('persona.list.load_more')}
-                </button>
-            {/if}
+        <div class="persona-catalog">
+            <div class="setting-list persona-list">
+                {#if personaState.personas.length === 0 && personaState.phase !== 'loading'}
+                    <p class="persona-empty-state">{$tr('persona.list.empty')}</p>
+                {/if}
+                {#each personaState.personas as persona (persona.value.id)}
+                    <button
+                        class="setting-row persona-row"
+                        type="button"
+                        disabled={busy}
+                        onclick={() => beginEdit(persona)}
+                    >
+                        <span class="setting-content">
+                            <span class="setting-copy persona-row-copy">
+                                <strong class="persona-row-name">{persona.value.name}</strong>
+                                <small class="persona-row-description">
+                                    {persona.value.description || $tr('persona.description.empty')}
+                                </small>
+                            </span>
+                        </span>
+                    </button>
+                {/each}
+                {#if personaState.next_cursor !== null}
+                    <button
+                        class="persona-load-more"
+                        type="button"
+                        disabled={busy}
+                        onclick={() => void controller.loadMore()}
+                    >
+                        {$tr('persona.list.load_more')}
+                    </button>
+                {/if}
+            </div>
         </div>
     {/if}
-</section>
+{/snippet}
+
+{#snippet detailActions()}
+    {#if personaState.phase !== 'unavailable'}
+        <DetailActionBar className="persona-action-bar" ariaLabel={$tr('persona.actions.label')}>
+            {#if editorMode === null}
+                <button
+                    class="primary detail-action detail-action--wide persona-bar-action persona-bar-action-wide"
+                    type="button"
+                    disabled={busy}
+                    onclick={beginCreate}
+                >
+                    <UserRoundPlus class="persona-add-icon" aria-hidden="true" />
+                    {$tr('persona.editor.create_button')}
+                </button>
+            {:else if editingPersona !== null && deleteConfirmationId === editingPersona.value.id}
+                <button
+                    class="danger detail-action detail-action--destructive persona-bar-action persona-delete-confirm"
+                    type="button"
+                    disabled={busy}
+                    onclick={() => void deleteEditingPersona()}
+                >
+                    {$tr('persona.list.confirm_delete')}
+                </button>
+                <button
+                    class="detail-action detail-action--grow persona-bar-action persona-cancel-action"
+                    type="button"
+                    disabled={busy}
+                    onclick={() => (deleteConfirmationId = null)}
+                >
+                    {$tr('persona.list.cancel')}
+                </button>
+            {:else}
+                {#if editingPersona !== null}
+                    <button
+                        class="detail-action detail-action--destructive detail-action--borderless persona-bar-action persona-delete-button"
+                        type="button"
+                        disabled={busy}
+                        onclick={() => (deleteConfirmationId = editingPersona?.value.id ?? null)}
+                    >
+                        {$tr('persona.list.delete')}
+                    </button>
+                {/if}
+                <button
+                    class="primary detail-action detail-action--grow persona-bar-action persona-save-action"
+                    type="submit"
+                    form="persona-editor-form"
+                    disabled={busy || name.trim() === ''}
+                >
+                    {editingPersona === null
+                        ? $tr('persona.editor.submit_create')
+                        : $tr('persona.editor.submit_update')}
+                </button>
+            {/if}
+        </DetailActionBar>
+    {/if}
+{/snippet}
+
+<DetailPage
+    className="persona-panel"
+    scrollClassName="provider-scroll settings-detail-scroll persona-scroll"
+    ariaLabel={$tr('persona.title')}
+    resetKey={editorMode ?? 'list'}
+    content={detailContent}
+    actions={detailActions}
+/>
 
 <style>
-    .persona-panel {
-        display: grid;
-        gap: 1rem;
+    .persona-empty-state,
+    .persona-feedback {
+        padding: 12px;
+        border-radius: 12px;
+        margin: 0;
+        background: var(--surface-sunken);
+        color: var(--ink-muted);
+        line-height: 1.5;
     }
 
-    /*
-     * The heading row every settings panel wears: title on the left, its one
-     * action on the right. It stacks once the column is too narrow to seat
-     * both.
-     */
-    .section-heading {
+    .persona-feedback {
         display: flex;
-        gap: 16px;
         align-items: center;
         justify-content: space-between;
+        gap: 12px;
     }
 
-    @container view (max-width: 640px) {
-        .section-heading {
-            align-items: flex-start;
-        }
-
-        /*
-         * The panel is already a card at this width, so a bordered block
-         * inside it only draws a second frame around the same content and
-         * spends the width twice. A rule and some air separate them instead.
-         */
-        .persona-selection,
-        .persona-form {
-            padding: 1rem 0 0;
-            border-width: 1px 0 0;
-            border-radius: 0;
-            background: transparent;
-        }
+    .persona-feedback p {
+        margin: 0;
     }
 
-    .persona-selection,
-    .persona-form {
+    .persona-feedback.warning {
+        color: var(--danger);
+    }
+
+    .persona-editor-page {
         display: grid;
-        gap: 0.75rem;
-        padding: 1rem;
-        border: 1px solid var(--line);
-        border-radius: 0.85rem;
-        background: var(--surface-raised);
-    }
-
-    .section-heading.compact {
-        align-items: start;
-        margin: 0;
-    }
-
-    .section-heading.compact h3,
-    .persona-card h3 {
-        margin: 0;
-    }
-
-    .section-heading.compact p,
-    .persona-card p {
-        margin: 0.25rem 0 0;
-    }
-
-    .persona-selected-card {
-        padding: 0.85rem;
-        border-left: 0.25rem solid var(--accent);
-        border-radius: 0.5rem;
-        background: var(--surface-sunken);
-    }
-
-    .persona-selected-card p,
-    .persona-selected-card small {
-        display: block;
-        margin: 0.3rem 0 0;
+        gap: 14px;
     }
 
     .persona-form label {
         display: grid;
-        gap: 0.35rem;
+        gap: 7px;
+        color: var(--ink-muted);
+        font-size: var(--detail-support-type);
+        font-weight: 700;
     }
 
     .persona-form input,
     .persona-form textarea {
         width: 100%;
+        min-width: 0;
         box-sizing: border-box;
+        padding: clamp(12px, 3.432vw, 15px);
+        border: 1.5px solid var(--line);
+        border-radius: var(--radius-md);
+        -webkit-appearance: none;
+        appearance: none;
+        background: color-mix(in srgb, var(--surface-sunken) 26%, var(--surface-raised));
+        box-shadow: inset 0 1px 2px rgb(16 18 24 / 3%);
+        caret-color: var(--accent);
+        color: var(--ink);
+        font-size: var(--detail-support-type);
+        line-height: 1.5;
+        transition:
+            background-color 140ms ease,
+            box-shadow 140ms ease;
+    }
+
+    .persona-form input {
+        min-height: clamp(48px, 13.73vw, 60px);
+    }
+
+    .persona-form textarea {
+        min-height: clamp(112px, 32.037vw, 140px);
+        resize: none;
+    }
+
+    .persona-form :is(input, textarea):hover:not(:focus, :disabled) {
+        border-color: var(--line);
+    }
+
+    .persona-form :is(input, textarea):focus {
+        border-color: var(--accent);
+        outline: none;
+    }
+
+    .persona-form :is(input, textarea):disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
+    }
+
+    .persona-bar-action :global(.persona-add-icon) {
+        width: 20px;
+        height: 20px;
+        flex: none;
+        fill: none;
+        stroke: currentcolor;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        stroke-width: 1.8;
     }
 
     .persona-list {
+        width: 100%;
+        margin: 0;
+    }
+
+    .persona-row-copy {
         display: grid;
-        gap: 0.75rem;
+        min-width: 0;
+        gap: 5px;
     }
 
-    .persona-card {
-        display: grid;
-        gap: 0.75rem;
-        padding: 1rem;
-        border: 1px solid var(--line);
-        border-radius: 0.85rem;
+    .persona-row-name,
+    .persona-row-description {
+        overflow: hidden;
+        color: var(--ink);
+        font-size: var(--detail-support-type);
+        font-weight: 550;
+        line-height: 1.35;
+        text-overflow: ellipsis;
     }
 
-    .persona-card.selected {
-        border-color: var(--accent);
+    .persona-row-name {
+        white-space: nowrap;
     }
 
-    .persona-card header {
-        display: flex;
-        justify-content: space-between;
-        gap: 1rem;
-    }
-
-    .persona-pin-note {
+    .persona-row-description {
+        display: -webkit-box;
         color: var(--ink-muted);
-        font-size: 0.9rem;
-    }
-
-    .persona-actions {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.5rem;
+        overflow-wrap: anywhere;
+        white-space: normal;
+        line-clamp: 3;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 3;
     }
 
     .persona-load-more {
-        justify-self: center;
-    }
-
-    button.danger {
-        color: var(--danger);
+        align-self: center;
+        margin: 8px;
     }
 </style>

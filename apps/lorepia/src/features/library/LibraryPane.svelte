@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { Plus, Search, UserRoundPlus } from '@lucide/svelte';
     import { t, tr } from '../../lib/i18n';
     import type { LorepiaAppState, LorepiaAppController } from '../../app/app-controller';
     import type {
@@ -139,8 +140,10 @@
                 <span
                     class="import-character-mark"
                     class:mobile-root-fab-mark={rootView}
-                    aria-hidden="true">+</span
+                    aria-hidden="true"
                 >
+                    <Plus class="import-character-icon" />
+                </span>
                 <span class="import-character-label">{$tr('library.import')}</span>
             </button>
         {/if}
@@ -181,10 +184,7 @@
     </div>
 
     <label class="library-search" class:mobile-root-search={rootView}>
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-            <circle cx="10.5" cy="10.5" r="6.5" />
-            <path d="m15.5 15.5 4.5 4.5" />
-        </svg>
+        <Search class="library-search-icon" aria-hidden="true" />
         <span class="sr-only">{$tr('library.search.label')}</span>
         <input
             type="search"
@@ -212,11 +212,7 @@
                     type="button"
                     onclick={() => void controller.beginImport()}
                 >
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                        <circle cx="8" cy="7.5" r="3" />
-                        <path d="M2.5 18c.8-3.7 2.6-5.5 5.5-5.5 1.3 0 2.4.4 3.3 1.1" />
-                        <path d="M17.5 9.5v7M14 13h7" />
-                    </svg>
+                    <UserRoundPlus class="import-contact-icon" aria-hidden="true" />
                     <span>{$tr('library.empty.import')}</span>
                 </button>
             </div>
@@ -277,6 +273,11 @@
         display: none;
     }
 
+    .import-character-mark :global(.import-character-icon) {
+        width: 24px;
+        height: 24px;
+    }
+
     .library-search {
         display: flex;
         min-height: 44px;
@@ -296,7 +297,7 @@
         border-color: var(--accent);
     }
 
-    .library-search svg {
+    .library-search :global(.library-search-icon) {
         width: clamp(16px, 4.577vw, 20px);
         height: clamp(16px, 4.577vw, 20px);
         flex: none;

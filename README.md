@@ -47,6 +47,14 @@ npm ci --prefix apps/lorepia
 npm run tauri dev --prefix apps/lorepia
 ```
 
+운영 데이터와 분리된 UI 테스트 데이터 데모:
+
+```bash
+npm run demo --prefix apps/lorepia
+```
+
+데이터 구성과 초기화 방법은 [apps/lorepia/TEST_DATA.md](apps/lorepia/TEST_DATA.md)에 정리돼 있다.
+
 Rust 검사:
 
 ```bash

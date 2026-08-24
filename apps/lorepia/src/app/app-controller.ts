@@ -2626,14 +2626,14 @@ export class LorepiaAppController {
         }
     }
 
-    async previewSelectedProviderRequest(): Promise<void> {
+    async previewSelectedProviderRequest(): Promise<boolean> {
         const settings = get(this.mutable).providers.workspace.settings;
         if (
             settings.selected_model_route_id === null ||
             settings.selected_generation_preset_id === null
         ) {
             this.announce(t('provider.notice.no_default_route'));
-            return;
+            return false;
         }
         try {
             const preview = await this.client.previewProviderRequest({
@@ -2647,8 +2647,10 @@ export class LorepiaAppController {
                     workspace: { ...state.providers.workspace, request_preview: preview },
                 },
             }));
+            return true;
         } catch (error: unknown) {
             this.announce(errorLabel(error));
+            return false;
         }
     }
 

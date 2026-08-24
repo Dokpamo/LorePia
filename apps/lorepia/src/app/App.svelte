@@ -1,6 +1,16 @@
 <script lang="ts">
+    import {
+        ArrowLeft,
+        ChevronRight,
+        CircleAlert,
+        House,
+        MessageSquare,
+        SlidersHorizontal,
+        Sparkles,
+    } from '@lucide/svelte';
     import { tr } from '../lib/i18n';
     import { onMount, untrack } from 'svelte';
+    import lorepiaLogoMark from '../assets/lorepia-logo-mark.png';
 
     import {
         INITIAL_APP_STATE,
@@ -23,8 +33,18 @@
         type ContentPackageState,
     } from '../features/orchestration/content-package-controller';
     import ProviderSettings from '../features/providers/ProviderSettings.svelte';
-    import type { SettingsSection } from '../features/providers/settings-contracts';
-    import type { StudioSection } from '../features/orchestration/studio-contracts';
+    import type {
+        SettingsDetailPage,
+        SettingsSection,
+    } from '../features/providers/settings-contracts';
+    import {
+        studioBaseDetailTitleKey,
+        studioDetailHasFixedActions,
+        studioDetailParent,
+        studioNestedDetailTitleKey,
+        type StudioDetailPage,
+        type StudioSection,
+    } from '../features/orchestration/studio-contracts';
     import {
         INITIAL_PERSONA_STATE,
         PersonaController,
@@ -48,9 +68,13 @@
 
     interface Props {
         client?: LorepiaClient;
+        initialSelection?: {
+            characterId: string;
+            conversationId?: string;
+        };
     }
 
-    let { client }: Props = $props();
+    let { client, initialSelection }: Props = $props();
     const appClient = untrack(() => client ?? createLiveLorepiaClient());
     const controller = untrack(() => new LorepiaAppController(appClient));
     const orchestrationController = untrack(() => new OrchestrationController(appClient));
@@ -71,13 +95,23 @@
     let chatThreadOpen = $state(false);
     /* Settings and studio entries open as dedicated screens inside the handheld shell. */
     let settingsSection = $state<SettingsSection | null>(null);
+    let settingsDetailPage = $state<SettingsDetailPage>(null);
+    let settingsEditorMode = $state<string | null>(null);
+    let settingsEditorTitle = $state('');
+    let personaEditorMode = $state<'create' | 'edit' | null>(null);
     let studioSection = $state<StudioSection | null>(null);
+    let studioDetailPage = $state<StudioDetailPage>(null);
     let isDesktop = $state(false);
     let sidebarContentMounted = $state(false);
     let studioScrollElement = $state<HTMLDivElement>();
+    let pushedTitleElement = $state<HTMLHeadingElement>();
+    let pushedTopFadeProgress = $state(0);
     let sidebarUnmountTimer: ReturnType<typeof setTimeout> | undefined;
     let orchestrationContextKey = '';
     let personaContextKey = '';
+    let studioRouteKey = '';
+    let pushedTitleRouteKey = '';
+    let initialSelectionStarted = false;
     let messageFocusRequest = $state<
         (MemoryRecordSourceNavigationDto & { request_id: number }) | null
     >(null);
@@ -107,41 +141,213 @@
     function openCreate(): void {
         view = 'create';
         studioSection = null;
-    }
-
-    function setStudioTopMaskAlpha(alpha: number): void {
-        studioScrollElement?.style.setProperty('--mobile-top-mask-alpha', String(alpha));
+        studioDetailPage = null;
     }
 
     function resetStudioDetailScroll(): void {
-        if (studioScrollElement === undefined) return;
-        studioScrollElement.scrollTop = 0;
-        setStudioTopMaskAlpha(1);
+        pushedTopFadeProgress = 0;
+        const scroller = studioScrollElement;
+        if (!scroller) return;
+        scroller.scrollTop = 0;
     }
 
     function openStudioSection(next: StudioSection): void {
         studioSection = next;
+        studioDetailPage = null;
         resetStudioDetailScroll();
     }
 
     function closeStudioSection(): void {
+        if (studioDetailPage !== null) {
+            studioDetailPage = studioDetailParent(studioDetailPage);
+            resetStudioDetailScroll();
+            return;
+        }
         studioSection = null;
+        studioDetailPage = null;
         resetStudioDetailScroll();
     }
 
     function handleStudioDetailScroll(event: Event): void {
         const scroller = event.currentTarget as HTMLDivElement;
-        const alpha = Math.min(
-            1,
-            Math.max(0, 1 - scroller.scrollTop / MOBILE_TOP_FADE_DISTANCE_PX),
-        );
-        scroller.style.setProperty('--mobile-top-mask-alpha', String(alpha));
+        handlePushedDetailScroll(scroller.scrollTop);
     }
+
+    function handlePushedDetailScroll(scrollTop: number): void {
+        pushedTopFadeProgress = Math.min(1, Math.max(0, scrollTop / MOBILE_TOP_FADE_DISTANCE_PX));
+    }
+
+    $effect(() => {
+        const nextKey = `${view}:${studioSection ?? ''}:${studioDetailPage ?? ''}`;
+        if (nextKey === studioRouteKey) return;
+        studioRouteKey = nextKey;
+        queueMicrotask(resetStudioDetailScroll);
+    });
+
+    $effect(() => {
+        const nextKey =
+            view === 'create' && studioSection !== null
+                ? `studio:${studioSection}:${studioDetailPage ?? ''}`
+                : view === 'settings' && settingsSection !== null
+                  ? `settings:${settingsSection}:${settingsDetailPage ?? ''}:${settingsEditorMode ?? ''}:${personaEditorMode ?? ''}`
+                  : '';
+        if (nextKey === '') {
+            pushedTitleRouteKey = '';
+            return;
+        }
+        if (nextKey === pushedTitleRouteKey) return;
+        pushedTitleRouteKey = nextKey;
+        pushedTopFadeProgress = 0;
+        queueMicrotask(() => pushedTitleElement?.focus({ preventScroll: true }));
+    });
 
     function openSettings(): void {
         view = 'settings';
         settingsSection = null;
+        settingsDetailPage = null;
+        settingsEditorMode = null;
+        settingsEditorTitle = '';
+        personaEditorMode = null;
         void controller.loadProviders();
+    }
+
+    function openSettingsSection(next: SettingsSection): void {
+        personaEditorMode = null;
+        settingsDetailPage = null;
+        settingsEditorMode = null;
+        settingsEditorTitle = '';
+        settingsSection = next;
+    }
+
+    function closeSettingsSection(): void {
+        if (settingsSection === 'persona' && personaEditorMode !== null) {
+            personaEditorMode = null;
+            return;
+        }
+        if (settingsEditorMode !== null) {
+            settingsEditorMode =
+                settingsEditorMode === 'override-create' ||
+                settingsEditorMode === 'override-edit' ||
+                settingsEditorMode === 'override-readonly'
+                    ? 'overrides'
+                    : null;
+            settingsEditorTitle = '';
+            return;
+        }
+        if (settingsDetailPage !== null) {
+            settingsDetailPage = null;
+            settingsEditorTitle = '';
+            return;
+        }
+        personaEditorMode = null;
+        settingsDetailPage = null;
+        settingsEditorMode = null;
+        settingsEditorTitle = '';
+        settingsSection = null;
+    }
+
+    function settingsDetailTitle(): string {
+        if (settingsSection === 'persona' && personaEditorMode !== null) {
+            return $tr(
+                personaEditorMode === 'create' ? 'persona.editor.new' : 'persona.editor.edit',
+            );
+        }
+
+        if (settingsDetailPage !== null) {
+            if (settingsSection === 'target' && settingsDetailPage === 'preview') {
+                return $tr('settings.page.target.preview');
+            }
+            if (settingsSection === 'connections') return $tr('settings.page.connection.detail');
+            if (settingsSection === 'templates') {
+                return settingsEditorTitle || $tr('settings.page.template.detail');
+            }
+            if (settingsSection === 'discovery') {
+                if (settingsEditorMode === 'create') {
+                    return settingsDetailPage === 'provider-discovery'
+                        ? $tr('settings.page.discovery.create')
+                        : $tr('settings.page.discovery.sync_create');
+                }
+                if (settingsEditorMode?.startsWith('session:')) {
+                    return settingsEditorTitle || $tr('settings.page.discovery.session');
+                }
+                if (settingsEditorMode?.startsWith('job:')) {
+                    return settingsEditorTitle || $tr('settings.page.discovery.sync_job');
+                }
+                return settingsDetailPage === 'provider-discovery'
+                    ? $tr('settings.page.discovery.provider')
+                    : $tr('settings.page.discovery.sync');
+            }
+            if (settingsSection === 'catalog') {
+                if (settingsDetailPage === 'status') return $tr('settings.page.catalog.status');
+                if (settingsDetailPage === 'import-review') {
+                    return $tr('settings.page.catalog.import');
+                }
+                if (settingsDetailPage === 'rollback-review') {
+                    return $tr('settings.page.catalog.rollback');
+                }
+                if (settingsDetailPage === 'diff') return $tr('settings.page.catalog.diff');
+                if (settingsDetailPage.startsWith('revision:')) {
+                    return $tr('settings.page.catalog.revision', {
+                        revision: settingsDetailPage.slice('revision:'.length),
+                    });
+                }
+            }
+            if (settingsSection === 'advanced') {
+                if (settingsEditorTitle !== '') return settingsEditorTitle;
+                if (settingsEditorMode !== null) {
+                    if (settingsEditorMode === 'create') {
+                        return $tr('settings.page.advanced.create');
+                    }
+                    if (settingsEditorMode === 'edit') return $tr('settings.page.advanced.edit');
+                    if (settingsEditorMode === 'effective') {
+                        return $tr('settings.page.advanced.effective');
+                    }
+                    if (settingsEditorMode === 'overrides') {
+                        return $tr('settings.page.advanced.overrides');
+                    }
+                    if (settingsEditorMode === 'override-create') {
+                        return $tr('settings.page.advanced.override_create');
+                    }
+                    if (settingsEditorMode === 'override-edit') {
+                        return $tr('settings.page.advanced.override_edit');
+                    }
+                    if (settingsEditorMode === 'override-readonly') {
+                        return $tr('settings.page.advanced.override_readonly');
+                    }
+                    if (settingsEditorMode === 'observations') {
+                        return $tr('settings.page.advanced.observations');
+                    }
+                    if (settingsEditorMode === 'parameters') {
+                        return $tr('settings.page.advanced.parameters');
+                    }
+                }
+                const titles: Record<string, string> = {
+                    connections: $tr('settings.page.advanced.connections'),
+                    routes: $tr('settings.page.advanced.routes'),
+                    presets: $tr('settings.page.advanced.presets'),
+                    capabilities: $tr('settings.page.advanced.capabilities'),
+                };
+                return titles[settingsDetailPage] ?? $tr('settings.section.advanced.title');
+            }
+        }
+
+        return settingsSection === null ? '' : $tr(`settings.section.${settingsSection}.title`);
+    }
+
+    function studioDetailTitle(): string {
+        if (studioDetailPage !== null) {
+            const nestedTitleKey = studioNestedDetailTitleKey(studioDetailPage);
+            if (nestedTitleKey !== null) return $tr(nestedTitleKey);
+
+            const titleKey = studioBaseDetailTitleKey(studioDetailPage);
+            if (titleKey !== null) {
+                if (studioDetailPage === 'transforms' && studioSection !== 'memory') {
+                    return $tr('studio.page.transforms.display');
+                }
+                return $tr(titleKey);
+            }
+        }
+        return studioSection === null ? '' : $tr(`studio.section.${studioSection}.title`);
     }
 
     async function navigateToMemorySource(source: MemoryRecordSourceNavigationDto): Promise<void> {
@@ -174,13 +380,18 @@
         const conversationId = appState.selected_conversation?.id ?? null;
         const branchId = appState.conversation_state?.active_branch_id ?? null;
         const contextKey = conversationId && branchId ? `${conversationId}:${branchId}` : '';
-        controller.setRoomGenerationTarget(
-            conversationId,
-            branchId,
+        const sourceTarget =
             orchestrationState.phase === 'ready' && orchestrationState.context_key === contextKey
                 ? orchestrationState.workspace.generation_target
-                : undefined,
-        );
+                : undefined;
+        const generationTarget =
+            sourceTarget === null || sourceTarget === undefined
+                ? sourceTarget
+                : {
+                      model_route_id: sourceTarget.model_route_id,
+                      generation_preset_id: sourceTarget.generation_preset_id,
+                  };
+        controller.setRoomGenerationTarget(conversationId, branchId, generationTarget);
     });
 
     $effect(() => {
@@ -233,6 +444,27 @@
                 previousBootstrapPhase !== 'ready' && value.bootstrap.phase === 'ready';
             previousBootstrapPhase = value.bootstrap.phase;
             appState = value;
+            if (
+                !initialSelectionStarted &&
+                initialSelection !== undefined &&
+                value.library.phase === 'ready'
+            ) {
+                const character = value.library.characters.find(
+                    (candidate) => candidate.id === initialSelection.characterId,
+                );
+                if (character !== undefined) {
+                    initialSelectionStarted = true;
+                    void controller.selectCharacter(character).then(async () => {
+                        if (initialSelection.conversationId === undefined) return;
+                        const conversation = appState.conversations.items.find(
+                            (candidate) => candidate.id === initialSelection.conversationId,
+                        );
+                        if (conversation !== undefined) {
+                            await controller.selectConversation(conversation);
+                        }
+                    });
+                }
+            }
             if (bootstrapBecameReady) void contentPackageController.loadPendingImports();
         });
         const unsubscribeOrchestration = orchestrationController.state.subscribe((value) => {
@@ -270,7 +502,7 @@
                 aria-expanded={homeSection === 'characters'}
                 onclick={() => (homeSection = 'characters')}
             >
-                <span class="chevron" aria-hidden="true">›</span>
+                <ChevronRight class="chevron" aria-hidden="true" />
                 <span class="section-name">{$tr('app.tab.library')}</span>
                 {#if appState.selected_character !== null}
                     <span class="section-value">{appState.selected_character.name}</span>
@@ -292,7 +524,7 @@
                 disabled={appState.selected_character === null}
                 onclick={() => (homeSection = 'conversations')}
             >
-                <span class="chevron" aria-hidden="true">›</span>
+                <ChevronRight class="chevron" aria-hidden="true" />
                 <span class="section-name">{$tr('app.tab.conversations')}</span>
             </button>
             <ConversationPane state={appState} {controller} onOpenChat={openChatThread} />
@@ -301,18 +533,11 @@
 {/snippet}
 
 {#snippet createIcon()}
-    <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true">
-        <path d="m12 3 2.2 5.3L19.5 10l-5.3 2.2L12 17.5 9.8 12.2 4.5 10l5.3-1.7z" />
-        <path d="M18 16.5 18.8 19l2.2.8-2.2.9-.8 2.3-.9-2.3-2.1-.9 2.1-.8z" />
-    </svg>
+    <Sparkles class="nav-icon" aria-hidden="true" />
 {/snippet}
 
 {#snippet settingsIcon()}
-    <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M4 7h10M18 7h2M4 17h2M10 17h10" />
-        <circle cx="16" cy="7" r="2.4" />
-        <circle cx="8" cy="17" r="2.4" />
-    </svg>
+    <SlidersHorizontal class="nav-icon" aria-hidden="true" />
 {/snippet}
 
 <svelte:head>
@@ -324,6 +549,12 @@
         {#if sidebarContentMounted && appState.bootstrap.phase !== 'error'}
             <aside class="sidebar" aria-label={$tr('app.nav.label')}>
                 <div class="sidebar-head">
+                    <span class="sidebar-logo" aria-hidden="true">
+                        <span
+                            class="brand-logo-mark"
+                            style:--logo-mask={`url("${lorepiaLogoMark}")`}
+                        ></span>
+                    </span>
                     <h1 class="index-title">LorePia</h1>
                 </div>
                 {@render navigator()}
@@ -354,7 +585,7 @@
     {#if appState.bootstrap.phase === 'error'}
         <main id="main-content" class="main">
             <div class="fatal-screen">
-                <span class="large-mark" aria-hidden="true">!</span>
+                <span class="large-mark" aria-hidden="true"><CircleAlert /></span>
                 <h1>{$tr('app.bootstrap.failed')}</h1>
                 <p>{appState.bootstrap.error}</p>
                 <button class="primary" type="button" onclick={() => void controller.start()}>
@@ -407,19 +638,22 @@
                         </header>
                     {/if}
                 {:else}
-                    <header class="mobile-top-bar sub-header">
+                    <header
+                        class="mobile-top-bar sub-header"
+                        style:--mobile-top-fade-progress={pushedTopFadeProgress}
+                    >
                         <button
                             class="icon-button ghost mobile-top-action mobile-top-action-left back-button"
                             type="button"
                             aria-label={$tr('app.nav.back')}
                             onclick={closeStudioSection}
                         >
-                            <svg viewBox="0 0 24 24" aria-hidden="true">
-                                <path d="M19 12H5m7-7-7 7 7 7" />
-                            </svg>
+                            <ArrowLeft aria-hidden="true" />
                         </button>
                         {#if studioSection !== null}
-                            <h1>{$tr(`studio.section.${studioSection}.title`)}</h1>
+                            <h1 bind:this={pushedTitleElement} tabindex="-1">
+                                {studioDetailTitle()}
+                            </h1>
                         {/if}
                     </header>
                 {/if}
@@ -427,6 +661,7 @@
                     bind:this={studioScrollElement}
                     class="view-scroll"
                     class:studio-detail-scroll={studioSection !== null}
+                    class:studio-detail-has-actions={studioDetailHasFixedActions(studioDetailPage)}
                     onscroll={handleStudioDetailScroll}
                 >
                     <OrchestrationStudio
@@ -440,24 +675,28 @@
                         onNavigateToMemorySource={(source: MemoryRecordSourceNavigationDto) =>
                             void navigateToMemorySource(source)}
                         section={studioSection}
+                        bind:detailPage={studioDetailPage}
                         onOpenSection={openStudioSection}
                         showIndexHeader={isDesktop}
                     />
                 </div>
             {:else}
                 {#if settingsSection !== null}
-                    <header class="mobile-top-bar sub-header">
+                    <header
+                        class="mobile-top-bar sub-header"
+                        style:--mobile-top-fade-progress={pushedTopFadeProgress}
+                    >
                         <button
                             class="icon-button ghost mobile-top-action mobile-top-action-left back-button"
                             type="button"
                             aria-label={$tr('app.nav.back')}
-                            onclick={() => (settingsSection = null)}
+                            onclick={closeSettingsSection}
                         >
-                            <svg viewBox="0 0 24 24" aria-hidden="true">
-                                <path d="M19 12H5m7-7-7 7 7 7" />
-                            </svg>
+                            <ArrowLeft aria-hidden="true" />
                         </button>
-                        <h1>{$tr(`settings.section.${settingsSection}.title`)}</h1>
+                        <h1 bind:this={pushedTitleElement} tabindex="-1">
+                            {settingsDetailTitle()}
+                        </h1>
                     </header>
                 {/if}
                 <ProviderSettings
@@ -465,14 +704,19 @@
                     {controller}
                     {personaState}
                     {personaController}
+                    bind:personaEditorMode
+                    bind:detailPage={settingsDetailPage}
+                    bind:editorMode={settingsEditorMode}
+                    bind:editorTitle={settingsEditorTitle}
                     section={settingsSection}
-                    onOpenSection={(next: SettingsSection) => (settingsSection = next)}
+                    onOpenSection={openSettingsSection}
+                    onDetailScroll={handlePushedDetailScroll}
                 />
             {/if}
         </main>
     {/if}
 
-    {#if !isDesktop && studioSection === null && !(view === 'chat' && chatThreadOpen)}
+    {#if !isDesktop && studioSection === null && !(view === 'chat' && chatThreadOpen) && !(view === 'settings' && settingsSection !== null)}
         <nav class="tab-bar" aria-label={$tr('app.nav.label')}>
             <button
                 class="tab"
@@ -480,9 +724,7 @@
                 aria-current={view === 'home' ? 'page' : undefined}
                 onclick={showHome}
             >
-                <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z" />
-                </svg>
+                <House class="nav-icon" aria-hidden="true" />
                 <span class="tab-label">{$tr('app.tab.home')}</span>
             </button>
             <button
@@ -491,9 +733,7 @@
                 aria-current={view === 'chat' ? 'page' : undefined}
                 onclick={showChat}
             >
-                <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M4 5h16v11H9l-5 4z" />
-                </svg>
+                <MessageSquare class="nav-icon" aria-hidden="true" />
                 <span class="tab-label">{$tr('app.tab.chat')}</span>
             </button>
             <button

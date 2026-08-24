@@ -1,5 +1,9 @@
 <script lang="ts">
+    import { Activity, ListChecks, Plus, SlidersHorizontal, Telescope } from '@lucide/svelte';
+    import { tick } from 'svelte';
     import type { LorepiaAppController, LorepiaAppState } from '../../app/app-controller';
+    import DetailActionBar from '../../components/detail/DetailActionBar.svelte';
+    import DetailPage from '../../components/detail/DetailPage.svelte';
     import {
         CAPABILITY_KEYS,
         type CapabilityKeyInput,
@@ -10,13 +14,25 @@
         type UpsertCapabilityOverrideInput,
     } from '../../lib/ipc/contracts';
 
+    type CapabilityDetailMode =
+        | 'effective'
+        | 'overrides'
+        | 'override-create'
+        | 'override-edit'
+        | 'override-readonly'
+        | 'observations'
+        | 'parameters'
+        | null;
+
     interface Props {
         appState: LorepiaAppState;
         controller: LorepiaAppController;
+        detailMode?: string | null;
     }
 
     type OverrideValueKind = CapabilityOverrideValueInput['type'];
 
+    const OVERRIDE_FORM_ID = 'capability-override-editor-form';
     const CAPABILITY_LABELS: Record<CapabilityKeyInput, string> = {
         streaming: '스트리밍',
         reasoning: '추론',
@@ -36,7 +52,7 @@
         max_output_tokens: '최대 출력 토큰',
     };
 
-    let { appState, controller }: Props = $props();
+    let { appState, controller, detailMode = $bindable(null) }: Props = $props();
     let selectedRouteId = $state('');
     let selectedCapabilityKey = $state<CapabilityKeyInput>('streaming');
     let overrideId = $state('');
@@ -49,20 +65,74 @@
     let expiresAt = $state('');
     let busy = $state(false);
     let formError = $state<string | null>(null);
-    let syncedRouteId: string | null = null;
+    let deleteConfirmationId = $state<string | null>(null);
+    let syncedRouteKey: string | null = null;
 
     const workspace = $derived(appState.providers.workspace);
+    const selectedRoute = $derived(
+        workspace.routes.find((route) => route.id === selectedRouteId) ?? null,
+    );
+    const routeIsLoaded = $derived(
+        selectedRouteId !== '' &&
+            selectedRoute !== null &&
+            workspace.selected_capability_model_route_id === selectedRouteId,
+    );
+    const observations = $derived(routeIsLoaded ? workspace.capability_observations : []);
+    const userOverrides = $derived(
+        observations.filter((observation) => observation.source === 'user_override'),
+    );
+    const selectedUserOverride = $derived(
+        userOverrides.find((observation) => observation.id === overrideId) ?? null,
+    );
+    const parameterSpecs = $derived(routeIsLoaded ? workspace.capability_parameter_specs : []);
     const effectiveCapability = $derived(
-        workspace.effective_capability?.selected.key === selectedCapabilityKey
+        routeIsLoaded && workspace.effective_capability?.selected.key === selectedCapabilityKey
             ? workspace.effective_capability
             : null,
+    );
+    const hasBottomAction = $derived(
+        detailMode === 'effective' ||
+            detailMode === 'overrides' ||
+            detailMode === 'override-create' ||
+            detailMode === 'override-edit' ||
+            detailMode === 'override-readonly',
     );
 
     $effect(() => {
         const routeId = workspace.selected_capability_model_route_id;
-        if (routeId === syncedRouteId) return;
-        syncedRouteId = routeId;
-        selectedRouteId = routeId ?? '';
+        const routeExists =
+            routeId === null || workspace.routes.some((route) => route.id === routeId);
+        const routeKey = `${routeId ?? '<none>'}:${routeExists ? 'present' : 'missing'}`;
+        if (routeKey === syncedRouteKey) return;
+        syncedRouteKey = routeKey;
+        selectedRouteId = routeId !== null && routeExists ? routeId : '';
+        resetOverrideForm();
+        detailMode = null;
+    });
+
+    $effect(() => {
+        if (
+            detailMode === 'override-edit' ||
+            detailMode === 'override-create' ||
+            detailMode === 'override-readonly'
+        ) {
+            return;
+        }
+        deleteConfirmationId = null;
+        formError = null;
+    });
+
+    $effect(() => {
+        if (
+            (detailMode !== 'override-edit' && detailMode !== 'override-readonly') ||
+            overrideId === '' ||
+            !routeIsLoaded ||
+            userOverrides.some((observation) => observation.id === overrideId)
+        ) {
+            return;
+        }
+        resetOverrideForm();
+        detailMode = 'overrides';
     });
 
     function isCapabilityKey(value: string): value is CapabilityKeyInput {
@@ -123,10 +193,25 @@
         overrideStatus = 'verified';
         expiresAt = '';
         formError = null;
+        deleteConfirmationId = null;
+    }
+
+    function openDetail(mode: Exclude<CapabilityDetailMode, null>): void {
+        if (busy || !routeIsLoaded) return;
+        deleteConfirmationId = null;
+        formError = null;
+        detailMode = mode;
+    }
+
+    function beginCreate(): void {
+        if (busy || !routeIsLoaded) return;
+        resetOverrideForm();
+        detailMode = 'override-create';
     }
 
     function editOverride(observation: CapabilityObservationDto): void {
         if (
+            busy ||
             observation.source !== 'user_override' ||
             !isCapabilityKey(observation.key) ||
             observation.value.type === 'structured'
@@ -137,6 +222,9 @@
         overrideKey = observation.key;
         selectedCapabilityKey = observation.key;
         overrideValueKind = observation.value.type;
+        booleanValue = true;
+        integerValue = 1;
+        enumValues = '';
         if (observation.value.type === 'boolean') booleanValue = observation.value.value;
         if (observation.value.type === 'integer') integerValue = observation.value.value;
         if (observation.value.type === 'enum_values') {
@@ -145,6 +233,15 @@
         overrideStatus = isOverrideStatus(observation.status) ? observation.status : 'unknown';
         expiresAt = localDateTime(observation.expires_at);
         formError = null;
+        deleteConfirmationId = null;
+        detailMode = 'override-edit';
+    }
+
+    function viewReadOnlyOverride(observation: CapabilityObservationDto): void {
+        if (busy || observation.source !== 'user_override') return;
+        resetOverrideForm();
+        overrideId = observation.id;
+        detailMode = 'override-readonly';
     }
 
     function overrideValue(): CapabilityOverrideValueInput | null {
@@ -174,19 +271,27 @@
     }
 
     async function loadRoute(routeId: string): Promise<void> {
+        const previousRouteId = workspace.selected_capability_model_route_id ?? '';
         selectedRouteId = routeId;
         resetOverrideForm();
+        detailMode = null;
         if (routeId === '') return;
         busy = true;
         try {
             await controller.loadProviderCapabilities(routeId);
+            await tick();
+            if (workspace.selected_capability_model_route_id !== routeId) {
+                selectedRouteId = workspace.routes.some((route) => route.id === previousRouteId)
+                    ? previousRouteId
+                    : '';
+            }
         } finally {
             busy = false;
         }
     }
 
     async function inspectCapability(): Promise<void> {
-        if (selectedRouteId === '') return;
+        if (!routeIsLoaded) return;
         busy = true;
         try {
             await controller.inspectEffectiveProviderCapability(selectedCapabilityKey);
@@ -196,7 +301,7 @@
     }
 
     async function saveOverride(): Promise<void> {
-        if (selectedRouteId === '') {
+        if (!routeIsLoaded) {
             formError = '먼저 모델 라우트를 선택해 주세요.';
             return;
         }
@@ -228,578 +333,862 @@
             if (await controller.upsertProviderCapabilityOverride(input)) {
                 selectedCapabilityKey = input.key;
                 resetOverrideForm();
+                detailMode = 'overrides';
             }
         } finally {
             busy = false;
         }
     }
 
-    async function deleteOverride(observation: CapabilityObservationDto): Promise<void> {
-        if (observation.source !== 'user_override') return;
+    async function deleteEditingOverride(): Promise<void> {
+        if (!routeIsLoaded || overrideId === '' || deleteConfirmationId !== overrideId) return;
+        const deletingOverrideId = overrideId;
         busy = true;
         try {
-            await controller.deleteProviderCapabilityOverride(observation.id);
+            await controller.deleteProviderCapabilityOverride(deletingOverrideId);
+            const stillExists = workspace.capability_observations.some(
+                (observation) => observation.id === deletingOverrideId,
+            );
+            if (!stillExists) {
+                resetOverrideForm();
+                detailMode = 'overrides';
+            }
         } finally {
             busy = false;
         }
     }
 </script>
 
-<section class="capability-panel" aria-labelledby="capability-title">
-    <header class="panel-heading">
-        <div>
-            <p class="eyebrow">Effective provider contract</p>
-            <h2 id="capability-title">모델 capability</h2>
-            <p>
-                관측 출처와 충돌을 확인하고, 필요한 경우에만 만료 가능한 사용자 override를
-                저장합니다.
-            </p>
-        </div>
-    </header>
-
-    <div class="route-row">
-        <label>
-            <span>모델 라우트</span>
-            <select
-                value={selectedRouteId}
-                disabled={busy}
-                onchange={(event) => void loadRoute(event.currentTarget.value)}
-            >
-                <option value="">선택</option>
-                {#each workspace.routes as route (route.id)}
-                    <option value={route.id}>{route.display_name ?? route.model_id}</option>
-                {/each}
-            </select>
-        </label>
-        <button
-            type="button"
-            disabled={busy || selectedRouteId === ''}
-            onclick={() => void loadRoute(selectedRouteId)}
-        >
-            capability 새로고침
-        </button>
-    </div>
-
-    {#if workspace.selected_capability_model_route_id}
-        <div class="content-grid">
-            <section class="inspection-card" aria-labelledby="effective-capability-title">
-                <h3 id="effective-capability-title">유효 capability 확인</h3>
-                <div class="inspect-row">
-                    <label>
-                        <span>Capability 키</span>
-                        <select bind:value={selectedCapabilityKey}>
-                            {#each CAPABILITY_KEYS as key (key)}
-                                <option value={key}>{CAPABILITY_LABELS[key]} · {key}</option>
-                            {/each}
-                        </select>
-                    </label>
-                    <button
-                        class="primary"
-                        type="button"
-                        disabled={busy}
-                        onclick={() => void inspectCapability()}
-                    >
-                        유효 값 확인
-                    </button>
-                </div>
-
-                {#if effectiveCapability}
-                    <article class:warning={effectiveCapability.has_conflict}>
-                        <div class="effective-heading">
-                            <strong>{capabilityLabel(effectiveCapability.selected.key)}</strong>
-                            <div class="badges">
-                                <span>{statusLabel(effectiveCapability.selected.status)}</span>
-                                {#if effectiveCapability.selected_is_stale}
-                                    <span class="warning-badge">만료됨</span>
-                                {/if}
-                                {#if effectiveCapability.has_conflict}
-                                    <span class="warning-badge">출처 충돌</span>
-                                {/if}
-                            </div>
-                        </div>
-                        <p class="effective-value">
-                            {formatValue(effectiveCapability.selected.value)}
-                        </p>
-                        <p>
-                            선택 출처: {sourceLabel(effectiveCapability.selected.source)} · 신뢰도
-                            {effectiveCapability.selected.confidence}
-                        </p>
-                        {#if effectiveCapability.alternatives.length > 0}
-                            <details>
-                                <summary>
-                                    다른 관측 {effectiveCapability.alternatives.length}개
-                                </summary>
-                                <ul class="compact-list">
-                                    {#each effectiveCapability.alternatives as alternative (alternative.id)}
-                                        <li>
-                                            <strong>{formatValue(alternative.value)}</strong>
-                                            <span>
-                                                {sourceLabel(alternative.source)} ·
-                                                {statusLabel(alternative.status)}
-                                            </span>
-                                        </li>
-                                    {/each}
-                                </ul>
-                            </details>
-                        {/if}
-                        <small>평가 시각 {effectiveCapability.evaluated_at}</small>
-                    </article>
-                {:else}
-                    <p class="empty-note">키를 선택하고 유효 값을 확인해 주세요.</p>
-                {/if}
-            </section>
-
-            <section class="override-card" aria-labelledby="capability-override-title">
-                <header>
-                    <div>
-                        <h3 id="capability-override-title">
-                            {overrideId === '' ? '사용자 override 추가' : '사용자 override 수정'}
-                        </h3>
-                        <p>구조화 값은 override할 수 없으며 Core가 저장 값을 다시 검증합니다.</p>
-                    </div>
-                    {#if overrideId !== ''}
-                        <button type="button" disabled={busy} onclick={resetOverrideForm}>
-                            수정 취소
-                        </button>
-                    {/if}
-                </header>
-
-                <form
-                    onsubmit={(event) => {
-                        event.preventDefault();
-                        void saveOverride();
-                    }}
+{#snippet capabilityContent()}
+    {#if detailMode === null}
+        <div class="route-form direct-form" aria-label="Capability 모델 라우트">
+            <label>
+                <span>모델 라우트</span>
+                <select
+                    value={selectedRouteId}
+                    disabled={busy}
+                    onchange={(event) => void loadRoute(event.currentTarget.value)}
                 >
-                    <div class="form-grid">
-                        <label>
-                            <span>Capability 키</span>
-                            <select bind:value={overrideKey} disabled={busy}>
-                                {#each CAPABILITY_KEYS as key (key)}
-                                    <option value={key}>{CAPABILITY_LABELS[key]} · {key}</option>
-                                {/each}
-                            </select>
-                        </label>
-                        <label>
-                            <span>값 종류</span>
-                            <select bind:value={overrideValueKind} disabled={busy}>
-                                <option value="boolean">Boolean</option>
-                                <option value="integer">Integer</option>
-                                <option value="enum_values">Enum 목록</option>
-                            </select>
-                        </label>
-
-                        {#if overrideValueKind === 'boolean'}
-                            <label>
-                                <span>Boolean 값</span>
-                                <select bind:value={booleanValue} disabled={busy}>
-                                    <option value={true}>true</option>
-                                    <option value={false}>false</option>
-                                </select>
-                            </label>
-                        {:else if overrideValueKind === 'integer'}
-                            <label>
-                                <span>정수 값</span>
-                                <input
-                                    type="number"
-                                    step="1"
-                                    bind:value={integerValue}
-                                    disabled={busy}
-                                />
-                            </label>
-                        {:else}
-                            <label>
-                                <span>열거 값</span>
-                                <textarea
-                                    rows="3"
-                                    bind:value={enumValues}
-                                    disabled={busy}
-                                    placeholder="값을 쉼표 또는 줄바꿈으로 구분"
-                                    required></textarea>
-                            </label>
-                        {/if}
-
-                        <label>
-                            <span>상태</span>
-                            <select bind:value={overrideStatus} disabled={busy}>
-                                <option value="verified">검증됨</option>
-                                <option value="unsupported">지원하지 않음</option>
-                                <option value="unknown">알 수 없음</option>
-                                <option value="conditional">조건부</option>
-                            </select>
-                        </label>
-                        <label>
-                            <span>만료 시각 (선택)</span>
-                            <input type="datetime-local" bind:value={expiresAt} disabled={busy} />
-                        </label>
-                    </div>
-
-                    {#if formError}
-                        <p class="form-error" role="alert">{formError}</p>
-                    {/if}
-
-                    <button class="primary" type="submit" disabled={busy}>
-                        {overrideId === '' ? '사용자 override 저장' : '사용자 override 업데이트'}
-                    </button>
-                </form>
-            </section>
+                    <option value="">선택</option>
+                    {#each workspace.routes as route (route.id)}
+                        <option value={route.id}>{route.display_name ?? route.model_id}</option>
+                    {/each}
+                </select>
+            </label>
         </div>
 
-        <section class="data-card" aria-labelledby="capability-observations-title">
-            <header>
-                <h3 id="capability-observations-title">Capability 관측</h3>
-                <span>{workspace.capability_observations.length}개</span>
-            </header>
-            {#if workspace.capability_observations.length === 0}
-                <p class="empty-note">저장된 capability 관측이 없습니다.</p>
-            {:else}
-                <ul class="observation-list">
-                    {#each workspace.capability_observations as observation (observation.id)}
-                        <li>
-                            <div class="observation-main">
-                                <strong>{capabilityLabel(observation.key)}</strong>
-                                <code>{observation.key}</code>
-                                <span class="observation-value">
-                                    {formatValue(observation.value)}
-                                </span>
-                            </div>
-                            <dl>
-                                <div>
-                                    <dt>상태</dt>
-                                    <dd>{statusLabel(observation.status)}</dd>
-                                </div>
-                                <div>
-                                    <dt>출처</dt>
-                                    <dd>{sourceLabel(observation.source)}</dd>
-                                </div>
-                                <div>
-                                    <dt>신뢰도</dt>
-                                    <dd>{observation.confidence}</dd>
-                                </div>
-                                <div>
-                                    <dt>만료</dt>
-                                    <dd>{observation.expires_at ?? '없음'}</dd>
-                                </div>
-                            </dl>
-                            {#if observation.source === 'user_override'}
-                                <div class="actions">
-                                    {#if isCapabilityKey(observation.key) && observation.value.type !== 'structured'}
-                                        <button
-                                            type="button"
-                                            disabled={busy}
-                                            onclick={() => editOverride(observation)}
-                                        >
-                                            이 override 수정
-                                        </button>
-                                    {/if}
-                                    <button
-                                        class="danger"
-                                        type="button"
-                                        disabled={busy}
-                                        onclick={() => void deleteOverride(observation)}
-                                    >
-                                        사용자 override 삭제
-                                    </button>
-                                </div>
-                            {/if}
-                        </li>
-                    {/each}
-                </ul>
-            {/if}
-        </section>
+        <ul class="setting-list capability-index" aria-label="Capability 영역">
+            <li>
+                <button
+                    class="setting-row capability-destination"
+                    type="button"
+                    disabled={busy || !routeIsLoaded}
+                    onclick={() => openDetail('effective')}
+                >
+                    <span class="setting-icon" aria-hidden="true"><Activity /></span>
+                    <span class="setting-content destination-content">
+                        <span class="setting-copy destination-copy">
+                            <strong>유효 capability</strong>
+                            <small>
+                                {effectiveCapability
+                                    ? `${capabilityLabel(effectiveCapability.selected.key)} · ${formatValue(effectiveCapability.selected.value)}`
+                                    : `${CAPABILITY_LABELS[selectedCapabilityKey]} 확인`}
+                            </small>
+                        </span>
+                    </span>
+                </button>
+            </li>
+            <li>
+                <button
+                    class="setting-row capability-destination"
+                    type="button"
+                    disabled={busy || !routeIsLoaded}
+                    onclick={() => openDetail('overrides')}
+                >
+                    <span class="setting-icon" aria-hidden="true"><SlidersHorizontal /></span>
+                    <span class="setting-content destination-content">
+                        <span class="setting-copy destination-copy">
+                            <strong>사용자 override</strong>
+                            <small>{userOverrides.length}개</small>
+                        </span>
+                    </span>
+                </button>
+            </li>
+            <li>
+                <button
+                    class="setting-row capability-destination"
+                    type="button"
+                    disabled={busy || !routeIsLoaded}
+                    onclick={() => openDetail('observations')}
+                >
+                    <span class="setting-icon" aria-hidden="true"><Telescope /></span>
+                    <span class="setting-content destination-content">
+                        <span class="setting-copy destination-copy">
+                            <strong>Capability 관측</strong>
+                            <small>{observations.length}개 관측</small>
+                        </span>
+                    </span>
+                </button>
+            </li>
+            <li>
+                <button
+                    class="setting-row capability-destination"
+                    type="button"
+                    disabled={busy || !routeIsLoaded}
+                    onclick={() => openDetail('parameters')}
+                >
+                    <span class="setting-icon" aria-hidden="true"><ListChecks /></span>
+                    <span class="setting-content destination-content">
+                        <span class="setting-copy destination-copy">
+                            <strong>유효 생성 파라미터</strong>
+                            <small>{parameterSpecs.length}개 파라미터</small>
+                        </span>
+                    </span>
+                </button>
+            </li>
+        </ul>
 
-        <section class="data-card" aria-labelledby="effective-parameters-title">
-            <header>
-                <h3 id="effective-parameters-title">유효 생성 파라미터</h3>
-                <span>{workspace.capability_parameter_specs.length}개</span>
-            </header>
-            {#if workspace.capability_parameter_specs.length === 0}
-                <p class="empty-note">이 라우트에서 사용할 수 있는 파라미터가 없습니다.</p>
-            {:else}
-                <ul class="parameter-list">
-                    {#each workspace.capability_parameter_specs as spec (spec.id)}
-                        <li>
-                            <div>
-                                <strong>{spec.label_key}</strong>
-                                <code>{spec.id}</code>
-                            </div>
-                            <dl>
-                                <div>
-                                    <dt>값 형식</dt>
-                                    <dd>{spec.value_type}</dd>
-                                </div>
-                                <div>
-                                    <dt>범위</dt>
-                                    <dd>
-                                        {spec.minimum ?? '제한 없음'} – {spec.maximum ??
-                                            '제한 없음'}
-                                    </dd>
-                                </div>
-                                <div>
-                                    <dt>기본 모드</dt>
-                                    <dd>{spec.default_mode}</dd>
-                                </div>
-                                <div>
-                                    <dt>전송 필드</dt>
-                                    <dd>{spec.provider_mapping.field_name}</dd>
-                                </div>
-                            </dl>
-                            {#if spec.description_key}
-                                <small>{spec.description_key}</small>
-                            {/if}
-                        </li>
+        {#if !routeIsLoaded}
+            <p class="empty-note">
+                {selectedRouteId === ''
+                    ? '모델 라우트를 선택해 주세요.'
+                    : selectedRoute === null
+                      ? '선택한 모델 라우트를 찾을 수 없습니다.'
+                      : 'Capability 상태를 불러오는 중입니다.'}
+            </p>
+        {/if}
+    {:else if detailMode === 'effective'}
+        <div class="direct-form effective-form">
+            <label>
+                <span>Capability 키</span>
+                <select bind:value={selectedCapabilityKey} disabled={busy || !routeIsLoaded}>
+                    {#each CAPABILITY_KEYS as key (key)}
+                        <option value={key}>{CAPABILITY_LABELS[key]} · {key}</option>
                     {/each}
-                </ul>
+                </select>
+            </label>
+        </div>
+
+        {#if effectiveCapability}
+            <div class="result-stack">
+                <p class="group-label">선택된 값</p>
+                <dl class:warning={effectiveCapability.has_conflict} class="effective-result">
+                    <div class="effective-primary-row">
+                        <dt>{capabilityLabel(effectiveCapability.selected.key)}</dt>
+                        <dd class="effective-value">
+                            {formatValue(effectiveCapability.selected.value)}
+                        </dd>
+                    </div>
+                    <div>
+                        <dt>상태</dt>
+                        <dd class="badges">
+                            <span>{statusLabel(effectiveCapability.selected.status)}</span>
+                            {#if effectiveCapability.selected_is_stale}
+                                <span class="warning-badge">만료됨</span>
+                            {/if}
+                            {#if effectiveCapability.has_conflict}
+                                <span class="warning-badge">출처 충돌</span>
+                            {/if}
+                        </dd>
+                    </div>
+                    <div>
+                        <dt>출처</dt>
+                        <dd>{sourceLabel(effectiveCapability.selected.source)}</dd>
+                    </div>
+                    <div>
+                        <dt>신뢰도</dt>
+                        <dd>{effectiveCapability.selected.confidence}</dd>
+                    </div>
+                    <div>
+                        <dt>평가 시각</dt>
+                        <dd>{effectiveCapability.evaluated_at}</dd>
+                    </div>
+                </dl>
+
+                {#if effectiveCapability.alternatives.length > 0}
+                    <p class="group-label">다른 관측</p>
+                    <ul class="read-list compact-read-list">
+                        {#each effectiveCapability.alternatives as alternative (alternative.id)}
+                            <li class="read-row">
+                                <div class="read-row-heading">
+                                    <strong>{formatValue(alternative.value)}</strong>
+                                    <span>{statusLabel(alternative.status)}</span>
+                                </div>
+                                <small>{sourceLabel(alternative.source)}</small>
+                            </li>
+                        {/each}
+                    </ul>
+                {/if}
+            </div>
+        {:else}
+            <p class="empty-note">키를 선택하고 유효 값을 확인해 주세요.</p>
+        {/if}
+    {:else if detailMode === 'overrides'}
+        {#if userOverrides.length === 0}
+            <p class="empty-note">저장된 사용자 override가 없습니다.</p>
+        {:else}
+            <ul class="setting-list override-list" aria-label="사용자 override 목록">
+                {#each userOverrides as observation (observation.id)}
+                    <li>
+                        {#if isCapabilityKey(observation.key) && observation.value.type !== 'structured'}
+                            <button
+                                class="setting-row override-row"
+                                type="button"
+                                aria-label="이 override 수정"
+                                disabled={busy}
+                                onclick={() => editOverride(observation)}
+                            >
+                                <span class="override-row-copy">
+                                    <strong>{capabilityLabel(observation.key)}</strong>
+                                    <small>
+                                        {formatValue(observation.value)} · {statusLabel(
+                                            observation.status,
+                                        )}
+                                    </small>
+                                </span>
+                            </button>
+                        {:else}
+                            <button
+                                class="setting-row override-row read-only-row"
+                                type="button"
+                                aria-label="이 override 보기"
+                                disabled={busy}
+                                onclick={() => viewReadOnlyOverride(observation)}
+                            >
+                                <span class="override-row-copy">
+                                    <strong>{capabilityLabel(observation.key)}</strong>
+                                    <small>
+                                        {formatValue(observation.value)} · 읽기 전용
+                                    </small>
+                                </span>
+                            </button>
+                        {/if}
+                    </li>
+                {/each}
+            </ul>
+        {/if}
+    {:else if detailMode === 'override-create' || detailMode === 'override-edit'}
+        <form
+            id={OVERRIDE_FORM_ID}
+            class="direct-form override-editor"
+            aria-label={detailMode === 'override-create'
+                ? '사용자 override 추가'
+                : '사용자 override 수정'}
+            onsubmit={(event) => {
+                event.preventDefault();
+                void saveOverride();
+            }}
+        >
+            <label>
+                <span>Capability 키</span>
+                <select bind:value={overrideKey} disabled={busy || !routeIsLoaded}>
+                    {#each CAPABILITY_KEYS as key (key)}
+                        <option value={key}>{CAPABILITY_LABELS[key]} · {key}</option>
+                    {/each}
+                </select>
+            </label>
+            <label>
+                <span>값 종류</span>
+                <select bind:value={overrideValueKind} disabled={busy || !routeIsLoaded}>
+                    <option value="boolean">Boolean</option>
+                    <option value="integer">Integer</option>
+                    <option value="enum_values">Enum 목록</option>
+                </select>
+            </label>
+
+            {#if overrideValueKind === 'boolean'}
+                <label>
+                    <span>Boolean 값</span>
+                    <select bind:value={booleanValue} disabled={busy || !routeIsLoaded}>
+                        <option value={true}>true</option>
+                        <option value={false}>false</option>
+                    </select>
+                </label>
+            {:else if overrideValueKind === 'integer'}
+                <label>
+                    <span>정수 값</span>
+                    <input
+                        type="number"
+                        step="1"
+                        bind:value={integerValue}
+                        disabled={busy || !routeIsLoaded}
+                    />
+                </label>
+            {:else}
+                <label>
+                    <span>열거 값</span>
+                    <textarea
+                        rows="3"
+                        bind:value={enumValues}
+                        disabled={busy || !routeIsLoaded}
+                        placeholder="값을 쉼표 또는 줄바꿈으로 구분"
+                        required></textarea>
+                </label>
             {/if}
-        </section>
-    {:else}
-        <p class="empty-note route-empty">모델 라우트를 선택하면 capability 상태를 불러옵니다.</p>
+
+            <label>
+                <span>상태</span>
+                <select bind:value={overrideStatus} disabled={busy || !routeIsLoaded}>
+                    <option value="verified">검증됨</option>
+                    <option value="unsupported">지원하지 않음</option>
+                    <option value="unknown">알 수 없음</option>
+                    <option value="conditional">조건부</option>
+                </select>
+            </label>
+            <label>
+                <span>만료 시각 (선택)</span>
+                <input
+                    type="datetime-local"
+                    bind:value={expiresAt}
+                    disabled={busy || !routeIsLoaded}
+                />
+            </label>
+
+            {#if formError}
+                <p class="form-error" role="alert">{formError}</p>
+            {/if}
+        </form>
+    {:else if detailMode === 'override-readonly'}
+        {#if selectedUserOverride}
+            <ul class="read-list" aria-label="읽기 전용 사용자 override">
+                <li class="read-row">
+                    <div class="read-row-heading">
+                        <strong>{capabilityLabel(selectedUserOverride.key)}</strong>
+                        <span>읽기 전용</span>
+                    </div>
+                    <code>{selectedUserOverride.key}</code>
+                    <p class="read-only-value">{formatValue(selectedUserOverride.value)}</p>
+                    <dl class="metadata-grid">
+                        <div>
+                            <dt>상태</dt>
+                            <dd>{statusLabel(selectedUserOverride.status)}</dd>
+                        </div>
+                        <div>
+                            <dt>출처</dt>
+                            <dd>{sourceLabel(selectedUserOverride.source)}</dd>
+                        </div>
+                        <div>
+                            <dt>신뢰도</dt>
+                            <dd>{selectedUserOverride.confidence}</dd>
+                        </div>
+                        <div>
+                            <dt>만료</dt>
+                            <dd>{selectedUserOverride.expires_at ?? '없음'}</dd>
+                        </div>
+                    </dl>
+                </li>
+            </ul>
+        {:else}
+            <p class="empty-note">이 사용자 override를 찾을 수 없습니다.</p>
+        {/if}
+    {:else if detailMode === 'observations'}
+        {#if observations.length === 0}
+            <p class="empty-note">저장된 capability 관측이 없습니다.</p>
+        {:else}
+            <ul class="read-list" aria-label="Capability 관측 목록">
+                {#each observations as observation (observation.id)}
+                    <li class="read-row">
+                        <div class="read-row-heading">
+                            <strong>{capabilityLabel(observation.key)}</strong>
+                            <span>{formatValue(observation.value)}</span>
+                        </div>
+                        <code>{observation.key}</code>
+                        <dl class="metadata-grid">
+                            <div>
+                                <dt>상태</dt>
+                                <dd>{statusLabel(observation.status)}</dd>
+                            </div>
+                            <div>
+                                <dt>출처</dt>
+                                <dd>{sourceLabel(observation.source)}</dd>
+                            </div>
+                            <div>
+                                <dt>신뢰도</dt>
+                                <dd>{observation.confidence}</dd>
+                            </div>
+                            <div>
+                                <dt>만료</dt>
+                                <dd>{observation.expires_at ?? '없음'}</dd>
+                            </div>
+                        </dl>
+                    </li>
+                {/each}
+            </ul>
+        {/if}
+    {:else if detailMode === 'parameters'}
+        {#if parameterSpecs.length === 0}
+            <p class="empty-note">이 라우트에서 사용할 수 있는 파라미터가 없습니다.</p>
+        {:else}
+            <ul class="read-list" aria-label="유효 생성 파라미터 목록">
+                {#each parameterSpecs as spec (spec.id)}
+                    <li class="read-row">
+                        <div class="read-row-heading">
+                            <strong>{spec.label_key}</strong>
+                            <span>{spec.value_type}</span>
+                        </div>
+                        <code>{spec.id}</code>
+                        <dl class="metadata-grid">
+                            <div>
+                                <dt>범위</dt>
+                                <dd>
+                                    {spec.minimum ?? '제한 없음'} – {spec.maximum ?? '제한 없음'}
+                                </dd>
+                            </div>
+                            <div>
+                                <dt>기본 모드</dt>
+                                <dd>{spec.default_mode}</dd>
+                            </div>
+                            <div>
+                                <dt>전송 필드</dt>
+                                <dd>{spec.provider_mapping.field_name}</dd>
+                            </div>
+                        </dl>
+                        {#if spec.description_key}
+                            <small>{spec.description_key}</small>
+                        {/if}
+                    </li>
+                {/each}
+            </ul>
+        {/if}
     {/if}
-</section>
+{/snippet}
+
+{#snippet capabilityActions()}
+    {#if detailMode === 'effective'}
+        <DetailActionBar ariaLabel="유효 capability 작업">
+            <button
+                class="primary detail-action detail-action--wide"
+                type="button"
+                aria-label="유효 값 확인"
+                disabled={busy || !routeIsLoaded}
+                onclick={() => void inspectCapability()}
+            >
+                확인
+            </button>
+        </DetailActionBar>
+    {:else if detailMode === 'overrides'}
+        <DetailActionBar ariaLabel="사용자 override 작업">
+            <button
+                class="primary detail-action detail-action--wide"
+                type="button"
+                disabled={busy || !routeIsLoaded}
+                onclick={beginCreate}
+            >
+                <Plus aria-hidden="true" />
+                사용자 override 추가
+            </button>
+        </DetailActionBar>
+    {:else if detailMode === 'override-create'}
+        <DetailActionBar ariaLabel="사용자 override 편집 작업">
+            <button
+                class="primary detail-action detail-action--wide"
+                type="submit"
+                form={OVERRIDE_FORM_ID}
+                aria-label="사용자 override 저장"
+                disabled={busy || !routeIsLoaded}
+            >
+                저장
+            </button>
+        </DetailActionBar>
+    {:else if detailMode === 'override-edit'}
+        <DetailActionBar ariaLabel="사용자 override 편집 작업">
+            {#if deleteConfirmationId === overrideId}
+                <button
+                    class="danger detail-action detail-action--destructive detail-action--borderless delete-confirm"
+                    type="button"
+                    aria-label="사용자 override 삭제 확인"
+                    disabled={busy || !routeIsLoaded}
+                    onclick={() => void deleteEditingOverride()}
+                >
+                    정말 삭제
+                </button>
+                <button
+                    class="detail-action detail-action--grow cancel-action"
+                    type="button"
+                    disabled={busy}
+                    onclick={() => (deleteConfirmationId = null)}
+                >
+                    취소
+                </button>
+            {:else}
+                <button
+                    class="detail-action detail-action--destructive detail-action--borderless delete-action"
+                    type="button"
+                    aria-label="사용자 override 삭제"
+                    disabled={busy || !routeIsLoaded || overrideId === ''}
+                    onclick={() => (deleteConfirmationId = overrideId)}
+                >
+                    삭제
+                </button>
+                <button
+                    class="primary detail-action detail-action--grow save-action"
+                    type="submit"
+                    form={OVERRIDE_FORM_ID}
+                    aria-label="사용자 override 업데이트"
+                    disabled={busy || !routeIsLoaded}
+                >
+                    저장
+                </button>
+            {/if}
+        </DetailActionBar>
+    {:else if detailMode === 'override-readonly'}
+        <DetailActionBar ariaLabel="읽기 전용 사용자 override 작업">
+            {#if deleteConfirmationId === overrideId}
+                <button
+                    class="danger detail-action detail-action--destructive detail-action--borderless delete-confirm"
+                    type="button"
+                    aria-label="사용자 override 삭제 확인"
+                    disabled={busy || !routeIsLoaded || selectedUserOverride === null}
+                    onclick={() => void deleteEditingOverride()}
+                >
+                    정말 삭제
+                </button>
+                <button
+                    class="detail-action detail-action--grow cancel-action"
+                    type="button"
+                    disabled={busy}
+                    onclick={() => (deleteConfirmationId = null)}
+                >
+                    취소
+                </button>
+            {:else}
+                <button
+                    class="detail-action detail-action--destructive detail-action--borderless detail-action--wide delete-action"
+                    type="button"
+                    aria-label="사용자 override 삭제"
+                    disabled={busy || !routeIsLoaded || selectedUserOverride === null}
+                    onclick={() => (deleteConfirmationId = overrideId)}
+                >
+                    삭제
+                </button>
+            {/if}
+        </DetailActionBar>
+    {/if}
+{/snippet}
+
+<DetailPage
+    ariaLabel="모델 capability"
+    className="capability-panel"
+    scrollClassName="provider-scroll settings-detail-scroll capability-scroll"
+    resetKey={detailMode ?? 'index'}
+    hasActions={hasBottomAction}
+    content={capabilityContent}
+    actions={capabilityActions}
+/>
 
 <style>
-    .capability-panel {
-        padding: 20px;
-        border: 1px solid var(--line);
-        border-radius: var(--radius-md);
-        background: var(--surface-raised);
+    :global(.capability-scroll) {
+        overscroll-behavior: contain;
     }
 
-    .panel-heading h2,
-    h3 {
-        margin: 3px 0;
-    }
-
-    .panel-heading p:last-child,
-    .override-card header p,
-    .empty-note {
-        margin: 5px 0 0;
-        color: var(--ink-muted);
-        line-height: 1.45;
-    }
-
-    .route-row,
-    .inspect-row,
-    .override-card > header,
-    .data-card > header,
-    .actions,
-    .effective-heading {
-        display: flex;
-        gap: 10px;
-        align-items: end;
-        justify-content: space-between;
-    }
-
-    .route-row {
-        margin-top: 16px;
-    }
-
-    label {
+    .direct-form {
         display: grid;
-        flex: 1;
-        gap: 6px;
+        gap: 14px;
+    }
+
+    .direct-form label {
+        display: grid;
+        min-width: 0;
+        gap: 7px;
         color: var(--ink-muted);
-        font-size: 0.78rem;
+        font-size: var(--detail-support-type);
         font-weight: 700;
     }
 
-    .content-grid {
+    .direct-form :is(input, select, textarea) {
+        width: 100%;
+        min-width: 0;
+        min-height: clamp(48px, 13.73vw, 60px);
+        box-sizing: border-box;
+        padding: clamp(12px, 3.432vw, 15px);
+        border: 1.5px solid var(--line);
+        border-radius: var(--radius-md);
+        appearance: none;
+        background: color-mix(in srgb, var(--surface-sunken) 26%, var(--surface-raised));
+        box-shadow: inset 0 1px 2px rgb(16 18 24 / 3%);
+        caret-color: var(--accent);
+        color: var(--ink);
+        font: inherit;
+        line-height: 1.5;
+        transition:
+            background-color 140ms ease,
+            box-shadow 140ms ease;
+    }
+
+    .direct-form textarea {
+        min-height: clamp(112px, 32.037vw, 140px);
+        resize: vertical;
+    }
+
+    .direct-form :is(input, select, textarea):hover:not(:focus, :disabled) {
+        border-color: var(--line);
+    }
+
+    .direct-form :is(input, select, textarea):focus {
+        border-color: var(--accent);
+        outline: none;
+    }
+
+    .direct-form :is(input, select, textarea):disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
+    }
+
+    .route-form {
+        width: 100%;
+    }
+
+    .detail-action :global(svg) {
+        width: 19px;
+        height: 19px;
+        flex: none;
+        fill: none;
+        stroke: currentcolor;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        stroke-width: 1.8;
+    }
+
+    .capability-index,
+    .override-list {
+        width: 100%;
+        margin: 0;
+    }
+
+    .capability-destination,
+    .override-row {
+        min-height: clamp(60px, 17.162vw, 75px);
+    }
+
+    .destination-content,
+    .destination-copy,
+    .override-row-copy {
         display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        min-width: 0;
+        flex: 1;
+        gap: 5px;
+    }
+
+    .destination-copy strong,
+    .destination-copy small,
+    .override-row-copy strong,
+    .override-row-copy small {
+        overflow: hidden;
+        font-size: var(--detail-support-type);
+        line-height: 1.35;
+        text-overflow: ellipsis;
+    }
+
+    .destination-copy strong,
+    .override-row-copy strong {
+        color: var(--ink);
+        font-weight: 600;
+    }
+
+    .destination-copy small,
+    .override-row-copy small {
+        color: var(--ink-muted);
+        font-weight: 500;
+        white-space: normal;
+    }
+
+    .read-only-row {
+        cursor: default;
+        opacity: 0.72;
+    }
+
+    .empty-note {
+        padding: 12px 0;
+        border-radius: 0;
+        margin: 0;
+        background: transparent;
+        color: var(--ink-muted);
+        font-size: var(--detail-support-type);
+        line-height: 1.5;
+    }
+
+    .result-stack {
+        display: grid;
+        gap: 10px;
+    }
+
+    .group-label {
+        margin: 4px 0 0;
+        color: var(--ink-muted);
+        font-size: var(--detail-support-type);
+        font-weight: 700;
+    }
+
+    .effective-result {
+        display: grid;
+        padding: 0;
+        border-block: 1px solid var(--line);
+        margin: 0;
+        background: transparent;
+    }
+
+    .effective-result.warning {
+        border-color: color-mix(in srgb, var(--danger), transparent 55%);
+    }
+
+    .effective-result > div {
+        display: grid;
+        min-width: 0;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr);
+        align-items: baseline;
+        padding: clamp(12px, 3.432vw, 15px) 0;
+        border-bottom: 1px solid var(--line);
         gap: 14px;
-        margin-top: 16px;
     }
 
-    .inspection-card,
-    .override-card,
-    .data-card {
-        padding: 15px;
-        border: 1px solid var(--line);
-        border-radius: 14px;
-        background: var(--surface);
+    .effective-result > div:last-child {
+        border-bottom: 0;
     }
 
-    .inspect-row {
-        margin-top: 12px;
+    .effective-result dt {
+        color: var(--ink-muted);
+        font-size: var(--detail-support-type);
+        font-weight: 650;
     }
 
-    .inspection-card article {
-        margin-top: 12px;
-        padding: 12px;
-        border-radius: 11px;
-        background: var(--surface-sunken);
+    .effective-result dd {
+        min-width: 0;
+        margin: 0;
+        overflow-wrap: anywhere;
+        color: var(--ink);
+        font-size: var(--detail-support-type);
+        font-weight: 650;
     }
 
-    .inspection-card article.warning {
-        border: 1px solid color-mix(in srgb, var(--danger), transparent 55%);
+    .read-row-heading {
+        display: flex;
+        min-width: 0;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+    }
+
+    .read-row-heading strong {
+        min-width: 0;
+        overflow-wrap: anywhere;
+        color: var(--ink);
+        font-size: var(--detail-support-type);
+        font-weight: 650;
     }
 
     .effective-value {
-        margin: 10px 0 4px;
         overflow-wrap: anywhere;
-        font-size: 1.1rem;
-        font-weight: 850;
+        font-size: clamp(18px, 4.8vw, 22px) !important;
+        font-weight: 750 !important;
     }
 
-    .inspection-card article > p:not(.effective-value),
-    .inspection-card small {
-        color: var(--ink-muted);
-        font-size: 0.75rem;
-    }
-
-    .badges,
-    .actions {
+    .badges {
+        display: flex;
         flex-wrap: wrap;
-        justify-content: flex-start;
+        justify-content: flex-end;
+        gap: 5px;
     }
 
     .badges span {
-        padding: 3px 7px;
-        border-radius: 999px;
+        padding: 0;
+        border-radius: 0;
+        background: transparent;
         color: var(--accent);
-        background: var(--accent-soft);
-        font-size: 0.68rem;
-        font-weight: 800;
+        font-size: 0.72rem;
+        font-weight: 750;
     }
 
     .badges .warning-badge {
+        background: transparent;
         color: var(--danger);
-        background: color-mix(in srgb, var(--danger), transparent 88%);
     }
 
-    details {
-        margin: 10px 0;
-    }
-
-    .compact-list,
-    .observation-list,
-    .parameter-list {
-        display: grid;
-        gap: 8px;
-        margin: 10px 0 0;
-        padding: 0;
-        list-style: none;
-    }
-
-    .compact-list li {
+    .read-list {
         display: flex;
+        flex-direction: column;
+        padding: 0;
+        border-top: 1px solid var(--line);
+        border-radius: 0;
+        margin: 0;
+        background: transparent;
+        box-shadow: none;
+        gap: 0;
+        list-style: none;
+        overflow: visible;
+    }
+
+    .read-row {
+        display: grid;
+        min-width: 0;
+        padding: clamp(14px, 4vw, 18px) 0;
+        border-bottom: 1px solid var(--line);
+        border-radius: 0;
+        background: transparent;
         gap: 8px;
-        justify-content: space-between;
     }
 
-    .compact-list span {
+    .read-row-heading span,
+    .read-row > small,
+    .read-row > code {
+        overflow-wrap: anywhere;
         color: var(--ink-muted);
-        font-size: 0.72rem;
+        font-size: 0.78rem;
     }
 
-    .override-card form {
-        display: grid;
-        gap: 12px;
-        margin-top: 12px;
+    .read-only-value {
+        margin: 0;
+        overflow-wrap: anywhere;
+        color: var(--ink);
+        font-size: var(--detail-support-type);
+        line-height: 1.5;
     }
 
-    .form-grid {
+    .compact-read-list .read-row {
+        min-height: 52px;
+    }
+
+    .metadata-grid {
         display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: 10px;
+        margin: 0;
+    }
+
+    .metadata-grid > div {
+        min-width: 0;
+    }
+
+    .metadata-grid dt {
+        color: var(--ink-muted);
+        font-size: 0.7rem;
+    }
+
+    .metadata-grid dd {
+        margin: 3px 0 0;
+        overflow-wrap: anywhere;
+        color: var(--ink);
+        font-size: 0.78rem;
+        font-weight: 650;
     }
 
     .form-error {
         margin: 0;
         color: var(--danger);
-        font-size: 0.78rem;
-        font-weight: 750;
+        font-size: var(--detail-support-type);
+        font-weight: 700;
     }
 
-    .data-card {
-        margin-top: 14px;
-    }
-
-    .data-card > header {
-        align-items: center;
-    }
-
-    .data-card > header span {
-        color: var(--ink-muted);
-        font-size: 0.75rem;
-    }
-
-    .observation-list > li,
-    .parameter-list > li {
-        display: grid;
-        gap: 10px;
-        padding: 11px;
-        border-radius: 11px;
-        background: var(--surface-sunken);
-    }
-
-    .observation-main,
-    .parameter-list > li > div:first-child {
-        display: flex;
-        gap: 8px;
-        align-items: baseline;
-        flex-wrap: wrap;
-    }
-
-    code,
-    .observation-value {
-        overflow-wrap: anywhere;
-        font-size: 0.72rem;
-    }
-
-    .observation-value {
-        margin-left: auto;
-        font-weight: 800;
-    }
-
-    dl {
-        display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: 8px;
-        margin: 0;
-    }
-
-    dl > div {
-        min-width: 0;
-    }
-
-    dt {
-        color: var(--ink-muted);
-        font-size: 0.67rem;
-    }
-
-    dd {
-        margin: 3px 0 0;
-        overflow-wrap: anywhere;
-        font-size: 0.76rem;
-        font-weight: 750;
-    }
-
-    .parameter-list small {
-        color: var(--ink-muted);
-    }
-
-    .route-empty {
-        margin-top: 16px;
-        padding: 12px;
-        border-radius: 11px;
-        background: var(--surface-sunken);
-    }
-
-    @container view (max-width: 760px) {
-        .content-grid,
-        .form-grid {
-            grid-template-columns: 1fr;
-        }
-
-        .route-row,
-        .inspect-row,
-        .override-card > header {
-            align-items: stretch;
-            flex-direction: column;
-        }
-
-        dl {
+    @container view (max-width: 520px) {
+        .metadata-grid {
             grid-template-columns: repeat(2, minmax(0, 1fr));
         }
+    }
+
+    :global(.app-shell[data-layout='mobile'] .capability-scroll) {
+        scrollbar-width: none;
+    }
+
+    :global(.app-shell[data-layout='mobile'] .capability-scroll::-webkit-scrollbar) {
+        display: none;
     }
 </style>

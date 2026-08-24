@@ -10,6 +10,7 @@ export type ThemePreference = 'system' | 'light' | 'dark';
 export const THEME_PREFERENCES: readonly ThemePreference[] = ['system', 'light', 'dark'];
 
 const STORAGE_KEY = 'lorepia.theme';
+const DEFAULT_THEME_PREFERENCE: ThemePreference = 'light';
 
 function isThemePreference(value: unknown): value is ThemePreference {
     return value === 'system' || value === 'light' || value === 'dark';
@@ -18,10 +19,10 @@ function isThemePreference(value: unknown): value is ThemePreference {
 function readStoredPreference(): ThemePreference {
     try {
         const stored = localStorage.getItem(STORAGE_KEY);
-        return isThemePreference(stored) ? stored : 'system';
+        return isThemePreference(stored) ? stored : DEFAULT_THEME_PREFERENCE;
     } catch {
-        // A blocked or absent store just means the system preference wins.
-        return 'system';
+        // A blocked or absent store starts with LorePia's daylight identity.
+        return DEFAULT_THEME_PREFERENCE;
     }
 }
 

@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "demo": "vite --port 5174 --open /preview.html",
+    "tauri:demo": "tauri dev --config src-tauri/tauri.demo.conf.json",
     "tauri": "tauri",
     "build": "vite build",
     "format:check": "prettier --check .",
@@ -16,6 +18,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@lucide/svelte": "1.33.0",
     "@tauri-apps/api": "2.11.1",
     "svelte": "5.56.8"
   },

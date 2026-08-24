@@ -1,4 +1,7 @@
 <script lang="ts">
+    import { Plus } from '@lucide/svelte';
+    import DetailActionBar from '../../components/detail/DetailActionBar.svelte';
+    import DetailPage from '../../components/detail/DetailPage.svelte';
     import type { LorepiaAppController, LorepiaAppState } from '../../app/app-controller';
     import type {
         ApiFamilyInput,
@@ -15,9 +18,20 @@
     interface Props {
         appState: LorepiaAppState;
         controller: LorepiaAppController;
+        resourcePage?: 'connections' | 'routes' | 'presets' | null;
+        detailMode?: string | null;
+        detailTitle?: string;
     }
 
-    let { appState, controller }: Props = $props();
+    type ResourcePage = 'connections' | 'routes' | 'presets';
+    let {
+        appState,
+        controller,
+        resourcePage = $bindable<ResourcePage | null>(null),
+        detailMode = $bindable<string | null>(null),
+        detailTitle = $bindable(''),
+    }: Props = $props();
+    let lastResourcePage: ResourcePage | null = resourcePage;
 
     let connectionBusy = $state(false);
     let connectionError = $state('');
@@ -82,15 +96,108 @@
     const ordinaryRoutes = $derived(
         workspace.routes.filter((route) => !retainedLegacyProfileIds.has(route.connection_id)),
     );
+    const ordinaryRouteIds = $derived(new Set(ordinaryRoutes.map((route) => route.id)));
+    const ordinaryPresets = $derived(
+        workspace.presets.filter((preset) => ordinaryRouteIds.has(preset.model_route_id)),
+    );
     const selectedConnectionIsRetainedLegacy = $derived(
         retainedLegacyProfileIds.has(selectedConnectionId),
     );
     const selectedTemplate = $derived(
         workspace.templates.find((template) => template.id === connectionTemplateId) ?? null,
     );
-    const presetsForSelectedRoute = $derived(
-        workspace.presets.filter((preset) => preset.model_route_id === presetRouteId),
-    );
+    function pageTitle(page: ResourcePage | null, mode: string | null): string {
+        if (page === 'connections') {
+            if (mode === 'create') return '새 프로바이더 연결';
+            if (mode === 'edit') return '프로바이더 연결 편집';
+            return '프로바이더 연결';
+        }
+        if (page === 'routes') {
+            if (mode === 'create') return '새 모델 라우트';
+            if (mode === 'edit') return '모델 라우트 편집';
+            return '모델 라우트';
+        }
+        if (page === 'presets') {
+            if (mode === 'create') return '새 생성 프리셋';
+            if (mode === 'edit') return '생성 프리셋 편집';
+            return '생성 프리셋';
+        }
+        return '고급';
+    }
+
+    function resetConfirmations(): void {
+        confirmConnectionDelete = false;
+        confirmRouteDelete = false;
+        confirmPresetDelete = false;
+    }
+
+    function openResource(page: ResourcePage): void {
+        resetConfirmations();
+        resourcePage = page;
+        detailMode = null;
+    }
+
+    function openConnectionCreate(): void {
+        resetConnectionCreateForm();
+        connectionError = '';
+        resetConfirmations();
+        detailMode = 'create';
+    }
+
+    function openConnectionEdit(id: string): void {
+        connectionError = '';
+        selectConnection(id);
+        detailMode = 'edit';
+    }
+
+    function openRouteCreate(): void {
+        routeError = '';
+        routeConnectionId = '';
+        routeId = '';
+        routeApiFamily = 'open_ai_responses';
+        routeModelId = '';
+        routeDisplayName = '';
+        routeDeploymentId = '';
+        routeRegion = '';
+        routeEndpointPath = '';
+        routeValuesJson = '[]';
+        routeStatus = 'available';
+        resetConfirmations();
+        detailMode = 'create';
+    }
+
+    function openRouteEdit(id: string): void {
+        routeError = '';
+        selectRoute(id);
+        detailMode = 'edit';
+    }
+
+    function openPresetCreate(): void {
+        presetError = '';
+        presetRouteId = '';
+        clearPresetForm();
+        detailMode = 'create';
+    }
+
+    function openPresetEdit(id: string): void {
+        presetError = '';
+        const preset = workspace.presets.find((candidate) => candidate.id === id);
+        if (!preset) return;
+        presetRouteId = preset.model_route_id;
+        selectPreset(id);
+        detailMode = 'edit';
+    }
+
+    $effect(() => {
+        const page = resourcePage;
+        if (page !== lastResourcePage) {
+            lastResourcePage = page;
+            detailMode = null;
+            resetConfirmations();
+        }
+        const nextTitle = pageTitle(page, detailMode);
+        if (detailTitle !== nextTitle) detailTitle = nextTitle;
+    });
 
     function optionalText(value: string): string | null {
         const normalized = value.trim();
@@ -105,9 +212,14 @@
         return parsed;
     }
 
-    function optionalNonNegativeInteger(value: string, label: string): number | null {
-        if (value.trim() === '') return null;
-        const parsed = Number(value);
+    function optionalNonNegativeInteger(value: unknown, label: string): number | null {
+        if (value === null || value === undefined) return null;
+        if (typeof value !== 'string' && typeof value !== 'number') {
+            throw new Error(`${label}은(는) 숫자여야 합니다.`);
+        }
+        const normalized = typeof value === 'string' ? value.trim() : value;
+        if (normalized === '') return null;
+        const parsed = Number(normalized);
         if (!Number.isInteger(parsed) || parsed < 0) {
             throw new Error(`${label}은(는) 0 이상의 정수여야 합니다.`);
         }
@@ -185,7 +297,7 @@
         connectionNetworkMode = template.default_network_mode as ProviderNetworkModeInput;
         connectionValuesJson = JSON.stringify(
             template.connection_fields
-                .filter((field) => field.required)
+                .filter((field) => field.required && field.value_type !== 'credential')
                 .map((field) => ({
                     key: field.key,
                     value:
@@ -201,9 +313,12 @@
     }
 
     function resetConnectionCreateForm(): void {
+        connectionTemplateId = '';
         connectionId = '';
         connectionDisplayName = '';
+        connectionOrigin = '';
         connectionBasePath = '';
+        connectionNetworkMode = 'public';
         connectionLocalOrigin = '';
         connectionLocalAddresses = '';
         connectionValuesJson = '[]';
@@ -236,6 +351,17 @@
             ) {
                 throw new Error('승인된 로컬 네트워크의 origin과 주소를 모두 입력해 주세요.');
             }
+            const values = parseConfigValues(connectionValuesJson, '연결 값');
+            const credentialKeys = new Set(
+                selectedTemplate.connection_fields
+                    .filter((field) => field.value_type === 'credential')
+                    .map((field) => field.key),
+            );
+            if (values.some((entry) => credentialKeys.has(entry.key))) {
+                throw new Error(
+                    '자격증명 값은 이 화면에 입력할 수 없습니다. 연결을 만든 뒤 네이티브 캡처를 사용해 주세요.',
+                );
+            }
 
             const input: CreateProviderConnectionInput = {
                 id: connectionId.trim(),
@@ -246,12 +372,15 @@
                 api_base_path: optionalText(connectionBasePath),
                 network_mode: connectionNetworkMode,
                 local_network_approval: localNetworkApproval,
-                values: parseConfigValues(connectionValuesJson, '연결 값'),
+                values,
                 approved_credential_origin: optionalText(connectionApprovedCredentialOrigin),
                 timeout_seconds: timeoutSeconds,
             };
             const created = await controller.createProviderConnection(input);
-            if (created) resetConnectionCreateForm();
+            if (created) {
+                resetConnectionCreateForm();
+                detailMode = null;
+            }
         } catch (error: unknown) {
             connectionError = error instanceof Error ? error.message : '연결 입력을 확인해 주세요.';
         } finally {
@@ -279,7 +408,7 @@
                 display_name: updateConnectionDisplayName.trim(),
                 timeout_seconds: timeoutSeconds,
             };
-            await controller.updateProviderConnection(input);
+            if (await controller.updateProviderConnection(input)) detailMode = null;
         } catch (error: unknown) {
             connectionError = error instanceof Error ? error.message : '연결 입력을 확인해 주세요.';
         } finally {
@@ -288,11 +417,17 @@
     }
 
     async function deleteConnection(): Promise<void> {
-        if (selectedConnectionId === '' || !confirmConnectionDelete) return;
+        if (
+            selectedConnectionId === '' ||
+            !confirmConnectionDelete ||
+            selectedConnectionIsRetainedLegacy
+        )
+            return;
         connectionBusy = true;
         try {
             if (await controller.deleteProviderConnection(selectedConnectionId)) {
                 selectConnection('');
+                detailMode = null;
             }
         } finally {
             connectionBusy = false;
@@ -327,6 +462,7 @@
                 routeRegion = '';
                 routeEndpointPath = '';
                 routeValuesJson = '[]';
+                detailMode = null;
             }
         } catch (error: unknown) {
             routeError = error instanceof Error ? error.message : '라우트 입력을 확인해 주세요.';
@@ -377,18 +513,24 @@
                 display_name: optionalText(updateRouteDisplayName),
                 status: updateRouteStatus,
             };
-            await controller.upsertProviderModelRoute(input);
+            if (await controller.upsertProviderModelRoute(input)) detailMode = null;
         } finally {
             routeBusy = false;
         }
     }
 
     async function deleteRoute(): Promise<void> {
-        if (selectedRouteId === '' || !confirmRouteDelete) return;
+        if (
+            selectedRouteId === '' ||
+            !confirmRouteDelete ||
+            protectsRetainedLegacyRoute(selectedRouteId)
+        )
+            return;
         routeBusy = true;
         try {
             if (await controller.deleteProviderModelRoute(selectedRouteId)) {
                 selectRoute('');
+                detailMode = null;
             }
         } finally {
             routeBusy = false;
@@ -478,7 +620,7 @@
         if (candidate === null) return;
         presetBusy = true;
         try {
-            await controller.upsertProviderGenerationPreset(candidate);
+            if (await controller.upsertProviderGenerationPreset(candidate)) detailMode = null;
         } finally {
             presetBusy = false;
         }
@@ -507,11 +649,17 @@
     }
 
     async function deletePreset(): Promise<void> {
-        if (selectedPresetId === '' || !confirmPresetDelete) return;
+        if (
+            selectedPresetId === '' ||
+            !confirmPresetDelete ||
+            protectsRetainedLegacyPreset(selectedPresetId)
+        )
+            return;
         presetBusy = true;
         try {
             if (await controller.deleteProviderGenerationPreset(selectedPresetId)) {
                 clearPresetForm();
+                detailMode = null;
             }
         } finally {
             presetBusy = false;
@@ -519,29 +667,81 @@
     }
 </script>
 
-<section class="crud-panel" aria-labelledby="provider-crud-title">
-    <header class="panel-heading">
-        <div>
-            <p class="eyebrow">Direct Core configuration</p>
-            <h2 id="provider-crud-title">연결·라우트·프리셋 직접 관리</h2>
-            <p>
+{#snippet detailContent()}
+    {#if resourcePage === null}
+        <div class="setting-list resource-index" aria-label="고급 설정 항목">
+            <button
+                class="setting-row resource-row"
+                type="button"
+                onclick={() => openResource('connections')}
+            >
+                <span class="setting-content">
+                    <span class="setting-copy resource-copy">
+                        <strong>프로바이더 연결</strong>
+                        <small>{workspace.connections.length}개 연결</small>
+                    </span>
+                </span>
+            </button>
+            <button
+                class="setting-row resource-row"
+                type="button"
+                onclick={() => openResource('routes')}
+            >
+                <span class="setting-content">
+                    <span class="setting-copy resource-copy">
+                        <strong>모델 라우트</strong>
+                        <small>{ordinaryRoutes.length}개 라우트</small>
+                    </span>
+                </span>
+            </button>
+            <button
+                class="setting-row resource-row"
+                type="button"
+                onclick={() => openResource('presets')}
+            >
+                <span class="setting-content">
+                    <span class="setting-copy resource-copy">
+                        <strong>생성 프리셋</strong>
+                        <small>{ordinaryPresets.length}개 프리셋</small>
+                    </span>
+                </span>
+            </button>
+        </div>
+    {:else if resourcePage === 'connections'}
+        {#if detailMode === null}
+            <div class="setting-list resource-list" aria-label="프로바이더 연결 목록">
+                {#if workspace.connections.length === 0}
+                    <p class="resource-empty">아직 등록된 프로바이더 연결이 없습니다.</p>
+                {/if}
+                {#each workspace.connections as connection (connection.id)}
+                    <button
+                        class="setting-row resource-row"
+                        type="button"
+                        disabled={connectionBusy}
+                        onclick={() => openConnectionEdit(connection.id)}
+                    >
+                        <span class="setting-content">
+                            <span class="setting-copy resource-copy">
+                                <strong>{connection.display_name}</strong>
+                                <small>{connection.api_origin}</small>
+                            </span>
+                        </span>
+                    </button>
+                {/each}
+            </div>
+            <p class="security-note">
                 입력은 고수준 Tauri 명령으로만 전달됩니다. 자격증명은 이 화면에 보관하지 않습니다.
             </p>
-        </div>
-    </header>
-
-    <details open>
-        <summary>프로바이더 연결</summary>
-        <div class="detail-body">
+        {:else if detailMode === 'create'}
             <form
-                class="form-grid"
+                id="connection-editor-form"
+                class="resource-form"
                 aria-label="프로바이더 연결 만들기"
                 onsubmit={(event) => {
                     event.preventDefault();
                     void createConnection();
                 }}
             >
-                <h3 class="wide">새 연결</h3>
                 <label>
                     <span>템플릿</span>
                     <select
@@ -586,7 +786,7 @@
                         <span>승인 origin</span>
                         <input bind:value={connectionLocalOrigin} type="url" required />
                     </label>
-                    <label class="wide">
+                    <label>
                         <span>승인 주소 (줄바꿈 또는 쉼표 구분)</span>
                         <textarea
                             bind:value={connectionLocalAddresses}
@@ -595,15 +795,16 @@
                             spellcheck="false"></textarea>
                     </label>
                 {/if}
-                <label class="wide">
+                <label>
                     <span>연결 값 JSON</span>
                     <textarea
+                        class="code-field"
                         bind:value={connectionValuesJson}
                         rows="5"
                         spellcheck="false"
                         aria-describedby="connection-values-help"></textarea>
                     <small id="connection-values-help">
-                        [{`{"key":"organization","value":{"type":"text","value":"..."}}`}]
+                        자격증명 키는 제외하세요. [{`{"key":"organization","value":{"type":"text","value":"..."}}`}]
                     </small>
                 </label>
                 <label>
@@ -618,44 +819,24 @@
                     <span>타임아웃 (초)</span>
                     <input bind:value={connectionTimeout} type="number" min="1" required />
                 </label>
-                <p class="wide">
+                <p class="security-note">
                     연결을 만든 뒤 자격증명 카드에서 운영체제 네이티브 캡처를 사용하세요. 자격증명은
                     이 화면이나 WebView 메모리에 들어오지 않습니다.
                 </p>
-                <div class="wide actions">
-                    <button
-                        class="primary"
-                        type="submit"
-                        disabled={connectionBusy || connectionTemplateId === ''}
-                    >
-                        연결 만들기
-                    </button>
-                </div>
+                {#if connectionError}
+                    <p class="form-error" role="alert">{connectionError}</p>
+                {/if}
             </form>
-
+        {:else}
             <form
-                class="form-grid divided"
+                id="connection-editor-form"
+                class="resource-form"
                 aria-label="프로바이더 연결 수정 또는 삭제"
                 onsubmit={(event) => {
                     event.preventDefault();
                     void updateConnection();
                 }}
             >
-                <h3 class="wide">기존 연결 수정</h3>
-                <label class="wide">
-                    <span>연결 선택</span>
-                    <select
-                        value={selectedConnectionId}
-                        onchange={(event) => selectConnection(event.currentTarget.value)}
-                    >
-                        <option value="">선택</option>
-                        {#each workspace.connections as connection (connection.id)}
-                            <option value={connection.id}>
-                                {connection.display_name} · {connection.id}
-                            </option>
-                        {/each}
-                    </select>
-                </label>
                 <label>
                     <span>표시 이름</span>
                     <input
@@ -674,60 +855,53 @@
                         disabled={selectedConnectionId === '' || selectedConnectionIsRetainedLegacy}
                     />
                 </label>
-                <div class="wide actions">
-                    <button
-                        type="submit"
-                        disabled={connectionBusy ||
-                            selectedConnectionId === '' ||
-                            selectedConnectionIsRetainedLegacy}
-                    >
-                        연결 수정
-                    </button>
-                </div>
                 {#if selectedConnectionIsRetainedLegacy}
-                    <p class="wide inline-note">
-                        기존 프로필 연결의 메타데이터는 기존 프로필 경로에서 관리됩니다.
+                    <p class="security-note">
+                        기존 프로필 연결의 메타데이터와 삭제는 기존 프로필 경로에서 관리됩니다.
+                    </p>
+                {:else if confirmConnectionDelete}
+                    <p class="security-note" role="status">
+                        이 연결과 연결에 종속된 설정이 함께 삭제됩니다. 하단에서 한 번 더 확인해
+                        주세요.
                     </p>
                 {/if}
-                <label class="wide confirm-row">
-                    <input
-                        type="checkbox"
-                        bind:checked={confirmConnectionDelete}
-                        disabled={selectedConnectionId === ''}
-                    />
-                    <span>선택한 연결과 그 종속 설정의 삭제를 확인합니다.</span>
-                </label>
-                <div class="wide actions">
-                    <button
-                        class="danger"
-                        type="button"
-                        disabled={connectionBusy ||
-                            selectedConnectionId === '' ||
-                            !confirmConnectionDelete}
-                        onclick={() => void deleteConnection()}
-                    >
-                        선택한 연결 삭제
-                    </button>
-                </div>
+                {#if connectionError}
+                    <p class="form-error" role="alert">{connectionError}</p>
+                {/if}
             </form>
-            {#if connectionError}
-                <p class="form-error" role="alert">{connectionError}</p>
-            {/if}
-        </div>
-    </details>
-
-    <details>
-        <summary>모델 라우트</summary>
-        <div class="detail-body">
+        {/if}
+    {:else if resourcePage === 'routes'}
+        {#if detailMode === null}
+            <div class="setting-list resource-list" aria-label="모델 라우트 목록">
+                {#if ordinaryRoutes.length === 0}
+                    <p class="resource-empty">아직 등록된 모델 라우트가 없습니다.</p>
+                {/if}
+                {#each ordinaryRoutes as route (route.id)}
+                    <button
+                        class="setting-row resource-row"
+                        type="button"
+                        disabled={routeBusy}
+                        onclick={() => openRouteEdit(route.id)}
+                    >
+                        <span class="setting-content">
+                            <span class="setting-copy resource-copy">
+                                <strong>{route.display_name ?? route.model_id}</strong>
+                                <small>{route.api_family} · {route.model_id}</small>
+                            </span>
+                        </span>
+                    </button>
+                {/each}
+            </div>
+        {:else if detailMode === 'create'}
             <form
-                class="form-grid"
+                id="route-editor-form"
+                class="resource-form"
                 aria-label="모델 라우트 만들기"
                 onsubmit={(event) => {
                     event.preventDefault();
                     void createRoute();
                 }}
             >
-                <h3 class="wide">새 모델 라우트</h3>
                 <label>
                     <span>연결</span>
                     <select bind:value={routeConnectionId} required>
@@ -779,48 +953,32 @@
                     <span>Region (선택)</span>
                     <input bind:value={routeRegion} autocomplete="off" />
                 </label>
-                <label class="wide">
+                <label>
                     <span>Endpoint path (선택)</span>
                     <input bind:value={routeEndpointPath} autocomplete="off" />
                 </label>
-                <label class="wide">
+                <label>
                     <span>라우트 값 JSON</span>
-                    <textarea bind:value={routeValuesJson} rows="4" spellcheck="false"></textarea>
+                    <textarea
+                        class="code-field"
+                        bind:value={routeValuesJson}
+                        rows="4"
+                        spellcheck="false"></textarea>
                 </label>
-                <div class="wide actions">
-                    <button
-                        class="primary"
-                        type="submit"
-                        disabled={routeBusy || routeConnectionId === ''}
-                    >
-                        라우트 만들기
-                    </button>
-                </div>
+                {#if routeError}
+                    <p class="form-error" role="alert">{routeError}</p>
+                {/if}
             </form>
-
+        {:else}
             <form
-                class="form-grid divided"
+                id="route-editor-form"
+                class="resource-form"
                 aria-label="모델 라우트 수정 또는 삭제"
                 onsubmit={(event) => {
                     event.preventDefault();
                     void updateRoute();
                 }}
             >
-                <h3 class="wide">기존 라우트 수정</h3>
-                <label class="wide">
-                    <span>라우트 선택</span>
-                    <select
-                        value={selectedRouteId}
-                        onchange={(event) => selectRoute(event.currentTarget.value)}
-                    >
-                        <option value="">선택</option>
-                        {#each ordinaryRoutes as route (route.id)}
-                            <option value={route.id}>
-                                {route.display_name ?? route.model_id} · {route.id}
-                            </option>
-                        {/each}
-                    </select>
-                </label>
                 <label>
                     <span>표시 이름 (선택)</span>
                     <input bind:value={updateRouteDisplayName} disabled={selectedRouteId === ''} />
@@ -837,47 +995,51 @@
                         <option value="unknown">알 수 없음</option>
                     </select>
                 </label>
-                <div class="wide actions">
-                    <button type="submit" disabled={routeBusy || selectedRouteId === ''}>
-                        라우트 수정
-                    </button>
-                </div>
                 {#if protectsRetainedLegacyRoute(selectedRouteId)}
-                    <p class="wide inline-note">
+                    <p class="security-note">
                         현재 기존 프로필의 모델 라우트는 프로필 연결과 함께 관리됩니다.
                     </p>
-                {:else}
-                    <label class="wide confirm-row">
-                        <input
-                            type="checkbox"
-                            bind:checked={confirmRouteDelete}
-                            disabled={selectedRouteId === ''}
-                        />
-                        <span>선택한 라우트와 그 종속 프리셋의 삭제를 확인합니다.</span>
-                    </label>
-                    <div class="wide actions">
-                        <button
-                            class="danger"
-                            type="button"
-                            disabled={routeBusy || selectedRouteId === '' || !confirmRouteDelete}
-                            onclick={() => void deleteRoute()}
-                        >
-                            선택한 라우트 삭제
-                        </button>
-                    </div>
+                {:else if confirmRouteDelete}
+                    <p class="security-note" role="status">
+                        이 라우트와 라우트에 종속된 프리셋이 함께 삭제됩니다. 하단에서 한 번 더
+                        확인해 주세요.
+                    </p>
+                {/if}
+                {#if routeError}
+                    <p class="form-error" role="alert">{routeError}</p>
                 {/if}
             </form>
-            {#if routeError}
-                <p class="form-error" role="alert">{routeError}</p>
-            {/if}
-        </div>
-    </details>
-
-    <details>
-        <summary>생성 프리셋</summary>
-        <div class="detail-body">
+        {/if}
+    {:else}
+        {#if detailMode === null}
+            <div class="setting-list resource-list" aria-label="생성 프리셋 목록">
+                {#if ordinaryPresets.length === 0}
+                    <p class="resource-empty">아직 등록된 생성 프리셋이 없습니다.</p>
+                {/if}
+                {#each ordinaryPresets as preset (preset.id)}
+                    <button
+                        class="setting-row resource-row"
+                        type="button"
+                        disabled={presetBusy}
+                        onclick={() => openPresetEdit(preset.id)}
+                    >
+                        <span class="setting-content">
+                            <span class="setting-copy resource-copy">
+                                <strong>{preset.display_name}</strong>
+                                <small>
+                                    {ordinaryRoutes.find(
+                                        (route) => route.id === preset.model_route_id,
+                                    )?.display_name ?? preset.model_route_id}
+                                </small>
+                            </span>
+                        </span>
+                    </button>
+                {/each}
+            </div>
+        {:else}
             <form
-                class="form-grid"
+                id="preset-editor-form"
+                class="resource-form"
                 aria-label="생성 프리셋 만들기 또는 수정"
                 onsubmit={(event) => {
                     event.preventDefault();
@@ -889,6 +1051,7 @@
                     <select
                         value={presetRouteId}
                         required
+                        disabled={detailMode === 'edit'}
                         onchange={(event) => selectPresetRoute(event.currentTarget.value)}
                     >
                         <option value="">선택</option>
@@ -898,24 +1061,11 @@
                     </select>
                 </label>
                 <label>
-                    <span>기존 프리셋 (선택)</span>
-                    <select
-                        value={selectedPresetId}
-                        disabled={presetRouteId === ''}
-                        onchange={(event) => selectPreset(event.currentTarget.value)}
-                    >
-                        <option value="">새 프리셋</option>
-                        {#each presetsForSelectedRoute as preset (preset.id)}
-                            <option value={preset.id}>{preset.display_name}</option>
-                        {/each}
-                    </select>
-                </label>
-                <label>
                     <span>프리셋 ID</span>
                     <input
                         bind:value={presetId}
                         required
-                        readonly={selectedPresetId !== ''}
+                        readonly={detailMode === 'edit'}
                         autocomplete="off"
                     />
                 </label>
@@ -923,9 +1073,10 @@
                     <span>표시 이름</span>
                     <input bind:value={presetDisplayName} required autocomplete="off" />
                 </label>
-                <label class="wide">
+                <label>
                     <span>파라미터 JSON</span>
                     <textarea
+                        class="code-field code-field-tall"
                         bind:value={presetValuesJson}
                         rows="8"
                         spellcheck="false"
@@ -935,7 +1086,7 @@
                     </small>
                 </label>
 
-                <fieldset class="wide nested-grid">
+                <fieldset class="field-group">
                     <legend>Reasoning</legend>
                     <label>
                         <span>Mode</span>
@@ -953,13 +1104,13 @@
                         <span>Summary</span>
                         <input bind:value={reasoningSummary} required autocomplete="off" />
                     </label>
-                    <label class="wide confirm-row">
+                    <label class="toggle-row">
                         <input type="checkbox" bind:checked={reasoningPreserveOpaqueState} />
                         <span>프로바이더의 opaque reasoning 상태 보존</span>
                     </label>
                 </fieldset>
 
-                <fieldset class="wide nested-grid">
+                <fieldset class="field-group">
                     <legend>Prompt cache</legend>
                     <label>
                         <span>Mode</span>
@@ -979,10 +1130,7 @@
                     </label>
                 </fieldset>
 
-                <div class="wide actions">
-                    <button class="primary" type="submit" disabled={presetBusy}>
-                        {selectedPresetId === '' ? '프리셋 만들기' : '프리셋 수정'}
-                    </button>
+                <div class="editor-utilities" aria-label="프리셋 검사">
                     <button
                         type="button"
                         disabled={presetBusy}
@@ -999,240 +1147,431 @@
                     </button>
                 </div>
 
-                {#if selectedPresetId !== ''}
-                    {#if protectsRetainedLegacyPreset(selectedPresetId)}
-                        <p class="wide inline-note">
-                            현재 기존 프로필의 기본 프리셋은 프로필 연결과 함께 관리됩니다.
-                        </p>
-                    {:else}
-                        <label class="wide confirm-row">
-                            <input type="checkbox" bind:checked={confirmPresetDelete} />
-                            <span>선택한 생성 프리셋의 삭제를 확인합니다.</span>
-                        </label>
-                        <div class="wide actions">
-                            <button
-                                class="danger"
-                                type="button"
-                                disabled={presetBusy || !confirmPresetDelete}
-                                onclick={() => void deletePreset()}
-                            >
-                                선택한 프리셋 삭제
-                            </button>
-                        </div>
-                    {/if}
+                {#if protectsRetainedLegacyPreset(selectedPresetId)}
+                    <p class="security-note">
+                        현재 기존 프로필의 기본 프리셋은 프로필 연결과 함께 관리됩니다.
+                    </p>
+                {:else if confirmPresetDelete}
+                    <p class="security-note" role="status">
+                        이 생성 프리셋이 삭제됩니다. 하단에서 한 번 더 확인해 주세요.
+                    </p>
+                {/if}
+                {#if presetError}
+                    <p class="form-error" role="alert">{presetError}</p>
+                {/if}
+
+                {#if workspace.request_preview}
+                    <section class="request-preview" aria-labelledby="candidate-preview-title">
+                        <h3 id="candidate-preview-title">민감값이 제거된 요청 구조</h3>
+                        <dl>
+                            <div>
+                                <dt>Method</dt>
+                                <dd>{workspace.request_preview.method}</dd>
+                            </div>
+                            <div>
+                                <dt>Origin</dt>
+                                <dd>{workspace.request_preview.origin}</dd>
+                            </div>
+                            <div>
+                                <dt>Path</dt>
+                                <dd>{workspace.request_preview.path}</dd>
+                            </div>
+                            <div>
+                                <dt>Headers</dt>
+                                <dd>
+                                    {workspace.request_preview.header_names.join(', ') || '없음'}
+                                </dd>
+                            </div>
+                        </dl>
+                        <p>메시지 본문과 자격증명 값은 표시하지 않습니다.</p>
+                    </section>
                 {/if}
             </form>
-            {#if presetError}
-                <p class="form-error" role="alert">{presetError}</p>
-            {/if}
+        {/if}
+    {/if}
+{/snippet}
 
-            {#if workspace.request_preview}
-                <article class="preview-card" aria-labelledby="candidate-preview-title">
-                    <h3 id="candidate-preview-title">민감값이 제거된 요청 구조</h3>
-                    <dl>
-                        <div>
-                            <dt>Method</dt>
-                            <dd>{workspace.request_preview.method}</dd>
-                        </div>
-                        <div>
-                            <dt>Origin</dt>
-                            <dd>{workspace.request_preview.origin}</dd>
-                        </div>
-                        <div>
-                            <dt>Path</dt>
-                            <dd>{workspace.request_preview.path}</dd>
-                        </div>
-                        <div>
-                            <dt>Headers</dt>
-                            <dd>{workspace.request_preview.header_names.join(', ') || '없음'}</dd>
-                        </div>
-                    </dl>
-                    <p>메시지 본문과 자격증명 값은 표시하지 않습니다.</p>
-                </article>
+{#snippet detailActions()}
+    {#if resourcePage !== null}
+        <DetailActionBar className="resource-action-bar" ariaLabel={`${detailTitle} 작업`}>
+            {#if detailMode === null}
+                <button
+                    class="primary detail-action detail-action--wide"
+                    type="button"
+                    onclick={() => {
+                        if (resourcePage === 'connections') openConnectionCreate();
+                        else if (resourcePage === 'routes') openRouteCreate();
+                        else openPresetCreate();
+                    }}
+                >
+                    <Plus class="resource-add-icon" aria-hidden="true" />
+                    {resourcePage === 'connections'
+                        ? '연결 추가하기'
+                        : resourcePage === 'routes'
+                          ? '라우트 추가하기'
+                          : '프리셋 추가하기'}
+                </button>
+            {:else if resourcePage === 'connections'}
+                {#if detailMode === 'edit' && !selectedConnectionIsRetainedLegacy && confirmConnectionDelete}
+                    <button
+                        class="danger detail-action detail-action--destructive"
+                        type="button"
+                        disabled={connectionBusy}
+                        onclick={() => void deleteConnection()}>삭제 확인</button
+                    >
+                    <button
+                        class="detail-action detail-action--grow"
+                        type="button"
+                        disabled={connectionBusy}
+                        onclick={() => (confirmConnectionDelete = false)}>취소</button
+                    >
+                {:else}
+                    {#if detailMode === 'edit' && !selectedConnectionIsRetainedLegacy}
+                        <button
+                            class="detail-action detail-action--destructive detail-action--borderless"
+                            type="button"
+                            disabled={connectionBusy}
+                            onclick={() => (confirmConnectionDelete = true)}>삭제</button
+                        >
+                    {/if}
+                    <button
+                        class="primary detail-action detail-action--grow"
+                        type="submit"
+                        form="connection-editor-form"
+                        disabled={connectionBusy ||
+                            (connectionTemplateId === '' && detailMode === 'create') ||
+                            selectedConnectionIsRetainedLegacy}
+                        >{detailMode === 'create' ? '연결 만들기' : '저장'}</button
+                    >
+                {/if}
+            {:else if resourcePage === 'routes'}
+                {#if detailMode === 'edit' && confirmRouteDelete}
+                    <button
+                        class="danger detail-action detail-action--destructive"
+                        type="button"
+                        disabled={routeBusy}
+                        onclick={() => void deleteRoute()}>삭제 확인</button
+                    >
+                    <button
+                        class="detail-action detail-action--grow"
+                        type="button"
+                        disabled={routeBusy}
+                        onclick={() => (confirmRouteDelete = false)}>취소</button
+                    >
+                {:else}
+                    {#if detailMode === 'edit'}
+                        <button
+                            class="detail-action detail-action--destructive detail-action--borderless"
+                            type="button"
+                            disabled={routeBusy}
+                            onclick={() => (confirmRouteDelete = true)}>삭제</button
+                        >
+                    {/if}
+                    <button
+                        class="primary detail-action detail-action--grow"
+                        type="submit"
+                        form="route-editor-form"
+                        disabled={routeBusy ||
+                            (routeConnectionId === '' && detailMode === 'create')}
+                        >{detailMode === 'create' ? '라우트 만들기' : '저장'}</button
+                    >
+                {/if}
+            {:else}
+                {#if detailMode === 'edit' && confirmPresetDelete}
+                    <button
+                        class="danger detail-action detail-action--destructive"
+                        type="button"
+                        disabled={presetBusy}
+                        onclick={() => void deletePreset()}>삭제 확인</button
+                    >
+                    <button
+                        class="detail-action detail-action--grow"
+                        type="button"
+                        disabled={presetBusy}
+                        onclick={() => (confirmPresetDelete = false)}>취소</button
+                    >
+                {:else}
+                    {#if detailMode === 'edit'}
+                        <button
+                            class="detail-action detail-action--destructive detail-action--borderless"
+                            type="button"
+                            disabled={presetBusy}
+                            onclick={() => (confirmPresetDelete = true)}>삭제</button
+                        >
+                    {/if}
+                    <button
+                        class="primary detail-action detail-action--grow"
+                        type="submit"
+                        form="preset-editor-form"
+                        disabled={presetBusy || presetRouteId === ''}
+                        >{detailMode === 'create' ? '프리셋 만들기' : '저장'}</button
+                    >
+                {/if}
             {/if}
-        </div>
-    </details>
-</section>
+        </DetailActionBar>
+    {/if}
+{/snippet}
+
+<DetailPage
+    className="crud-panel"
+    scrollClassName="provider-scroll settings-detail-scroll resource-scroll"
+    ariaLabel={detailTitle}
+    resetKey={`${resourcePage ?? 'index'}:${detailMode ?? 'list'}`}
+    content={detailContent}
+    actions={detailActions}
+/>
 
 <style>
-    .crud-panel {
-        display: grid;
-        gap: 12px;
-        padding: 20px;
-        border: 1px solid var(--line);
-        border-radius: var(--radius-md);
-        background: var(--surface-raised);
-    }
-
-    .panel-heading h2,
-    .form-grid h3,
-    .preview-card h3 {
-        margin: 3px 0;
-    }
-
-    .panel-heading p:last-child,
-    .preview-card p {
-        margin: 5px 0 0;
-        color: var(--ink-muted);
-        line-height: 1.45;
-    }
-
-    details {
-        margin: 0;
-        border: 1px solid var(--line);
-        border-radius: 14px;
-        background: var(--surface);
-    }
-
-    summary {
-        min-height: var(--touch);
-        padding: 13px 15px;
-        cursor: pointer;
-        font-weight: 800;
-    }
-
-    .detail-body {
-        padding: 0 15px 15px;
-    }
-
-    .form-grid,
-    .nested-grid {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 12px;
-    }
-
-    .divided {
-        margin-top: 20px;
-        padding-top: 20px;
-        border-top: 1px solid var(--line);
-    }
-
-    .wide {
-        grid-column: 1 / -1;
-    }
-
-    label {
-        display: grid;
-        gap: 6px;
-        color: var(--ink-muted);
-        font-size: 0.78rem;
-        font-weight: 700;
-    }
-
-    input,
-    select,
-    textarea {
+    .resource-index,
+    .resource-list {
         width: 100%;
-        min-height: var(--touch);
-        padding: 9px 11px;
-        border: 1px solid var(--line);
-        border-radius: 10px;
+        margin: 0;
+    }
+
+    .resource-copy {
+        display: grid;
+        min-width: 0;
+        gap: 5px;
+    }
+
+    :global(.resource-add-icon) {
+        width: 20px;
+        height: 20px;
+        flex: none;
+        fill: none;
+        stroke: currentcolor;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        stroke-width: 1.8;
+    }
+
+    .resource-copy strong,
+    .resource-copy small {
+        overflow: hidden;
+        font-size: var(--detail-support-type);
+        font-weight: 550;
+        line-height: 1.35;
+        text-overflow: ellipsis;
+    }
+
+    .resource-copy strong {
         color: var(--ink);
-        background: var(--surface-raised);
+        white-space: nowrap;
     }
 
-    textarea {
-        resize: vertical;
-        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-        font-size: 0.78rem;
-    }
-
-    small {
+    .resource-copy small {
+        display: -webkit-box;
         color: var(--ink-muted);
         overflow-wrap: anywhere;
-        font-weight: 500;
+        white-space: normal;
+        line-clamp: 3;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 3;
     }
 
-    fieldset {
-        min-width: 0;
+    .resource-empty,
+    .security-note,
+    .form-error {
+        padding: 12px;
+        border-radius: var(--radius-md);
         margin: 0;
-        padding: 14px;
-        border: 1px solid var(--line);
-        border-radius: 12px;
-    }
-
-    legend {
-        padding: 0 5px;
-        font-weight: 800;
-    }
-
-    .confirm-row {
-        display: flex;
-        gap: 9px;
-        align-items: center;
-        min-height: var(--touch);
-        padding: 8px 10px;
-        border-radius: 10px;
+        color: var(--ink-muted);
         background: var(--surface-sunken);
+        font-size: var(--detail-support-type);
+        line-height: 1.5;
     }
 
-    .confirm-row input {
-        width: 18px;
-        min-height: 18px;
+    .resource-empty {
         margin: 0;
-    }
-
-    .actions {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-    }
-
-    .actions button {
-        padding-inline: 14px;
     }
 
     .form-error {
-        margin: 12px 0 0;
-        padding: 10px 12px;
-        border-radius: 10px;
         color: var(--danger);
         background: var(--danger-soft);
     }
 
-    .preview-card {
-        margin-top: 16px;
-        padding: 14px;
-        border: 1px solid var(--line);
-        border-radius: 12px;
-        background: var(--surface-sunken);
+    .resource-form,
+    .field-group {
+        display: grid;
+        gap: 14px;
     }
 
-    .preview-card dl {
+    .resource-form label {
+        display: grid;
+        gap: 7px;
+        color: var(--ink-muted);
+        font-size: var(--detail-support-type);
+        font-weight: 700;
+    }
+
+    .resource-form :is(input, select, textarea) {
+        width: 100%;
+        min-width: 0;
+        box-sizing: border-box;
+        padding: clamp(12px, 3.432vw, 15px);
+        border: 1.5px solid var(--line);
+        border-radius: var(--radius-md);
+        -webkit-appearance: none;
+        appearance: none;
+        background: color-mix(in srgb, var(--surface-sunken) 26%, var(--surface-raised));
+        box-shadow: inset 0 1px 2px rgb(16 18 24 / 3%);
+        caret-color: var(--accent);
+        color: var(--ink);
+        font: inherit;
+        font-size: var(--detail-support-type);
+        line-height: 1.5;
+        transition:
+            background-color 140ms ease,
+            box-shadow 140ms ease;
+    }
+
+    .resource-form :is(input, select) {
+        min-height: clamp(48px, 13.73vw, 60px);
+    }
+
+    .resource-form select {
+        padding-right: 38px;
+        background-image:
+            linear-gradient(45deg, transparent 50%, var(--ink-muted) 50%),
+            linear-gradient(135deg, var(--ink-muted) 50%, transparent 50%);
+        background-position:
+            calc(100% - 19px) 50%,
+            calc(100% - 14px) 50%;
+        background-repeat: no-repeat;
+        background-size:
+            5px 5px,
+            5px 5px;
+    }
+
+    .resource-form textarea {
+        min-height: clamp(112px, 32.037vw, 140px);
+        resize: vertical;
+    }
+
+    .resource-form .code-field {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.8rem;
+    }
+
+    .resource-form .code-field-tall {
+        min-height: 200px;
+    }
+
+    .resource-form :is(input, select, textarea):hover:not(:focus, :disabled) {
+        border-color: var(--line);
+    }
+
+    .resource-form :is(input, select, textarea):focus {
+        border-color: var(--accent);
+        outline: none;
+    }
+
+    .resource-form :is(input, select, textarea):disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
+    }
+
+    .resource-form small {
+        color: var(--ink-muted);
+        overflow-wrap: anywhere;
+        font-size: 0.8em;
+        font-weight: 500;
+    }
+
+    .field-group {
+        min-width: 0;
+        padding: 18px 0 0;
+        border: 0;
+        border-top: 1px solid var(--line);
+        margin: 4px 0 0;
+    }
+
+    .field-group legend {
+        padding: 0 0 8px;
+        color: var(--ink);
+        font-size: var(--detail-support-type);
+        font-weight: 700;
+    }
+
+    .resource-form .toggle-row {
+        display: flex;
+        min-height: var(--touch);
+        align-items: center;
+        gap: 10px;
+    }
+
+    .resource-form .toggle-row input {
+        width: 20px;
+        min-height: 20px;
+        flex: none;
+        padding: 0;
+        appearance: auto;
+    }
+
+    .editor-utilities {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 8px;
-        margin: 12px 0 0;
     }
 
-    .preview-card dl > div {
-        min-width: 0;
-        padding: 9px;
-        border-radius: 9px;
-        background: var(--surface-raised);
+    .editor-utilities button {
+        min-height: var(--touch);
+        padding: 9px 12px;
+        border-radius: var(--radius-pill);
+        font-size: var(--detail-support-type);
+        font-weight: 700;
     }
 
-    dt {
+    .request-preview {
+        display: grid;
+        padding-top: 18px;
+        border-top: 1px solid var(--line);
+        gap: 12px;
+    }
+
+    .request-preview h3,
+    .request-preview p,
+    .request-preview dl {
+        margin: 0;
+    }
+
+    .request-preview h3 {
+        font-size: var(--detail-support-type);
+    }
+
+    .request-preview dl {
+        display: grid;
+        gap: 10px;
+    }
+
+    .request-preview dl > div {
+        display: grid;
+        grid-template-columns: minmax(72px, 0.3fr) minmax(0, 1fr);
+        padding-bottom: 10px;
+        border-bottom: 1px solid var(--line);
+        gap: 12px;
+    }
+
+    .request-preview dt,
+    .request-preview p {
         color: var(--ink-muted);
-        font-size: 0.7rem;
     }
 
-    dd {
-        margin: 3px 0 0;
+    .request-preview dd {
+        margin: 0;
         overflow-wrap: anywhere;
-        font-weight: 800;
+        font-weight: 700;
     }
 
-    @container view (max-width: 700px) {
-        .form-grid,
-        .nested-grid,
-        .preview-card dl {
-            grid-template-columns: 1fr;
+    @container view (min-width: 701px) {
+        .resource-form {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
         }
 
-        .wide {
-            grid-column: auto;
+        .resource-form
+            > :is(.security-note, .form-error, .field-group, .editor-utilities, .request-preview),
+        .resource-form > label:has(textarea) {
+            grid-column: 1 / -1;
         }
     }
 </style>

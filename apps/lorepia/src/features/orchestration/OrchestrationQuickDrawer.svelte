@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { SlidersHorizontal, X } from '@lucide/svelte';
     import { tr } from '../../lib/i18n';
     import { tick } from 'svelte';
 
@@ -115,11 +116,7 @@
         aria-controls="orchestration-quick-drawer"
         onclick={() => void setOpen(!open)}
     >
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M4 7h10M18 7h2M4 17h2M10 17h10" />
-            <circle cx="16" cy="7" r="2.4" />
-            <circle cx="8" cy="17" r="2.4" />
-        </svg>
+        <SlidersHorizontal class="orchestration-toggle-icon" aria-hidden="true" />
         {#if orchestrationState.dirty_room_config}
             <span class="dirty-dot" aria-label={$tr('quick.dirty')}></span>
         {/if}
@@ -143,7 +140,7 @@
                     aria-label={$tr('quick.close')}
                     onclick={() => void setOpen(false)}
                 >
-                    ×
+                    <X class="quick-drawer-close-icon" aria-hidden="true" />
                 </button>
             </header>
 
@@ -446,14 +443,9 @@
         place-items: center;
     }
 
-    .orchestration-toggle svg {
+    .orchestration-toggle :global(.orchestration-toggle-icon) {
         width: 24px;
         height: 24px;
-        fill: none;
-        stroke: currentcolor;
-        stroke-linecap: round;
-        stroke-linejoin: round;
-        stroke-width: 1.8;
     }
 
     .dirty-dot {
@@ -463,7 +455,7 @@
         width: 7px;
         height: 7px;
         border-radius: 999px;
-        background: var(--brand-neon-pink);
+        background: var(--brand-coral);
     }
 
     .quick-drawer {
@@ -505,10 +497,16 @@
     }
 
     .icon-button {
+        display: grid;
         width: 36px;
         min-width: 36px;
         padding: 6px;
-        font-size: 1.35rem;
+        place-items: center;
+    }
+
+    .icon-button :global(.quick-drawer-close-icon) {
+        width: 20px;
+        height: 20px;
     }
 
     .drawer-scroll {

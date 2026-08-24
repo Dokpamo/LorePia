@@ -60,6 +60,9 @@ describe('PromptPresetHistory', () => {
                 '앱 내장 프롬프트 프리셋은 정책 보호를 위해 모든 롤백 동작이 비활성화됩니다.',
             ),
         ).toBeInTheDocument();
+        const historyActions = screen.getByRole('toolbar', { name: '리비전 이력 작업' });
+        expect(historyActions).toHaveClass('fixed');
+        expect(screen.getByRole('button', { name: '이력 새로고침' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: '리비전 1 롤백 검토' })).toBeDisabled();
         expect(reviewPromptPresetRollback).not.toHaveBeenCalled();
     });
@@ -109,6 +112,9 @@ describe('PromptPresetHistory', () => {
         await waitFor(() => {
             expect(screen.getByText(REVIEW_SHA)).toBeInTheDocument();
         });
+        expect(screen.queryByRole('toolbar', { name: '리비전 이력 작업' })).not.toBeInTheDocument();
+        const reviewActions = screen.getByRole('toolbar', { name: '롤백 검토 작업' });
+        expect(reviewActions).toHaveClass('fixed');
         expect(screen.getByRole('button', { name: '이 검토 해시로 롤백 승인' })).toBeEnabled();
         expect(applyPromptPresetRollback).not.toHaveBeenCalled();
     });

@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { X } from '@lucide/svelte';
     import { onMount } from 'svelte';
 
     import type { LorepiaAppState, LorepiaAppController } from '../../app/app-controller';
@@ -70,7 +71,7 @@
                 aria-label={$tr('import.dialog.close')}
                 onclick={() => void controller.discardImport()}
             >
-                ×
+                <X class="import-close-icon" size={20} aria-hidden="true" />
             </button>
         </header>
 

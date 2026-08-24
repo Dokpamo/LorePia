@@ -979,12 +979,12 @@ describe('OrchestrationQuickDrawer', () => {
         recentBlock.enabled = false;
         render(OrchestrationStudio, {
             section: 'prompt',
+            detailPage: 'blocks',
             appState: appState(),
             orchestrationState: state,
             controller: controller(),
         });
-        const blockCard = screen.getByRole('heading', { name: '프롬프트 블록' }).closest('section');
-        if (blockCard === null) throw new Error('prompt block card is missing');
+        const blockCard = screen.getByRole('region', { name: '프롬프트 블록' });
         const blockUi = within(blockCard);
         const minimap = blockUi.getByRole('navigation', { name: '프롬프트 블록 미니맵' });
         expect(minimap).toBeInTheDocument();
@@ -1025,6 +1025,7 @@ describe('OrchestrationStudio', () => {
         const move = vi.spyOn(orchestrationController, 'movePromptBlock').mockResolvedValue(true);
         render(OrchestrationStudio, {
             section: 'prompt',
+            detailPage: 'blocks',
             appState: appState(),
             orchestrationState: orchestrationState(),
             controller: orchestrationController,
@@ -1036,13 +1037,19 @@ describe('OrchestrationStudio', () => {
         expect(screen.getByText('안전 정책')).toBeInTheDocument();
         expect(screen.queryByText('최근 대화')).not.toBeInTheDocument();
 
-        await fireEvent.click(screen.getByText('조건·토큰·오버플로 세부정보'));
-        expect(screen.getByText('<img src=x onerror=alert(1)>')).toBeInTheDocument();
-        expect(document.querySelector('img')).toBeNull();
-
         const movePolicy = screen.getByRole('button', { name: '안전 정책 블록 아래로 이동' });
         expect(movePolicy).toBeDisabled();
         expect(move).not.toHaveBeenCalled();
+
+        await fireEvent.click(screen.getByRole('button', { name: /안전 정책 static_instruction/ }));
+        expect(screen.getByRole('region', { name: '프롬프트 블록 편집' })).toBeInTheDocument();
+        expect(screen.getByText('<img src=x onerror=alert(1)>')).toBeInTheDocument();
+        expect(document.querySelector('img')).toBeNull();
+        expect(screen.queryByRole('group', { name: '구조화된 블록 편집' })).not.toBeInTheDocument();
+        const blockActions = screen.getByRole('toolbar', { name: '프롬프트 블록 작업' });
+        expect(blockActions).toHaveClass('fixed');
+        expect(within(blockActions).getByRole('button', { name: '다시 불러오기' })).toBeEnabled();
+        expect(within(blockActions).getByRole('button', { name: '저장' })).toBeDisabled();
     });
 
     it('stages bounded room prompt sources and saves them explicitly', async () => {
@@ -1057,6 +1064,7 @@ describe('OrchestrationStudio', () => {
         const save = vi.spyOn(orchestrationController, 'saveRoomConfig').mockResolvedValue(true);
         render(OrchestrationStudio, {
             section: 'prompt',
+            detailPage: 'room',
             appState: appState(),
             orchestrationState: readyState,
             controller: orchestrationController,
@@ -1095,7 +1103,9 @@ describe('OrchestrationStudio', () => {
                 { name: '', value: '' },
             ],
         });
-        await fireEvent.click(screen.getByRole('button', { name: '방별 프롬프트 소스 저장' }));
+        const actions = screen.getByRole('toolbar', { name: '방별 프롬프트 소스 작업' });
+        expect(actions).toHaveClass('fixed');
+        await fireEvent.click(within(actions).getByRole('button', { name: '저장' }));
         expect(save).toHaveBeenCalledOnce();
     });
 
@@ -1108,13 +1118,19 @@ describe('OrchestrationStudio', () => {
         ];
         render(OrchestrationStudio, {
             section: 'prompt',
+            detailPage: 'room',
             appState: appState(),
             orchestrationState: duplicateState,
             controller: controller(),
         });
 
         expect(screen.getByRole('alert')).toHaveTextContent('중복되었습니다');
-        expect(screen.getByRole('button', { name: '방별 프롬프트 소스 저장' })).toBeDisabled();
+        expect(
+            within(screen.getByRole('toolbar', { name: '방별 프롬프트 소스 작업' })).getByRole(
+                'button',
+                { name: '저장' },
+            ),
+        ).toBeDisabled();
 
         cleanup();
         const cappedState = orchestrationState();
@@ -1124,12 +1140,14 @@ describe('OrchestrationStudio', () => {
         );
         render(OrchestrationStudio, {
             section: 'prompt',
+            detailPage: 'room',
             appState: appState(),
             orchestrationState: cappedState,
             controller: controller(),
         });
 
-        expect(screen.getByText('슬롯 128/128')).toBeInTheDocument();
+        expect(screen.getByLabelText('템플릿 슬롯 128 이름')).toBeInTheDocument();
+        expect(screen.queryByLabelText('템플릿 슬롯 129 이름')).not.toBeInTheDocument();
         expect(screen.getByRole('button', { name: '슬롯 추가' })).toBeDisabled();
     });
 
@@ -1141,6 +1159,7 @@ describe('OrchestrationStudio', () => {
         expect(readyState.phase).toBe('ready');
         const props = {
             section: 'memory' as const,
+            detailPage: 'knowledge',
             client: fixture.client,
             appState: appState(),
             orchestrationState: readyState,
@@ -1151,6 +1170,9 @@ describe('OrchestrationStudio', () => {
         await fireEvent.input(screen.getByLabelText('검사할 문장'), {
             target: { value: '달빛 지식 확인' },
         });
+        expect(screen.getByRole('toolbar', { name: '세계관 지식 시뮬레이션 작업' })).toHaveClass(
+            'fixed',
+        );
         await fireEvent.click(screen.getByRole('button', { name: '활성화 시뮬레이션' }));
         await waitFor(() => {
             expect(get(orchestrationController.state).knowledge_simulation).not.toBeNull();
@@ -1195,26 +1217,32 @@ describe('OrchestrationStudio', () => {
             },
         });
 
+        await rendered.rerender({
+            ...props,
+            detailPage: 'transforms',
+            orchestrationState: get(orchestrationController.state),
+        });
         await fireEvent.input(screen.getByLabelText('규칙 ID'), {
             target: { value: 'rule-1' },
         });
         await fireEvent.input(screen.getByLabelText('합성 테스트 입력'), {
             target: { value: '달빛' },
         });
+        expect(screen.getByRole('toolbar', { name: '안전한 변환 미리보기 작업' })).toHaveClass(
+            'fixed',
+        );
         await fireEvent.click(screen.getByRole('button', { name: '변환 diff 만들기' }));
         await waitFor(() => {
             expect(get(orchestrationController.state).transform_preview).not.toBeNull();
         });
         await rendered.rerender({
             ...props,
+            detailPage: 'transforms',
             orchestrationState: get(orchestrationController.state),
         });
 
         expect(screen.getByText('은빛')).toBeInTheDocument();
-        const transformCard = screen
-            .getByRole('heading', { name: '안전한 변환 미리보기' })
-            .closest('section');
-        if (transformCard === null) throw new Error('transform preview card is missing');
+        const transformCard = screen.getByRole('region', { name: '안전한 변환 미리보기' });
         expect(transformCard).toHaveTextContent('출처 set set-1 · rule rule-1');
         expect(within(transformCard).getByText('rule-1 · applied')).toBeInTheDocument();
         expect(transformCard).toHaveTextContent('치환 1회 · 2 → 2자');
@@ -1341,6 +1369,7 @@ describe('OrchestrationStudio', () => {
         vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue(operationNonce);
         const props = {
             section: 'diagnostics' as const,
+            detailPage: 'plan',
             appState: get(appController.state),
             orchestrationState: get(orchestrationController.state),
             controller: orchestrationController,
@@ -1486,6 +1515,7 @@ describe('OrchestrationStudio', () => {
         await orchestrationController.loadContext('conversation-1', 'branch-1');
         const props = {
             section: 'diagnostics' as const,
+            detailPage: 'plan',
             client: fixture.client,
             appState: appState(),
             orchestrationState: get(orchestrationController.state),
@@ -1580,6 +1610,7 @@ describe('OrchestrationStudio', () => {
         await orchestrationController.loadContext('conversation-1', 'branch-1');
         render(OrchestrationStudio, {
             section: 'diagnostics',
+            detailPage: 'plan',
             client: fixture.client,
             appState: appState(),
             orchestrationState: get(orchestrationController.state),
@@ -1647,6 +1678,7 @@ describe('OrchestrationStudio', () => {
         await orchestrationController.loadContext('conversation-1', 'branch-1');
         const props = {
             section: 'memory' as const,
+            detailPage: 'knowledge',
             client: fixture.client,
             appState: appState(),
             orchestrationState: get(orchestrationController.state),
@@ -1670,6 +1702,11 @@ describe('OrchestrationStudio', () => {
         expect(get(orchestrationController.state).knowledge_simulation).toBeNull();
         expect(screen.getByText('아직 실행하지 않았습니다.')).toBeInTheDocument();
 
+        await rendered.rerender({
+            ...props,
+            detailPage: 'transforms',
+            orchestrationState: get(orchestrationController.state),
+        });
         await fireEvent.input(screen.getByLabelText('규칙 ID'), {
             target: { value: 'rule-1' },
         });
@@ -1686,6 +1723,7 @@ describe('OrchestrationStudio', () => {
         });
         await rendered.rerender({
             ...props,
+            detailPage: 'transforms',
             orchestrationState: get(orchestrationController.state),
         });
 
@@ -1703,6 +1741,9 @@ describe('OrchestrationStudio', () => {
         const deleteMemoryRecord = vi
             .spyOn(studioController, 'deleteMemoryRecord')
             .mockResolvedValue(true);
+        const updateMemoryRecord = vi
+            .spyOn(studioController, 'updateMemoryRecord')
+            .mockResolvedValue(true);
         const memoryRecord = readyOrchestrationState.workspace.memory_records[0];
         if (memoryRecord === undefined) throw new Error('memory fixture is missing');
         memoryRecord.excluded_from_conversation = true;
@@ -1716,16 +1757,56 @@ describe('OrchestrationStudio', () => {
                 completed_jobs: 5,
             },
         };
-        render(OrchestrationStudio, {
+        const rendered = render(OrchestrationStudio, {
             section: 'memory',
+            detailPage: 'records',
             appState: readyAppState,
             orchestrationState: readyOrchestrationState,
             controller: studioController,
         });
 
         expect(screen.getByText(/기억 작업 감시 중/)).toHaveTextContent('중단 복구 2건 · 완료 5건');
-        expect(screen.getByText('현재 대화 선택 제외됨')).toBeInTheDocument();
-        expect(screen.queryByRole('button', { name: /선택.*제외/ })).not.toBeInTheDocument();
+        const memoryList = screen.getByRole('list', { name: '장기기억 목록' });
+        expect(within(memoryList).getAllByRole('button')).toHaveLength(1);
+        await fireEvent.click(
+            within(screen.getByRole('list', { name: '장기기억 목록' })).getByRole('button', {
+                name: /첫 만남/,
+            }),
+        );
+
+        expect(screen.getByRole('region', { name: '장기기억 편집' })).toBeInTheDocument();
+        expect(screen.getByText('현재 대화 선택에서 제외되어 있습니다.')).toBeInTheDocument();
+        const memoryActions = screen.getByRole('toolbar', { name: '장기기억 편집 작업' });
+        expect(memoryActions).toHaveClass('fixed');
+        expect(within(memoryActions).getByRole('button', { name: '삭제' })).toBeInTheDocument();
+        expect(within(memoryActions).getByRole('button', { name: '저장' })).toBeInTheDocument();
+
+        await fireEvent.input(screen.getByLabelText('요약'), {
+            target: { value: '수정한 첫 만남' },
+        });
+        await fireEvent.click(within(memoryActions).getByRole('button', { name: '저장' }));
+        expect(updateMemoryRecord).toHaveBeenCalledWith('memory-1', {
+            summary: '수정한 첫 만남',
+        });
+
+        await fireEvent.click(
+            within(screen.getByRole('list', { name: '장기기억 목록' })).getByRole('button', {
+                name: /첫 만남/,
+            }),
+        );
+        await fireEvent.click(screen.getByRole('button', { name: '삭제' }));
+        expect(screen.getByRole('button', { name: '삭제 확인' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: '취소' })).toBeInTheDocument();
+        await fireEvent.click(screen.getByRole('button', { name: '삭제 확인' }));
+        expect(deleteMemoryRecord).toHaveBeenCalledWith('memory-1');
+
+        await rendered.rerender({
+            section: 'memory',
+            detailPage: 'knowledge',
+            appState: readyAppState,
+            orchestrationState: readyOrchestrationState,
+            controller: studioController,
+        });
         expect(screen.getByText('recursive parent knowledge-root matched')).toBeInTheDocument();
         expect(screen.getByText('token budget exhausted')).toBeInTheDocument();
         expect(screen.getByText(/knowledge · 선택 · 12 tokens/)).toHaveTextContent(
@@ -1734,9 +1815,101 @@ describe('OrchestrationStudio', () => {
         expect(screen.getByText(/knowledge · 제외 · 20 tokens/)).toHaveTextContent(
             'score 0.2 · 배치 없음',
         );
-        await fireEvent.click(screen.getByRole('button', { name: '삭제' }));
-        await fireEvent.click(screen.getByRole('button', { name: '삭제 확인' }));
-        expect(deleteMemoryRecord).toHaveBeenCalledWith('memory-1');
+    });
+
+    it('pushes interaction proposals into a bounded review page with fixed decisions', async () => {
+        const state = orchestrationState();
+        state.workspace.interaction_state = [
+            {
+                id: 'mood',
+                label: '기분',
+                value: '차분함',
+                scope: 'conversation',
+            },
+        ];
+        state.workspace.interaction_proposals = [
+            {
+                conversation_id: 'conversation-1',
+                branch_id: 'branch-1',
+                state_revision: 11,
+                proposal_revision: 4,
+                proposal: {
+                    id: 'proposal-1',
+                    title: '합성 상태 변경',
+                    body: '현재 상태를 바꾸는 제안입니다.',
+                    status: 'pending',
+                    source_interaction_state_revision: 10,
+                    requested_at_epoch_seconds: 1,
+                    expires_at_epoch_seconds: 60,
+                    decided_at_epoch_seconds: null,
+                },
+            },
+        ];
+        const studioController = controller();
+        const decideProposal = vi.spyOn(studioController, 'decideProposal').mockResolvedValue(true);
+        render(OrchestrationStudio, {
+            section: 'memory',
+            detailPage: 'interactions',
+            appState: appState(),
+            orchestrationState: state,
+            controller: studioController,
+        });
+
+        expect(screen.getByText('기분')).toBeInTheDocument();
+        const proposals = screen.getByRole('list', { name: '사용자 승인 제안 목록' });
+        expect(
+            within(proposals).queryByText('현재 상태를 바꾸는 제안입니다.'),
+        ).not.toBeInTheDocument();
+        await fireEvent.click(within(proposals).getByRole('button', { name: /합성 상태 변경/ }));
+
+        expect(screen.getByRole('region', { name: '상호작용 검토' })).toHaveTextContent(
+            '현재 상태를 바꾸는 제안입니다.',
+        );
+        const reviewActions = screen.getByRole('toolbar', {
+            name: '상호작용 제안 검토 작업',
+        });
+        expect(reviewActions).toHaveClass('fixed');
+        expect(within(reviewActions).getByRole('button', { name: '거절' })).toBeEnabled();
+        expect(within(reviewActions).getByRole('button', { name: '승인' })).toBeEnabled();
+        await fireEvent.click(within(reviewActions).getByRole('button', { name: '승인' }));
+        expect(decideProposal).toHaveBeenCalledWith('proposal-1', true);
+        expect(screen.getByRole('list', { name: '사용자 승인 제안 목록' })).toBeInTheDocument();
+    });
+
+    it('never projects unsafe stored interaction text and only allows rejection', () => {
+        const state = orchestrationState();
+        state.workspace.interaction_proposals = [
+            {
+                conversation_id: 'conversation-1',
+                branch_id: 'branch-1',
+                state_revision: 11,
+                proposal_revision: 4,
+                proposal: {
+                    id: 'proposal-redacted',
+                    title: 'unsafe title sentinel',
+                    body: 'unsafe body sentinel',
+                    projection_rejection_reason: 'unsafe_native_text',
+                    status: 'pending',
+                    source_interaction_state_revision: 10,
+                    requested_at_epoch_seconds: 1,
+                    expires_at_epoch_seconds: null,
+                    decided_at_epoch_seconds: null,
+                },
+            },
+        ];
+        render(OrchestrationStudio, {
+            section: 'memory',
+            detailPage: 'interactions/review/proposal-redacted',
+            appState: appState(),
+            orchestrationState: state,
+            controller: controller(),
+        });
+
+        expect(screen.getByText('저장 제안 내용을 표시할 수 없음')).toBeInTheDocument();
+        expect(screen.queryByText('unsafe title sentinel')).not.toBeInTheDocument();
+        expect(screen.queryByText('unsafe body sentinel')).not.toBeInTheDocument();
+        expect(screen.getByRole('button', { name: '거절' })).toBeEnabled();
+        expect(screen.getByRole('button', { name: '승인' })).toBeDisabled();
     });
 
     it('shows snapshot and final-plan knowledge evidence with explicit truncation warnings', async () => {
@@ -1782,6 +1955,7 @@ describe('OrchestrationStudio', () => {
 
         const knowledgeProps = {
             section: 'memory' as const,
+            detailPage: 'knowledge',
             appState: appState(),
             orchestrationState: state,
             controller: controller(),
@@ -1792,12 +1966,25 @@ describe('OrchestrationStudio', () => {
             '전체 후보 목록으로 해석하지 마세요',
         );
 
-        await rendered.rerender({ ...knowledgeProps, section: 'diagnostics' });
+        await rendered.rerender({
+            ...knowledgeProps,
+            section: 'diagnostics',
+            detailPage: 'selection',
+        });
         expect(
-            screen.getByRole('heading', { name: '현재 방의 지식·기억 선택 근거' }),
+            screen.getByRole('region', { name: '현재 방의 지식·기억 선택 근거' }),
         ).toBeInTheDocument();
         expect(screen.getByText('현재 방 달빛 지식')).toBeInTheDocument();
         expect(screen.getByText('semantic score below threshold')).toBeInTheDocument();
+        expect(screen.getByText(/처음 300개 선택 근거만 표시합니다/)).toHaveTextContent(
+            '전체 후보 목록으로 해석하지 마세요',
+        );
+
+        await rendered.rerender({
+            ...knowledgeProps,
+            section: 'diagnostics',
+            detailPage: 'plan',
+        });
         expect(screen.getByText('세계관 지식 선택 근거')).toBeInTheDocument();
         expect(screen.getByText('plan-knowledge-1 · 선택')).toBeInTheDocument();
         expect(screen.getByText(/"kind": "keyword"/)).toBeInTheDocument();
@@ -1805,15 +1992,13 @@ describe('OrchestrationStudio', () => {
         expect(screen.getByText('plan-knowledge-2 · 제외').closest('li')).toHaveTextContent(
             'knowledge_remaining_token_budget',
         );
-        expect(screen.getByText(/처음 300개 선택 근거만 표시합니다/)).toHaveTextContent(
-            '전체 후보 목록으로 해석하지 마세요',
-        );
     });
 
     it('shows the safe module lifecycle boundary and a bounded, escaped final plan preview in expert mode', async () => {
         const orchestrationController = controller();
         const expertProps = {
             section: 'content' as const,
+            detailPage: 'modules',
             appState: appState(),
             orchestrationState: orchestrationState(),
             controller: orchestrationController,
@@ -1827,7 +2012,11 @@ describe('OrchestrationStudio', () => {
             screen.getAllByText(/해시로 고정된 콘텐츠 모듈 활성화·롤백 API/).length,
         ).toBeGreaterThan(0);
 
-        await rendered.rerender({ ...expertProps, section: 'diagnostics' });
+        await rendered.rerender({
+            ...expertProps,
+            section: 'diagnostics',
+            detailPage: 'plan',
+        });
         expect(screen.getByText('sha256:synthetic-plan')).toBeInTheDocument();
         expect(screen.queryByText('<script>never execute</script>')).not.toBeInTheDocument();
         expect(document.querySelector('script:not([src])')).toBeNull();
@@ -1910,14 +2099,14 @@ describe('OrchestrationStudio', () => {
         };
         render(OrchestrationStudio, {
             section: 'diagnostics',
+            detailPage: 'display',
             appState: reopenedAppState,
             orchestrationState: orchestrationState(),
             controller: controller(),
         });
-        const diagnosticsCard = screen
-            .getByRole('heading', { name: '메시지 표시 변환 진단' })
-            .closest('section');
-        if (diagnosticsCard === null) throw new Error('display diagnostics card is missing');
+        const diagnosticsCard = screen.getByRole('region', {
+            name: '메시지 표시 변환 진단',
+        });
         const card = within(diagnosticsCard);
         expect(card.getByText('display_only · applied')).toBeInTheDocument();
         expect(card.getByText('transform-set-revision-7')).toBeInTheDocument();
@@ -1969,6 +2158,7 @@ describe('OrchestrationStudio', () => {
 
         render(OrchestrationStudio, {
             section: 'diagnostics',
+            detailPage: 'plan',
             client: approvalClient,
             appState: appState(),
             orchestrationState: orchestrationState(),
@@ -2027,6 +2217,7 @@ describe('OrchestrationStudio', () => {
 
         render(OrchestrationStudio, {
             section: 'diagnostics',
+            detailPage: 'plan',
             client: approvalClient,
             appState: readyAppState,
             orchestrationState: orchestrationState(),
@@ -2074,7 +2265,7 @@ describe('OrchestrationStudio', () => {
         expect(screen.queryByRole('heading', { name: '프롬프트 제작실' })).not.toBeInTheDocument();
     });
 
-    it('groups every create destination into one settings-style list', async () => {
+    it('groups create destinations and pushes each section into one selected subtool page', async () => {
         const onOpenSection = vi.fn();
         const rendered = render(OrchestrationStudio, {
             section: null,
@@ -2096,9 +2287,106 @@ describe('OrchestrationStudio', () => {
         expect(destinationList).toContainElement(feature);
         expect(within(destinationList).getAllByRole('button')).toHaveLength(4);
         expect(destinationList.querySelectorAll('.setting-icon')).toHaveLength(4);
+        expect(destinationList.querySelector('.setting-chevron')).not.toBeInTheDocument();
 
         await fireEvent.click(feature);
         expect(onOpenSection).toHaveBeenCalledWith('prompt');
+
+        const sectionCases = [
+            {
+                section: 'prompt' as const,
+                count: 6,
+                destination: /프롬프트 블록/,
+                outerTitle: '프롬프트',
+                innerTitle: '프롬프트 블록',
+                assertSelected: () => {
+                    expect(
+                        screen.getByRole('searchbox', { name: '블록 검색' }),
+                    ).toBeInTheDocument();
+                    expect(screen.queryByLabelText('사용자 표시 이름')).not.toBeInTheDocument();
+                },
+            },
+            {
+                section: 'memory' as const,
+                count: 4,
+                destination: /세계관 지식 시뮬레이터/,
+                outerTitle: '기억과 지식',
+                innerTitle: '세계관 지식 시뮬레이터',
+                assertSelected: () => {
+                    expect(screen.getByLabelText('검사할 문장')).toBeInTheDocument();
+                    expect(screen.queryByLabelText('규칙 ID')).not.toBeInTheDocument();
+                },
+            },
+            {
+                section: 'content' as const,
+                count: 2,
+                destination: /LorePia 패키지/,
+                outerTitle: '콘텐츠 모듈',
+                innerTitle: 'LorePia 패키지 선택 가져오기',
+                assertSelected: () => {
+                    expect(
+                        screen.getByRole('toolbar', { name: 'LorePia 패키지 작업' }),
+                    ).toBeInTheDocument();
+                    expect(
+                        screen.queryByRole('heading', { name: '콘텐츠 모듈 활성화·롤백' }),
+                    ).not.toBeInTheDocument();
+                },
+            },
+            {
+                section: 'diagnostics' as const,
+                count: 3,
+                destination: /메시지 표시 변환/,
+                outerTitle: '진단',
+                innerTitle: '메시지 표시 변환 진단',
+                assertSelected: () => {
+                    expect(
+                        screen.getByText('현재 분기에 저장된 표시 변환 진단이 없습니다.'),
+                    ).toBeInTheDocument();
+                    expect(
+                        screen.queryByRole('heading', {
+                            name: '현재 방의 지식·기억 선택 근거',
+                        }),
+                    ).not.toBeInTheDocument();
+                },
+            },
+        ];
+
+        for (const sectionCase of sectionCases) {
+            cleanup();
+            const sectionView = render(OrchestrationStudio, {
+                section: sectionCase.section,
+                detailPage: null,
+                appState: appState(),
+                orchestrationState: orchestrationState(),
+                controller: controller(),
+                contentPackageState: contentPackageState(),
+                contentPackageController: new ContentPackageController({} as LorepiaClient),
+            });
+            const subtools = screen.getByRole('list', { name: '세부 도구' });
+            expect(subtools).toHaveClass('setting-list', 'studio-detail-list');
+            const rows = within(subtools).getAllByRole('button');
+            expect(rows).toHaveLength(sectionCase.count);
+            expect(rows.every((row) => row.classList.contains('studio-detail-row'))).toBe(true);
+            expect(subtools.querySelector('.setting-chevron')).not.toBeInTheDocument();
+
+            await fireEvent.click(
+                within(subtools).getByRole('button', { name: sectionCase.destination }),
+            );
+
+            expect(screen.queryByRole('list', { name: '세부 도구' })).not.toBeInTheDocument();
+            expect(
+                sectionView.container.querySelectorAll('.studio-home.detail-index'),
+            ).toHaveLength(0);
+            expect(sectionView.container.querySelectorAll('.studio-panel')).toHaveLength(1);
+            expect(
+                screen.queryByRole('heading', { name: sectionCase.outerTitle }),
+            ).not.toBeInTheDocument();
+            const detailRegion = screen.getByRole('region', { name: sectionCase.innerTitle });
+            expect(
+                within(detailRegion).queryByRole('heading', { name: sectionCase.innerTitle }),
+            ).not.toBeInTheDocument();
+            sectionCase.assertSelected();
+        }
     });
 
     it('requires bounded dimensions and disables fallback routes for memory embedding profiles', async () => {
@@ -2125,20 +2413,26 @@ describe('OrchestrationStudio', () => {
 
         render(OrchestrationStudio, {
             section: 'prompt',
+            detailPage: 'profiles',
             appState: appState(),
             orchestrationState: state,
             controller: orchestrationController,
         });
 
+        await fireEvent.click(screen.getByRole('button', { name: /embedding-task/ }));
+        expect(screen.getByRole('form', { name: '작업 프로필 편집' })).toBeInTheDocument();
+        const profileActions = screen.getByRole('toolbar', { name: '작업 프로필 편집 작업' });
+        expect(profileActions).toHaveClass('fixed');
+        expect(within(profileActions).getByRole('button', { name: '삭제' })).toBeEnabled();
         const dimensions = screen.getByRole('spinbutton', { name: '임베딩 차원' });
         expect(dimensions).toBeRequired();
         expect(dimensions).toHaveAttribute('min', '1');
         expect(dimensions).toHaveAttribute('max', '32768');
-        expect(screen.getByLabelText(/Fallback route IDs/)).toBeDisabled();
+        expect(screen.queryByLabelText(/Fallback route IDs/)).not.toBeInTheDocument();
         expect(
             screen.getByText('메모리 임베딩 차원은 1에서 32768 사이의 정수여야 합니다.'),
         ).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: '저장' })).toBeDisabled();
+        expect(within(profileActions).getByRole('button', { name: '저장' })).toBeDisabled();
 
         await fireEvent.input(dimensions, { target: { value: '1536' } });
         expect(stage).toHaveBeenCalledWith('embedding-task', {
@@ -2149,6 +2443,7 @@ describe('OrchestrationStudio', () => {
     it('renders only the safe selective package review and disables quarantined components', () => {
         render(OrchestrationStudio, {
             section: 'content',
+            detailPage: 'packages',
             appState: appState(),
             orchestrationState: orchestrationState(),
             controller: controller(),
@@ -2157,7 +2452,7 @@ describe('OrchestrationStudio', () => {
         });
 
         expect(
-            screen.getByRole('heading', { name: 'LorePia 패키지 선택 가져오기' }),
+            screen.getByRole('region', { name: 'LorePia 패키지 선택 가져오기' }),
         ).toBeInTheDocument();
         expect(
             screen.getByRole('heading', { name: /<img src=x onerror=alert\(1\)>/ }),
@@ -2185,6 +2480,7 @@ describe('OrchestrationStudio', () => {
         };
         render(OrchestrationStudio, {
             section: 'content',
+            detailPage: 'packages',
             appState: appState(),
             orchestrationState: orchestrationState(),
             controller: controller(),
@@ -2206,6 +2502,7 @@ describe('OrchestrationStudio', () => {
         packageState.exporting_import_id = 'import-1';
         render(OrchestrationStudio, {
             section: 'content',
+            detailPage: 'packages',
             appState: appState(),
             orchestrationState: orchestrationState(),
             controller: controller(),
@@ -2229,6 +2526,7 @@ describe('OrchestrationStudio', () => {
         const packageState = restartedCompletedExportState();
         render(OrchestrationStudio, {
             section: 'content',
+            detailPage: 'packages',
             appState: appState(),
             orchestrationState: orchestrationState(),
             controller: controller(),
@@ -2266,6 +2564,7 @@ describe('OrchestrationStudio', () => {
         }));
         render(OrchestrationStudio, {
             section: 'content',
+            detailPage: 'packages',
             appState: appState(),
             orchestrationState: orchestrationState(),
             controller: controller(),
@@ -2286,6 +2585,7 @@ describe('OrchestrationStudio', () => {
         const packageState = contentPackageSelectionState();
         render(OrchestrationStudio, {
             section: 'content',
+            detailPage: 'packages',
             appState: appState(),
             orchestrationState: orchestrationState(),
             controller: controller(),
@@ -2320,6 +2620,7 @@ describe('OrchestrationStudio', () => {
         ];
         render(OrchestrationStudio, {
             section: 'content',
+            detailPage: 'packages',
             appState: appState(),
             orchestrationState: orchestrationState(),
             controller: controller(),
@@ -2349,6 +2650,7 @@ describe('OrchestrationStudio', () => {
         }));
         render(OrchestrationStudio, {
             section: 'content',
+            detailPage: 'packages',
             appState: appState(),
             orchestrationState: orchestrationState(),
             controller: controller(),
