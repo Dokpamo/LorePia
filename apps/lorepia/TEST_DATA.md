@@ -9,7 +9,7 @@ cd apps/lorepia
 npm run demo
 ```
 
-브라우저가 열리지 않으면 [http://localhost:5174/preview.html](http://localhost:5174/preview.html)에 접속합니다. 이 저장소의 다른 개발 서버와 충돌하지 않도록 데모 포트는 5174로 고정했습니다.
+브라우저가 열리지 않으면 [http://localhost:5175/preview.html](http://localhost:5175/preview.html)에 접속합니다. 이 컴퓨터의 다른 개발 서버와 충돌하지 않도록 데모 포트는 5175로 고정했습니다.
 
 데모는 `preview.html`에서만 활성화됩니다. 기본 앱 진입점인 `src/main.ts`와 Tauri 저장소는 데모 클라이언트를 가져오지 않습니다.
 

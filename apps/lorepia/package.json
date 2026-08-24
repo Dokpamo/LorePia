@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "demo": "vite --port 5174 --open /preview.html",
+    "demo": "vite --port 5175 --open /preview.html",
     "tauri:demo": "tauri dev --config src-tauri/tauri.demo.conf.json",
     "tauri": "tauri",
     "build": "vite build",
