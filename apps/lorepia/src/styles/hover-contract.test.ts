@@ -108,8 +108,10 @@ describe('pointer interaction styling', () => {
     });
 
     it('puts every pushed-screen action in the same measured toolbar slot', () => {
-        expect(appSource).toMatch(/class="mobile-top-bar mobile-root-header"/);
-        expect(appSource.match(/class="mobile-top-bar sub-header"/g)).toHaveLength(2);
+        expect(appSource).toMatch(/class="mobile-top-frame mobile-root-header"/);
+        expect(
+            appSource.match(/class="mobile-top-frame mobile-top-frame-leading sub-header"/g),
+        ).toHaveLength(2);
         expect(appSource).toContain('class:studio-detail-scroll={studioSection !== null}');
         expect(appSource).toContain('onscroll={handleStudioDetailScroll}');
         expect(appSource).toContain('onDetailScroll={handlePushedDetailScroll}');
@@ -117,12 +119,10 @@ describe('pointer interaction styling', () => {
             appSource.match(/mobile-top-action mobile-top-action-left back-button/g),
         ).toHaveLength(2);
         expect(conversationPaneSource).toMatch(
-            /class="mobile-top-bar mobile-root-header conversation-root-header"/,
+            /class="mobile-top-frame mobile-root-header conversation-root-header"/,
         );
-        expect(providerSettingsSource).toMatch(/class="mobile-top-bar settings-toolbar"/);
-        expect(providerSettingsSource).toMatch(
-            /mobile-top-action mobile-top-action-right settings-tool-button/,
-        );
+        expect(providerSettingsSource).toMatch(/class="mobile-top-frame settings-toolbar"/);
+        expect(providerSettingsSource).toMatch(/mobile-top-action settings-tool-button/);
         expect(providerSettingsSource).toMatch(
             /\.settings-toolbar\s*\{[^}]*position:\s*absolute;[^}]*inset:\s*0 0 auto;[^}]*background:\s*transparent;[^}]*pointer-events:\s*none;/s,
         );
@@ -137,10 +137,15 @@ describe('pointer interaction styling', () => {
         expect(providerSettingsSource).not.toContain('showDetailTitle');
         expect(providerSettingsSource).toContain('onscroll={handleSettingsDetailScroll}');
         expect(providerSettingsSource).not.toMatch(/class="settings-dialog"/);
-        expect(chatPaneSource).toMatch(/class="mobile-top-bar chat-header"/);
+        expect(chatPaneSource).toMatch(
+            /class="mobile-top-frame mobile-top-frame-leading chat-header"/,
+        );
         expect(chatPaneSource).toMatch(/mobile-top-action mobile-top-action-left back-button/);
         expect(appCss).toMatch(
-            /\.mobile-top-bar\s*\{[^}]*height:\s*calc\(var\(--mobile-root-header\) \+ env\(safe-area-inset-top\)\);[^}]*grid-template-columns:\s*var\(--mobile-top-action\) minmax\(0,\s*1fr\) var\(--mobile-top-action\);[^}]*padding-top:\s*env\(safe-area-inset-top\);[^}]*padding-inline-start:\s*max\(var\(--mobile-top-inset\),\s*env\(safe-area-inset-left\)\);[^}]*padding-inline-end:\s*max\(var\(--mobile-top-inset\),\s*env\(safe-area-inset-right\)\);/s,
+            /\.mobile-top-frame\s*\{[^}]*height:\s*calc\(var\(--mobile-root-header\) \+ env\(safe-area-inset-top\)\);[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) auto;[^}]*padding-top:\s*env\(safe-area-inset-top\);[^}]*padding-inline-start:\s*max\(var\(--mobile-top-inset\),\s*env\(safe-area-inset-left\)\);[^}]*padding-inline-end:\s*max\(var\(--mobile-top-inset\),\s*env\(safe-area-inset-right\)\);/s,
+        );
+        expect(appCss).toMatch(
+            /\.mobile-top-frame-leading\s*\{[^}]*grid-template-columns:\s*auto minmax\(0,\s*1fr\) auto;/s,
         );
         expect(appCss).toMatch(
             /\.mobile-top-action\s*\{[^}]*width:\s*var\(--mobile-top-action\);[^}]*height:\s*var\(--mobile-top-action\);[^}]*border-radius:\s*50%;[^}]*background:\s*var\(--surface-raised\);[^}]*box-shadow:\s*var\(--shadow-1\);/s,
@@ -158,10 +163,13 @@ describe('pointer interaction styling', () => {
             /\.app-shell\[data-layout='mobile'\] \.sub-header::after\s*\{[^}]*(?:-webkit-)?mask-(?:image|repeat):/s,
         );
         expect(appCss).toMatch(
-            /\.app-shell\[data-layout='mobile'\] :is\(\.studio-detail-scroll, \.settings-detail-scroll\)\s*\{[^}]*padding-top:\s*calc\(\s*env\(safe-area-inset-top\) \+ var\(--mobile-top-offset\) \+ var\(--mobile-top-action\) \+ 16px\s*\);[^}]*scroll-padding-top:/s,
+            /\.app-shell\[data-layout='mobile'\] :is\(\.studio-detail-scroll, \.settings-detail-scroll\)\s*\{[^}]*padding-top:\s*calc\(\s*env\(safe-area-inset-top\) \+ var\(--mobile-top-offset\) \+ var\(--mobile-top-action\) \+\s*clamp\(7px,\s*3\.661vw,\s*16px\)\s*\);[^}]*scroll-padding-top:/s,
         );
         expect(appCss).toMatch(
             /\.sub-header h1\s*\{[^}]*grid-column:\s*2;[^}]*padding-inline:\s*8px;[^}]*text-align:\s*center;/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='mobile'\] \.sub-header h1\s*\{[^}]*height:\s*var\(--mobile-top-action\);[^}]*display:\s*flex;[^}]*align-self:\s*center;[^}]*border-radius:\s*var\(--radius-pill\);[^}]*margin-top:\s*0;[^}]*background:\s*color-mix\(in srgb,\s*var\(--surface-raised\) 94%,\s*transparent\);[^}]*box-shadow:\s*var\(--shadow-1\);/s,
         );
         expect(appCss).toMatch(
             /\.app-shell\[data-layout='desktop'\] \.sub-header\s*\{[^}]*position:\s*relative;[^}]*border-bottom:\s*1px solid color-mix\(in srgb,\s*var\(--line\) 72%,\s*transparent\);[^}]*background:\s*var\(--bg\);/s,
@@ -202,7 +210,7 @@ describe('pointer interaction styling', () => {
 
     it('pins the mobile tab bar over page content instead of reserving a layout row', () => {
         expect(appCss).toMatch(
-            /\.tab-bar\s*\{[^}]*position:\s*absolute;[^}]*bottom:\s*calc\(8px \+ env\(safe-area-inset-bottom\)\);[^}]*left:\s*50%;[^}]*width:\s*min\(calc\(100% - var\(--gutter\) - var\(--gutter\)\),\s*560px\);[^}]*transform:\s*translateX\(-50%\);/s,
+            /\.tab-bar\s*\{[^}]*position:\s*absolute;[^}]*bottom:\s*calc\(clamp\(4px,\s*1\.831vw,\s*8px\) \+ env\(safe-area-inset-bottom\)\);[^}]*left:\s*50%;[^}]*width:\s*min\(calc\(100% - var\(--gutter\) - var\(--gutter\)\),\s*560px\);[^}]*transform:\s*translateX\(-50%\);/s,
         );
         expect(appCss).toMatch(/\.tab-bar\s*\{[^}]*margin:\s*0;/s);
     });
@@ -234,7 +242,7 @@ describe('pointer interaction styling', () => {
             /\.detail-page-scroll\.detail-page-has-actions\s*\{[^}]*padding-bottom:\s*calc\(var\(--mobile-nav\) \+ 36px \+ env\(safe-area-inset-bottom\)\);/s,
         );
         expect(providerSettingsSource).toMatch(
-            /:global\(\.app-shell\[data-layout='mobile'\]\)\s*\.settings-detail-scroll\.detail-scroll-has-actions\s*\{[^}]*padding-bottom:\s*calc\(var\(--mobile-nav\) \+ 36px \+ env\(safe-area-inset-bottom\)\);/s,
+            /:global\(\.app-shell\[data-layout='mobile'\]\)\s*\.settings-detail-scroll\.detail-scroll-has-actions\s*\{[^}]*padding-bottom:\s*calc\(\s*var\(--mobile-nav\) \+ clamp\(15px,\s*8\.238vw,\s*36px\) \+ env\(safe-area-inset-bottom\)\s*\);/s,
         );
         expect(
             providerSettingsSource.indexOf(
@@ -353,38 +361,56 @@ describe('pointer interaction styling', () => {
             /\.library-pane\.root-view \.entity-list\s*\{[^}]*padding:\s*0 8px calc\(/s,
         );
         expect(conversationPaneSource).toMatch(
-            /\.conversation-pane\.root-view \.entity-list\s*\{[^}]*padding:\s*0 8px calc\(/s,
+            /\.conversation-pane\.root-view \.entity-list\s*\{[^}]*padding:\s*8px 8px calc\(/s,
         );
         expect(appCss).toMatch(/\.message-scroll\s*\{[^}]*padding:\s*0 var\(--gutter\);/s);
+        expect(providerSettingsSource).toMatch(
+            /:global\(\.app-shell\[data-layout='mobile'\]\) \.provider-scroll\.settings-home-scroll\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;[^}]*padding-bottom:/s,
+        );
+        expect(providerSettingsSource).toMatch(
+            /:global\(\.app-shell\[data-layout='mobile'\]\) \.settings-home-scroll \.setting-list\s*\{[^}]*flex:\s*none;[^}]*margin-bottom:/s,
+        );
     });
 
     it('uses shared root-screen geometry for home and chat', () => {
         expect(libraryPaneSource).toMatch(
             /class="library-search"\s+class:mobile-root-search=\{rootView\}/,
         );
+        expect(libraryPaneSource).toMatch(
+            /class="mobile-top-frame mobile-root-header library-root-header"/,
+        );
         expect(conversationPaneSource).toMatch(
-            /class="mobile-top-bar mobile-root-header conversation-root-header"/,
+            /class="mobile-top-frame mobile-root-header conversation-root-header"/,
         );
         expect(conversationPaneSource).toMatch(/class="conversation-search mobile-root-search"/);
-        expect(libraryPaneSource).toMatch(/class:mobile-root-fab=\{rootView\}/);
-        expect(conversationPaneSource).toMatch(/class:mobile-root-fab=\{rootView\}/);
+        expect(conversationPaneSource).toMatch(
+            /\.conversation-filter-pill\s*\{[^}]*height:\s*var\(--mobile-pill-control\);[^}]*min-height:\s*var\(--mobile-pill-control\);/s,
+        );
+        expect(libraryPaneSource).toMatch(/class="mobile-root-actions"/);
+        expect(conversationPaneSource).toMatch(/class="mobile-root-actions"/);
+        expect(libraryPaneSource).not.toContain('mobile-root-fab');
+        expect(conversationPaneSource).not.toContain('mobile-root-fab');
         expect(libraryPaneSource).toMatch(/class:mobile-root-row=\{rootView\}/);
         expect(conversationPaneSource).toMatch(/class:mobile-root-row=\{rootView\}/);
         expect(appCss).toMatch(/\.chat-list-view\s*\{[^}]*background:\s*var\(--bg\);/s);
         expect(appCss).toMatch(
-            /\.app-shell\[data-layout='mobile'\] \.mobile-root-search\s*\{[^}]*min-height:\s*var\(--mobile-search\);[^}]*border:\s*1px solid var\(--line\);[^}]*width:\s*min\([\s\S]*?var\(--reading\)[\s\S]*?\);[^}]*margin:\s*0 auto 8px;[^}]*background:\s*var\(--surface-raised\);[^}]*box-shadow:\s*var\(--shadow-1\);/s,
+            /\.app-shell\[data-layout='mobile'\] \.mobile-root-search\s*\{[^}]*min-height:\s*var\(--mobile-search\);[^}]*border:\s*1px solid var\(--line\);[^}]*width:\s*min\([\s\S]*?var\(--reading\)[\s\S]*?\);[^}]*margin:\s*0 auto clamp\(4px,\s*1\.831vw,\s*8px\);[^}]*background:\s*var\(--surface-raised\);[^}]*box-shadow:\s*var\(--shadow-1\);/s,
         );
         expect(libraryPaneSource).not.toContain('mobile-root-empty');
         expect(conversationPaneSource).not.toContain('mobile-root-empty');
         expect(appCss).not.toContain('.mobile-root-empty');
+        expect(appCss).not.toContain('.mobile-root-contact-action');
+        expect(appCss).not.toContain('.mobile-root-contact-button');
+        expect(appCss).not.toContain('.mobile-root-fab');
         expect(appCss).toMatch(
-            /\.app-shell\[data-layout='mobile'\] \.mobile-root-contact-action\s*\{[^}]*top:\s*calc\(65% - 10px\);[^}]*left:\s*50%;[^}]*transform:\s*translateX\(-50%\);/s,
+            /\.mobile-root-actions\s*\{[^}]*display:\s*flex;[^}]*grid-column:\s*2;[^}]*align-self:\s*center;[^}]*margin-top:\s*0;/s,
         );
         expect(appCss).toMatch(
-            /\.app-shell\[data-layout='mobile'\] \.mobile-root-contact-button\s*\{[^}]*width:\s*clamp\(155px,\s*45\.35vw,\s*198px\);[^}]*min-height:\s*clamp\(43px,\s*12\.52vw,\s*55px\);[^}]*border-radius:\s*var\(--radius-pill\);/s,
+            /\.mobile-root-header \.mobile-top-action,\s*\.settings-toolbar \.mobile-top-action\s*\{[^}]*width:\s*var\(--mobile-top-action\);[^}]*height:\s*var\(--mobile-top-action\);[^}]*min-width:\s*var\(--mobile-top-action\);[^}]*min-height:\s*var\(--mobile-top-action\);/s,
         );
+        expect(appCss).toMatch(/\.mobile-top-add-action\s*\{[^}]*color:\s*var\(--ink\);/s);
         expect(appCss).toMatch(
-            /\.app-shell\[data-layout='mobile'\] \.mobile-root-fab\s*\{[^}]*width:\s*56px;[^}]*height:\s*56px;[^}]*background:\s*var\(--primary-bg\);[^}]*box-shadow:\s*var\(--shadow-2\);/s,
+            /\.mobile-root-header h1\s*\{[^}]*grid-column:\s*1;[^}]*align-self:\s*center;/s,
         );
         expect(appCss).toMatch(
             /\.app-shell\[data-layout='mobile'\] \.mobile-root-row\s*\{[^}]*min-height:\s*var\(--mobile-row\);[^}]*border-radius:\s*var\(--radius-md\);/s,
@@ -393,16 +419,55 @@ describe('pointer interaction styling', () => {
 
     it('matches the Telegram pushed-header proportions at every mobile width', () => {
         expect(appCss).toMatch(
-            /--mobile-root-header:\s*clamp\(56px,\s*16\.476vw,\s*72px\);[^}]*--mobile-top-action:\s*clamp\(42px,\s*12\.18vw,\s*53px\);[^}]*--mobile-top-inset:\s*clamp\(13px,\s*3\.89vw,\s*17px\);[^}]*--mobile-top-offset:\s*clamp\(14px,\s*4\.06vw,\s*18px\);[^}]*--mobile-root-title-inset:\s*clamp\(20px,\s*6\.095vw,\s*26px\);/s,
+            /--mobile-root-header:\s*clamp\(40px,\s*16\.476vw,\s*72px\);[^}]*--mobile-top-action:\s*clamp\(30px,\s*12\.18vw,\s*53px\);[^}]*--mobile-top-inset:\s*clamp\(9px,\s*3\.89vw,\s*17px\);[^}]*--mobile-top-offset:\s*clamp\(10px,\s*4\.06vw,\s*18px\);[^}]*--mobile-root-title-inset:\s*clamp\(14px,\s*6\.095vw,\s*26px\);/s,
         );
+        expect(appCss).toMatch(/--mobile-pill-control:\s*clamp\(26px,\s*10\.526vw,\s*46px\);/s);
         expect(appCss).toMatch(
             /\.mobile-top-action\s*\{[^}]*width:\s*var\(--mobile-top-action\);[^}]*height:\s*var\(--mobile-top-action\);[^}]*min-width:\s*var\(--mobile-top-action\);[^}]*min-height:\s*var\(--mobile-top-action\);/s,
         );
-        expect(appCss).toMatch(/--detail-ui-type:\s*clamp\(16px,\s*4\.119vw,\s*18px\);/s);
-        expect(appCss).toMatch(/--detail-support-type:\s*clamp\(14px,\s*3\.55vw,\s*16px\);/s);
+        expect(appCss).toMatch(/--detail-ui-type:\s*clamp\(10px,\s*4\.119vw,\s*18px\);/s);
+        expect(appCss).toMatch(/--detail-support-type:\s*clamp\(9px,\s*3\.55vw,\s*16px\);/s);
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='mobile'\]\s*\{[^}]*--reading:\s*591px;[^}]*--settings:\s*591px;/s,
+        );
+        for (const source of [libraryPaneSource, conversationPaneSource]) {
+            expect(source).toMatch(
+                /\.mobile-root-row\s*\{[^}]*min-height:\s*clamp\(46px,\s*19\.222vw,\s*84px\);[^}]*padding:\s*clamp\(4px,\s*1\.831vw,\s*8px\) clamp\(10px,\s*4\.119vw,\s*18px\);/s,
+            );
+            expect(source).toMatch(
+                /\.mobile-root-row[\s\S]*?\.avatar\s*\{[^}]*width:\s*clamp\(35px,\s*14\.645vw,\s*64px\);[^}]*height:\s*clamp\(35px,\s*14\.645vw,\s*64px\);/s,
+            );
+        }
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='mobile'\] \.setting-row\s*\{[^}]*min-height:\s*clamp\(37px,\s*15\.561vw,\s*68px\);/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.composer-field\s*\{[^}]*min-height:\s*var\(--mobile-top-action\);/s,
+        );
         expect(appCss).toMatch(/\.sub-header h1\s*\{[^}]*font-size:\s*var\(--detail-ui-type\);/s);
         expect(appCss).toMatch(
-            /\.app-shell\[data-layout='mobile'\] \.sub-header h1\s*\{[^}]*height:\s*var\(--mobile-top-action\);[^}]*align-self:\s*start;[^}]*margin-top:\s*var\(--mobile-top-offset\);[^}]*line-height:\s*var\(--mobile-top-action\);/s,
+            /\.app-shell\[data-layout='mobile'\] \.sub-header h1\s*\{[^}]*height:\s*var\(--mobile-top-action\);[^}]*display:\s*flex;[^}]*align-self:\s*center;[^}]*align-items:\s*center;[^}]*justify-content:\s*center;[^}]*border-radius:\s*var\(--radius-pill\);[^}]*margin-top:\s*0;/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.chat-pane \.chat-toolbar\s*\{[^}]*height:\s*var\(--mobile-pill-control\);[^}]*min-height:\s*var\(--mobile-pill-control\);[^}]*padding:\s*0;[^}]*border:\s*0;[^}]*background:\s*transparent;/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.chat-pane \.chat-header\s*\{[^}]*margin:\s*0 auto;[^}]*inset:\s*0 0 auto;/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.chat-toolbar \.segmented button,\s*\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.chat-toolbar \.branch-picker select\s*\{[^}]*height:\s*var\(--mobile-pill-control\);[^}]*min-height:\s*var\(--mobile-pill-control\);/s,
+        );
+        expect(appCss).toMatch(
+            /\.chat-toolbar-new-operation\s*\{[^}]*width:\s*var\(--mobile-pill-control\);[^}]*height:\s*var\(--mobile-pill-control\);[^}]*min-width:\s*var\(--mobile-pill-control\);[^}]*min-height:\s*var\(--mobile-pill-control\);/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.chat-pane::before\s*\{[^}]*position:\s*absolute;[^}]*z-index:\s*10;[^}]*background:\s*linear-gradient\(/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.chat-pane \.message-scroll\s*\{[^}]*padding-top:\s*calc\([^}]*var\(--mobile-top-action\)[^}]*var\(--mobile-pill-control\)/s,
+        );
+        expect(appCss).not.toMatch(
+            /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.chat-pane \.message-scroll\s*\{[^}]*(?:-webkit-)?mask-image:/s,
         );
         expect(personaPanelSource).toMatch(
             /\.persona-form label\s*\{[^}]*font-size:\s*var\(--detail-support-type\);/s,
@@ -423,15 +488,15 @@ describe('pointer interaction styling', () => {
             /\.persona-row-description\s*\{[^}]*color:\s*var\(--ink-muted\);[^}]*white-space:\s*normal;[^}]*line-clamp:\s*3;[^}]*-webkit-box-orient:\s*vertical;[^}]*-webkit-line-clamp:\s*3;/s,
         );
         expect(appCss).toMatch(
-            /\.mobile-top-bar > \.mobile-top-action\s*\{[^}]*margin-top:\s*var\(--mobile-top-offset\);/s,
+            /\.mobile-top-frame > \.mobile-top-action\s*\{[^}]*align-self:\s*center;[^}]*margin-top:\s*0;/s,
         );
     });
 
-    it('scales the search rail and floating tab bar from the 437px reference', () => {
-        expect(appCss).toMatch(/--mobile-search:\s*clamp\(39px,\s*10\.984vw,\s*48px\);/);
-        expect(appCss).toMatch(/--mobile-nav:\s*clamp\(53px,\s*15\.103vw,\s*66px\);/);
+    it('scales controls to the 437px logical reference without growing on wider hosts', () => {
+        expect(appCss).toMatch(/--mobile-search:\s*clamp\(27px,\s*10\.984vw,\s*48px\);/);
+        expect(appCss).toMatch(/--mobile-nav:\s*clamp\(37px,\s*15\.103vw,\s*66px\);/);
         expect(appCss).toMatch(
-            /\.tab-bar\s*\{[^}]*padding:\s*clamp\(2px,\s*0\.686vw,\s*3px\);[^}]*gap:\s*2px;/s,
+            /\.tab-bar\s*\{[^}]*padding:\s*clamp\(2px,\s*0\.686vw,\s*3px\);[^}]*gap:\s*clamp\(1px,\s*0\.458vw,\s*2px\);/s,
         );
         expect(appCss).toMatch(/\.tab\s*\{[^}]*height:\s*100%;[^}]*min-height:\s*0;/s);
         expect(appCss).toMatch(/\.tab\s*\{[^}]*margin-inline:\s*clamp\(1px,\s*0\.458vw,\s*2px\);/s);
@@ -456,16 +521,16 @@ describe('pointer interaction styling', () => {
             /\.setting-row:hover:not\(:disabled\)\s*\{[^}]*background:\s*var\(--bg\);/s,
         );
         expect(appCss).toMatch(
-            /\.tab \.nav-icon\s*\{[^}]*width:\s*clamp\(22px,\s*5\.95vw,\s*26px\);[^}]*height:\s*clamp\(22px,\s*5\.95vw,\s*26px\);/s,
+            /\.tab \.nav-icon\s*\{[^}]*width:\s*clamp\(14px,\s*5\.95vw,\s*26px\);[^}]*height:\s*clamp\(14px,\s*5\.95vw,\s*26px\);/s,
         );
         expect(appCss).toMatch(
-            /\.tab-label\s*\{[^}]*font-size:\s*clamp\(11px,\s*3\.204vw,\s*14px\);[^}]*font-weight:\s*700;/s,
+            /\.tab-label\s*\{[^}]*font-size:\s*clamp\(8px,\s*3\.204vw,\s*14px\);[^}]*font-weight:\s*700;/s,
         );
         expect(appCss).toMatch(
-            /\.mobile-root-header h1\s*\{[^}]*grid-column:\s*1 \/ 3;[^}]*align-self:\s*center;[^}]*padding-left:\s*calc\(var\(--mobile-root-title-inset\) - var\(--mobile-top-inset\)\);/s,
+            /\.mobile-root-header h1\s*\{[^}]*grid-column:\s*1;[^}]*align-self:\s*center;[^}]*padding-left:\s*calc\(var\(--mobile-root-title-inset\) - var\(--mobile-top-inset\)\);/s,
         );
         expect(appCss).toMatch(
-            /\.app-shell\[data-layout='mobile'\] \.mobile-root-search input\s*\{[^}]*font-size:\s*clamp\(13px,\s*3\.432vw,\s*15px\);/s,
+            /\.app-shell\[data-layout='mobile'\] \.mobile-root-search input\s*\{[^}]*font-size:\s*clamp\(8px,\s*3\.432vw,\s*15px\);/s,
         );
     });
 });

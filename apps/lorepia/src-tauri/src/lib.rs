@@ -26,7 +26,9 @@ use tauri_plugin_lorepia_platform::LorepiaPlatformExt;
 const NARROWEST_PHONE_ASPECT: f64 = 9.0 / 20.0;
 
 /// Floor from `tauri.conf.json`, kept here so the two minimums move together.
-const MIN_WINDOW_HEIGHT: f64 = 480.0;
+/// At the 9:20 aspect floor this produces a 248 × 552 logical-point window,
+/// matching the smallest user-verified layout that keeps every control intact.
+const MIN_WINDOW_HEIGHT: f64 = 552.0;
 
 /// Last minimum width handed to the window manager, in logical points.
 ///

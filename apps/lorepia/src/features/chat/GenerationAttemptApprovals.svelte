@@ -18,6 +18,7 @@
         refreshEpoch?: number;
         onRetry?: (generationId: string) => void | Promise<void>;
         retryLabel?: string;
+        hideWhenInactive?: boolean;
     }
 
     let {
@@ -29,6 +30,7 @@
         refreshEpoch = 0,
         onRetry,
         retryLabel = t('attempt_approval.retry_label'),
+        hideWhenInactive = false,
     }: Props = $props();
     const ownsController = untrack(() => providedController === undefined);
     const approvalController = untrack(
@@ -41,6 +43,16 @@
 
     const busy = $derived(
         approvalState.phase === 'loading' || approvalState.busy_proposal_key !== null,
+    );
+    const hidden = $derived(
+        hideWhenInactive &&
+            (approvalState.phase === 'idle' ||
+                approvalState.phase === 'unavailable' ||
+                (approvalState.phase === 'ready' &&
+                    approvalState.error === null &&
+                    !approvalState.has_more_due &&
+                    approvalState.proposals.length === 0 &&
+                    approvalState.retry_generation_ids.length === 0)),
     );
 
     $effect(() => {
@@ -79,174 +91,180 @@
     }
 </script>
 
-<section class="attempt-approvals" aria-labelledby={headingId}>
-    <header>
-        <div>
-            <h3 id={headingId}>{$tr('attempt_approval.title')}</h3>
-            <p>
-                {$tr('attempt_approval.hint')}
-            </p>
-        </div>
-        <button
-            type="button"
-            disabled={busy || conversationId === null || sourceBranchId === null}
-            onclick={() => void approvalController.reload()}
-        >
-            {$tr('attempt_approval.reload')}
-        </button>
-    </header>
-
-    <p class="sr-only" aria-live="polite">{approvalState.announcement}</p>
-
-    {#if conversationId === null || sourceBranchId === null}
-        <p class="attempt-note" role="note">
-            {$tr('attempt_approval.pick_room')}
-        </p>
-    {:else if approvalState.phase === 'loading'}
-        <p role="status">{$tr('attempt_approval.loading')}</p>
-    {:else if approvalState.phase === 'unavailable'}
-        <p class="attempt-note" role="note">{approvalState.error}</p>
-    {:else if approvalState.error !== null}
-        <div class="attempt-error" role="alert">
-            <p>{approvalState.error}</p>
-            <button type="button" disabled={busy} onclick={() => void approvalController.reload()}>
-                {$tr('attempt_approval.reload_latest')}
+{#if !hidden}
+    <section class="attempt-approvals" aria-labelledby={headingId}>
+        <header>
+            <div>
+                <h3 id={headingId}>{$tr('attempt_approval.title')}</h3>
+                <p>
+                    {$tr('attempt_approval.hint')}
+                </p>
+            </div>
+            <button
+                type="button"
+                disabled={busy || conversationId === null || sourceBranchId === null}
+                onclick={() => void approvalController.reload()}
+            >
+                {$tr('attempt_approval.reload')}
             </button>
-        </div>
-    {/if}
+        </header>
 
-    {#if approvalState.has_more_due}
-        <p class="attempt-note" role="note">
-            {$tr('attempt_approval.too_many')}
-        </p>
-    {/if}
+        <p class="sr-only" aria-live="polite">{approvalState.announcement}</p>
 
-    {#if approvalState.proposals.length > 0}
-        <ol class="proposal-list" aria-label={$tr('attempt_approval.list.label')}>
-            {#each approvalState.proposals as item, index (itemKey(item.generation_id, item.proposal.id))}
-                {@const key = itemKey(item.generation_id, item.proposal.id)}
-                {@const summaryId = `${headingId}-proposal-${String(index)}`}
-                <li>
-                    <article
-                        aria-labelledby={`${summaryId}-title`}
-                        aria-describedby={`${summaryId}-body ${summaryId}-authority`}
-                    >
-                        <div class="proposal-copy">
-                            {#if item.proposal.projection_rejection_reason === 'unsafe_native_text'}
-                                <h4 id={`${summaryId}-title`}>
-                                    {$tr('attempt_approval.unrenderable.title')}
-                                </h4>
-                                <p id={`${summaryId}-body`}>
-                                    {$tr('attempt_approval.unrenderable.hint')}
-                                </p>
-                            {:else}
-                                <h4 id={`${summaryId}-title`}>{item.proposal.title}</h4>
-                                <p id={`${summaryId}-body`}>{item.proposal.body}</p>
-                            {/if}
-                        </div>
-                        <dl id={`${summaryId}-authority`}>
-                            <div>
-                                <dt>{$tr('attempt_approval.field.attempt')}</dt>
-                                <dd><code>{shortId(item.generation_id)}</code></dd>
+        {#if conversationId === null || sourceBranchId === null}
+            <p class="attempt-note" role="note">
+                {$tr('attempt_approval.pick_room')}
+            </p>
+        {:else if approvalState.phase === 'loading'}
+            <p role="status">{$tr('attempt_approval.loading')}</p>
+        {:else if approvalState.phase === 'unavailable'}
+            <p class="attempt-note" role="note">{approvalState.error}</p>
+        {:else if approvalState.error !== null}
+            <div class="attempt-error" role="alert">
+                <p>{approvalState.error}</p>
+                <button
+                    type="button"
+                    disabled={busy}
+                    onclick={() => void approvalController.reload()}
+                >
+                    {$tr('attempt_approval.reload_latest')}
+                </button>
+            </div>
+        {/if}
+
+        {#if approvalState.has_more_due}
+            <p class="attempt-note" role="note">
+                {$tr('attempt_approval.too_many')}
+            </p>
+        {/if}
+
+        {#if approvalState.proposals.length > 0}
+            <ol class="proposal-list" aria-label={$tr('attempt_approval.list.label')}>
+                {#each approvalState.proposals as item, index (itemKey(item.generation_id, item.proposal.id))}
+                    {@const key = itemKey(item.generation_id, item.proposal.id)}
+                    {@const summaryId = `${headingId}-proposal-${String(index)}`}
+                    <li>
+                        <article
+                            aria-labelledby={`${summaryId}-title`}
+                            aria-describedby={`${summaryId}-body ${summaryId}-authority`}
+                        >
+                            <div class="proposal-copy">
+                                {#if item.proposal.projection_rejection_reason === 'unsafe_native_text'}
+                                    <h4 id={`${summaryId}-title`}>
+                                        {$tr('attempt_approval.unrenderable.title')}
+                                    </h4>
+                                    <p id={`${summaryId}-body`}>
+                                        {$tr('attempt_approval.unrenderable.hint')}
+                                    </p>
+                                {:else}
+                                    <h4 id={`${summaryId}-title`}>{item.proposal.title}</h4>
+                                    <p id={`${summaryId}-body`}>{item.proposal.body}</p>
+                                {/if}
                             </div>
-                            <div>
-                                <dt>{$tr('attempt_approval.field.branch')}</dt>
-                                <dd><code>{shortId(item.proposed_branch_id)}</code></dd>
-                            </div>
-                            <div>
-                                <dt>{$tr('attempt_approval.field.pending')}</dt>
-                                <dd>
-                                    {$tr('attempt_approval.field.pending_count', {
-                                        count: item.pending_proposal_count,
+                            <dl id={`${summaryId}-authority`}>
+                                <div>
+                                    <dt>{$tr('attempt_approval.field.attempt')}</dt>
+                                    <dd><code>{shortId(item.generation_id)}</code></dd>
+                                </div>
+                                <div>
+                                    <dt>{$tr('attempt_approval.field.branch')}</dt>
+                                    <dd><code>{shortId(item.proposed_branch_id)}</code></dd>
+                                </div>
+                                <div>
+                                    <dt>{$tr('attempt_approval.field.pending')}</dt>
+                                    <dd>
+                                        {$tr('attempt_approval.field.pending_count', {
+                                            count: item.pending_proposal_count,
+                                        })}
+                                    </dd>
+                                </div>
+                                <div>
+                                    <dt>{$tr('attempt_approval.field.expiry')}</dt>
+                                    <dd>{expiryLabel(item.proposal.expires_at_epoch_seconds)}</dd>
+                                </div>
+                            </dl>
+                            <div class="proposal-actions">
+                                <button
+                                    class="approve"
+                                    type="button"
+                                    disabled={busy ||
+                                        approvalState.has_more_due ||
+                                        approvalState.error !== null ||
+                                        item.proposal.projection_rejection_reason ===
+                                            'unsafe_native_text'}
+                                    aria-label={$tr('attempt_approval.approve.label', {
+                                        index: index + 1,
                                     })}
-                                </dd>
+                                    aria-describedby={`${summaryId}-body ${summaryId}-authority`}
+                                    onclick={() =>
+                                        void approvalController.decideProposal(
+                                            item.generation_id,
+                                            item.proposal.id,
+                                            'approve',
+                                        )}
+                                >
+                                    {approvalState.busy_proposal_key === key
+                                        ? $tr('attempt_approval.busy')
+                                        : $tr('attempt_approval.approve')}
+                                </button>
+                                <button
+                                    class="reject"
+                                    type="button"
+                                    disabled={busy ||
+                                        approvalState.has_more_due ||
+                                        approvalState.error !== null}
+                                    aria-label={$tr('attempt_approval.reject.label', {
+                                        index: index + 1,
+                                    })}
+                                    aria-describedby={`${summaryId}-body ${summaryId}-authority`}
+                                    onclick={() =>
+                                        void approvalController.decideProposal(
+                                            item.generation_id,
+                                            item.proposal.id,
+                                            'reject',
+                                        )}
+                                >
+                                    {$tr('attempt_approval.reject')}
+                                </button>
                             </div>
-                            <div>
-                                <dt>{$tr('attempt_approval.field.expiry')}</dt>
-                                <dd>{expiryLabel(item.proposal.expires_at_epoch_seconds)}</dd>
-                            </div>
-                        </dl>
-                        <div class="proposal-actions">
-                            <button
-                                class="approve"
-                                type="button"
-                                disabled={busy ||
-                                    approvalState.has_more_due ||
-                                    approvalState.error !== null ||
-                                    item.proposal.projection_rejection_reason ===
-                                        'unsafe_native_text'}
-                                aria-label={$tr('attempt_approval.approve.label', {
-                                    index: index + 1,
-                                })}
-                                aria-describedby={`${summaryId}-body ${summaryId}-authority`}
-                                onclick={() =>
-                                    void approvalController.decideProposal(
-                                        item.generation_id,
-                                        item.proposal.id,
-                                        'approve',
-                                    )}
-                            >
-                                {approvalState.busy_proposal_key === key
-                                    ? $tr('attempt_approval.busy')
-                                    : $tr('attempt_approval.approve')}
-                            </button>
-                            <button
-                                class="reject"
-                                type="button"
-                                disabled={busy ||
-                                    approvalState.has_more_due ||
-                                    approvalState.error !== null}
-                                aria-label={$tr('attempt_approval.reject.label', {
-                                    index: index + 1,
-                                })}
-                                aria-describedby={`${summaryId}-body ${summaryId}-authority`}
-                                onclick={() =>
-                                    void approvalController.decideProposal(
-                                        item.generation_id,
-                                        item.proposal.id,
-                                        'reject',
-                                    )}
-                            >
-                                {$tr('attempt_approval.reject')}
-                            </button>
-                        </div>
-                    </article>
-                </li>
-            {/each}
-        </ol>
-    {:else if approvalState.phase === 'ready' && approvalState.retry_generation_ids.length === 0}
-        <p class="attempt-note">{$tr('attempt_approval.empty')}</p>
-    {/if}
+                        </article>
+                    </li>
+                {/each}
+            </ol>
+        {:else if approvalState.phase === 'ready' && approvalState.retry_generation_ids.length === 0}
+            <p class="attempt-note">{$tr('attempt_approval.empty')}</p>
+        {/if}
 
-    {#if approvalState.retry_available && approvalState.retry_generation_ids.length > 0}
-        <div class="retry-generation">
-            <p role="status">{approvalState.announcement}</p>
-            {#if onRetry !== undefined}
-                <ol class="retry-list" aria-label={$tr('attempt_approval.retry_list.label')}>
-                    {#each approvalState.retry_generation_ids as generationId (generationId)}
-                        <li class="retry-item">
-                            <span
-                                >{$tr('attempt_approval.retry_item')}
-                                <code>{generationId}</code></span
-                            >
-                            <button
-                                type="button"
-                                disabled={busy}
-                                aria-label={$tr('attempt_approval.retry_item.label', {
-                                    label: retryLabel,
-                                    id: generationId,
-                                })}
-                                onclick={() => void onRetry(generationId)}
-                            >
-                                {retryLabel}
-                            </button>
-                        </li>
-                    {/each}
-                </ol>
-            {/if}
-        </div>
-    {/if}
-</section>
+        {#if approvalState.retry_available && approvalState.retry_generation_ids.length > 0}
+            <div class="retry-generation">
+                <p role="status">{approvalState.announcement}</p>
+                {#if onRetry !== undefined}
+                    <ol class="retry-list" aria-label={$tr('attempt_approval.retry_list.label')}>
+                        {#each approvalState.retry_generation_ids as generationId (generationId)}
+                            <li class="retry-item">
+                                <span
+                                    >{$tr('attempt_approval.retry_item')}
+                                    <code>{generationId}</code></span
+                                >
+                                <button
+                                    type="button"
+                                    disabled={busy}
+                                    aria-label={$tr('attempt_approval.retry_item.label', {
+                                        label: retryLabel,
+                                        id: generationId,
+                                    })}
+                                    onclick={() => void onRetry(generationId)}
+                                >
+                                    {retryLabel}
+                                </button>
+                            </li>
+                        {/each}
+                    </ol>
+                {/if}
+            </div>
+        {/if}
+    </section>
+{/if}
 
 <style>
     .attempt-approvals {

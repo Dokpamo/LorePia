@@ -1,9 +1,9 @@
 /*
  * LorePia design system — one handheld column, everywhere.
  *
- * There is exactly one layout: a 437px reference handheld column. It fills a
- * narrow host, scales its principal measurements below that baseline, and is
- * centred without changing navigation structure in a wider desktop host.
+ * There is exactly one handheld layout: controls scale up to a 437px logical
+ * reference, while the reading column may widen to 591px on a Fold or tablet.
+ * Above the control reference, content and whitespace grow instead of controls.
  *
  * The colour source is the supplied desktop light/dark reference: warm paper
  * whites by day and neutral charcoal at night. Each mode borrows the other's
@@ -84,31 +84,32 @@
     --success: var(--brand-seafoam);
     --success-soft: #e4efe8;
 
-    --radius-xs: clamp(7px, 1.831vw, 8px);
-    --radius-sm: clamp(9px, 2.517vw, 11px);
-    --radius-md: clamp(12px, 3.432vw, 15px);
-    --radius-lg: clamp(16px, 4.577vw, 20px);
+    --radius-xs: clamp(4px, 1.831vw, 8px);
+    --radius-sm: clamp(6px, 2.517vw, 11px);
+    --radius-md: clamp(8px, 3.432vw, 15px);
+    --radius-lg: clamp(11px, 4.577vw, 20px);
     --radius-pill: 999px;
 
     --shadow-1: 0 1px 2px rgb(43 42 40 / 5%);
     --shadow-2: 0 8px 32px rgb(43 42 40 / 9%);
     --shadow-3: 0 24px 64px rgb(43 42 40 / 18%);
 
-    /* 437px is the measured comparison width; narrower hosts scale from it. */
-    --touch: clamp(38px, 10.069vw, 44px);
-    --mobile-toolbar: clamp(48px, 12.815vw, 56px);
-    --mobile-root-header: clamp(56px, 16.476vw, 72px);
-    --mobile-top-action: clamp(42px, 12.18vw, 53px);
-    --mobile-top-inset: clamp(13px, 3.89vw, 17px);
-    --mobile-top-offset: clamp(14px, 4.06vw, 18px);
-    --mobile-top-fade: clamp(103px, 30.2vw, 132px);
-    --mobile-root-title-inset: clamp(20px, 6.095vw, 26px);
-    --mobile-row: clamp(58px, 16.476vw, 72px);
-    --mobile-search: clamp(39px, 10.984vw, 48px);
-    --mobile-search-inset: clamp(10px, 3vw, 13px);
-    --mobile-nav: clamp(53px, 15.103vw, 66px);
-    --detail-ui-type: clamp(16px, 4.119vw, 18px);
-    --detail-support-type: clamp(14px, 3.55vw, 16px);
+    /* Controls scale through narrow phones, then stop at the 437px logical reference. */
+    --touch: clamp(25px, 10.069vw, 44px);
+    --mobile-toolbar: clamp(31px, 12.815vw, 56px);
+    --mobile-root-header: clamp(40px, 16.476vw, 72px);
+    --mobile-top-action: clamp(30px, 12.18vw, 53px);
+    --mobile-pill-control: clamp(26px, 10.526vw, 46px);
+    --mobile-top-inset: clamp(9px, 3.89vw, 17px);
+    --mobile-top-offset: clamp(10px, 4.06vw, 18px);
+    --mobile-top-fade: clamp(72px, 30.2vw, 132px);
+    --mobile-root-title-inset: clamp(14px, 6.095vw, 26px);
+    --mobile-row: clamp(40px, 16.476vw, 72px);
+    --mobile-search: clamp(27px, 10.984vw, 48px);
+    --mobile-search-inset: clamp(7px, 3vw, 13px);
+    --mobile-nav: clamp(37px, 15.103vw, 66px);
+    --detail-ui-type: clamp(10px, 4.119vw, 18px);
+    --detail-support-type: clamp(9px, 3.55vw, 16px);
 
     /*
      * Content measures. A full-bleed row spends its own padding to centre its
@@ -120,8 +121,8 @@
     --reading: 44rem;
     --settings: 54rem;
     --sidebar: 300px;
-    --gutter: clamp(14px, 3.89vw, 17px);
-    --settings-gutter: clamp(12px, 3.432vw, 15px);
+    --gutter: clamp(9px, 3.89vw, 17px);
+    --settings-gutter: clamp(8px, 3.432vw, 15px);
 
     font-family:
         Pretendard,
@@ -133,7 +134,7 @@
     font-synthesis: none;
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
-    font-size: clamp(13px, 3.661vw, 16px);
+    font-size: clamp(9px, 3.661vw, 16px);
     color: var(--ink);
     background: var(--bg);
 }
@@ -476,8 +477,10 @@ textarea {
 .app-shell[data-layout='mobile'] {
     width: min(100%, 899px);
     margin-inline: auto;
+    --reading: 591px;
+    --settings: 591px;
     --detail-action-center: 50vw;
-    --detail-action-workspace-width: min(100vw, 899px);
+    --detail-action-workspace-width: min(100vw, 591px);
     --detail-action-fixed-gutter: var(--gutter);
 }
 
@@ -488,6 +491,9 @@ textarea {
     --settings-gutter: max(16px, calc((100% - var(--settings)) / 2));
     --mobile-root-header: 60px;
     --mobile-top-action: 44px;
+    --mobile-pill-control: 46px;
+    --mobile-search: 48px;
+    --mobile-nav: 66px;
     --mobile-top-inset: 14px;
     --mobile-top-offset: 8px;
     --detail-action-center: calc(var(--sidebar) + (100vw - var(--sidebar)) / 2);
@@ -655,7 +661,7 @@ textarea {
     position: absolute;
     z-index: 20;
     right: auto;
-    bottom: calc(8px + env(safe-area-inset-bottom));
+    bottom: calc(clamp(4px, 1.831vw, 8px) + env(safe-area-inset-bottom));
     left: 50%;
     display: flex;
     width: min(calc(100% - var(--gutter) - var(--gutter)), 560px);
@@ -667,7 +673,7 @@ textarea {
     margin: 0;
     background: var(--surface-raised);
     box-shadow: var(--shadow-2);
-    gap: 2px;
+    gap: clamp(1px, 0.458vw, 2px);
     transform: translateX(-50%);
 }
 
@@ -680,7 +686,7 @@ textarea {
     flex: 1;
     flex-direction: column;
     justify-content: center;
-    padding: clamp(3px, 1.144vw, 5px) 2px;
+    padding: clamp(3px, 1.144vw, 5px) clamp(1px, 0.458vw, 2px);
     border: 0;
     border-radius: var(--radius-pill);
     margin-inline: clamp(1px, 0.458vw, 2px);
@@ -750,8 +756,8 @@ textarea {
 }
 
 .tab .nav-icon {
-    width: clamp(22px, 5.95vw, 26px);
-    height: clamp(22px, 5.95vw, 26px);
+    width: clamp(14px, 5.95vw, 26px);
+    height: clamp(14px, 5.95vw, 26px);
     stroke-width: 1.8;
 }
 
@@ -774,7 +780,7 @@ textarea {
 }
 
 .tab-label {
-    font-size: clamp(11px, 3.204vw, 14px);
+    font-size: clamp(8px, 3.204vw, 14px);
     font-weight: 700;
     line-height: 1;
 }
@@ -801,24 +807,34 @@ textarea {
     flex: 1;
 }
 
-.mobile-top-bar {
+.mobile-top-frame {
     position: relative;
     z-index: 6;
     display: grid;
     height: calc(var(--mobile-root-header) + env(safe-area-inset-top));
     min-height: calc(var(--mobile-root-header) + env(safe-area-inset-top));
     flex: none;
-    grid-template-columns: var(--mobile-top-action) minmax(0, 1fr) var(--mobile-top-action);
+    grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
     padding-top: env(safe-area-inset-top);
     padding-inline-start: max(var(--mobile-top-inset), env(safe-area-inset-left));
     padding-inline-end: max(var(--mobile-top-inset), env(safe-area-inset-right));
-    background: var(--bg);
+    background: transparent;
+    column-gap: clamp(4px, 1.831vw, 8px);
 }
 
-.mobile-top-bar > .mobile-top-action {
-    align-self: start;
-    margin-top: var(--mobile-top-offset);
+.app-shell[data-layout='mobile'] .mobile-top-frame {
+    width: min(100%, 591px);
+    margin-inline: auto;
+}
+
+.mobile-top-frame-leading {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.mobile-top-frame > .mobile-top-action {
+    align-self: center;
+    margin-top: 0;
 }
 
 .mobile-top-action {
@@ -834,11 +850,15 @@ textarea {
     box-shadow: var(--shadow-1);
     color: var(--ink);
     place-items: center;
+    transition:
+        background-color 140ms ease,
+        color 140ms ease,
+        transform 140ms ease;
 }
 
 .mobile-top-action svg {
-    width: 24px;
-    height: 24px;
+    width: clamp(16px, 6.865vw, 30px);
+    height: clamp(16px, 6.865vw, 30px);
     fill: none;
     stroke: currentcolor;
     stroke-linecap: round;
@@ -854,14 +874,54 @@ textarea {
     grid-column: 3;
 }
 
+.mobile-root-actions {
+    display: flex;
+    grid-column: 2;
+    align-self: center;
+    margin-top: 0;
+    gap: 0;
+}
+
+.mobile-root-actions > .mobile-top-action {
+    margin-top: 0;
+}
+
+.mobile-top-add-action {
+    color: var(--ink);
+}
+
+.mobile-top-action:disabled {
+    opacity: 0.45;
+}
+
+.mobile-top-action:active:not(:disabled) {
+    background: var(--surface-active);
+    transform: scale(0.96);
+}
+
 .mobile-root-header h1 {
-    grid-column: 1 / 3;
+    grid-column: 1;
     align-self: center;
     padding-left: calc(var(--mobile-root-title-inset) - var(--mobile-top-inset));
     margin: 0;
-    font-size: 1.5rem;
+    font-size: clamp(14px, 5.72vw, 25px);
     font-weight: 700;
     letter-spacing: -0.025em;
+}
+
+.mobile-root-header {
+    background: var(--bg);
+}
+
+.mobile-root-header .mobile-top-action,
+.settings-toolbar .mobile-top-action {
+    width: var(--mobile-top-action);
+    height: var(--mobile-top-action);
+    min-width: var(--mobile-top-action);
+    min-height: var(--mobile-top-action);
+    background: transparent;
+    box-shadow: none;
+    color: var(--ink);
 }
 
 .chat-list-view {
@@ -876,18 +936,18 @@ textarea {
     min-height: var(--mobile-search);
     flex: none;
     align-items: center;
-    padding: 0 clamp(10px, 3.204vw, 14px);
+    padding: 0 clamp(7px, 3.204vw, 14px);
     border: 1px solid var(--line);
     border-radius: var(--radius-pill);
     width: min(
         calc(100% - var(--mobile-search-inset) - var(--mobile-search-inset)),
-        var(--reading)
+        calc(var(--reading) - var(--mobile-search-inset) - var(--mobile-search-inset))
     );
-    margin: 0 auto 8px;
+    margin: 0 auto clamp(4px, 1.831vw, 8px);
     background: var(--surface-raised);
     box-shadow: var(--shadow-1);
     color: var(--ink-muted);
-    gap: clamp(8px, 2.288vw, 10px);
+    gap: clamp(5px, 2.288vw, 10px);
 }
 
 .app-shell[data-layout='mobile'] .mobile-root-search:focus-within {
@@ -895,8 +955,8 @@ textarea {
 }
 
 .app-shell[data-layout='mobile'] .mobile-root-search svg {
-    width: clamp(16px, 4.577vw, 20px);
-    height: clamp(16px, 4.577vw, 20px);
+    width: clamp(11px, 4.577vw, 20px);
+    height: clamp(11px, 4.577vw, 20px);
     flex: none;
     fill: none;
     stroke: currentcolor;
@@ -913,79 +973,11 @@ textarea {
     outline: 0;
     background: transparent;
     color: var(--ink);
-    font-size: clamp(13px, 3.432vw, 15px);
+    font-size: clamp(8px, 3.432vw, 15px);
 }
 
 .app-shell[data-layout='mobile'] .mobile-root-search input::placeholder {
     color: var(--ink-subtle);
-}
-
-/* Empty-home action measured from Telegram Contacts at the same phone ratio. */
-.app-shell[data-layout='mobile'] .mobile-root-contact-action {
-    position: absolute;
-    z-index: 5;
-    top: calc(65% - 10px);
-    left: 50%;
-    transform: translateX(-50%);
-}
-
-.app-shell[data-layout='mobile'] .mobile-root-contact-button {
-    display: inline-flex;
-    width: clamp(155px, 45.35vw, 198px);
-    min-height: clamp(43px, 12.52vw, 55px);
-    align-items: center;
-    justify-content: center;
-    padding: 0 18px;
-    border-radius: var(--radius-pill);
-    box-shadow: none;
-    font-size: clamp(14px, 3.55vw, 16px);
-    font-weight: 700;
-    gap: 8px;
-    white-space: nowrap;
-}
-
-.app-shell[data-layout='mobile'] .mobile-root-contact-button svg {
-    width: clamp(19px, 5.03vw, 22px);
-    height: clamp(19px, 5.03vw, 22px);
-    flex: none;
-    fill: none;
-    stroke: currentcolor;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-    stroke-width: 1.9;
-}
-
-.app-shell[data-layout='mobile'] .mobile-root-fab {
-    position: absolute;
-    z-index: 21;
-    right: max(22px, calc((100% - var(--reading)) / 2 + 8px));
-    bottom: calc(var(--mobile-nav) + 26px + env(safe-area-inset-bottom));
-    display: grid;
-    width: 56px;
-    height: 56px;
-    min-height: 56px;
-    padding: 0;
-    border: 0;
-    border-radius: 50%;
-    background: var(--primary-bg);
-    box-shadow: var(--shadow-2);
-    color: var(--primary-ink);
-    place-items: center;
-}
-
-.app-shell[data-layout='mobile'] .mobile-root-fab-mark {
-    display: block;
-    font-size: 2rem;
-    font-weight: 300;
-    line-height: 1;
-}
-
-.app-shell[data-layout='mobile'] .mobile-root-fab:disabled {
-    opacity: 0.45;
-}
-
-.app-shell[data-layout='mobile'] .mobile-root-fab:active:not(:disabled) {
-    background: var(--primary-bg-hover);
 }
 
 .app-shell[data-layout='mobile'] .mobile-root-row {
@@ -1090,10 +1082,12 @@ textarea {
 
 .app-shell[data-layout='mobile'] :is(.studio-detail-scroll, .settings-detail-scroll) {
     padding-top: calc(
-        env(safe-area-inset-top) + var(--mobile-top-offset) + var(--mobile-top-action) + 16px
+        env(safe-area-inset-top) + var(--mobile-top-offset) + var(--mobile-top-action) +
+            clamp(7px, 3.661vw, 16px)
     );
     scroll-padding-top: calc(
-        env(safe-area-inset-top) + var(--mobile-top-action) + var(--mobile-top-offset) + 8px
+        env(safe-area-inset-top) + var(--mobile-top-action) + var(--mobile-top-offset) +
+            clamp(4px, 1.831vw, 8px)
     );
 }
 
@@ -1107,7 +1101,7 @@ textarea {
 }
 
 .app-shell[data-layout='mobile'] :is(.settings-home-scroll, .studio-home) > .setting-list {
-    width: min(calc(100% - 6px), var(--reading));
+    width: min(calc(100% - clamp(3px, 1.373vw, 6px)), var(--reading));
     margin-inline: auto;
 }
 
@@ -1392,6 +1386,7 @@ textarea {
 
 /* The mobile thread is a room layered over a quiet message canvas. */
 .app-shell[data-layout='mobile'][data-view='chat'] .chat-pane {
+    position: relative;
     background-color: color-mix(in srgb, var(--ink) 2%, var(--bg));
     background-image:
         radial-gradient(
@@ -1404,27 +1399,159 @@ textarea {
             color-mix(in srgb, var(--ink) 3%, transparent) 0 3px,
             transparent 3.5px
         );
-    background-size: 92px 92px;
+    background-size: clamp(51px, 21.053vw, 92px) clamp(51px, 21.053vw, 92px);
 }
 
 .app-shell[data-layout='mobile'][data-view='chat'] .chat-pane .message-scroll {
+    padding-top: calc(
+        env(safe-area-inset-top) + var(--mobile-top-offset) + var(--mobile-top-action) +
+            var(--mobile-pill-control) + clamp(10px, 4.119vw, 18px)
+    );
     background: transparent;
 }
 
+.app-shell[data-layout='mobile'][data-view='chat'] .chat-pane::before {
+    position: absolute;
+    z-index: 10;
+    height: calc(
+        env(safe-area-inset-top) + var(--mobile-top-offset) + var(--mobile-top-action) +
+            var(--mobile-pill-control) + clamp(13px, 5.492vw, 24px)
+    );
+    background: linear-gradient(
+        to bottom,
+        var(--bg) 0%,
+        color-mix(in srgb, var(--bg) 92%, transparent) 72%,
+        transparent 100%
+    );
+    content: '';
+    inset: 0 0 auto;
+    pointer-events: none;
+}
+
 .app-shell[data-layout='mobile'][data-view='chat'] .chat-pane .chat-header {
+    position: absolute;
     height: calc(var(--mobile-root-header) + env(safe-area-inset-top));
     min-height: calc(var(--mobile-root-header) + env(safe-area-inset-top));
+    z-index: 12;
     border: 0;
-    border-bottom: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
     border-radius: 0;
-    margin: 0;
-    background: color-mix(in srgb, var(--bg) 92%, transparent);
+    margin: 0 auto;
+    background: transparent;
     box-shadow: none;
+    column-gap: clamp(2px, 0.915vw, 4px);
+    inset: 0 0 auto;
+    pointer-events: none;
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .chat-pane .chat-header > * {
+    pointer-events: auto;
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .chat-pane .chat-identity {
+    height: var(--mobile-top-action);
+    align-self: center;
+    padding: clamp(2px, 0.686vw, 3px) clamp(5px, 2.288vw, 10px) clamp(2px, 0.686vw, 3px)
+        clamp(2px, 0.686vw, 3px);
+    border-radius: var(--radius-pill);
+    margin-top: 0;
+    background: color-mix(in srgb, var(--surface-raised) 94%, transparent);
+    box-shadow: var(--shadow-1);
+    gap: clamp(5px, 2.059vw, 9px);
+    backdrop-filter: blur(14px);
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .chat-pane .chat-identity .avatar {
+    width: calc(var(--mobile-top-action) - clamp(4px, 1.831vw, 8px));
+    height: calc(var(--mobile-top-action) - clamp(4px, 1.831vw, 8px));
+    background: var(--surface-active);
+    color: var(--ink);
+    font-size: clamp(9px, 3.661vw, 16px);
+    font-weight: 700;
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .chat-pane .chat-identity h2 {
+    font-size: clamp(10px, 3.89vw, 17px);
+    line-height: 1.15;
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .chat-pane .chat-subtitle {
+    font-size: clamp(7px, 2.746vw, 12px);
+    line-height: 1.15;
 }
 
 .app-shell[data-layout='mobile'][data-view='chat'] .chat-pane .chat-toolbar {
+    position: absolute;
+    z-index: 11;
+    top: calc(
+        env(safe-area-inset-top) + var(--mobile-top-offset) + var(--mobile-top-action) +
+            clamp(3px, 1.373vw, 6px)
+    );
+    right: 50%;
+    height: var(--mobile-pill-control);
+    min-height: var(--mobile-pill-control);
     justify-content: center;
-    padding: 6px 12px 0;
+    width: max-content;
+    max-width: calc(100% - 2 * var(--mobile-top-inset));
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    gap: clamp(4px, 1.831vw, 8px);
+    overflow-x: auto;
+    transform: translateX(50%);
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .chat-toolbar .segmented {
+    padding: 0;
+    background: transparent;
+    gap: clamp(4px, 1.831vw, 8px);
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .chat-toolbar .segmented button,
+.app-shell[data-layout='mobile'][data-view='chat'] .chat-toolbar .branch-picker select {
+    height: var(--mobile-pill-control);
+    min-height: var(--mobile-pill-control);
+    padding: 0 clamp(8px, 3.432vw, 15px);
+    border: 1px solid var(--line);
+    background: var(--surface-raised);
+    color: var(--ink);
+    font-size: clamp(10px, 4.119vw, 18px);
+    font-weight: 700;
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .chat-toolbar .branch-picker select {
+    max-width: clamp(82px, 34vw, 149px);
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .chat-toolbar .segmented button.active {
+    border-color: var(--ink);
+    background: var(--ink);
+    box-shadow: none;
+    color: var(--bg);
+}
+
+.chat-toolbar-new-operation {
+    display: grid;
+    width: var(--mobile-pill-control);
+    height: var(--mobile-pill-control);
+    min-width: var(--mobile-pill-control);
+    min-height: var(--mobile-pill-control);
+    padding: 0;
+    border: 1px solid var(--line);
+    border-radius: 50%;
+    background: var(--surface-raised);
+    color: var(--ink-muted);
+    place-items: center;
+}
+
+.chat-toolbar-new-operation svg {
+    width: clamp(12px, 4.9vw, 21px);
+    height: clamp(12px, 4.9vw, 21px);
+    fill: none;
+    stroke: currentcolor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.8;
 }
 
 .chat-pane > .message-scroll {
@@ -1482,13 +1609,13 @@ textarea {
     min-width: 0;
     grid-column: 2;
     align-items: center;
-    padding-inline: clamp(8px, 2.288vw, 10px);
+    padding-inline: clamp(5px, 2.288vw, 10px);
     gap: 10px;
 }
 
 .empty-chat-header .chat-identity {
-    grid-column: 1 / 3;
-    padding-left: clamp(9px, 2.517vw, 11px);
+    grid-column: 1 / -1;
+    padding-left: clamp(6px, 2.517vw, 11px);
 }
 
 .chat-identity h2 {
@@ -1525,8 +1652,8 @@ textarea {
 
 .app-shell[data-layout='mobile'] .chat-controls {
     height: var(--mobile-top-action);
-    align-self: start;
-    margin-top: var(--mobile-top-offset);
+    align-self: center;
+    margin-top: 0;
 }
 
 /* Desktop restores the compact transcript toolbar instead of stretching the phone grid. */
@@ -1662,6 +1789,14 @@ textarea {
     backdrop-filter: blur(10px);
 }
 
+.app-shell[data-layout='mobile'][data-view='chat'] .message-date-divider {
+    padding: clamp(5px, 2.746vw, 12px) 0 clamp(3px, 1.831vw, 8px);
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .message-date-divider time {
+    padding: clamp(2px, 1.144vw, 5px) clamp(5px, 2.517vw, 11px);
+}
+
 .message-avatar {
     display: grid;
     overflow: hidden;
@@ -1697,12 +1832,13 @@ textarea {
 }
 
 .message-time {
-    justify-self: start;
-    padding: 4px 3px 0;
+    display: block;
+    padding: 4px 0 0;
     color: var(--ink-subtle);
     font-size: 0.65625rem;
     font-variant-numeric: tabular-nums;
     line-height: 1;
+    text-align: right;
 }
 
 .message-body {
@@ -1751,9 +1887,99 @@ textarea {
 }
 
 .message-item.from-user .message-time {
-    justify-self: end;
-    padding-right: 3px;
+    padding: 4px 0 0;
+    color: color-mix(in srgb, var(--bubble-user-ink) 58%, transparent);
     grid-column: 1;
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .message-item {
+    padding: clamp(2px, 1.144vw, 5px) 0;
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.app-shell[data-layout='mobile'][data-view='chat']
+    .message-item
+    :is(.message-avatar, .message-role) {
+    display: none;
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .message-item .message-body {
+    max-width: 86%;
+    justify-self: start;
+    padding: clamp(5px, 2.059vw, 9px) clamp(7px, 2.746vw, 12px) clamp(4px, 1.602vw, 7px);
+    border-radius: var(--radius-lg);
+    border-bottom-left-radius: var(--radius-xs);
+    background: var(--bubble-char-bg);
+    box-shadow: var(--shadow-1);
+    font-size: clamp(9px, 3.89vw, 17px);
+    grid-column: 1;
+    line-height: 1.55;
+}
+
+.message-bubble-meta {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    margin-top: clamp(1px, 0.686vw, 3px);
+    gap: clamp(1px, 0.458vw, 2px);
+}
+
+.message-bubble-meta .message-time {
+    padding: 0;
+}
+
+.message-action-reveal {
+    display: grid;
+    width: 18px;
+    min-width: 18px;
+    min-height: 18px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--ink-subtle);
+    place-items: center;
+}
+
+.message-action-reveal svg {
+    width: 13px;
+    height: 13px;
+    fill: none;
+    stroke: currentcolor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 2;
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .message-item.from-user .message-body {
+    justify-self: end;
+    border-radius: var(--radius-lg);
+    border-bottom-right-radius: var(--radius-xs);
+    background: var(--bubble-user-bg);
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .message-item .message-actions {
+    max-height: 0;
+    padding-top: 0;
+    overflow: hidden;
+    grid-column: 1;
+    opacity: 0;
+    pointer-events: none;
+    visibility: hidden;
+    transition:
+        max-height 140ms ease,
+        padding 140ms ease,
+        opacity 110ms ease;
+}
+
+.app-shell[data-layout='mobile'][data-view='chat']
+    .message-item:is(:focus-within, .actions-open)
+    .message-actions {
+    max-height: 36px;
+    padding-top: 4px;
+    opacity: 1;
+    pointer-events: auto;
+    visibility: visible;
 }
 
 /* Editing swaps the bubble for a working surface, whoever is speaking. */
@@ -1905,8 +2131,8 @@ textarea {
 }
 
 .app-shell[data-layout='mobile'][data-view='chat'] .composer {
-    padding: 6px max(10px, calc((100% - var(--reading)) / 2))
-        calc(10px + env(safe-area-inset-bottom));
+    padding: clamp(3px, 1.373vw, 6px) max(var(--gutter), calc((100% - var(--reading)) / 2))
+        calc(clamp(5px, 2.288vw, 10px) + env(safe-area-inset-bottom));
     border: 0;
     margin: 0;
     background: linear-gradient(to top, var(--bg) 72%, transparent);
@@ -1922,6 +2148,29 @@ textarea {
     background: var(--surface-raised);
     box-shadow: var(--shadow-2);
     gap: 4px;
+}
+
+.composer-leading-action {
+    display: grid;
+    width: 44px;
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--ink-muted);
+    place-items: center;
+}
+
+.composer-leading-action svg {
+    width: 23px;
+    height: 23px;
+    fill: none;
+    stroke: currentcolor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.8;
 }
 
 .composer-field:focus-within {
@@ -1963,6 +2212,29 @@ textarea {
     stroke-linecap: round;
     stroke-linejoin: round;
     stroke-width: 1.8;
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .composer-field {
+    min-height: var(--mobile-top-action);
+    padding: clamp(2px, 0.686vw, 3px);
+    box-shadow: var(--shadow-1);
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .composer textarea {
+    min-height: calc(var(--mobile-top-action) - clamp(4px, 1.373vw, 6px));
+    padding: clamp(5px, 2.059vw, 9px) clamp(4px, 1.831vw, 8px);
+    font-size: var(--detail-support-type);
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] :is(.composer-leading-action, .send-button) {
+    width: calc(var(--mobile-top-action) - clamp(4px, 1.373vw, 6px));
+    min-width: calc(var(--mobile-top-action) - clamp(4px, 1.373vw, 6px));
+    min-height: calc(var(--mobile-top-action) - clamp(4px, 1.373vw, 6px));
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] :is(.composer-leading-action, .send-button) svg {
+    width: clamp(14px, 5.492vw, 24px);
+    height: clamp(14px, 5.492vw, 24px);
 }
 
 .composer .danger.compact {
@@ -2123,6 +2395,29 @@ textarea {
     stroke-width: 2;
 }
 
+.app-shell[data-layout='mobile'] .setting-list {
+    border-radius: clamp(16px, 6.59vw, 24px);
+    margin-inline: clamp(2px, 0.686vw, 3px);
+    gap: clamp(2px, 0.686vw, 3px);
+}
+
+.app-shell[data-layout='mobile'] .setting-row {
+    min-height: clamp(37px, 15.561vw, 68px);
+    padding: clamp(5px, 2.288vw, 10px) clamp(11px, 4.577vw, 20px);
+    border-radius: clamp(2px, 0.915vw, 4px);
+    gap: clamp(13px, 5.492vw, 24px);
+}
+
+.app-shell[data-layout='mobile'] .setting-icon {
+    width: clamp(19px, 7.78vw, 34px);
+    height: clamp(19px, 7.78vw, 34px);
+}
+
+.app-shell[data-layout='mobile'] .setting-icon svg {
+    width: clamp(13px, 5.492vw, 24px);
+    height: clamp(13px, 5.492vw, 24px);
+}
+
 .setting-copy {
     display: flex;
     min-width: 0;
@@ -2195,9 +2490,17 @@ textarea {
 
 .app-shell[data-layout='mobile'] .sub-header h1 {
     height: var(--mobile-top-action);
-    align-self: start;
-    margin-top: var(--mobile-top-offset);
-    line-height: var(--mobile-top-action);
+    display: flex;
+    align-self: center;
+    align-items: center;
+    justify-content: center;
+    padding-inline: clamp(8px, 3.432vw, 15px);
+    border-radius: var(--radius-pill);
+    margin-top: 0;
+    background: color-mix(in srgb, var(--surface-raised) 94%, transparent);
+    box-shadow: var(--shadow-1);
+    line-height: 1.2;
+    backdrop-filter: blur(14px);
 }
 
 .app-shell[data-layout='desktop'] .sub-header {
@@ -2388,11 +2691,6 @@ textarea {
 
     .primary:hover:not(:disabled) {
         border-color: transparent;
-        background: var(--primary-bg-hover);
-        color: var(--primary-ink);
-    }
-
-    .app-shell[data-layout='mobile'] .mobile-root-fab:hover:not(:disabled) {
         background: var(--primary-bg-hover);
         color: var(--primary-ink);
     }

@@ -69,6 +69,39 @@ function expiredReceipt(
 }
 
 describe('GenerationAttemptApprovals', () => {
+    it('stays out of the messenger chrome when the room has no approval work', async () => {
+        const expire = vi.fn().mockResolvedValue({
+            conversation_id: 'conversation-1',
+            source_branch_id: 'branch-1',
+            decisions: [],
+            has_more_due: false,
+        });
+        const listRetryable = vi.fn().mockResolvedValue([]);
+        const client: GenerationAttemptApprovalCapableClient = {
+            expireGenerationAttemptProposals: expire,
+            listGenerationAttemptProposals: vi.fn().mockResolvedValue([]),
+            listRetryableGenerationAttempts: listRetryable,
+            decideGenerationAttemptProposal: vi.fn(),
+        };
+
+        render(GenerationAttemptApprovals, {
+            props: {
+                client,
+                conversationId: 'conversation-1',
+                sourceBranchId: 'branch-1',
+                hideWhenInactive: true,
+            },
+        });
+
+        await waitFor(() => expect(expire).toHaveBeenCalledOnce());
+        await waitFor(() => expect(listRetryable).toHaveBeenCalledOnce());
+        await waitFor(() =>
+            expect(
+                screen.queryByRole('heading', { name: '생성 시도 승인' }),
+            ).not.toBeInTheDocument(),
+        );
+    });
+
     it('recreates through the live command adapter and retries only the clicked projected attempt', async () => {
         const invoke = vi.fn((commandName: string): Promise<unknown> => {
             switch (commandName) {

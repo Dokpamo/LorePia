@@ -8,11 +8,14 @@ function demoEntryPlugin(): Plugin {
         configureServer(server: ViteDevServer) {
             server.middlewares.use((request, _response, next) => {
                 const requestUrl: unknown = Reflect.get(request, 'url');
-                if (
-                    typeof requestUrl === 'string' &&
-                    (requestUrl === '/' || requestUrl.startsWith('/?'))
-                ) {
-                    Reflect.set(request, 'url', `/preview.html${requestUrl.slice(1)}`);
+                if (typeof requestUrl === 'string') {
+                    const queryIndex = requestUrl.indexOf('?');
+                    const pathname =
+                        queryIndex === -1 ? requestUrl : requestUrl.slice(0, queryIndex);
+                    if (pathname === '/' || pathname === '/index.html') {
+                        const query = queryIndex === -1 ? '' : requestUrl.slice(queryIndex);
+                        Reflect.set(request, 'url', `/preview.html${query}`);
+                    }
                 }
                 next();
             });

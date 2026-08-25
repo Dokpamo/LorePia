@@ -597,9 +597,6 @@
         <main id="main-content" class="main">
             {#if view === 'home'}
                 <section class="mobile-root home-view" aria-label={$tr('app.tab.home')}>
-                    <header class="mobile-top-bar mobile-root-header">
-                        <h1>캐릭터</h1>
-                    </header>
                     <LibraryPane
                         state={appState}
                         {controller}
@@ -625,6 +622,7 @@
                         <ConversationPane
                             state={appState}
                             {controller}
+                            client={appClient}
                             rootView
                             onOpenChat={openChatThread}
                         />
@@ -633,13 +631,13 @@
             {:else if view === 'create'}
                 {#if studioSection === null}
                     {#if !isDesktop}
-                        <header class="mobile-top-bar mobile-root-header">
+                        <header class="mobile-top-frame mobile-root-header">
                             <h1>{$tr('studio.title')}</h1>
                         </header>
                     {/if}
                 {:else}
                     <header
-                        class="mobile-top-bar sub-header"
+                        class="mobile-top-frame mobile-top-frame-leading sub-header"
                         style:--mobile-top-fade-progress={pushedTopFadeProgress}
                     >
                         <button
@@ -683,7 +681,7 @@
             {:else}
                 {#if settingsSection !== null}
                     <header
-                        class="mobile-top-bar sub-header"
+                        class="mobile-top-frame mobile-top-frame-leading sub-header"
                         style:--mobile-top-fade-progress={pushedTopFadeProgress}
                     >
                         <button

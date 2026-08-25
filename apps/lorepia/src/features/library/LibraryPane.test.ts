@@ -57,7 +57,7 @@ function deferred<Value>(): {
 }
 
 describe('LibraryPane safe local sources', () => {
-    it('uses the Telegram Contacts action position on an empty home', () => {
+    it('keeps character creation in the top action area on an empty home', () => {
         const state = structuredClone(INITIAL_APP_STATE);
         state.library = { phase: 'ready', error: null, characters: [] };
         const controller = new LorepiaAppController({} as LorepiaClient);
@@ -73,15 +73,33 @@ describe('LibraryPane safe local sources', () => {
         expect(screen.queryByText('아직 캐릭터가 없습니다.')).not.toBeInTheDocument();
         expect(screen.getAllByRole('button', { name: '새 캐릭터 추가' })).toHaveLength(1);
         const action = screen.getByRole('button', { name: '새 캐릭터 추가' });
-        expect(action).toHaveClass('mobile-root-contact-button');
-        expect(action).not.toHaveClass('mobile-root-fab');
-        expect(rendered.container.querySelector('.mobile-root-contact-action')).toContainElement(
-            action,
-        );
+        expect(action).toHaveClass('mobile-top-action', 'mobile-top-add-action');
+        expect(rendered.container.querySelector('.mobile-root-actions')).toContainElement(action);
+        expect(
+            rendered.container.querySelector('.mobile-root-contact-action'),
+        ).not.toBeInTheDocument();
         expect(rendered.container.querySelector('.library-empty')).not.toBeInTheDocument();
         expect(
             screen.queryByText('캐릭터를 추가하면 바로 새로운 대화를 시작할 수 있어요.'),
         ).not.toBeInTheDocument();
+        controller.destroy();
+    });
+
+    it('keeps the persistent home search field without a redundant top action', () => {
+        const state = libraryState();
+        const controller = new LorepiaAppController({} as LorepiaClient);
+
+        render(LibraryPane, {
+            state,
+            controller,
+            client: {} as LorepiaClient,
+            onOpenConversations: () => undefined,
+            rootView: true,
+        });
+
+        const search = screen.getByRole('searchbox', { name: '캐릭터 검색' });
+        expect(search).toBeVisible();
+        expect(screen.queryByRole('button', { name: '검색창으로 이동' })).not.toBeInTheDocument();
         controller.destroy();
     });
 

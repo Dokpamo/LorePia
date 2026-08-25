@@ -432,9 +432,9 @@
         : $tr(`settings.section.${section}.title`)}
 >
     {#if section === null}
-        <div class="mobile-top-bar settings-toolbar" role="toolbar" aria-label="설정 도구">
+        <div class="mobile-top-frame settings-toolbar" role="toolbar" aria-label="설정 도구">
             <button
-                class="icon-button ghost mobile-top-action mobile-top-action-right settings-tool-button"
+                class="icon-button ghost mobile-top-action settings-tool-button"
                 type="button"
                 aria-label="설정 더보기"
                 aria-expanded={settingsMenuOpen}
@@ -1235,15 +1235,33 @@
     }
 
     :global(.app-shell[data-layout='mobile']) .settings-detail-scroll {
-        padding-bottom: calc(24px + env(safe-area-inset-bottom));
+        padding-bottom: calc(clamp(10px, 5.492vw, 24px) + env(safe-area-inset-bottom));
     }
 
     :global(.app-shell[data-layout='mobile']) .settings-detail-scroll.detail-scroll-has-actions {
-        padding-bottom: calc(var(--mobile-nav) + 36px + env(safe-area-inset-bottom));
+        padding-bottom: calc(
+            var(--mobile-nav) + clamp(15px, 8.238vw, 36px) + env(safe-area-inset-bottom)
+        );
     }
 
     :global(.app-shell[data-layout='mobile']) .provider-scroll.settings-home-scroll {
-        padding-bottom: calc(var(--mobile-nav) + 26px + env(safe-area-inset-bottom));
+        display: flex;
+        min-height: 0;
+        flex-direction: column;
+        padding-top: clamp(25px, 10.297vw, 45px);
+        padding-bottom: calc(
+            var(--mobile-nav) + clamp(11px, 5.95vw, 26px) + env(safe-area-inset-bottom)
+        );
+    }
+
+    :global(.app-shell[data-layout='mobile']) .settings-home-scroll .setting-list {
+        min-height: 0;
+        flex: none;
+        justify-content: flex-start;
+        /* The fixed tab bar overlays the page, so keep a real scroll tail after the last row. */
+        margin-bottom: calc(
+            var(--mobile-nav) + clamp(11px, 5.95vw, 26px) + env(safe-area-inset-bottom)
+        );
     }
 
     .settings-toolbar {
@@ -1254,6 +1272,8 @@
     }
 
     .settings-tool-button {
+        grid-column: 2;
+        justify-self: end;
         color: var(--ink);
         pointer-events: auto;
     }
@@ -1351,21 +1371,34 @@
         letter-spacing: -0.025em;
     }
 
-    @container view (max-width: 719px) {
-        .provider-scroll.settings-home-scroll {
-            display: flex;
-            min-height: 0;
-            flex-direction: column;
-            padding-bottom: calc(var(--mobile-nav) + 26px + env(safe-area-inset-bottom));
-        }
+    :global(.app-shell[data-layout='mobile']) .provider-scroll {
+        gap: clamp(7px, 3.661vw, 16px);
+        padding-inline: var(--settings-gutter);
+    }
 
-        .settings-home-scroll .setting-list {
-            min-height: 0;
-            flex: none;
-            justify-content: flex-start;
-            /* The fixed tab bar overlays the page, so keep a real scroll tail after the last row. */
-            margin-bottom: calc(var(--mobile-nav) + 26px + env(safe-area-inset-bottom));
-        }
+    :global(.app-shell[data-layout='mobile']) .settings-identity {
+        min-height: clamp(103px, 43.021vw, 188px);
+        padding: 0 clamp(8px, 4.577vw, 20px) clamp(7px, 4.119vw, 18px);
+        margin-bottom: clamp(3px, 1.831vw, 8px);
+        gap: clamp(7px, 2.975vw, 13px);
+    }
+
+    :global(.app-shell[data-layout='mobile']) .settings-avatar-wrap {
+        width: clamp(59px, 24.714vw, 108px);
+        height: clamp(59px, 24.714vw, 108px);
+    }
+
+    :global(.app-shell[data-layout='mobile']) .settings-avatar-badge {
+        right: clamp(-3px, -0.458vw, -1px);
+        bottom: clamp(-3px, -0.458vw, -1px);
+        width: clamp(20px, 8.238vw, 36px);
+        height: clamp(20px, 8.238vw, 36px);
+        border-width: clamp(2px, 0.915vw, 4px);
+    }
+
+    :global(.app-shell[data-layout='mobile']) .settings-avatar-badge :global(svg) {
+        width: clamp(11px, 4.577vw, 20px);
+        height: clamp(11px, 4.577vw, 20px);
     }
 
     .detail-choice-list,
@@ -1432,6 +1465,11 @@
         outline: 0;
     }
 
+    :global(.app-shell[data-layout='mobile']) .detail-form :is(input, select) {
+        min-height: clamp(33px, 13.73vw, 60px);
+        padding: clamp(8px, 3.432vw, 15px);
+    }
+
     .detail-secondary-action {
         width: 100%;
         min-height: clamp(48px, 13.73vw, 60px);
@@ -1439,6 +1477,10 @@
         border-color: var(--line);
         font-size: var(--detail-support-type);
         font-weight: 700;
+    }
+
+    :global(.app-shell[data-layout='mobile']) .detail-secondary-action {
+        min-height: clamp(33px, 13.73vw, 60px);
     }
 
     .detail-value-list {

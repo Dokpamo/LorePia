@@ -71,6 +71,7 @@ function appClient(
     return {
         bootstrapSnapshot,
         listCharacters,
+        listConversations: vi.fn().mockResolvedValue([]),
         getProviderOverview: vi.fn().mockResolvedValue({
             templates: [],
             connections: [],
@@ -210,7 +211,9 @@ describe('App responsive shell', () => {
         await fireEvent.click(screen.getByRole('button', { name: '채팅' }));
 
         expect(screen.getByRole('heading', { name: '채팅' })).toBeVisible();
-        expect(screen.getByRole('searchbox', { name: '대화 검색' })).toBeVisible();
+        expect(screen.queryByRole('searchbox', { name: '대화 검색' })).not.toBeInTheDocument();
+        await fireEvent.click(screen.getByRole('button', { name: '대화 검색' }));
+        expect(screen.getByRole('searchbox', { name: '대화 검색' })).toHaveFocus();
         expect(screen.getByRole('navigation', { name: '주요 화면' })).toBeVisible();
         expect(screen.queryByRole('button', { name: '새 대화' })).not.toBeInTheDocument();
     });
@@ -229,6 +232,7 @@ describe('App responsive shell', () => {
 
         await fireEvent.click(screen.getByRole('button', { name: '채팅' }));
 
+        await fireEvent.click(screen.getByRole('button', { name: '대화 검색' }));
         await screen.findByRole('searchbox', { name: '대화 검색' });
         expect(screen.getByRole('navigation', { name: '주요 화면' })).toBeVisible();
     });
@@ -296,7 +300,7 @@ describe('App responsive shell', () => {
         await fireEvent.click(screen.getByRole('button', { name: '생성' }));
 
         const title = await screen.findByRole('heading', { name: '창작 스튜디오' });
-        expect(title.closest('.mobile-top-bar.mobile-root-header')).not.toBeNull();
+        expect(title.closest('.mobile-top-frame.mobile-root-header')).not.toBeNull();
         expect(rendered.container.querySelector('.studio-index-header')).toBeNull();
     });
 

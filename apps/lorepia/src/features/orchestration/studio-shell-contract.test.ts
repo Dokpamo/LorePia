@@ -95,7 +95,7 @@ describe('Studio pushed-screen shell', () => {
         expect(detailActionBarSource).toMatch(
             /\.detail-action-bar\.fixed\s*\{[^}]*position:\s*fixed;[^}]*left:\s*var\(--detail-action-center,\s*50%\);[^}]*var\(--detail-action-workspace-width,\s*100vw\)/s,
         );
-        expect(appCss).toContain('--detail-action-workspace-width: min(100vw, 899px)');
+        expect(appCss).toContain('--detail-action-workspace-width: min(100vw, 591px)');
         expect(appCss).toContain('--detail-action-workspace-width: calc(100vw - var(--sidebar))');
         expect(appCss).toMatch(
             /\.view-scroll\.studio-detail-scroll\s*\{[^}]*padding-bottom:\s*24px;/s,

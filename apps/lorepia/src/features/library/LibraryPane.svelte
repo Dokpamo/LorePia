@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { Plus, Search, UserRoundPlus } from '@lucide/svelte';
+    import { Plus, Search } from '@lucide/svelte';
     import { t, tr } from '../../lib/i18n';
     import type { LorepiaAppState, LorepiaAppController } from '../../app/app-controller';
     import type {
@@ -126,28 +126,42 @@
     }
 </script>
 
-<section class="pane library-pane" class:root-view={rootView} aria-labelledby="library-title">
+<section
+    class="pane library-pane"
+    class:root-view={rootView}
+    aria-labelledby={rootView ? 'library-root-title' : 'library-title'}
+>
+    {#if rootView}
+        <header class="mobile-top-frame mobile-root-header library-root-header">
+            <h1 id="library-root-title">캐릭터</h1>
+            <div class="mobile-root-actions" aria-label="캐릭터 작업">
+                <button
+                    class="mobile-top-action mobile-top-add-action"
+                    type="button"
+                    aria-label={$tr('library.empty.import')}
+                    onclick={() => void controller.beginImport()}
+                >
+                    <Plus aria-hidden="true" />
+                </button>
+            </div>
+        </header>
+    {/if}
     <header class="pane-header">
-        <h1 id="library-title" class="sr-only">{$tr('library.title')}</h1>
-        {#if !rootView || appState.library.characters.length > 0}
+        {#if !rootView}
+            <h1 id="library-title" class="sr-only">{$tr('library.title')}</h1>
             <button
                 class="compact import-character-button"
-                class:mobile-root-fab={rootView}
                 type="button"
                 aria-label={$tr('library.empty.import')}
                 onclick={() => void controller.beginImport()}
             >
-                <span
-                    class="import-character-mark"
-                    class:mobile-root-fab-mark={rootView}
-                    aria-hidden="true"
-                >
+                <span class="import-character-mark" aria-hidden="true">
                     <Plus class="import-character-icon" />
                 </span>
                 <span class="import-character-label">{$tr('library.import')}</span>
             </button>
         {/if}
-        {#if appState.selected_character !== null && visibleCharacters.some((character) => character.id === appState.selected_character?.id)}
+        {#if !rootView && appState.selected_character !== null && visibleCharacters.some((character) => character.id === appState.selected_character?.id)}
             {@const selected = appState.selected_character}
             <button
                 class="compact export-character-button"
@@ -204,63 +218,55 @@
                 >{$tr('library.retry')}</button
             >
         </div>
-    {:else if appState.library.characters.length === 0}
-        {#if rootView}
-            <div class="mobile-root-contact-action">
-                <button
-                    class="primary mobile-root-contact-button"
-                    type="button"
-                    onclick={() => void controller.beginImport()}
-                >
-                    <UserRoundPlus class="import-contact-icon" aria-hidden="true" />
-                    <span>{$tr('library.empty.import')}</span>
+    {:else if appState.library.characters.length > 0}
+        {#if visibleCharacters.length === 0}
+            <div class="state-panel empty search-empty">
+                <strong>{$tr('library.search.empty')}</strong>
+                <button type="button" onclick={() => (searchQuery = '')}>
+                    {$tr('library.search.clear')}
                 </button>
             </div>
+        {:else}
+            <ul class="entity-list" aria-label={$tr('library.list.label')}>
+                {#each visibleCharacters as character (character.id)}
+                    <li>
+                        <button
+                            type="button"
+                            class:active={appState.selected_character?.id === character.id}
+                            class="entity-row"
+                            class:mobile-root-row={rootView}
+                            aria-pressed={appState.selected_character?.id === character.id}
+                            onclick={() => selectCharacter(character)}
+                        >
+                            <span class="avatar">
+                                {#if character.avatar_asset_id === null}
+                                    <span aria-hidden="true">{character.name.slice(0, 1)}</span>
+                                {:else}
+                                    <TrustedAsset
+                                        {client}
+                                        selector={{
+                                            kind: 'asset_id',
+                                            asset_id: character.avatar_asset_id,
+                                        }}
+                                        expectedKind="image"
+                                        alt={$tr('library.character.image', {
+                                            name: character.name.slice(0, 256),
+                                        })}
+                                    />
+                                {/if}
+                            </span>
+                            <span class="entity-copy">
+                                <strong>{character.name}</strong>
+                                <span
+                                    >{character.description ||
+                                        $tr('library.description.empty')}</span
+                                >
+                            </span>
+                        </button>
+                    </li>
+                {/each}
+            </ul>
         {/if}
-    {:else if visibleCharacters.length === 0}
-        <div class="state-panel empty search-empty">
-            <strong>{$tr('library.search.empty')}</strong>
-            <button type="button" onclick={() => (searchQuery = '')}>
-                {$tr('library.search.clear')}
-            </button>
-        </div>
-    {:else}
-        <ul class="entity-list" aria-label={$tr('library.list.label')}>
-            {#each visibleCharacters as character (character.id)}
-                <li>
-                    <button
-                        type="button"
-                        class:active={appState.selected_character?.id === character.id}
-                        class="entity-row"
-                        class:mobile-root-row={rootView}
-                        aria-pressed={appState.selected_character?.id === character.id}
-                        onclick={() => selectCharacter(character)}
-                    >
-                        <span class="avatar">
-                            {#if character.avatar_asset_id === null}
-                                <span aria-hidden="true">{character.name.slice(0, 1)}</span>
-                            {:else}
-                                <TrustedAsset
-                                    {client}
-                                    selector={{
-                                        kind: 'asset_id',
-                                        asset_id: character.avatar_asset_id,
-                                    }}
-                                    expectedKind="image"
-                                    alt={$tr('library.character.image', {
-                                        name: character.name.slice(0, 256),
-                                    })}
-                                />
-                            {/if}
-                        </span>
-                        <span class="entity-copy">
-                            <strong>{character.name}</strong>
-                            <span>{character.description || $tr('library.description.empty')}</span>
-                        </span>
-                    </button>
-                </li>
-            {/each}
-        </ul>
     {/if}
 </section>
 
@@ -283,14 +289,14 @@
         min-height: 44px;
         flex: none;
         align-items: center;
-        padding: 0 clamp(10px, 3.204vw, 14px);
+        padding: 0 clamp(7px, 3.204vw, 14px);
         border: 1px solid var(--line);
         border-radius: var(--radius-pill);
         margin: 2px 14px 8px;
         background: var(--surface-raised);
         box-shadow: var(--shadow-1);
         color: var(--ink-muted);
-        gap: clamp(8px, 2.288vw, 10px);
+        gap: clamp(5px, 2.288vw, 10px);
     }
 
     .library-search:focus-within {
@@ -298,8 +304,8 @@
     }
 
     .library-search :global(.library-search-icon) {
-        width: clamp(16px, 4.577vw, 20px);
-        height: clamp(16px, 4.577vw, 20px);
+        width: clamp(11px, 4.577vw, 20px);
+        height: clamp(11px, 4.577vw, 20px);
         flex: none;
         fill: none;
         stroke: currentcolor;
@@ -369,7 +375,53 @@
     }
 
     .library-pane.root-view .entity-list {
-        padding: 0 8px calc(var(--mobile-nav) + 92px + env(safe-area-inset-bottom));
+        padding: 0 8px calc(var(--mobile-nav) + 20px + env(safe-area-inset-bottom));
         gap: 0;
+    }
+
+    :global(.app-shell[data-layout='mobile']) .library-pane.root-view .entity-list {
+        padding-inline: 0;
+        padding-bottom: calc(
+            var(--mobile-nav) + clamp(8px, 4.577vw, 20px) + env(safe-area-inset-bottom)
+        );
+    }
+
+    :global(.app-shell[data-layout='mobile']) .library-pane.root-view .mobile-root-row {
+        min-height: clamp(46px, 19.222vw, 84px);
+        padding: clamp(4px, 1.831vw, 8px) clamp(10px, 4.119vw, 18px);
+        border-radius: 0;
+        gap: clamp(8px, 3.204vw, 14px);
+    }
+
+    :global(.app-shell[data-layout='mobile']) .library-pane.root-view .mobile-root-row.active {
+        background: transparent;
+        color: var(--ink);
+        font-weight: 400;
+    }
+
+    :global(.app-shell[data-layout='mobile']) .library-pane.root-view .mobile-root-row .avatar {
+        width: clamp(35px, 14.645vw, 64px);
+        height: clamp(35px, 14.645vw, 64px);
+        background: var(--surface-active);
+        color: var(--ink);
+        font-size: clamp(11px, 4.577vw, 20px);
+        font-weight: 700;
+    }
+
+    :global(.app-shell[data-layout='mobile'])
+        .library-pane.root-view
+        .mobile-root-row
+        .entity-copy
+        > strong {
+        font-size: clamp(11px, 4.577vw, 20px);
+        font-weight: 700;
+    }
+
+    :global(.app-shell[data-layout='mobile'])
+        .library-pane.root-view
+        .mobile-root-row
+        .entity-copy
+        > span {
+        font-size: clamp(9px, 3.661vw, 16px);
     }
 </style>

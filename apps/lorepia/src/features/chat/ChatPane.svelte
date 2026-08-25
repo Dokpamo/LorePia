@@ -1,5 +1,11 @@
 <script lang="ts">
-    import { ArrowLeft, Send, Sparkles } from '@lucide/svelte';
+    import {
+        ArrowLeft,
+        EllipsisVertical,
+        FaceSlightlySmiling,
+        Send,
+        Sparkles,
+    } from '@lucide/svelte';
     import MarkdownText from './MarkdownText.svelte';
     import { onMount, tick } from 'svelte';
     import type { KeyboardEventHandler } from 'svelte/elements';
@@ -92,6 +98,7 @@
     let anchoredBranchKey = '';
     let anchoredMessageCount = 0;
     let editingMessageId = $state<string | null>(null);
+    let activeActionMessageId = $state<string | null>(null);
     let editDraft = $state('');
     let pendingRemoveId = $state<string | null>(null);
     let copyNotice = $state('');
@@ -807,6 +814,12 @@
         composerTextarea?.focus();
     }
 
+    async function insertEmoji(): Promise<void> {
+        draft = `${draft}🙂`;
+        await tick();
+        composerTextarea?.focus();
+    }
+
     const onComposerKeydown: KeyboardEventHandler<HTMLTextAreaElement> = (event) => {
         if (
             shouldSubmitComposer(
@@ -829,8 +842,13 @@
 
     function beginEdit(message: MessageDto): void {
         editingMessageId = message.id;
+        activeActionMessageId = null;
         editDraft = message.content;
         pendingRemoveId = null;
+    }
+
+    function toggleMessageActions(messageId: string): void {
+        activeActionMessageId = activeActionMessageId === messageId ? null : messageId;
     }
 
     async function commitEdit(messageId: string): Promise<void> {
@@ -853,7 +871,7 @@
 
 <section class="pane chat-pane" aria-labelledby="chat-title">
     {#if appState.selected_conversation === null}
-        <header class="mobile-top-bar chat-header empty-chat-header">
+        <header class="mobile-top-frame chat-header empty-chat-header">
             <div class="chat-identity">
                 <h2 id="chat-title">채팅</h2>
             </div>
@@ -866,7 +884,7 @@
             <button class="primary" type="button" onclick={onOpenHome}> 대화 목록 열기 </button>
         </div>
     {:else}
-        <header class="mobile-top-bar chat-header">
+        <header class="mobile-top-frame mobile-top-frame-leading chat-header">
             <button
                 class="icon-button ghost mobile-top-action mobile-top-action-left back-button"
                 type="button"
@@ -938,6 +956,18 @@
                     </select>
                 </label>
             {/if}
+            <button
+                class="chat-toolbar-new-operation"
+                type="button"
+                aria-label="새 생성 작업"
+                title="새 생성 작업"
+                disabled={sending ||
+                    appState.chat.phase === 'loading' ||
+                    appState.chat.active_generation_id !== null}
+                onclick={() => void beginNewGenerationOperation()}
+            >
+                <Sparkles aria-hidden="true" />
+            </button>
         </div>
 
         {#if client !== undefined && interactionController !== null && interactionState.phase !== 'unavailable'}
@@ -1188,6 +1218,7 @@
                         <li
                             class:from-user={message.role === 'user'}
                             class:has-date-divider={showsDay}
+                            class:actions-open={activeActionMessageId === message.id}
                             class:memory-source-boundary={messageFocusRequest !== null &&
                                 (message.id === messageFocusRequest.start_message_id ||
                                     message.id === messageFocusRequest.end_message_id)}
@@ -1257,20 +1288,31 @@
                                             </button>
                                         </div>
                                     </form>
+                                    <time class="message-time" datetime={message.created_at}>
+                                        {formatMessageTime(message.created_at)}
+                                    </time>
                                 </article>
-                                <time class="message-time" datetime={message.created_at}>
-                                    {formatMessageTime(message.created_at)}
-                                </time>
                             {:else}
                                 <article class="message-body" aria-label={turnLabel}>
                                     <MarkdownText text={message.content} />
                                     {#if message.status !== 'complete'}
                                         <span class="message-status">{message.status}</span>
                                     {/if}
+                                    <footer class="message-bubble-meta">
+                                        <time class="message-time" datetime={message.created_at}>
+                                            {formatMessageTime(message.created_at)}
+                                        </time>
+                                        <button
+                                            class="message-action-reveal"
+                                            type="button"
+                                            aria-label={`${turnLabel} 작업 보기`}
+                                            aria-expanded={activeActionMessageId === message.id}
+                                            onclick={() => toggleMessageActions(message.id)}
+                                        >
+                                            <EllipsisVertical aria-hidden="true" />
+                                        </button>
+                                    </footer>
                                 </article>
-                                <time class="message-time" datetime={message.created_at}>
-                                    {formatMessageTime(message.created_at)}
-                                </time>
                                 <div class="message-actions" aria-label="메시지 작업">
                                     <button type="button" onclick={() => void copyMessage(message)}>
                                         복사
@@ -1376,21 +1418,9 @@
                 refreshEpoch={attemptApprovalRefreshEpoch}
                 onRetry={returnToRetainedGenerationInput}
                 retryLabel="원래 전송·수정·재생성 확인"
+                hideWhenInactive
             />
         {/if}
-
-        <div class="generation-operation-actions">
-            <button
-                class="compact"
-                type="button"
-                disabled={sending ||
-                    appState.chat.phase === 'loading' ||
-                    appState.chat.active_generation_id !== null}
-                onclick={() => void beginNewGenerationOperation()}
-            >
-                새 생성 작업
-            </button>
-        </div>
 
         <div class="memory-query-retry-slot">
             <MemoryQueryRetryPanel
@@ -1418,6 +1448,14 @@
         >
             <label class="sr-only" for="chat-draft">메시지</label>
             <div class="composer-field">
+                <button
+                    class="composer-leading-action"
+                    type="button"
+                    aria-label="이모지 추가"
+                    onclick={() => void insertEmoji()}
+                >
+                    <FaceSlightlySmiling aria-hidden="true" />
+                </button>
                 <textarea
                     id="chat-draft"
                     bind:this={composerTextarea}
@@ -1537,13 +1575,6 @@
     }
 
     .memory-query-retry-slot {
-        width: min(100% - 2 * clamp(16px, 5vw, 32px), var(--reading));
-        margin: 8px auto 0;
-    }
-
-    .generation-operation-actions {
-        display: flex;
-        justify-content: flex-end;
         width: min(100% - 2 * clamp(16px, 5vw, 32px), var(--reading));
         margin: 8px auto 0;
     }

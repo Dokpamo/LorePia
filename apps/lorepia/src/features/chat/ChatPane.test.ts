@@ -194,6 +194,40 @@ describe('ChatPane transcript chrome', () => {
         expect(send.querySelector('svg')).not.toBeNull();
         controller.destroy();
     });
+
+    it('keeps the leading messenger action functional and returns focus to the composer', async () => {
+        const { controller } = renderChat();
+        const composer = screen.getByRole('textbox', { name: '메시지' });
+
+        await fireEvent.click(screen.getByRole('button', { name: '이모지 추가' }));
+
+        expect(composer).toHaveValue('🙂');
+        expect(composer).toHaveFocus();
+        controller.destroy();
+    });
+
+    it('reveals message tools only when the reader asks for them', async () => {
+        const appState = chatReadyState();
+        appState.messages.items = [
+            {
+                id: 'message-action-1',
+                conversation_id: 'conversation-1',
+                parent_id: null,
+                role: 'user',
+                content: '작업을 열어 주세요.',
+                status: 'complete',
+                generation_id: null,
+                created_at: '2026-08-03T19:47:00',
+            },
+        ];
+        const { controller } = renderChat(appState);
+        const message = screen.getByRole('button', { name: '내 메시지 작업 보기' });
+
+        expect(message).toHaveAttribute('aria-expanded', 'false');
+        await fireEvent.click(message);
+        expect(message).toHaveAttribute('aria-expanded', 'true');
+        controller.destroy();
+    });
 });
 
 describe('ChatPane live response', () => {

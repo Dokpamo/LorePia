@@ -73,7 +73,7 @@ describe('preview demo client', () => {
 
         await fireEvent.click(screen.getByRole('button', { name: '채팅' }));
         const conversation = await screen.findByRole('button', {
-            name: /잊혀진 서고.*아리아과의 대화/,
+            name: /잊혀진 서고/,
         });
         await fireEvent.click(conversation);
 

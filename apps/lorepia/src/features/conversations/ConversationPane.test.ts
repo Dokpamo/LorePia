@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -30,6 +30,23 @@ const conversation: ConversationDto = {
     title: '첫 대화',
     created_at: '2026-08-03T00:00:00Z',
     updated_at: '2026-08-03T00:00:00Z',
+};
+
+const otherCharacter: CharacterDto = {
+    id: 'character-2',
+    name: '미오',
+    description: '',
+    source_hash: 'synthetic-2',
+    avatar_asset_id: null,
+    created_at: '2026-08-04T00:00:00Z',
+};
+
+const otherConversation: ConversationDto = {
+    id: 'conversation-2',
+    character_id: otherCharacter.id,
+    title: '별빛 산책',
+    created_at: '2026-08-04T00:00:00Z',
+    updated_at: '2026-08-04T00:00:00Z',
 };
 
 const catalog: CharacterGreetingCatalogDto = {
@@ -81,7 +98,7 @@ describe('ConversationPane greeting selector', () => {
         ).not.toBeInTheDocument();
     });
 
-    it('keeps new conversation in its floating position without an empty-state prompt', () => {
+    it('keeps root actions in the top area without an empty-state prompt', () => {
         const state = readyState();
         state.conversations.items = [];
         const controller = {
@@ -97,10 +114,96 @@ describe('ConversationPane greeting selector', () => {
         });
 
         const action = screen.getByRole('button', { name: '새 대화' });
-        expect(action).toHaveClass('mobile-root-fab');
+        expect(action).toHaveClass('mobile-top-action', 'mobile-top-add-action');
+        expect(rendered.container.querySelector('.mobile-root-actions')).toContainElement(action);
         expect(screen.queryByText('저장된 대화가 없습니다.')).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '대화 시작' })).not.toBeInTheDocument();
         expect(rendered.container.querySelector('.conversation-empty')).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: '설정' })).not.toBeInTheDocument();
+    });
+
+    it('focuses the Telegram-style search shortcut and previews the latest selected message', async () => {
+        const state = readyState();
+        state.selected_conversation = conversation;
+        state.messages = {
+            phase: 'ready',
+            error: null,
+            items: [
+                {
+                    id: 'message-1',
+                    conversation_id: conversation.id,
+                    parent_id: null,
+                    role: 'assistant',
+                    content: '마지막 메시지\n미리보기',
+                    status: 'complete',
+                    generation_id: 'generation-1',
+                    created_at: '2026-08-03T00:00:00Z',
+                },
+            ],
+        };
+        const controller = {
+            selectConversation: vi.fn(() => Promise.resolve(false)),
+            openNewConversation: vi.fn(() => Promise.resolve(false)),
+        } as unknown as LorepiaAppController;
+
+        render(ConversationPane, {
+            state,
+            controller,
+            onOpenChat: vi.fn(),
+            rootView: true,
+        });
+
+        expect(screen.queryByRole('searchbox', { name: '대화 검색' })).not.toBeInTheDocument();
+        await fireEvent.click(screen.getByRole('button', { name: '대화 검색' }));
+        const search = screen.getByRole('searchbox', { name: '대화 검색' });
+        expect(search).toHaveFocus();
+        expect(screen.getByRole('button', { name: '검색 닫기' })).toHaveAttribute(
+            'aria-pressed',
+            'true',
+        );
+        expect(screen.getByText('마지막 메시지 미리보기')).toBeVisible();
+    });
+
+    it('loads the global conversation index and filters it with character pills', async () => {
+        const state = readyState();
+        state.library = {
+            phase: 'ready',
+            error: null,
+            characters: [character, otherCharacter],
+        };
+        const listConversations = vi.fn().mockResolvedValue([conversation, otherConversation]);
+        const selectCharacter = vi.fn().mockResolvedValue(undefined);
+        const selectConversation = vi.fn().mockResolvedValue(true);
+        const onOpenChat = vi.fn();
+        const controller = {
+            selectCharacter,
+            selectConversation,
+            openNewConversation: vi.fn(() => Promise.resolve(false)),
+        } as unknown as LorepiaAppController;
+
+        render(ConversationPane, {
+            state,
+            controller,
+            client: { listConversations },
+            onOpenChat,
+            rootView: true,
+        });
+
+        await screen.findByRole('tab', { name: '미오' });
+        expect(listConversations).toHaveBeenCalledWith(null);
+        expect(screen.getByRole('button', { name: /첫 대화/ })).toBeVisible();
+        expect(screen.getByRole('button', { name: /별빛 산책/ })).toBeVisible();
+        expect(document.querySelector('.conversation-filter-count')).not.toBeInTheDocument();
+
+        await fireEvent.click(screen.getByRole('tab', { name: '미오' }));
+        expect(screen.queryByRole('button', { name: /첫 대화/ })).not.toBeInTheDocument();
+        await fireEvent.click(screen.getByRole('button', { name: /별빛 산책/ }));
+
+        await waitFor(() => {
+            expect(selectCharacter).toHaveBeenCalledWith(otherCharacter);
+            expect(selectConversation).toHaveBeenCalledWith(otherConversation);
+            expect(onOpenChat).toHaveBeenCalledOnce();
+        });
     });
 
     it('exposes new conversation as the mobile primary action without changing its gate', () => {
