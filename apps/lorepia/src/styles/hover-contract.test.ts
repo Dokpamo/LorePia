@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import appSource from '../app/App.svelte?raw';
+import choicePopoverSource from '../components/ChoicePopover.svelte?raw';
 import detailActionBarSource from '../components/detail/DetailActionBar.svelte?raw';
 import detailPageSource from '../components/detail/DetailPage.svelte?raw';
 import chatPaneSource from '../features/chat/ChatPane.svelte?raw';
 import conversationPaneSource from '../features/conversations/ConversationPane.svelte?raw';
 import libraryPaneSource from '../features/library/LibraryPane.svelte?raw';
+import orchestrationQuickDrawerSource from '../features/orchestration/OrchestrationQuickDrawer.svelte?raw';
 import orchestrationStudioSource from '../features/orchestration/OrchestrationStudio.svelte?raw';
 import personaPanelSource from '../features/personas/PersonaPanel.svelte?raw';
 import discoveryPanelSource from '../features/providers/DiscoveryPanel.svelte?raw';
@@ -327,6 +329,30 @@ describe('pointer interaction styling', () => {
         expect(appSource).toContain("const REDUCED_MOTION = '(prefers-reduced-motion: reduce)'");
     });
 
+    it('caps mobile density continuously through Fold and tablet widths', () => {
+        expect(appCss).toMatch(
+            /@media \(max-width:\s*899px\)\s*\{[\s\S]*?:root\s*\{[^}]*font-size:\s*clamp\(9px,\s*3\.661vw,\s*15px\);[\s\S]*?\.app-shell\[data-layout='mobile'\]\s*\{[^}]*--mobile-root-header:\s*clamp\(40px,\s*16\.476vw,\s*60px\);[^}]*--mobile-top-action:\s*clamp\(30px,\s*12\.18vw,\s*44px\);[^}]*--mobile-pill-control:\s*clamp\(26px,\s*10\.526vw,\s*36px\);[^}]*--mobile-nav:\s*clamp\(37px,\s*15\.103vw,\s*60px\);[^}]*--reading:\s*560px;[^}]*--settings:\s*560px;/s,
+        );
+        expect(appCss).toMatch(
+            /@media \(max-width:\s*899px\)[\s\S]*?\.mobile-root-header h1\s*\{[^}]*font-size:\s*clamp\(14px,\s*5\.72vw,\s*22px\);/s,
+        );
+        for (const source of [libraryPaneSource, conversationPaneSource]) {
+            expect(source).toMatch(
+                /@media \(max-width:\s*899px\)[\s\S]*?\.mobile-root-row\s*\{[^}]*min-height:\s*clamp\(46px,\s*19\.222vw,\s*68px\);[^}]*padding:\s*clamp\(4px,\s*1\.831vw,\s*6px\) clamp\(10px,\s*4\.119vw,\s*16px\);/s,
+            );
+            expect(source).toMatch(
+                /@media \(max-width:\s*899px\)[\s\S]*?\.mobile-root-row[\s\S]*?\.avatar\s*\{[^}]*width:\s*clamp\(35px,\s*14\.645vw,\s*52px\);[^}]*height:\s*clamp\(35px,\s*14\.645vw,\s*52px\);/s,
+            );
+        }
+        expect(conversationPaneSource).toMatch(
+            /@media \(max-width:\s*899px\)[\s\S]*?\.conversation-filter-strip\s*\{[^}]*min-height:\s*clamp\(37px,\s*15\.561vw,\s*52px\);/s,
+        );
+        expect(providerSettingsSource).toMatch(
+            /@media \(max-width:\s*899px\)[\s\S]*?\.settings-avatar-wrap\s*\{[^}]*width:\s*clamp\(59px,\s*24\.714vw,\s*88px\);[^}]*height:\s*clamp\(59px,\s*24\.714vw,\s*88px\);/s,
+        );
+        expect(appCss).not.toContain('@media (min-width: 600px) and (max-width: 899px)');
+    });
+
     it('hides mobile scrollbars without disabling native wheel or touch scrolling', () => {
         expect(providerSettingsSource).toMatch(
             /\.provider-scroll\s*\{[^}]*height:\s*0;[^}]*min-height:\s*0;[^}]*flex:\s*1 1 0;[^}]*overflow-y:\s*scroll;/s,
@@ -373,18 +399,51 @@ describe('pointer interaction styling', () => {
     });
 
     it('uses shared root-screen geometry for home and chat', () => {
-        expect(libraryPaneSource).toMatch(
-            /class="library-search"\s+class:mobile-root-search=\{rootView\}/,
-        );
+        expect(libraryPaneSource).toMatch(/class="library-search"/);
+        expect(libraryPaneSource).not.toContain('class:mobile-root-search={rootView}');
         expect(libraryPaneSource).toMatch(
             /class="mobile-top-frame mobile-root-header library-root-header"/,
         );
         expect(conversationPaneSource).toMatch(
             /class="mobile-top-frame mobile-root-header conversation-root-header"/,
         );
-        expect(conversationPaneSource).toMatch(/class="conversation-search mobile-root-search"/);
+        expect(conversationPaneSource).toMatch(
+            /class="conversation-search conversation-top-search"[\s\S]*?role="search"/,
+        );
+        expect(conversationPaneSource).not.toMatch(
+            /class="conversation-search mobile-root-search"/,
+        );
+        expect(conversationPaneSource).toMatch(/@keyframes conversation-search-expand/);
+        expect(conversationPaneSource).toMatch(/@keyframes conversation-search-collapse/);
+        expect(libraryPaneSource).toMatch(/class="library-top-search"[\s\S]*?role="search"/);
+        expect(libraryPaneSource).toMatch(/@keyframes library-search-expand/);
+        expect(libraryPaneSource).toMatch(/@keyframes library-search-collapse/);
         expect(conversationPaneSource).toMatch(
             /\.conversation-filter-pill\s*\{[^}]*height:\s*var\(--mobile-pill-control\);[^}]*min-height:\s*var\(--mobile-pill-control\);/s,
+        );
+        expect(libraryPaneSource).toMatch(
+            /\.library-filter-pill\s*\{[^}]*height:\s*var\(--mobile-pill-control\);[^}]*min-height:\s*var\(--mobile-pill-control\);/s,
+        );
+        expect(conversationPaneSource).toContain(
+            '.conversation-filter-pill:hover:not(:disabled):not(.active)',
+        );
+        expect(libraryPaneSource).toContain(
+            '.library-filter-pill:hover:not(:disabled):not(.active)',
+        );
+        expect(conversationPaneSource).not.toMatch(
+            /\.conversation-filter-pill(?:\.active)?:hover[^{}]*\{[^}]*translateY/s,
+        );
+        expect(libraryPaneSource).not.toMatch(
+            /\.library-filter-pill(?:\.active)?:hover[^{}]*\{[^}]*translateY/s,
+        );
+        expect(libraryPaneSource).toMatch(
+            /\.library-pane\.root-view\s*\.mobile-root-row\.active:hover\s*\{[^}]*background:\s*var\(--surface-hover\);/s,
+        );
+        expect(conversationPaneSource).toMatch(
+            /\.conversation-pane\.root-view\s*\.mobile-root-row\.active:hover\s*\{[^}]*background:\s*var\(--surface-hover\);/s,
+        );
+        expect(conversationPaneSource).toMatch(
+            /\.conversation-preview\s*\{[^}]*padding-right:\s*clamp\(14px,\s*5\.492vw,\s*24px\);/s,
         );
         expect(libraryPaneSource).toMatch(/class="mobile-root-actions"/);
         expect(conversationPaneSource).toMatch(/class="mobile-root-actions"/);
@@ -444,27 +503,93 @@ describe('pointer interaction styling', () => {
         expect(appCss).toMatch(
             /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.composer-field\s*\{[^}]*min-height:\s*var\(--mobile-top-action\);/s,
         );
+        expect(appCss).toMatch(
+            /\.composer-field\s*\{[^}]*--composer-expanded-size:\s*clamp\(96px,\s*18dvh,\s*140px\);[^}]*border-radius:\s*var\(--composer-corner\);[^}]*transition:[^}]*min-height 260ms/s,
+        );
+        expect(appCss).toMatch(
+            /\.composer-field:focus-within\s*\{[^}]*min-height:\s*var\(--composer-expanded-size\);[^}]*border-radius:\s*var\(--radius-lg\);/s,
+        );
+        expect(appCss).toMatch(
+            /\.composer-field:focus-within textarea\s*\{[^}]*min-height:\s*calc\(var\(--composer-expanded-size\) - 10px\);[^}]*padding-block:\s*12px;/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.composer-field:focus-within\s*\{[^}]*min-height:\s*var\(--composer-expanded-size\);/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.composer-field:focus-within textarea\s*\{[^}]*min-height:\s*calc\(var\(--composer-expanded-size\) - 10px\);[^}]*padding-block:\s*12px;/s,
+        );
+        expect(chatPaneSource).toContain('<Plus aria-hidden="true" />');
+        expect(chatPaneSource).toContain('<ArrowUp class="chat-send-icon" aria-hidden="true" />');
+        const removedPlaceholder = `placeholder="${String.fromCodePoint(47700, 49884, 51648)}"`;
+        expect(chatPaneSource).not.toContain(removedPlaceholder);
+        expect(chatPaneSource).not.toContain('message-action-reveal');
         expect(appCss).toMatch(/\.sub-header h1\s*\{[^}]*font-size:\s*var\(--detail-ui-type\);/s);
         expect(appCss).toMatch(
             /\.app-shell\[data-layout='mobile'\] \.sub-header h1\s*\{[^}]*height:\s*var\(--mobile-top-action\);[^}]*display:\s*flex;[^}]*align-self:\s*center;[^}]*align-items:\s*center;[^}]*justify-content:\s*center;[^}]*border-radius:\s*var\(--radius-pill\);[^}]*margin-top:\s*0;/s,
         );
-        expect(appCss).toMatch(
-            /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.chat-pane \.chat-toolbar\s*\{[^}]*height:\s*var\(--mobile-pill-control\);[^}]*min-height:\s*var\(--mobile-pill-control\);[^}]*padding:\s*0;[^}]*border:\s*0;[^}]*background:\s*transparent;/s,
-        );
+        expect(chatPaneSource).toContain('{#snippet roomControls(');
+        expect(chatPaneSource).toMatch(/<OrchestrationQuickDrawer[\s\S]*\{roomControls\}/);
+        expect(chatPaneSource).not.toContain('class="chat-toolbar"');
+        expect(appCss).not.toContain('.chat-toolbar-new-operation');
+        expect(appCss).not.toContain('.chat-pane .chat-toolbar');
         expect(appCss).toMatch(
             /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.chat-pane \.chat-header\s*\{[^}]*margin:\s*0 auto;[^}]*inset:\s*0 0 auto;/s,
         );
-        expect(appCss).toMatch(
-            /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.chat-toolbar \.segmented button,\s*\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.chat-toolbar \.branch-picker select\s*\{[^}]*height:\s*var\(--mobile-pill-control\);[^}]*min-height:\s*var\(--mobile-pill-control\);/s,
+        expect(orchestrationQuickDrawerSource).toContain('class="quick-drawer-backdrop"');
+        expect(orchestrationQuickDrawerSource).toContain('aria-hidden={!open}');
+        expect(orchestrationQuickDrawerSource).toContain('inert={!open}');
+        expect(orchestrationQuickDrawerSource).not.toContain('in:fly');
+        expect(orchestrationQuickDrawerSource).not.toContain('out:fly');
+        expect(orchestrationQuickDrawerSource).toMatch(
+            /\.quick-drawer-backdrop\s*\{[^}]*opacity:\s*0;[^}]*visibility:\s*hidden;/s,
         );
-        expect(appCss).toMatch(
-            /\.chat-toolbar-new-operation\s*\{[^}]*width:\s*var\(--mobile-pill-control\);[^}]*height:\s*var\(--mobile-pill-control\);[^}]*min-width:\s*var\(--mobile-pill-control\);[^}]*min-height:\s*var\(--mobile-pill-control\);/s,
+        expect(orchestrationQuickDrawerSource).toMatch(
+            /\.quick-drawer-backdrop\.open\s*\{[^}]*opacity:\s*1;[^}]*visibility:\s*visible;/s,
+        );
+        expect(choicePopoverSource).toContain('role="menu"');
+        expect(choicePopoverSource).toContain('role="menuitemradio"');
+        expect(choicePopoverSource).toContain('class="choice-check"');
+        expect(choicePopoverSource).toContain('popover="manual"');
+        expect(choicePopoverSource).toMatch(
+            /\.choice-menu\s*\{[^}]*position:\s*fixed;[^}]*inset:\s*auto;/s,
+        );
+        expect(choicePopoverSource).toMatch(
+            /\.choice-menu::backdrop\s*\{[^}]*background:\s*transparent;/s,
+        );
+        expect(orchestrationQuickDrawerSource).not.toContain('<footer>');
+        expect(orchestrationQuickDrawerSource).not.toContain('type="checkbox"');
+        expect(orchestrationQuickDrawerSource).toContain('class="switch-button"');
+        expect(orchestrationQuickDrawerSource).toContain('role="switch"');
+        expect(orchestrationQuickDrawerSource).toContain(
+            'aria-checked={roomConfig.memory_enabled}',
+        );
+        expect(orchestrationQuickDrawerSource).toContain(
+            'background-color: rgba(0, 0, 0, 0.14) !important;',
+        );
+        expect(orchestrationQuickDrawerSource).toContain('backdrop-filter: none !important;');
+        expect(orchestrationQuickDrawerSource).toContain('onpointerdown={handleSheetPointerDown}');
+        expect(orchestrationQuickDrawerSource).toMatch(
+            /\.quick-drawer\s*\{[^}]*position:\s*fixed;[^}]*bottom:\s*calc\(max\(-680px, -70dvh\) - 24px\);[^}]*grid-template-rows:\s*auto auto minmax\(0, 1fr\);[^}]*height:\s*min\(70dvh, 680px\);/s,
+        );
+        expect(orchestrationQuickDrawerSource).toMatch(
+            /\.quick-drawer\.open\s*\{[^}]*bottom:\s*calc\(12px - var\(--sheet-drag-y, 0px\)\);[^}]*visibility:\s*visible;/s,
+        );
+        expect(orchestrationQuickDrawerSource).not.toContain('translate3d');
+        expect(orchestrationQuickDrawerSource).not.toContain('will-change');
+        expect(orchestrationQuickDrawerSource).toMatch(
+            /@container view \(max-width:\s*640px\)[\s\S]*?\.quick-drawer\s*\{[^}]*bottom:\s*calc\(-70dvh - 24px\);[^}]*width:\s*100%;[^}]*height:\s*70dvh;[^}]*border-radius:\s*24px 24px 0 0;/s,
+        );
+        expect(orchestrationQuickDrawerSource).toMatch(
+            /\.drawer-body\s*\{[^}]*overflow-y:\s*auto;/s,
         );
         expect(appCss).toMatch(
             /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.chat-pane::before\s*\{[^}]*position:\s*absolute;[^}]*z-index:\s*10;[^}]*background:\s*linear-gradient\(/s,
         );
         expect(appCss).toMatch(
-            /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.chat-pane \.message-scroll\s*\{[^}]*padding-top:\s*calc\([^}]*var\(--mobile-top-action\)[^}]*var\(--mobile-pill-control\)/s,
+            /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.chat-pane \.message-scroll\s*\{[^}]*padding-top:\s*calc\([^}]*var\(--mobile-top-action\)[^}]*clamp\(10px,/s,
+        );
+        expect(appCss).not.toMatch(
+            /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.chat-pane \.message-scroll\s*\{[^}]*padding-top:\s*calc\([^}]*var\(--mobile-pill-control\)/s,
         );
         expect(appCss).not.toMatch(
             /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.chat-pane \.message-scroll\s*\{[^}]*(?:-webkit-)?mask-image:/s,

@@ -98,7 +98,7 @@ describe('ConversationPane greeting selector', () => {
         ).not.toBeInTheDocument();
     });
 
-    it('keeps root actions in the top area without an empty-state prompt', () => {
+    it('keeps chat creation out of the root header and reserves it for characters', () => {
         const state = readyState();
         state.conversations.items = [];
         const controller = {
@@ -113,9 +113,12 @@ describe('ConversationPane greeting selector', () => {
             rootView: true,
         });
 
-        const action = screen.getByRole('button', { name: '새 대화' });
-        expect(action).toHaveClass('mobile-top-action', 'mobile-top-add-action');
-        expect(rendered.container.querySelector('.mobile-root-actions')).toContainElement(action);
+        const searchAction = screen.getByRole('button', { name: '대화 검색' });
+        expect(searchAction).toHaveClass('mobile-top-action');
+        expect(rendered.container.querySelector('.mobile-root-actions')).toContainElement(
+            searchAction,
+        );
+        expect(screen.queryByRole('button', { name: '새 대화' })).not.toBeInTheDocument();
         expect(screen.queryByText('저장된 대화가 없습니다.')).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '대화 시작' })).not.toBeInTheDocument();
         expect(rendered.container.querySelector('.conversation-empty')).not.toBeInTheDocument();
@@ -146,7 +149,7 @@ describe('ConversationPane greeting selector', () => {
             openNewConversation: vi.fn(() => Promise.resolve(false)),
         } as unknown as LorepiaAppController;
 
-        render(ConversationPane, {
+        const rendered = render(ConversationPane, {
             state,
             controller,
             onOpenChat: vi.fn(),
@@ -157,11 +160,76 @@ describe('ConversationPane greeting selector', () => {
         await fireEvent.click(screen.getByRole('button', { name: '대화 검색' }));
         const search = screen.getByRole('searchbox', { name: '대화 검색' });
         expect(search).toHaveFocus();
-        expect(screen.getByRole('button', { name: '검색 닫기' })).toHaveAttribute(
-            'aria-pressed',
+        const rootHeader = rendered.container.querySelector('.conversation-root-header');
+        const filterStrip = rendered.container.querySelector('.conversation-filter-strip');
+        expect(rootHeader).toContainElement(search);
+        expect(rootHeader?.nextElementSibling).toBe(filterStrip);
+        expect(rendered.container.querySelector('.mobile-root-search')).not.toBeInTheDocument();
+        expect(rendered.container.querySelector('.mobile-root-actions')).toHaveAttribute(
+            'aria-hidden',
             'true',
         );
+        expect(screen.getByRole('button', { name: '검색 닫기' })).toHaveClass(
+            'conversation-search-close',
+        );
         expect(screen.getByText('마지막 메시지 미리보기')).toBeVisible();
+
+        await fireEvent.keyDown(search, { key: 'Escape' });
+        expect(screen.queryByRole('searchbox', { name: '대화 검색' })).not.toBeInTheDocument();
+        expect(screen.getByRole('heading', { name: '채팅' })).toBeVisible();
+        expect(rendered.container.querySelector('.mobile-root-actions')).toHaveAttribute(
+            'aria-hidden',
+            'false',
+        );
+    });
+
+    it('finishes the animated search collapse before restoring the header controls', async () => {
+        vi.useFakeTimers();
+        const getAnimationsDescriptor = Object.getOwnPropertyDescriptor(
+            Element.prototype,
+            'getAnimations',
+        );
+        Object.defineProperty(Element.prototype, 'getAnimations', {
+            configurable: true,
+            value: vi.fn(() => []),
+        });
+
+        try {
+            const state = readyState();
+            const controller = {
+                selectConversation: vi.fn(() => Promise.resolve(false)),
+                openNewConversation: vi.fn(() => Promise.resolve(false)),
+            } as unknown as LorepiaAppController;
+            const rendered = render(ConversationPane, {
+                state,
+                controller,
+                onOpenChat: vi.fn(),
+                rootView: true,
+            });
+
+            await fireEvent.click(screen.getByRole('button', { name: '대화 검색' }));
+            await fireEvent.click(screen.getByRole('button', { name: '검색 닫기' }));
+
+            expect(rendered.container.querySelector('.conversation-top-search')).toHaveClass(
+                'closing',
+            );
+            expect(screen.getByRole('searchbox', { name: '대화 검색' })).toBeInTheDocument();
+
+            await vi.advanceTimersByTimeAsync(380);
+
+            expect(screen.queryByRole('searchbox', { name: '대화 검색' })).not.toBeInTheDocument();
+            expect(rendered.container.querySelector('.mobile-root-actions')).toHaveAttribute(
+                'aria-hidden',
+                'false',
+            );
+        } finally {
+            if (getAnimationsDescriptor === undefined) {
+                Reflect.deleteProperty(Element.prototype, 'getAnimations');
+            } else {
+                Object.defineProperty(Element.prototype, 'getAnimations', getAnimationsDescriptor);
+            }
+            vi.useRealTimers();
+        }
     });
 
     it('loads the global conversation index and filters it with character pills', async () => {

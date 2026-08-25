@@ -1,8 +1,9 @@
 <script lang="ts">
     import { SlidersHorizontal, X } from '@lucide/svelte';
     import { tr } from '../../lib/i18n';
-    import { tick } from 'svelte';
+    import { tick, type Snippet } from 'svelte';
 
+    import ChoicePopover from '../../components/ChoicePopover.svelte';
     import type { LorepiaAppState } from '../../app/app-controller';
     import type {
         CreatorControlDto,
@@ -16,7 +17,7 @@
         orchestrationState: OrchestrationState;
         controller: OrchestrationController;
         onOpen?: () => void;
-        onOpenStudio?: () => void;
+        roomControls?: Snippet<[closeSettings: () => Promise<void>]>;
     }
 
     let {
@@ -24,11 +25,19 @@
         orchestrationState,
         controller,
         onOpen = () => undefined,
-        onOpenStudio = () => undefined,
+        roomControls,
     }: Props = $props();
     let open = $state(false);
-    let closeButton = $state<HTMLButtonElement | null>(null);
     let toggleButton = $state<HTMLButtonElement | null>(null);
+    let drawerElement = $state<HTMLDivElement | null>(null);
+    let dragOffset = $state(0);
+    let dragging = $state(false);
+    let settling = $state(false);
+    let handleDragged = $state(false);
+    let dragStartY = 0;
+    let dragStartTime = 0;
+    let dragLastY = 0;
+    let dragLastTime = 0;
 
     const roomConfig = $derived(orchestrationState.workspace.room_config);
     const generationPresets = $derived(appState.providers.workspace.presets.slice(0, 200));
@@ -47,20 +56,110 @@
             : generationPresets.filter((preset) => preset.model_route_id === selectedModelRouteId),
     );
 
-    async function setOpen(next: boolean): Promise<void> {
+    async function setOpen(next: boolean, restoreToggleFocus = true): Promise<void> {
+        if (next) {
+            dragOffset = 0;
+            dragging = false;
+            settling = false;
+            handleDragged = false;
+        } else if (orchestrationState.dirty_room_config && !orchestrationState.saving) {
+            void controller.saveRoomConfig();
+        }
         open = next;
         if (next) {
             onOpen();
             await tick();
-            closeButton?.focus();
+            drawerElement?.focus();
         } else {
             await tick();
-            toggleButton?.focus();
+            dragOffset = 0;
+            dragging = false;
+            settling = false;
+            if (restoreToggleFocus) toggleButton?.focus();
         }
     }
 
+    function handleSheetPointerDown(event: PointerEvent): void {
+        if (event.button !== 0 || drawerElement === null) return;
+        event.preventDefault();
+        if (
+            event.currentTarget instanceof HTMLElement &&
+            typeof event.currentTarget.setPointerCapture === 'function'
+        ) {
+            event.currentTarget.setPointerCapture(event.pointerId);
+        }
+        dragging = true;
+        settling = false;
+        handleDragged = false;
+        dragStartY = event.clientY;
+        dragStartTime = performance.now();
+        dragLastY = event.clientY;
+        dragLastTime = dragStartTime;
+    }
+
+    function handleSheetPointerMove(event: PointerEvent): void {
+        if (!dragging) return;
+        const nextOffset = Math.max(0, event.clientY - dragStartY);
+        dragOffset = nextOffset;
+        handleDragged ||= nextOffset > 5;
+        dragLastY = event.clientY;
+        dragLastTime = performance.now();
+    }
+
+    async function dismissFromDrag(): Promise<void> {
+        dragging = false;
+        settling = true;
+        dragOffset = (drawerElement?.offsetHeight ?? window.innerHeight * 0.7) + 24;
+        await new Promise((resolve) => window.setTimeout(resolve, 260));
+        await setOpen(false, false);
+    }
+
+    function settleAfterDrag(): void {
+        dragging = false;
+        settling = true;
+        dragOffset = 0;
+        window.setTimeout(() => {
+            settling = false;
+        }, 300);
+    }
+
+    function handleSheetPointerUp(event: PointerEvent): void {
+        if (!dragging) return;
+        const target = event.currentTarget;
+        if (
+            target instanceof HTMLElement &&
+            typeof target.hasPointerCapture === 'function' &&
+            target.hasPointerCapture(event.pointerId)
+        ) {
+            target.releasePointerCapture(event.pointerId);
+        }
+        const now = performance.now();
+        const recentElapsed = Math.max(1, now - dragLastTime);
+        const recentVelocity = (event.clientY - dragLastY) / recentElapsed;
+        const totalElapsed = Math.max(1, now - dragStartTime);
+        const totalVelocity = (event.clientY - dragStartY) / totalElapsed;
+        const closeThreshold = Math.max(72, (drawerElement?.offsetHeight ?? 0) * 0.18);
+        if (dragOffset >= closeThreshold || Math.max(recentVelocity, totalVelocity) > 0.55) {
+            void dismissFromDrag();
+        } else {
+            settleAfterDrag();
+        }
+    }
+
+    function handleSheetPointerCancel(): void {
+        if (dragging) settleAfterDrag();
+    }
+
+    function handleSheetHandleClick(event: MouseEvent): void {
+        if (handleDragged) {
+            handleDragged = false;
+            return;
+        }
+        void setOpen(false, event.detail === 0);
+    }
+
     function handleWindowKeydown(event: KeyboardEvent): void {
-        if (open && event.key === 'Escape') {
+        if (!event.defaultPrevented && open && event.key === 'Escape') {
             event.preventDefault();
             void setOpen(false);
         }
@@ -122,99 +221,140 @@
         {/if}
     </button>
 
-    {#if open}
-        <aside
-            id="orchestration-quick-drawer"
-            class="quick-drawer"
-            aria-labelledby="orchestration-quick-title"
+    <button
+        class="quick-drawer-backdrop"
+        class:open
+        type="button"
+        aria-label="대화 설정 바깥 영역을 눌러 닫기"
+        aria-hidden={!open}
+        tabindex={open ? 0 : -1}
+        disabled={!open}
+        onclick={() => void setOpen(false, false)}
+    ></button>
+    <div
+        id="orchestration-quick-drawer"
+        class="quick-drawer"
+        class:open
+        class:dragging
+        class:settling
+        bind:this={drawerElement}
+        style:--sheet-drag-y={`${String(dragOffset)}px`}
+        tabindex="-1"
+        role="dialog"
+        aria-modal="true"
+        aria-hidden={!open}
+        inert={!open}
+        aria-labelledby="orchestration-quick-title"
+    >
+        <button
+            class="sheet-handle"
+            type="button"
+            aria-label={$tr('quick.drag_close')}
+            onpointerdown={handleSheetPointerDown}
+            onpointermove={handleSheetPointerMove}
+            onpointerup={handleSheetPointerUp}
+            onpointercancel={handleSheetPointerCancel}
+            onclick={handleSheetHandleClick}><span aria-hidden="true"></span></button
         >
-            <header>
-                <div>
-                    <p class="eyebrow">{$tr('quick.eyebrow')}</p>
-                    <h3 id="orchestration-quick-title">{$tr('quick.title')}</h3>
-                </div>
-                <button
-                    class="icon-button"
-                    type="button"
-                    bind:this={closeButton}
-                    aria-label={$tr('quick.close')}
-                    onclick={() => void setOpen(false)}
-                >
-                    <X class="quick-drawer-close-icon" aria-hidden="true" />
-                </button>
-            </header>
+        <header>
+            <div>
+                <p class="eyebrow">{$tr('quick.eyebrow')}</p>
+                <h3 id="orchestration-quick-title">{$tr('quick.title')}</h3>
+            </div>
+            <button
+                class="icon-button"
+                type="button"
+                aria-label={$tr('quick.close')}
+                onclick={(event) => void setOpen(false, event.detail === 0)}
+            >
+                <X class="quick-drawer-close-icon" aria-hidden="true" />
+            </button>
+        </header>
 
-            {#if orchestrationState.phase === 'loading'}
-                <p class="drawer-status" role="status">{$tr('quick.loading')}</p>
-            {:else if orchestrationState.phase === 'unavailable'}
-                <p class="drawer-status warning" role="note">{orchestrationState.error}</p>
-            {:else if orchestrationState.error !== null}
-                <p class="drawer-status error" role="alert">{orchestrationState.error}</p>
-            {/if}
+        <div class="drawer-body">
+            <div class="quick-drawer-context">
+                {#if orchestrationState.phase === 'loading'}
+                    <p class="drawer-status" role="status">{$tr('quick.loading')}</p>
+                {:else if orchestrationState.phase === 'unavailable'}
+                    <p class="drawer-status warning" role="note">{orchestrationState.error}</p>
+                {:else if orchestrationState.error !== null}
+                    <p class="drawer-status error" role="alert">{orchestrationState.error}</p>
+                {/if}
 
+                {#if roomControls}
+                    <section class="drawer-room-controls" aria-labelledby="room-controls-title">
+                        <h4 id="room-controls-title">대화</h4>
+                        {@render roomControls(() => setOpen(false, false))}
+                    </section>
+                {/if}
+            </div>
+
+            <h4 id="generation-settings-title" class="drawer-section-title">
+                {$tr('quick.legend')}
+            </h4>
             <fieldset
                 class="drawer-scroll drawer-fields"
+                aria-labelledby="generation-settings-title"
                 disabled={orchestrationState.phase !== 'ready'}
             >
                 <legend class="sr-only">{$tr('quick.legend')}</legend>
-                <label>
-                    <span>{$tr('quick.preset')}</span>
-                    <select
+                <div class="drawer-setting-row">
+                    <ChoicePopover
+                        id="orchestration-prompt-preset"
+                        label={$tr('quick.preset')}
                         value={roomConfig.prompt_preset_id ?? ''}
                         disabled={orchestrationState.workspace.prompt_presets.length === 0}
-                        onchange={(event) =>
+                        options={[
+                            { value: '', label: $tr('quick.preset.default') },
+                            ...orchestrationState.workspace.prompt_presets
+                                .slice(0, 100)
+                                .map((preset) => ({ value: preset.id, label: preset.name })),
+                        ]}
+                        onSelect={(value: string) =>
                             controller.stageRoomConfig({
-                                prompt_preset_id: event.currentTarget.value || null,
+                                prompt_preset_id: value.length === 0 ? null : value,
                             })}
-                    >
-                        <option value="">{$tr('quick.preset.default')}</option>
-                        {#each orchestrationState.workspace.prompt_presets.slice(0, 100) as preset (preset.id)}
-                            <option value={preset.id}>{preset.name}</option>
-                        {/each}
-                    </select>
-                </label>
+                    />
+                </div>
 
-                <label>
-                    <span>{$tr('quick.model')}</span>
-                    <select
-                        aria-label={$tr('quick.model')}
-                        aria-describedby="orchestration-model-route-help"
+                <div class="drawer-setting-row">
+                    <ChoicePopover
+                        id="orchestration-model-route"
+                        label={$tr('quick.model')}
                         value={selectedModelRouteId ?? ''}
                         disabled={modelRoutes.length === 0}
-                        onchange={(event) => selectModelRoute(event.currentTarget.value)}
-                    >
-                        <option value="">{$tr('quick.model.auto')}</option>
-                        {#each modelRoutes as route (route.id)}
-                            <option
-                                value={route.id}
-                                disabled={!generationPresets.some(
+                        options={[
+                            { value: '', label: $tr('quick.model.auto') },
+                            ...modelRoutes.map((route) => ({
+                                value: route.id,
+                                label: `${route.display_name ?? route.model_id} · ${route.status}`,
+                                disabled: !generationPresets.some(
                                     (preset) => preset.model_route_id === route.id,
-                                )}
-                            >
-                                {route.display_name ?? route.model_id} · {route.status}
-                            </option>
-                        {/each}
-                    </select>
-                    <small id="orchestration-model-route-help">
-                        {$tr('quick.model.hint')}
-                    </small>
-                </label>
+                                ),
+                            })),
+                        ]}
+                        onSelect={selectModelRoute}
+                    />
+                </div>
 
-                <label>
-                    <span>{$tr('quick.generation_preset')}</span>
-                    <select
+                <div class="drawer-setting-row">
+                    <ChoicePopover
+                        id="orchestration-generation-preset"
+                        label={$tr('quick.generation_preset')}
                         value={roomConfig.generation_preset_id ?? ''}
-                        onchange={(event) =>
+                        options={[
+                            { value: '', label: $tr('quick.generation_preset.default') },
+                            ...visibleGenerationPresets.map((preset) => ({
+                                value: preset.id,
+                                label: preset.display_name,
+                            })),
+                        ]}
+                        onSelect={(value: string) =>
                             controller.stageRoomConfig({
-                                generation_preset_id: event.currentTarget.value || null,
+                                generation_preset_id: value.length === 0 ? null : value,
                             })}
-                    >
-                        <option value="">{$tr('quick.generation_preset.default')}</option>
-                        {#each visibleGenerationPresets as preset (preset.id)}
-                            <option value={preset.id}>{preset.display_name}</option>
-                        {/each}
-                    </select>
-                </label>
+                    />
+                </div>
 
                 <fieldset>
                     <legend>{$tr('quick.length')}</legend>
@@ -246,7 +386,10 @@
                 </fieldset>
 
                 <label>
-                    <span>{$tr('quick.creativity')} <output>{roomConfig.creativity}</output></span>
+                    <span
+                        >{$tr('quick.creativity')}
+                        <output>{roomConfig.creativity}</output></span
+                    >
                     <input
                         type="range"
                         aria-label={$tr('quick.creativity')}
@@ -262,55 +405,68 @@
                     />
                 </label>
 
-                <label>
-                    <span>{$tr('quick.reasoning')}</span>
-                    <select
+                <div class="drawer-setting-row">
+                    <ChoicePopover
+                        id="orchestration-reasoning-effort"
+                        label={$tr('quick.reasoning')}
                         value={roomConfig.reasoning_effort}
                         disabled={!roomConfig.supported_fields.reasoning_effort}
-                        onchange={(event) =>
+                        options={[
+                            {
+                                value: 'provider_default',
+                                label: $tr('quick.reasoning.provider_default'),
+                            },
+                            { value: 'minimal', label: $tr('quick.reasoning.minimal') },
+                            { value: 'low', label: $tr('quick.reasoning.low') },
+                            { value: 'medium', label: $tr('quick.reasoning.medium') },
+                            { value: 'high', label: $tr('quick.reasoning.high') },
+                            { value: 'extra_high', label: $tr('quick.reasoning.extra_high') },
+                            { value: 'maximum', label: $tr('quick.reasoning.maximum') },
+                        ]}
+                        onSelect={(value: string) =>
                             controller.stageRoomConfig({
-                                reasoning_effort: event.currentTarget
-                                    .value as RoomOrchestrationConfigDto['reasoning_effort'],
+                                reasoning_effort:
+                                    value as RoomOrchestrationConfigDto['reasoning_effort'],
                             })}
-                    >
-                        <option value="provider_default"
-                            >{$tr('quick.reasoning.provider_default')}</option
-                        >
-                        <option value="minimal">{$tr('quick.reasoning.minimal')}</option>
-                        <option value="low">{$tr('quick.reasoning.low')}</option>
-                        <option value="medium">{$tr('quick.reasoning.medium')}</option>
-                        <option value="high">{$tr('quick.reasoning.high')}</option>
-                        <option value="extra_high">{$tr('quick.reasoning.extra_high')}</option>
-                        <option value="maximum">{$tr('quick.reasoning.maximum')}</option>
-                    </select>
-                </label>
+                    />
+                </div>
 
                 <fieldset>
                     <legend>{$tr('quick.enrichment')}</legend>
-                    <label class="toggle-row">
-                        <input
-                            type="checkbox"
-                            checked={roomConfig.memory_enabled}
-                            disabled={!roomConfig.supported_fields.memory_enabled}
-                            onchange={(event) =>
-                                controller.stageRoomConfig({
-                                    memory_enabled: event.currentTarget.checked,
-                                })}
-                        />
+                    <button
+                        class="switch-button"
+                        type="button"
+                        role="switch"
+                        aria-label={$tr('quick.memory')}
+                        aria-checked={roomConfig.memory_enabled}
+                        disabled={!roomConfig.supported_fields.memory_enabled}
+                        onclick={() =>
+                            controller.stageRoomConfig({
+                                memory_enabled: !roomConfig.memory_enabled,
+                            })}
+                    >
                         <span>{$tr('quick.memory')}</span>
-                    </label>
-                    <label class="toggle-row">
-                        <input
-                            type="checkbox"
-                            checked={roomConfig.knowledge_enabled}
-                            disabled={!roomConfig.supported_fields.knowledge_enabled}
-                            onchange={(event) =>
-                                controller.stageRoomConfig({
-                                    knowledge_enabled: event.currentTarget.checked,
-                                })}
-                        />
+                        <span class="switch-track" aria-hidden="true">
+                            <span class="switch-thumb"></span>
+                        </span>
+                    </button>
+                    <button
+                        class="switch-button"
+                        type="button"
+                        role="switch"
+                        aria-label={$tr('quick.knowledge')}
+                        aria-checked={roomConfig.knowledge_enabled}
+                        disabled={!roomConfig.supported_fields.knowledge_enabled}
+                        onclick={() =>
+                            controller.stageRoomConfig({
+                                knowledge_enabled: !roomConfig.knowledge_enabled,
+                            })}
+                    >
                         <span>{$tr('quick.knowledge')}</span>
-                    </label>
+                        <span class="switch-track" aria-hidden="true">
+                            <span class="switch-thumb"></span>
+                        </span>
+                    </button>
                 </fieldset>
 
                 {#if orchestrationState.workspace.creator_controls.length > 0}
@@ -319,53 +475,63 @@
                         <div class="creator-controls">
                             {#each orchestrationState.workspace.creator_controls.slice(0, 80) as control (control.id)}
                                 {#if control.kind === 'toggle'}
-                                    <label class="toggle-row">
-                                        <input
-                                            type="checkbox"
-                                            checked={Boolean(controlValue(control))}
-                                            onchange={(event) =>
-                                                controller.stageCreatorControl(
-                                                    control.id,
-                                                    event.currentTarget.checked,
-                                                )}
-                                        />
+                                    <button
+                                        class="switch-button"
+                                        type="button"
+                                        role="switch"
+                                        aria-label={control.label}
+                                        aria-checked={Boolean(controlValue(control))}
+                                        onclick={() =>
+                                            controller.stageCreatorControl(
+                                                control.id,
+                                                !controlValue(control),
+                                            )}
+                                    >
                                         <span>{control.label}</span>
-                                    </label>
+                                        <span class="switch-track" aria-hidden="true">
+                                            <span class="switch-thumb"></span>
+                                        </span>
+                                    </button>
                                 {:else if control.kind === 'select'}
-                                    <label>
-                                        <span>{control.label}</span>
-                                        <select
+                                    <div class="creator-choice-row">
+                                        <ChoicePopover
+                                            id={`creator-control-${control.id}`}
+                                            label={control.label}
                                             value={String(controlValue(control))}
-                                            onchange={(event) =>
-                                                controller.stageCreatorControl(
-                                                    control.id,
-                                                    event.currentTarget.value,
-                                                )}
-                                        >
-                                            {#each control.choices.slice(0, 100) as choice (choice)}
-                                                <option value={choice}>{choice}</option>
-                                            {/each}
-                                        </select>
-                                    </label>
+                                            options={control.choices
+                                                .slice(0, 100)
+                                                .map((choice) => ({
+                                                    value: choice,
+                                                    label: choice,
+                                                }))}
+                                            onSelect={(value: string) =>
+                                                controller.stageCreatorControl(control.id, value)}
+                                        />
+                                    </div>
                                 {:else if control.kind === 'multi_select'}
                                     <fieldset class="nested-fieldset">
                                         <legend>{control.label}</legend>
                                         {#each control.choices.slice(0, 40) as choice (choice)}
-                                            <label class="toggle-row">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={selectedValues(control).includes(
+                                            <button
+                                                class="switch-button"
+                                                type="button"
+                                                role="switch"
+                                                aria-label={choice}
+                                                aria-checked={selectedValues(control).includes(
+                                                    choice,
+                                                )}
+                                                onclick={() =>
+                                                    toggleMultiChoice(
+                                                        control,
                                                         choice,
+                                                        !selectedValues(control).includes(choice),
                                                     )}
-                                                    onchange={(event) =>
-                                                        toggleMultiChoice(
-                                                            control,
-                                                            choice,
-                                                            event.currentTarget.checked,
-                                                        )}
-                                                />
+                                            >
                                                 <span>{choice}</span>
-                                            </label>
+                                                <span class="switch-track" aria-hidden="true">
+                                                    <span class="switch-thumb"></span>
+                                                </span>
+                                            </button>
                                         {/each}
                                     </fieldset>
                                 {:else if control.kind === 'number' || control.kind === 'slider'}
@@ -407,20 +573,8 @@
                     </fieldset>
                 {/if}
             </fieldset>
-
-            <footer>
-                <button type="button" onclick={onOpenStudio}>{$tr('quick.studio')}</button>
-                <button
-                    class="primary"
-                    type="button"
-                    disabled={!orchestrationState.dirty_room_config || orchestrationState.saving}
-                    onclick={() => void controller.saveRoomConfig()}
-                >
-                    {orchestrationState.saving ? $tr('quick.saving') : $tr('quick.save')}
-                </button>
-            </footer>
-        </aside>
-    {/if}
+        </div>
+    </div>
 </div>
 
 <style>
@@ -458,50 +612,159 @@
         background: var(--brand-coral);
     }
 
-    .quick-drawer {
-        position: absolute;
-        z-index: 20;
-        top: calc(100% + 10px);
-        right: 0;
-        display: grid;
-        grid-template-rows: auto minmax(0, 1fr) auto;
-        width: min(390px, calc(100vw - 28px));
-        max-height: min(680px, calc(100vh - 130px));
-        overflow: hidden;
-        border: 1px solid var(--line);
-        border-radius: var(--radius-md);
-        background: var(--surface-raised);
-        box-shadow: var(--shadow-3);
+    .quick-drawer-backdrop {
+        position: fixed;
+        z-index: 40;
+        padding: 0;
+        border: 0;
+        border-radius: 0;
+        -webkit-backdrop-filter: none !important;
+        backdrop-filter: none !important;
+        background-color: rgba(0, 0, 0, 0.14) !important;
+        background-image: none !important;
+        box-shadow: none;
+        filter: none;
+        opacity: 0;
+        pointer-events: none;
+        transition: none;
+        visibility: hidden;
+        inset: 0;
     }
 
-    .quick-drawer > header,
-    .quick-drawer > footer {
+    .quick-drawer-backdrop.open {
+        opacity: 1;
+        pointer-events: auto;
+        visibility: visible;
+    }
+
+    .quick-drawer-backdrop:disabled {
+        opacity: 0;
+    }
+
+    .quick-drawer {
+        position: fixed;
+        z-index: 41;
+        right: auto;
+        bottom: calc(max(-680px, -70dvh) - 24px);
+        left: var(--detail-action-center, 50%);
+        display: grid;
+        grid-template-rows: auto auto minmax(0, 1fr);
+        width: min(calc(var(--detail-action-workspace-width, 100vw) - 32px), 620px);
+        height: min(70dvh, 680px);
+        max-height: min(70dvh, 680px);
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 24px;
+        background: var(--bg);
+        box-shadow: var(--shadow-3);
+        pointer-events: none;
+        transform: translateX(-50%);
+        transition:
+            bottom 360ms cubic-bezier(0.65, 0, 0.35, 1),
+            visibility 0s linear 360ms;
+        visibility: hidden;
+    }
+
+    .quick-drawer.open {
+        bottom: calc(12px - var(--sheet-drag-y, 0px));
+        pointer-events: auto;
+        transition:
+            bottom 420ms cubic-bezier(0.22, 1, 0.36, 1),
+            visibility 0s;
+        visibility: visible;
+    }
+
+    .quick-drawer:focus {
+        outline: none;
+    }
+
+    .quick-drawer.settling {
+        transition: bottom 260ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    .quick-drawer.dragging {
+        cursor: grabbing;
+        transition: none;
+        user-select: none;
+    }
+
+    .sheet-handle {
+        display: flex;
+        width: 100%;
+        height: 22px;
+        min-height: 22px;
+        align-items: end;
+        justify-content: center;
+        padding: 0 0 4px;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        box-shadow: none;
+        cursor: grab;
+        touch-action: none;
+    }
+
+    .sheet-handle span {
+        width: 38px;
+        height: 4px;
+        border-radius: var(--radius-pill);
+        background: var(--line-strong);
+    }
+
+    .quick-drawer .sheet-handle:hover:not(:disabled),
+    .quick-drawer .sheet-handle:active:not(:disabled) {
+        background: transparent;
+    }
+
+    .quick-drawer > header {
         display: flex;
         gap: 12px;
         align-items: center;
         justify-content: space-between;
-        padding: 14px 16px;
+        padding: 12px 18px;
+        border-bottom: 0;
     }
 
-    .quick-drawer > header {
-        border-bottom: 1px solid var(--line);
-    }
-
-    .quick-drawer > footer {
-        border-top: 1px solid var(--line);
+    .drawer-body {
+        min-height: 0;
+        padding-bottom: calc(14px + env(safe-area-inset-bottom));
+        overflow-y: auto;
+        overscroll-behavior: contain;
     }
 
     .quick-drawer h3,
+    .quick-drawer h4,
     .quick-drawer p {
         margin: 0;
+    }
+
+    .quick-drawer h3 {
+        font-size: 1.0625rem;
+    }
+
+    .quick-drawer .eyebrow,
+    .drawer-section-title,
+    .drawer-room-controls h4 {
+        color: var(--ink-muted);
+        font-size: 0.75rem;
+        font-weight: 650;
     }
 
     .icon-button {
         display: grid;
         width: 36px;
+        height: 36px;
         min-width: 36px;
         padding: 6px;
+        border: 0;
+        border-radius: 50%;
+        background: transparent;
+        box-shadow: none;
         place-items: center;
+    }
+
+    .quick-drawer .icon-button:hover:not(:disabled) {
+        background: transparent;
     }
 
     .icon-button :global(.quick-drawer-close-icon) {
@@ -511,15 +774,18 @@
 
     .drawer-scroll {
         display: grid;
-        gap: 15px;
-        padding: 16px;
-        overflow-y: auto;
+        gap: 3px;
+        padding: 0 16px;
     }
 
     .drawer-fields {
         min-width: 0;
         margin: 0;
         border: 0;
+    }
+
+    .drawer-section-title {
+        padding: 0 18px 8px;
     }
 
     .drawer-fields:disabled {
@@ -532,14 +798,50 @@
         gap: 6px;
     }
 
+    .drawer-scroll > label,
+    .drawer-scroll > fieldset,
+    .drawer-setting-row {
+        padding: 12px 14px;
+        border: 0;
+        border-radius: 4px;
+        background: var(--surface-raised);
+    }
+
+    .drawer-setting-row {
+        position: relative;
+        min-width: 0;
+        padding: 0;
+    }
+
+    .drawer-scroll > :first-child,
+    .drawer-scroll > .drawer-setting-row:first-child :global(.choice-trigger) {
+        border-radius: var(--radius-lg) var(--radius-lg) 4px 4px;
+    }
+
+    .drawer-scroll > :last-child,
+    .drawer-scroll > .drawer-setting-row:last-child :global(.choice-trigger) {
+        border-radius: 4px 4px var(--radius-lg) var(--radius-lg);
+    }
+
+    .drawer-scroll input[type='text'],
+    .drawer-scroll input[type='number'] {
+        height: 38px;
+        min-height: 38px;
+        padding: 0 34px 0 12px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-md);
+        background: var(--bg);
+        color: var(--ink);
+    }
+
     .drawer-scroll fieldset {
         display: grid;
         gap: 9px;
         min-width: 0;
         margin: 0;
         padding: 12px;
-        border: 1px solid var(--line);
-        border-radius: 11px;
+        border: 0;
+        border-radius: var(--radius-md);
     }
 
     .nested-fieldset {
@@ -562,10 +864,50 @@
         background: var(--surface-sunken);
     }
 
-    .toggle-row {
-        display: flex !important;
-        gap: 8px;
+    .switch-button {
+        display: flex;
+        width: 100%;
+        min-height: 44px;
         align-items: center;
+        justify-content: space-between;
+        padding: 0 12px;
+        border: 0;
+        border-radius: 10px;
+        background: transparent;
+        color: var(--ink);
+        font-weight: 650;
+        text-align: left;
+    }
+
+    .switch-track {
+        position: relative;
+        width: 42px;
+        height: 24px;
+        flex: 0 0 42px;
+        border-radius: var(--radius-pill);
+        background: var(--line-strong);
+        transition: background-color 160ms ease;
+    }
+
+    .switch-thumb {
+        position: absolute;
+        top: 3px;
+        left: 3px;
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background: var(--bg);
+        box-shadow: var(--shadow-1);
+        transform: translateX(0);
+        transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    .switch-button[aria-checked='true'] .switch-track {
+        background: var(--primary-bg);
+    }
+
+    .switch-button[aria-checked='true'] .switch-thumb {
+        transform: translateX(18px);
     }
 
     .creator-controls {
@@ -573,9 +915,30 @@
         gap: 10px;
     }
 
+    .creator-choice-row {
+        min-width: 0;
+        border-radius: var(--radius-md);
+        background: var(--surface-sunken);
+    }
+
     .creator-controls small,
     .drawer-status {
         color: var(--ink-muted);
+    }
+
+    .quick-drawer-context {
+        display: grid;
+        min-height: 0;
+    }
+
+    .drawer-room-controls {
+        display: grid;
+        padding: 12px 14px;
+        border-radius: var(--radius-lg);
+        margin: 0 16px 14px;
+        background: var(--surface-sunken);
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--line) 72%, transparent);
+        gap: 10px;
     }
 
     .drawer-status {
@@ -593,10 +956,21 @@
 
     @container view (max-width: 640px) {
         .quick-drawer {
-            position: fixed;
-            inset: auto 8px 76px;
-            width: auto;
-            max-height: calc(100vh - 150px);
+            right: 0;
+            bottom: calc(-70dvh - 24px);
+            left: 0;
+            width: 100%;
+            height: 70dvh;
+            max-height: 70dvh;
+            border-right: 0;
+            border-bottom: 0;
+            border-left: 0;
+            border-radius: 24px 24px 0 0;
+            transform: none;
+        }
+
+        .quick-drawer.open {
+            bottom: calc(0px - var(--sheet-drag-y, 0px));
         }
     }
 </style>

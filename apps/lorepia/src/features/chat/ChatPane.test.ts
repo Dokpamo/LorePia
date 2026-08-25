@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import { get } from 'svelte/store';
 import { afterEach, describe, expect, it, vi, type MockInstance } from 'vitest';
@@ -15,6 +15,10 @@ import {
     type LorepiaAppState,
 } from '../../app/app-controller';
 import '../../styles/app.css';
+import {
+    INITIAL_ORCHESTRATION_STATE,
+    OrchestrationController,
+} from '../orchestration/orchestration-controller';
 import ChatPane from './ChatPane.svelte';
 
 class ControlledResizeObserver implements ResizeObserver {
@@ -120,6 +124,26 @@ function renderChat(appState = chatReadyState(), client?: LorepiaClient): Render
     return { controller, sendMessage };
 }
 
+function renderChatWithSettings(
+    appState = chatReadyState(),
+    client?: LorepiaClient,
+): RenderedChat & { orchestrationController: OrchestrationController } {
+    const controller = new LorepiaAppController({} as LorepiaClient);
+    const sendMessage = vi.spyOn(controller, 'sendMessage').mockResolvedValue(true);
+    const orchestrationController = new OrchestrationController({} as LorepiaClient);
+    render(ChatPane, {
+        appState,
+        controller,
+        client,
+        orchestrationState: {
+            ...structuredClone(INITIAL_ORCHESTRATION_STATE),
+            phase: 'ready',
+        },
+        orchestrationController,
+    });
+    return { controller, sendMessage, orchestrationController };
+}
+
 describe('ChatPane empty state', () => {
     it('uses an open canvas instead of a full-pane dashed placeholder frame', () => {
         const controller = new LorepiaAppController({} as LorepiaClient);
@@ -142,6 +166,61 @@ describe('ChatPane empty state', () => {
 });
 
 describe('ChatPane transcript chrome', () => {
+    it('keeps room controls out of the transcript and groups them inside conversation settings', async () => {
+        const appState = chatReadyState();
+        appState.branches = [
+            {
+                id: 'branch-1',
+                conversation_id: 'conversation-1',
+                title: '본편',
+                fork_message_id: null,
+                head_message_id: null,
+                created_at: '2026-08-02T00:00:00Z',
+                updated_at: '2026-08-02T00:00:00Z',
+            },
+            {
+                id: 'branch-2',
+                conversation_id: 'conversation-1',
+                title: '다른 선택',
+                fork_message_id: null,
+                head_message_id: null,
+                created_at: '2026-08-02T00:00:00Z',
+                updated_at: '2026-08-02T00:00:00Z',
+            },
+        ];
+        const { controller, orchestrationController } = renderChatWithSettings(appState);
+        const setConversationMode = vi
+            .spyOn(controller, 'setConversationMode')
+            .mockResolvedValue(undefined);
+        const selectBranch = vi.spyOn(controller, 'selectBranch').mockResolvedValue(undefined);
+
+        expect(screen.queryByRole('group', { name: '대화 모드' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: '새 생성 작업' })).not.toBeInTheDocument();
+
+        await fireEvent.click(screen.getByRole('button', { name: '대화 설정' }));
+        const settings = screen.getByRole('dialog', { name: '대화 설정' });
+        const settingsUi = within(settings);
+
+        expect(settingsUi.getByRole('heading', { name: '대화' })).toBeInTheDocument();
+        expect(settingsUi.getByRole('group', { name: '대화 모드' })).toBeInTheDocument();
+        expect(settingsUi.getByRole('button', { name: /^분기:/ })).toHaveAttribute(
+            'aria-expanded',
+            'false',
+        );
+        expect(
+            settingsUi.getByText('현재 입력을 별도의 새 요청으로 처리합니다.'),
+        ).toBeInTheDocument();
+
+        await fireEvent.click(settingsUi.getByRole('button', { name: '스토리' }));
+        expect(setConversationMode).toHaveBeenCalledWith('story');
+        await fireEvent.click(settingsUi.getByRole('button', { name: /^분기:/ }));
+        await fireEvent.click(settingsUi.getByRole('menuitemradio', { name: '다른 선택' }));
+        expect(selectBranch).toHaveBeenCalledWith('branch-2');
+
+        controller.destroy();
+        orchestrationController.destroy();
+    });
+
     it('renders calendar-day separators and a time for every persisted message', () => {
         const appState = chatReadyState();
         appState.messages.items = [
@@ -182,31 +261,39 @@ describe('ChatPane transcript chrome', () => {
         controller.destroy();
     });
 
-    it('uses a single messenger input surface with a round icon send action', () => {
+    it('uses a compact empty input that expands for writing and reveals send after text', async () => {
         const { controller } = renderChat();
         const composer = screen.getByRole('form', { name: '메시지 작성' });
         const field = composer.querySelector('.composer-field');
-        const send = screen.getByRole('button', { name: '메시지 보내기' });
+        const textbox = screen.getByRole('textbox', { name: '메시지' });
 
         expect(field).not.toBeNull();
-        expect(field).toContainElement(screen.getByRole('textbox', { name: '메시지' }));
+        expect(field).toContainElement(textbox);
+        expect(textbox).not.toHaveAttribute('placeholder');
+        expect(screen.queryByRole('button', { name: '메시지 보내기' })).not.toBeInTheDocument();
+
+        await fireEvent.focus(textbox);
+        await fireEvent.input(textbox, { target: { value: '전송할 메시지' } });
+        const send = screen.getByRole('button', { name: '메시지 보내기' });
         expect(send).toHaveClass('send-button');
         expect(send.querySelector('svg')).not.toBeNull();
         controller.destroy();
     });
 
-    it('keeps the leading messenger action functional and returns focus to the composer', async () => {
+    it('uses a leading plus action that opens and focuses the writing surface', async () => {
         const { controller } = renderChat();
         const composer = screen.getByRole('textbox', { name: '메시지' });
 
-        await fireEvent.click(screen.getByRole('button', { name: '이모지 추가' }));
+        const add = screen.getByRole('button', { name: '추가' });
+        expect(add.querySelector('svg')).not.toBeNull();
+        await fireEvent.click(add);
 
-        expect(composer).toHaveValue('🙂');
+        expect(composer).toHaveValue('');
         expect(composer).toHaveFocus();
         controller.destroy();
     });
 
-    it('reveals message tools only when the reader asks for them', async () => {
+    it('reveals message tools only when the reader asks for them', () => {
         const appState = chatReadyState();
         appState.messages.items = [
             {
@@ -221,11 +308,14 @@ describe('ChatPane transcript chrome', () => {
             },
         ];
         const { controller } = renderChat(appState);
-        const message = screen.getByRole('button', { name: '내 메시지 작업 보기' });
+        const message = screen.getByRole('article', { name: '내 메시지' });
 
-        expect(message).toHaveAttribute('aria-expanded', 'false');
-        await fireEvent.click(message);
-        expect(message).toHaveAttribute('aria-expanded', 'true');
+        expect(
+            screen.queryByRole('button', { name: '내 메시지 작업 보기' }),
+        ).not.toBeInTheDocument();
+        expect(message).toHaveAttribute('tabindex', '0');
+        message.focus();
+        expect(message).toHaveFocus();
         controller.destroy();
     });
 });
@@ -651,7 +741,10 @@ describe('ChatPane composer', () => {
             listGenerationAttemptProposals,
             decideGenerationAttemptProposal,
         } as unknown as LorepiaClient;
-        const { controller, sendMessage } = renderChat(chatReadyState(), client);
+        const { controller, sendMessage, orchestrationController } = renderChatWithSettings(
+            chatReadyState(),
+            client,
+        );
         const beginNewGenerationOperation = vi.spyOn(controller, 'beginNewGenerationOperation');
         const stageGenerationAttemptRetry = vi.spyOn(controller, 'stageGenerationAttemptRetry');
         sendMessage.mockResolvedValue(false);
@@ -683,9 +776,12 @@ describe('ChatPane composer', () => {
             ),
         ).toBeInTheDocument();
 
-        await fireEvent.click(screen.getByRole('button', { name: '새 생성 작업' }));
+        expect(screen.queryByRole('button', { name: '새 생성 작업' })).not.toBeInTheDocument();
+        await fireEvent.click(screen.getByRole('button', { name: '대화 설정' }));
+        const settings = screen.getByRole('dialog', { name: '대화 설정' });
+        await fireEvent.click(within(settings).getByRole('button', { name: '새 생성 작업' }));
         expect(beginNewGenerationOperation).toHaveBeenCalledOnce();
-        expect(composer).toHaveFocus();
+        await waitFor(() => expect(composer).toHaveFocus());
         expect(composer).toHaveValue('승인 뒤에도 유지할 메시지');
         expect(sendMessage).toHaveBeenCalledOnce();
         expect(
@@ -700,6 +796,7 @@ describe('ChatPane composer', () => {
         expect(composer).toHaveValue('');
         expect(sendMessage).toHaveBeenCalledTimes(2);
         controller.destroy();
+        orchestrationController.destroy();
     });
 
     it('keeps the visible DOM bounded for 10,000 persisted messages', () => {

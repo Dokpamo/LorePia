@@ -85,8 +85,48 @@ describe('LibraryPane safe local sources', () => {
         controller.destroy();
     });
 
-    it('keeps the persistent home search field without a redundant top action', () => {
+    it('opens the character search field from the shared top action frame', async () => {
         const state = libraryState();
+        const controller = new LorepiaAppController({} as LorepiaClient);
+
+        const rendered = render(LibraryPane, {
+            state,
+            controller,
+            client: {} as LorepiaClient,
+            onOpenConversations: () => undefined,
+            rootView: true,
+        });
+
+        expect(screen.queryByRole('searchbox', { name: '캐릭터 검색' })).not.toBeInTheDocument();
+        await fireEvent.click(screen.getByRole('button', { name: '캐릭터 검색' }));
+        const search = screen.getByRole('searchbox', { name: '캐릭터 검색' });
+        expect(search).toHaveFocus();
+        expect(rendered.container.querySelector('.library-root-header')).toContainElement(search);
+        expect(rendered.container.querySelector('.mobile-root-search')).not.toBeInTheDocument();
+        expect(rendered.container.querySelector('.mobile-root-actions')).toHaveAttribute(
+            'aria-hidden',
+            'true',
+        );
+
+        await fireEvent.click(screen.getByRole('button', { name: '검색 닫기' }));
+        expect(screen.queryByRole('searchbox', { name: '캐릭터 검색' })).not.toBeInTheDocument();
+        expect(rendered.container.querySelector('.mobile-root-actions')).toHaveAttribute(
+            'aria-hidden',
+            'false',
+        );
+        controller.destroy();
+    });
+
+    it('filters the root character list with the same pill strip as chat', async () => {
+        const state = libraryState();
+        state.library.characters.push({
+            id: 'character-2',
+            name: '세라',
+            description: '별을 읽는 항해사',
+            source_hash: 'synthetic-2',
+            avatar_asset_id: null,
+            created_at: '2026-08-03T00:00:00Z',
+        });
         const controller = new LorepiaAppController({} as LorepiaClient);
 
         render(LibraryPane, {
@@ -97,10 +137,67 @@ describe('LibraryPane safe local sources', () => {
             rootView: true,
         });
 
-        const search = screen.getByRole('searchbox', { name: '캐릭터 검색' });
-        expect(search).toBeVisible();
-        expect(screen.queryByRole('button', { name: '검색창으로 이동' })).not.toBeInTheDocument();
+        expect(screen.getByRole('tablist', { name: '캐릭터 분류' })).toBeVisible();
+        expect(screen.getByRole('tab', { name: '전체' })).toHaveAttribute('aria-selected', 'true');
+
+        await fireEvent.click(screen.getByRole('tab', { name: '세라' }));
+
+        expect(screen.getByRole('tab', { name: '세라' })).toHaveAttribute('aria-selected', 'true');
+        expect(screen.getByRole('button', { name: /세라 별을 읽는 항해사/ })).toBeVisible();
+        expect(screen.queryByRole('button', { name: /라온 합성 캐릭터/ })).not.toBeInTheDocument();
+
+        await fireEvent.click(screen.getByRole('tab', { name: '전체' }));
+
+        expect(screen.getByRole('button', { name: /라온 합성 캐릭터/ })).toBeVisible();
+        expect(screen.getByRole('button', { name: /세라 별을 읽는 항해사/ })).toBeVisible();
         controller.destroy();
+    });
+
+    it('finishes the animated character-search collapse before restoring actions', async () => {
+        vi.useFakeTimers();
+        const getAnimationsDescriptor = Object.getOwnPropertyDescriptor(
+            Element.prototype,
+            'getAnimations',
+        );
+        Object.defineProperty(Element.prototype, 'getAnimations', {
+            configurable: true,
+            value: vi.fn(() => []),
+        });
+        const controller = new LorepiaAppController({} as LorepiaClient);
+
+        try {
+            const rendered = render(LibraryPane, {
+                state: libraryState(),
+                controller,
+                client: {} as LorepiaClient,
+                onOpenConversations: () => undefined,
+                rootView: true,
+            });
+
+            await fireEvent.click(screen.getByRole('button', { name: '캐릭터 검색' }));
+            await fireEvent.click(screen.getByRole('button', { name: '검색 닫기' }));
+
+            expect(rendered.container.querySelector('.library-top-search')).toHaveClass('closing');
+            expect(screen.getByRole('searchbox', { name: '캐릭터 검색' })).toBeInTheDocument();
+
+            await vi.advanceTimersByTimeAsync(380);
+
+            expect(
+                screen.queryByRole('searchbox', { name: '캐릭터 검색' }),
+            ).not.toBeInTheDocument();
+            expect(rendered.container.querySelector('.mobile-root-actions')).toHaveAttribute(
+                'aria-hidden',
+                'false',
+            );
+        } finally {
+            controller.destroy();
+            if (getAnimationsDescriptor === undefined) {
+                Reflect.deleteProperty(Element.prototype, 'getAnimations');
+            } else {
+                Object.defineProperty(Element.prototype, 'getAnimations', getAnimationsDescriptor);
+            }
+            vi.useRealTimers();
+        }
     });
 
     it('filters the local character list from the persistent home search field', async () => {

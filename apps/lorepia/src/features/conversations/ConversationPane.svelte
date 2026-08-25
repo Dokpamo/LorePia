@@ -16,7 +16,9 @@
     let { state: appState, controller, client, onOpenChat, rootView = false }: Props = $props();
     let searchQuery = $state('');
     let searchOpen = $state(false);
+    let searchClosing = $state(false);
     let searchInput = $state<HTMLInputElement | null>(null);
+    let searchContainer = $state<HTMLDivElement | null>(null);
     let conversationFilter = $state('all');
     let indexedConversations = $state<ConversationDto[] | null>(null);
 
@@ -96,8 +98,23 @@
     }
 
     function closeSearch(): void {
-        searchOpen = false;
-        searchQuery = '';
+        if (!searchOpen || searchClosing) return;
+        const container = searchContainer;
+        const finishClosing = (): void => {
+            searchOpen = false;
+            searchQuery = '';
+            searchClosing = false;
+        };
+        if (
+            container !== null &&
+            typeof container.getAnimations === 'function' &&
+            !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+        ) {
+            searchClosing = true;
+            window.setTimeout(finishClosing, 380);
+            return;
+        }
+        finishClosing();
     }
 
     function handleSearchKeydown(event: KeyboardEvent): void {
@@ -161,36 +178,55 @@
     aria-labelledby={rootView ? 'conversation-root-title' : 'conversation-title'}
 >
     {#if rootView}
-        <header class="mobile-top-frame mobile-root-header conversation-root-header">
+        <header
+            class="mobile-top-frame mobile-root-header conversation-root-header"
+            class:search-active={searchOpen}
+            class:search-closing={searchClosing}
+        >
             <h1 id="conversation-root-title">채팅</h1>
-            <div class="mobile-root-actions" aria-label="채팅 작업">
+            <div class="mobile-root-actions" aria-label="채팅 작업" aria-hidden={searchOpen}>
                 <button
                     class="mobile-top-action conversation-search-shortcut"
                     type="button"
-                    aria-label={searchOpen
-                        ? $tr('conversation.search.close')
-                        : $tr('conversation.search.open')}
-                    aria-pressed={searchOpen}
+                    aria-label={$tr('conversation.search.open')}
+                    tabindex={searchOpen ? -1 : undefined}
                     onclick={() => void toggleSearch()}
                 >
-                    {#if searchOpen}
-                        <X aria-hidden="true" />
-                    {:else}
-                        <Search aria-hidden="true" />
-                    {/if}
+                    <Search aria-hidden="true" />
                 </button>
-                {#if appState.selected_character !== null}
-                    <button
-                        class="mobile-top-action mobile-top-add-action new-conversation-top-action"
-                        type="button"
-                        aria-label={$tr('conversation.new')}
-                        disabled={appState.greeting_catalog.phase !== 'ready'}
-                        onclick={() => void openNewConversation()}
-                    >
-                        <MessageSquarePlus aria-hidden="true" />
-                    </button>
-                {/if}
             </div>
+            {#if searchOpen}
+                <div
+                    class="conversation-search conversation-top-search"
+                    class:closing={searchClosing}
+                    role="search"
+                    bind:this={searchContainer}
+                >
+                    <Search class="conversation-search-origin-icon" aria-hidden="true" />
+                    <Search class="conversation-search-icon" aria-hidden="true" />
+                    <label class="sr-only" for="conversation-search-input"
+                        >{$tr('conversation.search.open')}</label
+                    >
+                    <input
+                        id="conversation-search-input"
+                        type="search"
+                        aria-label={$tr('conversation.search.open')}
+                        placeholder={$tr('conversation.search.open')}
+                        autocomplete="off"
+                        bind:this={searchInput}
+                        bind:value={searchQuery}
+                        onkeydown={handleSearchKeydown}
+                    />
+                    <button
+                        class="conversation-search-close"
+                        type="button"
+                        aria-label={$tr('conversation.search.close')}
+                        onclick={closeSearch}
+                    >
+                        <X aria-hidden="true" />
+                    </button>
+                </div>
+            {/if}
         </header>
         <div
             class="conversation-filter-strip"
@@ -222,20 +258,6 @@
                 </button>
             {/each}
         </div>
-        {#if searchOpen}
-            <label class="conversation-search mobile-root-search">
-                <Search class="conversation-search-icon" aria-hidden="true" />
-                <span class="sr-only">{$tr('conversation.search.open')}</span>
-                <input
-                    type="search"
-                    aria-label={$tr('conversation.search.open')}
-                    placeholder={$tr('conversation.search.open')}
-                    bind:this={searchInput}
-                    bind:value={searchQuery}
-                    onkeydown={handleSearchKeydown}
-                />
-            </label>
-        {/if}
     {/if}
     <header class="pane-header">
         <h2 id="conversation-title" class="sr-only">{$tr('conversation.title')}</h2>
@@ -358,7 +380,9 @@
                                         >{relativeDate(conversation.updated_at)}</time
                                     >
                                 </span>
-                                <span>{conversationPreview(conversation)}</span>
+                                <span class="conversation-preview"
+                                    >{conversationPreview(conversation)}</span
+                                >
                             </span>
                         {:else}
                             <span class="entity-copy">
@@ -456,6 +480,25 @@
         color: var(--bg);
     }
 
+    @media (hover: hover) and (pointer: fine) {
+        .conversation-filter-pill:hover:not(:disabled):not(.active) {
+            border-color: var(--line-strong);
+            background: var(--surface-hover);
+        }
+
+        .conversation-filter-pill.active:hover:not(:disabled) {
+            border-color: var(--ink);
+            background: var(--ink);
+            color: var(--bg);
+        }
+
+        :global(.app-shell[data-layout='mobile'])
+            .conversation-pane.root-view
+            .mobile-root-row.active:hover {
+            background: var(--surface-hover);
+        }
+    }
+
     .conversation-filter-pill:active {
         transform: scale(0.97);
     }
@@ -465,12 +508,177 @@
         outline-offset: 0;
     }
 
-    .conversation-search-shortcut[aria-pressed='true'] {
-        background: var(--surface-active);
+    .conversation-root-header > h1,
+    .conversation-root-header > .mobile-root-actions {
+        transition:
+            opacity 180ms ease,
+            transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    .conversation-root-header.search-active:not(.search-closing) > h1 {
+        opacity: 0;
+        transform: translateX(-6px);
+    }
+
+    .conversation-root-header.search-active:not(.search-closing) > .mobile-root-actions {
+        opacity: 0;
+        transform: scale(0.96);
+    }
+
+    .conversation-root-header.search-active > .mobile-root-actions {
+        pointer-events: none;
+    }
+
+    .conversation-root-header.search-active.search-closing > h1,
+    .conversation-root-header.search-active.search-closing > .mobile-root-actions {
+        opacity: 1;
+        transform: none;
+        transition-delay: 100ms;
+        transition-duration: 260ms;
     }
 
     .conversation-search {
-        animation: conversation-search-in 160ms ease-out both;
+        animation: conversation-search-expand 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    }
+
+    .conversation-top-search {
+        --conversation-search-origin-after: 0px;
+        --conversation-search-origin-icon: clamp(16px, 6.865vw, 24px);
+        --conversation-search-edge-start: max(var(--mobile-top-inset), env(safe-area-inset-left));
+        --conversation-search-edge-end: max(var(--mobile-top-inset), env(safe-area-inset-right));
+
+        position: absolute;
+        top: calc(
+            env(safe-area-inset-top) + (var(--mobile-root-header) - var(--mobile-top-action)) / 2
+        );
+        right: var(--conversation-search-edge-end);
+        display: flex;
+        width: calc(
+            100% - var(--conversation-search-edge-start) - var(--conversation-search-edge-end)
+        );
+        height: var(--mobile-top-action);
+        min-width: 0;
+        min-height: var(--mobile-top-action);
+        align-items: center;
+        overflow: hidden;
+        padding-left: clamp(9px, 3.89vw, 16px);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-pill);
+        background: var(--surface-raised);
+        box-shadow: var(--shadow-1);
+        color: var(--ink-muted);
+        gap: clamp(5px, 2.288vw, 10px);
+        transition:
+            border-color 140ms ease,
+            background-color 140ms ease;
+    }
+
+    .conversation-top-search.closing {
+        animation: conversation-search-collapse 360ms cubic-bezier(0.4, 0, 0.2, 1) both;
+    }
+
+    .conversation-top-search:focus-within {
+        border-color: var(--accent);
+    }
+
+    .conversation-top-search :global(.conversation-search-icon) {
+        width: clamp(14px, 5.492vw, 20px);
+        height: clamp(14px, 5.492vw, 20px);
+        flex: none;
+        fill: none;
+        stroke: currentcolor;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        stroke-width: 1.8;
+        animation: conversation-search-content-in 420ms ease-out both;
+    }
+
+    .conversation-top-search :global(.conversation-search-origin-icon) {
+        position: absolute;
+        top: 50%;
+        right: calc(
+            var(--conversation-search-origin-after) +
+                (var(--mobile-top-action) - var(--conversation-search-origin-icon)) / 2
+        );
+        width: var(--conversation-search-origin-icon);
+        height: var(--conversation-search-origin-icon);
+        fill: none;
+        stroke: currentcolor;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        stroke-width: 2;
+        transform: translateY(-50%);
+        animation: conversation-search-origin-out 420ms ease-out both;
+        pointer-events: none;
+    }
+
+    .conversation-top-search input {
+        width: 100%;
+        min-width: 0;
+        height: 100%;
+        padding: 0;
+        border: 0;
+        outline: 0;
+        background: transparent;
+        color: var(--ink);
+        font: inherit;
+        font-size: var(--detail-support-type);
+        animation: conversation-search-content-in 420ms ease-out both;
+    }
+
+    .conversation-top-search input::placeholder {
+        color: var(--ink-subtle);
+    }
+
+    .conversation-top-search input::-webkit-search-cancel-button {
+        display: none;
+    }
+
+    .conversation-search-close {
+        display: grid;
+        width: calc(var(--mobile-top-action) - clamp(4px, 1.831vw, 8px));
+        height: calc(var(--mobile-top-action) - clamp(4px, 1.831vw, 8px));
+        min-width: calc(var(--mobile-top-action) - clamp(4px, 1.831vw, 8px));
+        padding: 0;
+        border: 0;
+        border-radius: 50%;
+        background: transparent;
+        color: var(--ink);
+        place-items: center;
+        transition:
+            background-color 140ms ease,
+            transform 140ms ease;
+        animation: conversation-search-content-in 420ms ease-out both;
+    }
+
+    .conversation-top-search.closing :global(.conversation-search-icon),
+    .conversation-top-search.closing input,
+    .conversation-top-search.closing .conversation-search-close {
+        animation: conversation-search-content-out 240ms ease-in both;
+    }
+
+    .conversation-top-search.closing :global(.conversation-search-origin-icon) {
+        animation: conversation-search-origin-in 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    }
+
+    .conversation-search-close:active {
+        background: var(--surface-active);
+        transform: scale(0.96);
+    }
+
+    .conversation-search-close:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: -2px;
+    }
+
+    .conversation-search-close :global(svg) {
+        width: clamp(14px, 5.492vw, 20px);
+        height: clamp(14px, 5.492vw, 20px);
+        fill: none;
+        stroke: currentcolor;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        stroke-width: 2;
     }
 
     .conversation-pane.root-view .entity-list {
@@ -506,6 +714,10 @@
         flex: none;
         color: var(--ink-muted);
         font-size: 0.75rem;
+    }
+
+    .conversation-preview {
+        padding-right: clamp(14px, 5.492vw, 24px);
     }
 
     .conversation-search-empty {
@@ -596,7 +808,7 @@
     :global(.app-shell[data-layout='mobile'])
         .conversation-pane.root-view
         .conversation-copy
-        > span:last-child {
+        > .conversation-preview {
         display: -webkit-box;
         font-size: clamp(9px, 3.661vw, 16px);
         line-height: 1.35;
@@ -658,23 +870,194 @@
         }
     }
 
-    @keyframes conversation-search-in {
+    @keyframes conversation-search-expand {
+        0% {
+            right: calc(
+                var(--conversation-search-edge-end) + var(--conversation-search-origin-after)
+            );
+            width: var(--mobile-top-action);
+            border-color: transparent;
+            background-color: transparent;
+            box-shadow: none;
+            opacity: 1;
+            transform: scaleY(0.94);
+        }
+
+        72% {
+            border-color: var(--accent);
+            background-color: var(--surface-raised);
+            box-shadow: var(--shadow-1);
+            opacity: 1;
+            transform: scaleY(1.025);
+        }
+
+        100% {
+            right: var(--conversation-search-edge-end);
+            width: calc(
+                100% - var(--conversation-search-edge-start) - var(--conversation-search-edge-end)
+            );
+            border-color: var(--accent);
+            background-color: var(--surface-raised);
+            box-shadow: var(--shadow-1);
+            opacity: 1;
+            transform: scaleY(1);
+        }
+    }
+
+    @keyframes conversation-search-collapse {
         from {
-            opacity: 0;
-            transform: translateY(-4px);
+            right: var(--conversation-search-edge-end);
+            width: calc(
+                100% - var(--conversation-search-edge-start) - var(--conversation-search-edge-end)
+            );
+            border-color: var(--accent);
+            background-color: var(--surface-raised);
+            box-shadow: var(--shadow-1);
+            opacity: 1;
+            transform: scaleY(1);
+        }
+
+        72% {
+            opacity: 1;
+            transform: scaleY(0.965);
         }
 
         to {
+            right: calc(
+                var(--conversation-search-edge-end) + var(--conversation-search-origin-after)
+            );
+            width: var(--mobile-top-action);
+            border-color: transparent;
+            background-color: transparent;
+            box-shadow: none;
             opacity: 1;
-            transform: translateY(0);
+            transform: scaleY(1);
+        }
+    }
+
+    @keyframes conversation-search-content-in {
+        0%,
+        34% {
+            opacity: 0;
+            transform: translateX(4px);
+        }
+
+        100% {
+            opacity: 1;
+            transform: translateX(0);
+        }
+    }
+
+    @keyframes conversation-search-content-out {
+        from {
+            opacity: 1;
+        }
+
+        to {
+            opacity: 0;
+            transform: translateX(6px);
+        }
+    }
+
+    @keyframes conversation-search-origin-out {
+        0%,
+        28% {
+            right: calc((var(--mobile-top-action) - var(--conversation-search-origin-icon)) / 2);
+            opacity: 1;
+        }
+
+        68%,
+        100% {
+            right: calc(
+                var(--conversation-search-origin-after) +
+                    (var(--mobile-top-action) - var(--conversation-search-origin-icon)) / 2
+            );
+            opacity: 0;
+        }
+    }
+
+    @keyframes conversation-search-origin-in {
+        0%,
+        42% {
+            right: calc(
+                var(--conversation-search-origin-after) +
+                    (var(--mobile-top-action) - var(--conversation-search-origin-icon)) / 2
+            );
+            opacity: 0;
+        }
+
+        100% {
+            right: calc((var(--mobile-top-action) - var(--conversation-search-origin-icon)) / 2);
+            opacity: 1;
         }
     }
 
     @media (prefers-reduced-motion: reduce) {
         .conversation-filter-pill,
-        .conversation-search {
+        .conversation-root-header > h1,
+        .conversation-root-header > .mobile-root-actions,
+        .conversation-search,
+        .conversation-top-search :global(.conversation-search-icon),
+        .conversation-top-search :global(.conversation-search-origin-icon),
+        .conversation-top-search input,
+        .conversation-search-close {
             animation: none;
             transition: none;
+        }
+
+        .conversation-top-search :global(.conversation-search-origin-icon) {
+            display: none;
+        }
+    }
+
+    @media (max-width: 899px) {
+        :global(.app-shell[data-layout='mobile']) .conversation-filter-strip {
+            min-height: clamp(37px, 15.561vw, 52px);
+            padding: clamp(4px, 1.831vw, 6px)
+                max(var(--mobile-top-inset), env(safe-area-inset-right)) clamp(5px, 2.288vw, 8px)
+                max(var(--mobile-top-inset), env(safe-area-inset-left));
+            gap: clamp(5px, 2.288vw, 8px);
+        }
+
+        :global(.app-shell[data-layout='mobile']) .conversation-filter-pill {
+            padding-inline: clamp(11px, 4.577vw, 16px);
+            font-size: clamp(10px, 4.119vw, 15px);
+        }
+
+        :global(.app-shell[data-layout='mobile']) .conversation-pane.root-view .mobile-root-row {
+            min-height: clamp(46px, 19.222vw, 68px);
+            padding: clamp(4px, 1.831vw, 6px) clamp(10px, 4.119vw, 16px);
+            gap: clamp(8px, 3.204vw, 12px);
+        }
+
+        :global(.app-shell[data-layout='mobile'])
+            .conversation-pane.root-view
+            .mobile-root-row
+            .avatar {
+            width: clamp(35px, 14.645vw, 52px);
+            height: clamp(35px, 14.645vw, 52px);
+            font-size: clamp(11px, 4.577vw, 16px);
+        }
+
+        :global(.app-shell[data-layout='mobile'])
+            .conversation-pane.root-view
+            .conversation-line
+            strong {
+            font-size: clamp(11px, 4.577vw, 16px);
+        }
+
+        :global(.app-shell[data-layout='mobile'])
+            .conversation-pane.root-view
+            .conversation-copy
+            > .conversation-preview {
+            font-size: clamp(9px, 3.661vw, 14px);
+        }
+
+        :global(.app-shell[data-layout='mobile'])
+            .conversation-pane.root-view
+            .conversation-line
+            time {
+            font-size: clamp(7px, 2.975vw, 11px);
         }
     }
 </style>

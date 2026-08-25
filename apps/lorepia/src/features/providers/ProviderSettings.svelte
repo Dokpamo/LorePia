@@ -1685,4 +1685,35 @@
             grid-template-columns: 1fr;
         }
     }
+
+    @media (max-width: 899px) {
+        :global(.app-shell[data-layout='mobile']) .provider-scroll.settings-home-scroll {
+            padding-top: clamp(25px, 10.297vw, 32px);
+        }
+
+        :global(.app-shell[data-layout='mobile']) .settings-identity {
+            min-height: clamp(103px, 43.021vw, 150px);
+            padding: 0 clamp(8px, 4.577vw, 16px) clamp(7px, 4.119vw, 14px);
+            margin-bottom: clamp(3px, 1.831vw, 6px);
+            gap: clamp(7px, 2.975vw, 8px);
+        }
+
+        :global(.app-shell[data-layout='mobile']) .settings-avatar-wrap {
+            width: clamp(59px, 24.714vw, 88px);
+            height: clamp(59px, 24.714vw, 88px);
+        }
+
+        :global(.app-shell[data-layout='mobile']) .settings-avatar-badge {
+            right: clamp(-3px, -0.458vw, -2px);
+            bottom: clamp(-3px, -0.458vw, -2px);
+            width: clamp(20px, 8.238vw, 30px);
+            height: clamp(20px, 8.238vw, 30px);
+            border-width: clamp(2px, 0.915vw, 3px);
+        }
+
+        :global(.app-shell[data-layout='mobile']) .settings-avatar-badge :global(svg) {
+            width: clamp(11px, 4.577vw, 16px);
+            height: clamp(11px, 4.577vw, 16px);
+        }
+    }
 </style>

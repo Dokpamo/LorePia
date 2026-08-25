@@ -1,17 +1,12 @@
 <script lang="ts">
-    import {
-        ArrowLeft,
-        EllipsisVertical,
-        FaceSlightlySmiling,
-        Send,
-        Sparkles,
-    } from '@lucide/svelte';
+    import { ArrowUp, ArrowLeft, Plus, Sparkles } from '@lucide/svelte';
     import MarkdownText from './MarkdownText.svelte';
     import { onMount, tick } from 'svelte';
     import type { KeyboardEventHandler } from 'svelte/elements';
     import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
     import type { LorepiaAppController, LorepiaAppState } from '../../app/app-controller';
+    import ChoicePopover from '../../components/ChoicePopover.svelte';
     import type {
         ConversationMode,
         MemoryRecordSourceNavigationDto,
@@ -52,7 +47,6 @@
         orchestrationController?: OrchestrationController;
         client?: InteractionRoomCapableClient;
         messageFocusRequest?: (MemoryRecordSourceNavigationDto & { request_id: number }) | null;
-        onOpenOrchestrationStudio?: () => void;
         onOpenHome?: () => void;
     }
 
@@ -83,7 +77,6 @@
         orchestrationController,
         client,
         messageFocusRequest = null,
-        onOpenOrchestrationStudio = () => undefined,
         onOpenHome = () => undefined,
     }: Props = $props();
     let draft = $state('');
@@ -98,7 +91,6 @@
     let anchoredBranchKey = '';
     let anchoredMessageCount = 0;
     let editingMessageId = $state<string | null>(null);
-    let activeActionMessageId = $state<string | null>(null);
     let editDraft = $state('');
     let pendingRemoveId = $state<string | null>(null);
     let copyNotice = $state('');
@@ -807,19 +799,6 @@
             '승인된 생성 시도를 준비했습니다. 원래 전송·수정·재생성 작업을 직접 반복하세요.';
     }
 
-    async function beginNewGenerationOperation(): Promise<void> {
-        controller.beginNewGenerationOperation();
-        copyNotice = '새 생성 작업으로 전환했습니다. 같은 입력도 새로운 요청으로 처리됩니다.';
-        await tick();
-        composerTextarea?.focus();
-    }
-
-    async function insertEmoji(): Promise<void> {
-        draft = `${draft}🙂`;
-        await tick();
-        composerTextarea?.focus();
-    }
-
     const onComposerKeydown: KeyboardEventHandler<HTMLTextAreaElement> = (event) => {
         if (
             shouldSubmitComposer(
@@ -842,13 +821,8 @@
 
     function beginEdit(message: MessageDto): void {
         editingMessageId = message.id;
-        activeActionMessageId = null;
         editDraft = message.content;
         pendingRemoveId = null;
-    }
-
-    function toggleMessageActions(messageId: string): void {
-        activeActionMessageId = activeActionMessageId === messageId ? null : messageId;
     }
 
     async function commitEdit(messageId: string): Promise<void> {
@@ -868,6 +842,72 @@
         }
     }
 </script>
+
+{#snippet roomControls(closeSettings: () => Promise<void>)}
+    <div class="chat-room-controls">
+        <div class="chat-room-control-block">
+            <span class="chat-room-control-label">대화 모드</span>
+            <div class="segmented chat-room-mode" role="group" aria-label="대화 모드">
+                <button
+                    type="button"
+                    class:active={appState.conversation_state?.selected_mode === 'chat'}
+                    aria-pressed={appState.conversation_state?.selected_mode === 'chat'}
+                    onclick={() => setMode('chat')}
+                >
+                    채팅
+                </button>
+                <button
+                    type="button"
+                    class:active={appState.conversation_state?.selected_mode === 'story'}
+                    aria-pressed={appState.conversation_state?.selected_mode === 'story'}
+                    onclick={() => setMode('story')}
+                >
+                    스토리
+                </button>
+            </div>
+        </div>
+
+        {#if appState.branches.length > 1}
+            <div class="branch-picker chat-room-branch">
+                <span>분기</span>
+                <ChoicePopover
+                    id="chat-active-branch"
+                    label="분기"
+                    value={appState.conversation_state?.active_branch_id ?? ''}
+                    showLabel={false}
+                    options={appState.branches.map((branch, index) => ({
+                        value: branch.id,
+                        label: branch.title ?? `분기 ${String(index + 1)}`,
+                    }))}
+                    onSelect={(value: string) => void controller.selectBranch(value)}
+                />
+            </div>
+        {/if}
+
+        <button
+            class="chat-room-new-operation"
+            type="button"
+            aria-label="새 생성 작업"
+            disabled={sending ||
+                appState.chat.phase === 'loading' ||
+                appState.chat.active_generation_id !== null}
+            onclick={async () => {
+                controller.beginNewGenerationOperation();
+                copyNotice =
+                    '새 생성 작업으로 전환했습니다. 같은 입력도 새로운 요청으로 처리됩니다.';
+                await closeSettings();
+                await tick();
+                composerTextarea?.focus();
+            }}
+        >
+            <Sparkles aria-hidden="true" />
+            <span>
+                <strong>새 생성 작업</strong>
+                <small>현재 입력을 별도의 새 요청으로 처리합니다.</small>
+            </span>
+        </button>
+    </div>
+{/snippet}
 
 <section class="pane chat-pane" aria-labelledby="chat-title">
     {#if appState.selected_conversation === null}
@@ -915,60 +955,11 @@
                                 void controller.loadProviders();
                             }
                         }}
-                        onOpenStudio={onOpenOrchestrationStudio}
+                        {roomControls}
                     />
                 {/if}
             </div>
         </header>
-
-        <div class="chat-toolbar">
-            <div class="segmented" aria-label="대화 모드">
-                <button
-                    type="button"
-                    class:active={appState.conversation_state?.selected_mode === 'chat'}
-                    aria-pressed={appState.conversation_state?.selected_mode === 'chat'}
-                    onclick={() => setMode('chat')}
-                >
-                    채팅
-                </button>
-                <button
-                    type="button"
-                    class:active={appState.conversation_state?.selected_mode === 'story'}
-                    aria-pressed={appState.conversation_state?.selected_mode === 'story'}
-                    onclick={() => setMode('story')}
-                >
-                    스토리
-                </button>
-            </div>
-            {#if appState.branches.length > 1}
-                <label class="branch-picker">
-                    <span>분기</span>
-                    <select
-                        value={appState.conversation_state?.active_branch_id}
-                        onchange={(event) =>
-                            void controller.selectBranch(event.currentTarget.value)}
-                    >
-                        {#each appState.branches as branch, index (branch.id)}
-                            <option value={branch.id}>
-                                {branch.title ?? `분기 ${String(index + 1)}`}
-                            </option>
-                        {/each}
-                    </select>
-                </label>
-            {/if}
-            <button
-                class="chat-toolbar-new-operation"
-                type="button"
-                aria-label="새 생성 작업"
-                title="새 생성 작업"
-                disabled={sending ||
-                    appState.chat.phase === 'loading' ||
-                    appState.chat.active_generation_id !== null}
-                onclick={() => void beginNewGenerationOperation()}
-            >
-                <Sparkles aria-hidden="true" />
-            </button>
-        </div>
 
         {#if client !== undefined && interactionController !== null && interactionState.phase !== 'unavailable'}
             {#if interactionState.phase === 'loading'}
@@ -1218,7 +1209,6 @@
                         <li
                             class:from-user={message.role === 'user'}
                             class:has-date-divider={showsDay}
-                            class:actions-open={activeActionMessageId === message.id}
                             class:memory-source-boundary={messageFocusRequest !== null &&
                                 (message.id === messageFocusRequest.start_message_id ||
                                     message.id === messageFocusRequest.end_message_id)}
@@ -1293,7 +1283,9 @@
                                     </time>
                                 </article>
                             {:else}
-                                <article class="message-body" aria-label={turnLabel}>
+                                <!-- The focusable bubble replaces the removed three-dot disclosure on touch and keyboard. -->
+                                <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+                                <article class="message-body" aria-label={turnLabel} tabindex="0">
                                     <MarkdownText text={message.content} />
                                     {#if message.status !== 'complete'}
                                         <span class="message-status">{message.status}</span>
@@ -1302,15 +1294,6 @@
                                         <time class="message-time" datetime={message.created_at}>
                                             {formatMessageTime(message.created_at)}
                                         </time>
-                                        <button
-                                            class="message-action-reveal"
-                                            type="button"
-                                            aria-label={`${turnLabel} 작업 보기`}
-                                            aria-expanded={activeActionMessageId === message.id}
-                                            onclick={() => toggleMessageActions(message.id)}
-                                        >
-                                            <EllipsisVertical aria-hidden="true" />
-                                        </button>
                                     </footer>
                                 </article>
                                 <div class="message-actions" aria-label="메시지 작업">
@@ -1451,10 +1434,10 @@
                 <button
                     class="composer-leading-action"
                     type="button"
-                    aria-label="이모지 추가"
-                    onclick={() => void insertEmoji()}
+                    aria-label="추가"
+                    onclick={() => composerTextarea?.focus()}
                 >
-                    <FaceSlightlySmiling aria-hidden="true" />
+                    <Plus aria-hidden="true" />
                 </button>
                 <textarea
                     id="chat-draft"
@@ -1462,7 +1445,6 @@
                     bind:value={draft}
                     rows="1"
                     maxlength="131072"
-                    placeholder="메시지"
                     disabled={appState.chat.phase === 'loading' ||
                         appState.chat.active_generation_id !== null ||
                         appState.conversation_state === null}
@@ -1478,14 +1460,14 @@
                     >
                         중지
                     </button>
-                {:else}
+                {:else if draft.trim().length > 0}
                     <button
                         class="primary send-button"
                         type="submit"
-                        disabled={draft.trim().length === 0 || sending}
+                        disabled={sending}
                         aria-label="메시지 보내기"
                     >
-                        <Send class="chat-send-icon" aria-hidden="true" />
+                        <ArrowUp class="chat-send-icon" aria-hidden="true" />
                     </button>
                 {/if}
             </div>
@@ -1494,6 +1476,87 @@
 </section>
 
 <style>
+    .chat-room-controls,
+    .chat-room-control-block {
+        display: grid;
+        gap: 8px;
+    }
+
+    .chat-room-control-label,
+    .chat-room-branch > span {
+        color: var(--ink-muted);
+        font-size: 0.75rem;
+        font-weight: 650;
+    }
+
+    .chat-room-mode {
+        display: grid;
+        width: 100%;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .chat-room-mode button {
+        width: 100%;
+    }
+
+    .chat-room-mode button.active {
+        background: var(--ink);
+        box-shadow: none;
+        color: var(--bg);
+    }
+
+    .chat-room-branch {
+        min-height: 42px;
+        justify-content: space-between;
+        padding: 0 4px;
+    }
+
+    .chat-room-branch :global(.choice-popover) {
+        width: min(68%, 240px);
+    }
+
+    .chat-room-new-operation {
+        display: flex;
+        width: 100%;
+        min-height: 54px;
+        align-items: center;
+        padding: 9px 12px;
+        border: 0;
+        border-radius: var(--radius-md);
+        background: var(--surface-raised);
+        box-shadow: var(--shadow-1);
+        color: var(--ink);
+        gap: 10px;
+        text-align: left;
+    }
+
+    .chat-room-new-operation :global(svg) {
+        width: 20px;
+        height: 20px;
+        flex: none;
+        fill: none;
+        stroke: currentcolor;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        stroke-width: 1.8;
+    }
+
+    .chat-room-new-operation > span {
+        display: grid;
+        min-width: 0;
+        gap: 2px;
+    }
+
+    .chat-room-new-operation strong {
+        font-size: 0.875rem;
+    }
+
+    .chat-room-new-operation small {
+        color: var(--ink-muted);
+        font-size: 0.72rem;
+        line-height: 1.35;
+    }
+
     .interaction-status,
     .interaction-surface {
         width: min(100% - 2 * clamp(16px, 5vw, 32px), var(--reading));

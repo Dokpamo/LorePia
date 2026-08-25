@@ -17,3 +17,32 @@ if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
         dispatchEvent: () => false,
     });
 }
+
+/*
+ * Svelte transitions use the Web Animations API, which jsdom does not ship.
+ * Finish each synthetic animation in a microtask so intro/outro lifecycle and
+ * focus restoration are still exercised instead of disabling transitions.
+ */
+if (typeof Element !== 'undefined' && typeof Element.prototype.animate !== 'function') {
+    Element.prototype.animate = () => {
+        let finishHandler: Animation['onfinish'] = null;
+        const animation = {
+            currentTime: 0,
+            effect: null,
+            playState: 'finished',
+            cancel: () => undefined,
+            get onfinish() {
+                return finishHandler;
+            },
+            set onfinish(handler: Animation['onfinish']) {
+                finishHandler = handler;
+                if (handler !== null) {
+                    queueMicrotask(() => {
+                        handler.call(animation, new Event('finish') as AnimationPlaybackEvent);
+                    });
+                }
+            },
+        } as unknown as Animation;
+        return animation;
+    };
+}

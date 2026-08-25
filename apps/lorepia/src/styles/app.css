@@ -2,8 +2,8 @@
  * LorePia design system — one handheld column, everywhere.
  *
  * There is exactly one handheld layout: controls scale up to a 437px logical
- * reference, while the reading column may widen to 591px on a Fold or tablet.
- * Above the control reference, content and whitespace grow instead of controls.
+ * phone reference, then stop at a compact density so Fold and tablet windows
+ * widen without making the phone typography and controls feel enlarged.
  *
  * The colour source is the supplied desktop light/dark reference: warm paper
  * whites by day and neutral charcoal at night. Each mode borrows the other's
@@ -1405,7 +1405,7 @@ textarea {
 .app-shell[data-layout='mobile'][data-view='chat'] .chat-pane .message-scroll {
     padding-top: calc(
         env(safe-area-inset-top) + var(--mobile-top-offset) + var(--mobile-top-action) +
-            var(--mobile-pill-control) + clamp(10px, 4.119vw, 18px)
+            clamp(10px, 4.119vw, 18px)
     );
     background: transparent;
 }
@@ -1415,7 +1415,7 @@ textarea {
     z-index: 10;
     height: calc(
         env(safe-area-inset-top) + var(--mobile-top-offset) + var(--mobile-top-action) +
-            var(--mobile-pill-control) + clamp(13px, 5.492vw, 24px)
+            clamp(13px, 5.492vw, 24px)
     );
     background: linear-gradient(
         to bottom,
@@ -1479,103 +1479,15 @@ textarea {
     line-height: 1.15;
 }
 
-.app-shell[data-layout='mobile'][data-view='chat'] .chat-pane .chat-toolbar {
-    position: absolute;
-    z-index: 11;
-    top: calc(
-        env(safe-area-inset-top) + var(--mobile-top-offset) + var(--mobile-top-action) +
-            clamp(3px, 1.373vw, 6px)
-    );
-    right: 50%;
-    height: var(--mobile-pill-control);
-    min-height: var(--mobile-pill-control);
-    justify-content: center;
-    width: max-content;
-    max-width: calc(100% - 2 * var(--mobile-top-inset));
-    padding: 0;
-    border: 0;
-    background: transparent;
-    box-shadow: none;
-    gap: clamp(4px, 1.831vw, 8px);
-    overflow-x: auto;
-    transform: translateX(50%);
-}
-
-.app-shell[data-layout='mobile'][data-view='chat'] .chat-toolbar .segmented {
-    padding: 0;
-    background: transparent;
-    gap: clamp(4px, 1.831vw, 8px);
-}
-
-.app-shell[data-layout='mobile'][data-view='chat'] .chat-toolbar .segmented button,
-.app-shell[data-layout='mobile'][data-view='chat'] .chat-toolbar .branch-picker select {
-    height: var(--mobile-pill-control);
-    min-height: var(--mobile-pill-control);
-    padding: 0 clamp(8px, 3.432vw, 15px);
-    border: 1px solid var(--line);
-    background: var(--surface-raised);
-    color: var(--ink);
-    font-size: clamp(10px, 4.119vw, 18px);
-    font-weight: 700;
-}
-
-.app-shell[data-layout='mobile'][data-view='chat'] .chat-toolbar .branch-picker select {
-    max-width: clamp(82px, 34vw, 149px);
-}
-
-.app-shell[data-layout='mobile'][data-view='chat'] .chat-toolbar .segmented button.active {
-    border-color: var(--ink);
-    background: var(--ink);
-    box-shadow: none;
-    color: var(--bg);
-}
-
-.chat-toolbar-new-operation {
-    display: grid;
-    width: var(--mobile-pill-control);
-    height: var(--mobile-pill-control);
-    min-width: var(--mobile-pill-control);
-    min-height: var(--mobile-pill-control);
-    padding: 0;
-    border: 1px solid var(--line);
-    border-radius: 50%;
-    background: var(--surface-raised);
-    color: var(--ink-muted);
-    place-items: center;
-}
-
-.chat-toolbar-new-operation svg {
-    width: clamp(12px, 4.9vw, 21px);
-    height: clamp(12px, 4.9vw, 21px);
-    fill: none;
-    stroke: currentcolor;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-    stroke-width: 1.8;
-}
-
 .chat-pane > .message-scroll {
     flex: 1;
     min-height: 0;
 }
 
 .chat-pane > .chat-header,
-.chat-pane > .chat-toolbar,
 .chat-pane > .composer,
 .chat-pane > .chat-live-status {
     flex: none;
-}
-
-/*
- * The header answers "who am I talking to"; anything that changes how the room
- * behaves sits on a quieter row beneath it. Crammed onto one line the identity
- * loses to the controls, which is the wrong way round.
- */
-.chat-toolbar {
-    display: flex;
-    align-items: center;
-    padding: 0 var(--gutter) 8px;
-    gap: 8px;
 }
 
 /*
@@ -1648,6 +1560,10 @@ textarea {
     align-items: center;
     justify-self: end;
     gap: 6px;
+}
+
+.app-shell .chat-header:has(.quick-drawer) {
+    z-index: 30;
 }
 
 .app-shell[data-layout='mobile'] .chat-controls {
@@ -1921,34 +1837,10 @@ textarea {
     align-items: center;
     justify-content: flex-end;
     margin-top: clamp(1px, 0.686vw, 3px);
-    gap: clamp(1px, 0.458vw, 2px);
 }
 
 .message-bubble-meta .message-time {
     padding: 0;
-}
-
-.message-action-reveal {
-    display: grid;
-    width: 18px;
-    min-width: 18px;
-    min-height: 18px;
-    padding: 0;
-    border: 0;
-    border-radius: 50%;
-    background: transparent;
-    color: var(--ink-subtle);
-    place-items: center;
-}
-
-.message-action-reveal svg {
-    width: 13px;
-    height: 13px;
-    fill: none;
-    stroke: currentcolor;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-    stroke-width: 2;
 }
 
 .app-shell[data-layout='mobile'][data-view='chat'] .message-item.from-user .message-body {
@@ -1972,9 +1864,7 @@ textarea {
         opacity 110ms ease;
 }
 
-.app-shell[data-layout='mobile'][data-view='chat']
-    .message-item:is(:focus-within, .actions-open)
-    .message-actions {
+.app-shell[data-layout='mobile'][data-view='chat'] .message-item:focus-within .message-actions {
     max-height: 36px;
     padding-top: 4px;
     opacity: 1;
@@ -2139,22 +2029,30 @@ textarea {
 }
 
 .composer-field {
+    --composer-control-size: 44px;
+    --composer-corner: calc(var(--composer-control-size) / 2 + 5px);
+    --composer-expanded-size: clamp(96px, 18dvh, 140px);
+
     display: flex;
     min-height: 54px;
     align-items: flex-end;
     padding: 4px;
     border: 1px solid var(--line);
-    border-radius: var(--radius-pill);
+    border-radius: var(--composer-corner);
     background: var(--surface-raised);
     box-shadow: var(--shadow-2);
     gap: 4px;
+    transition:
+        min-height 260ms cubic-bezier(0.22, 1, 0.36, 1),
+        border-radius 220ms ease,
+        border-color 140ms ease;
 }
 
 .composer-leading-action {
     display: grid;
-    width: 44px;
-    min-width: 44px;
-    min-height: 44px;
+    width: var(--composer-control-size);
+    min-width: var(--composer-control-size);
+    min-height: var(--composer-control-size);
     padding: 0;
     border: 0;
     border-radius: 50%;
@@ -2174,22 +2072,34 @@ textarea {
 }
 
 .composer-field:focus-within {
+    min-height: var(--composer-expanded-size);
     border-color: var(--accent-line);
+    border-radius: var(--radius-lg);
 }
 
 .composer textarea {
     max-height: 38vh;
-    min-height: 44px;
+    min-height: var(--composer-control-size);
     flex: 1;
-    padding: 11px 12px;
+    padding: calc((var(--composer-control-size) - 1.45em) / 2) 12px;
     border: 0;
-    border-radius: var(--radius-pill);
+    border-radius: calc(var(--composer-control-size) / 2);
     outline: 0;
     background: transparent;
     field-sizing: content;
     font-size: 0.9375rem;
     line-height: 1.45;
     resize: none;
+    transition:
+        min-height 260ms cubic-bezier(0.22, 1, 0.36, 1),
+        padding 220ms ease,
+        border-radius 220ms ease;
+}
+
+.composer-field:focus-within textarea {
+    min-height: calc(var(--composer-expanded-size) - 10px);
+    padding-block: 12px;
+    border-radius: calc(var(--radius-lg) - 5px);
 }
 
 .composer textarea:focus-visible {
@@ -2197,9 +2107,9 @@ textarea {
 }
 
 .send-button {
-    width: 44px;
-    min-width: 44px;
-    min-height: 44px;
+    width: var(--composer-control-size);
+    min-width: var(--composer-control-size);
+    min-height: var(--composer-control-size);
     padding: 0;
     border-radius: 50%;
 }
@@ -2215,21 +2125,33 @@ textarea {
 }
 
 .app-shell[data-layout='mobile'][data-view='chat'] .composer-field {
+    --composer-control-size: calc(var(--mobile-top-action) - clamp(4px, 1.373vw, 6px));
+    --composer-expanded-size: clamp(88px, 18dvh, 128px);
+
     min-height: var(--mobile-top-action);
     padding: clamp(2px, 0.686vw, 3px);
     box-shadow: var(--shadow-1);
 }
 
 .app-shell[data-layout='mobile'][data-view='chat'] .composer textarea {
-    min-height: calc(var(--mobile-top-action) - clamp(4px, 1.373vw, 6px));
-    padding: clamp(5px, 2.059vw, 9px) clamp(4px, 1.831vw, 8px);
+    min-height: var(--composer-control-size);
+    padding: calc((var(--composer-control-size) - 1.45em) / 2) clamp(4px, 1.831vw, 8px);
     font-size: var(--detail-support-type);
 }
 
+.app-shell[data-layout='mobile'][data-view='chat'] .composer-field:focus-within {
+    min-height: var(--composer-expanded-size);
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .composer-field:focus-within textarea {
+    min-height: calc(var(--composer-expanded-size) - 10px);
+    padding-block: 12px;
+}
+
 .app-shell[data-layout='mobile'][data-view='chat'] :is(.composer-leading-action, .send-button) {
-    width: calc(var(--mobile-top-action) - clamp(4px, 1.373vw, 6px));
-    min-width: calc(var(--mobile-top-action) - clamp(4px, 1.373vw, 6px));
-    min-height: calc(var(--mobile-top-action) - clamp(4px, 1.373vw, 6px));
+    width: var(--composer-control-size);
+    min-width: var(--composer-control-size);
+    min-height: var(--composer-control-size);
 }
 
 .app-shell[data-layout='mobile'][data-view='chat'] :is(.composer-leading-action, .send-button) svg {
@@ -2769,6 +2691,111 @@ textarea {
 
     .composer textarea:hover {
         border-color: transparent;
+    }
+}
+
+/* ------------------------------------------------ wide handheld density */
+
+/*
+ * A Fold or small tablet still uses the handheld navigation model, but it is
+ * not a magnified phone. Keep the single reading column and spend the added
+ * width on margins while returning text, rows and chrome to a compact native
+ * density. At 900px the standing desktop sidebar takes over as before.
+ */
+@media (max-width: 899px) {
+    :root {
+        font-size: clamp(9px, 3.661vw, 15px);
+    }
+
+    .app-shell[data-layout='mobile'] {
+        --touch: clamp(25px, 10.069vw, 40px);
+        --mobile-toolbar: clamp(31px, 12.815vw, 52px);
+        --mobile-root-header: clamp(40px, 16.476vw, 60px);
+        --mobile-top-action: clamp(30px, 12.18vw, 44px);
+        --mobile-pill-control: clamp(26px, 10.526vw, 36px);
+        --mobile-top-inset: clamp(9px, 3.89vw, 16px);
+        --mobile-top-offset: clamp(10px, 4.06vw, 12px);
+        --mobile-top-fade: clamp(72px, 30.2vw, 104px);
+        --mobile-root-title-inset: clamp(14px, 6.095vw, 22px);
+        --mobile-row: clamp(40px, 16.476vw, 68px);
+        --mobile-search: clamp(27px, 10.984vw, 42px);
+        --mobile-search-inset: clamp(7px, 3vw, 12px);
+        --mobile-nav: clamp(37px, 15.103vw, 60px);
+        --detail-ui-type: clamp(10px, 4.119vw, 16px);
+        --detail-support-type: clamp(9px, 3.55vw, 14px);
+        --reading: 560px;
+        --settings: 560px;
+        --gutter: max(clamp(9px, 3.89vw, 16px), calc((100% - 560px) / 2));
+        --settings-gutter: max(clamp(8px, 3.432vw, 16px), calc((100% - 560px) / 2));
+        --detail-action-workspace-width: min(100vw, 560px);
+        --detail-action-fixed-gutter: clamp(9px, 3.89vw, 16px);
+    }
+
+    .mobile-root-header h1 {
+        font-size: clamp(14px, 5.72vw, 22px);
+    }
+
+    .mobile-top-action svg {
+        width: clamp(16px, 6.865vw, 24px);
+        height: clamp(16px, 6.865vw, 24px);
+    }
+
+    .tab .nav-icon {
+        width: clamp(14px, 5.95vw, 22px);
+        height: clamp(14px, 5.95vw, 22px);
+    }
+
+    .tab-label {
+        font-size: clamp(8px, 3.204vw, 12px);
+    }
+
+    .app-shell[data-layout='mobile'] .mobile-root-search svg {
+        width: clamp(11px, 4.577vw, 18px);
+        height: clamp(11px, 4.577vw, 18px);
+    }
+
+    .app-shell[data-layout='mobile'] .mobile-root-search input {
+        font-size: clamp(8px, 3.432vw, 14px);
+    }
+
+    .app-shell[data-layout='mobile'] .setting-row {
+        min-height: clamp(37px, 15.561vw, 60px);
+        padding: clamp(5px, 2.288vw, 8px) clamp(11px, 4.577vw, 16px);
+        gap: clamp(13px, 5.492vw, 18px);
+    }
+
+    .app-shell[data-layout='mobile'] .setting-icon {
+        width: clamp(19px, 7.78vw, 28px);
+        height: clamp(19px, 7.78vw, 28px);
+    }
+
+    .app-shell[data-layout='mobile'] .setting-icon svg {
+        width: clamp(13px, 5.492vw, 20px);
+        height: clamp(13px, 5.492vw, 20px);
+    }
+
+    .app-shell[data-layout='mobile'][data-view='chat'] .chat-pane .chat-identity .avatar {
+        font-size: clamp(9px, 3.661vw, 14px);
+    }
+
+    .app-shell[data-layout='mobile'][data-view='chat'] .chat-pane .chat-identity h2 {
+        font-size: clamp(10px, 3.89vw, 16px);
+    }
+
+    .app-shell[data-layout='mobile'][data-view='chat'] .chat-pane .chat-subtitle {
+        font-size: clamp(7px, 2.746vw, 11px);
+    }
+
+    .app-shell[data-layout='mobile'][data-view='chat'] .message-item .message-body {
+        padding: clamp(5px, 2.059vw, 8px) clamp(7px, 2.746vw, 11px) clamp(4px, 1.602vw, 6px);
+        font-size: clamp(9px, 3.89vw, 15px);
+    }
+
+    .app-shell[data-layout='mobile'][data-view='chat']
+        :is(.composer-leading-action, .send-button)
+        svg {
+        width: clamp(14px, 5.492vw, 20px);
+        height: clamp(14px, 5.492vw, 20px);
     }
 }
 

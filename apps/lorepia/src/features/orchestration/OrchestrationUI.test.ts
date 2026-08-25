@@ -912,7 +912,7 @@ function restartedCompletedExportState(): ContentPackageState {
 }
 
 describe('OrchestrationQuickDrawer', () => {
-    it('provides accessible quick controls and explicit save without silently persisting', async () => {
+    it('provides accessible quick controls and saves staged changes when it closes', async () => {
         const orchestrationController = controller();
         const stage = vi.spyOn(orchestrationController, 'stageRoomConfig');
         const save = vi.spyOn(orchestrationController, 'saveRoomConfig').mockResolvedValue(true);
@@ -929,47 +929,83 @@ describe('OrchestrationQuickDrawer', () => {
             model_route_id: 'route-2',
             display_name: '합성 모델 2 균형 생성',
         });
-        render(OrchestrationQuickDrawer, {
+        const rendered = render(OrchestrationQuickDrawer, {
             appState: readyAppState,
             orchestrationState: { ...orchestrationState(), dirty_room_config: true },
             controller: orchestrationController,
         });
+        const persistentDrawer = rendered.container.querySelector('.quick-drawer');
+        expect(persistentDrawer).toHaveAttribute('aria-hidden', 'true');
+        expect(persistentDrawer).toHaveProperty('inert', true);
 
-        const toggle = screen.getByRole('button', { name: /생성 설정/ });
+        const toggle = screen.getByRole('button', { name: '대화 설정' });
         await fireEvent.click(toggle);
-        const drawer = screen.getByRole('complementary', { name: '프롬프트와 생성' });
-        expect(drawer).toBeInTheDocument();
+        const drawer = screen.getByRole('dialog', { name: '대화 설정' });
+        expect(drawer).toBe(persistentDrawer);
+        expect(drawer).toHaveAttribute('aria-hidden', 'false');
+        expect(drawer).toHaveProperty('inert', false);
 
-        expect(within(drawer).getByLabelText('모델')).toHaveValue('route-1');
-        await fireEvent.change(within(drawer).getByLabelText('모델'), {
-            target: { value: 'route-2' },
+        const promptChoice = within(drawer).getByRole('button', {
+            name: /^프롬프트 프리셋:/,
         });
-        await fireEvent.change(within(drawer).getByLabelText('생성 프리셋'), {
-            target: { value: 'generation-1' },
-        });
+        const promptRect = vi
+            .spyOn(promptChoice, 'getBoundingClientRect')
+            .mockReturnValue(new DOMRect(90, 700, 320, 40));
+        const viewportHeight = vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(768);
+        await fireEvent.click(promptChoice);
+        expect(within(drawer).getByRole('menu', { name: '프롬프트 프리셋 선택' })).toHaveClass(
+            'above',
+        );
+        await fireEvent.keyDown(window, { key: 'Escape' });
+        promptRect.mockRestore();
+        viewportHeight.mockRestore();
+        expect(screen.getByRole('dialog', { name: '대화 설정' })).toBeInTheDocument();
+        expect(within(drawer).queryByRole('menu')).not.toBeInTheDocument();
+
+        const modelChoice = within(drawer).getByRole('button', { name: /^모델:/ });
+        expect(modelChoice).toHaveAttribute('aria-expanded', 'false');
+        await fireEvent.click(modelChoice);
+        await fireEvent.click(within(drawer).getByRole('menuitemradio', { name: /합성 모델 2/ }));
+        await fireEvent.click(within(drawer).getByRole('button', { name: /^생성 프리셋:/ }));
+        await fireEvent.click(within(drawer).getByRole('menuitemradio', { name: '균형 생성' }));
         await fireEvent.click(within(drawer).getByLabelText('길게'));
         await fireEvent.input(within(drawer).getByRole('slider', { name: /창의성/ }), {
             target: { value: '73' },
         });
-        await fireEvent.change(within(drawer).getByLabelText('추론 강도'), {
-            target: { value: 'extra_high' },
+        await fireEvent.click(within(drawer).getByRole('button', { name: /^추론 강도:/ }));
+        await fireEvent.click(within(drawer).getByRole('menuitemradio', { name: '매우 높음' }));
+        const memoryToggle = within(drawer).getByRole('switch', { name: '장기기억 사용' });
+        const knowledgeToggle = within(drawer).getByRole('switch', {
+            name: '세계관 지식 사용',
         });
-        await fireEvent.click(within(drawer).getByLabelText('장기기억 사용'));
-        await fireEvent.click(within(drawer).getByLabelText('세계관 지식 사용'));
+        expect(memoryToggle).toHaveAttribute('aria-checked', 'true');
+        expect(knowledgeToggle).toHaveAttribute('aria-checked', 'true');
+        expect(within(drawer).queryByRole('checkbox')).not.toBeInTheDocument();
+        await fireEvent.click(memoryToggle);
+        await fireEvent.click(knowledgeToggle);
         expect(stage).toHaveBeenCalledWith({ generation_preset_id: 'generation-2' });
         expect(stage).toHaveBeenCalledWith({ generation_preset_id: 'generation-1' });
         expect(stage).toHaveBeenCalledWith({ response_length: 'long' });
         expect(stage).toHaveBeenCalledWith({ creativity: 73 });
         expect(stage).toHaveBeenCalledWith({ reasoning_effort: 'extra_high' });
-        expect(within(drawer).getByLabelText('장기기억 사용')).toBeEnabled();
+        expect(memoryToggle).toBeEnabled();
         expect(stage).toHaveBeenCalledWith({ memory_enabled: false });
         expect(stage).toHaveBeenCalledWith({ knowledge_enabled: false });
 
-        await fireEvent.click(within(drawer).getByRole('button', { name: '방 설정 저장' }));
-        expect(save).toHaveBeenCalledOnce();
+        expect(within(drawer).queryByRole('button', { name: '고급 설정' })).not.toBeInTheDocument();
+        expect(within(drawer).queryByRole('button', { name: '저장' })).not.toBeInTheDocument();
 
-        await fireEvent.keyDown(window, { key: 'Escape' });
-        expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
+        const dragHandle = within(drawer).getByRole('button', {
+            name: '아래로 끌어 대화 설정 닫기',
+        });
+        await fireEvent.pointerDown(dragHandle, { button: 0, clientY: 100, pointerId: 1 });
+        await fireEvent.pointerMove(dragHandle, { button: 0, clientY: 190, pointerId: 1 });
+        await fireEvent.pointerUp(dragHandle, { button: 0, clientY: 190, pointerId: 1 });
+        await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+        expect(rendered.container.querySelector('.quick-drawer')).toBe(persistentDrawer);
+        expect(persistentDrawer).toHaveAttribute('aria-hidden', 'true');
+        expect(persistentDrawer).toHaveProperty('inert', true);
+        expect(save).toHaveBeenCalledOnce();
     });
 
     it('filters large block sets and navigates their zone minimap', async () => {

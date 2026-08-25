@@ -615,7 +615,6 @@
                         {orchestrationController}
                         {messageFocusRequest}
                         onOpenHome={showChat}
-                        onOpenOrchestrationStudio={openCreate}
                     />
                 {:else}
                     <section class="mobile-root chat-list-view" aria-label={$tr('app.tab.chat')}>
