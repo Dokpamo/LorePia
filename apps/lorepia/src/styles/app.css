@@ -1068,6 +1068,7 @@ textarea {
 .app-shell[data-layout='mobile'] .sub-header {
     position: absolute;
     z-index: 10;
+    grid-template-columns: var(--mobile-top-action) minmax(0, 1fr) var(--mobile-top-action);
     border: 0;
     background: transparent;
     inset: 0 0 auto;
@@ -2180,14 +2181,14 @@ textarea {
     padding: 0;
     border: 0;
     border-radius: 50%;
-    background: var(--surface-active);
+    background: transparent;
     color: var(--ink-muted);
     place-items: center;
 }
 
 .composer-leading-action svg {
-    width: 23px;
-    height: 23px;
+    width: 24px;
+    height: 24px;
     fill: none;
     stroke: currentcolor;
     stroke-linecap: round;
@@ -2330,7 +2331,7 @@ textarea {
     padding: 0;
     border: 0;
     border-radius: 50%;
-    background: var(--surface-active);
+    background: transparent;
     color: var(--ink-subtle);
     opacity: 0;
     place-items: center;
@@ -2358,8 +2359,8 @@ textarea {
 }
 
 .composer-expand-action svg {
-    width: 17px;
-    height: 17px;
+    width: 24px;
+    height: 24px;
     fill: none;
     stroke: currentcolor;
     stroke-width: 1.8;
@@ -2427,10 +2428,15 @@ textarea {
 }
 
 .app-shell[data-layout='mobile'][data-view='chat']
-    :is(.composer-leading-action, .composer-expand-action, .send-button)
+    :is(.composer-leading-action, .composer-expand-action)
     svg {
-    width: clamp(10px, 4.577vw, 18px);
-    height: clamp(10px, 4.577vw, 18px);
+    width: clamp(16px, 6.865vw, 24px);
+    height: clamp(16px, 6.865vw, 24px);
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .send-button svg {
+    width: clamp(14px, 5.95vw, 21px);
+    height: clamp(14px, 5.95vw, 21px);
 }
 
 .composer .danger.compact {
@@ -2502,14 +2508,14 @@ textarea {
     padding: 0;
     border: 0;
     border-radius: 50%;
-    background: var(--surface-active);
+    background: transparent;
     color: var(--ink);
     place-items: center;
 }
 
 .composer-fullscreen-close svg {
-    width: 22px;
-    height: 22px;
+    width: 24px;
+    height: 24px;
     fill: none;
     stroke: currentcolor;
     stroke-width: 1.8;
@@ -2869,13 +2875,11 @@ textarea {
     align-self: center;
     align-items: center;
     justify-content: center;
-    padding-inline: clamp(8px, 3.432vw, 15px);
-    border-radius: var(--radius-pill);
-    margin-top: 0;
-    background: color-mix(in srgb, var(--surface-raised) 94%, transparent);
-    box-shadow: var(--shadow-1);
+    padding-inline: 0;
+    margin: 0;
+    background: transparent;
+    box-shadow: none;
     line-height: 1.2;
-    backdrop-filter: blur(14px);
 }
 
 .app-shell[data-layout='desktop'] .sub-header {
@@ -3245,10 +3249,15 @@ textarea {
     }
 
     .app-shell[data-layout='mobile'][data-view='chat']
-        :is(.composer-leading-action, .composer-expand-action, .send-button)
+        :is(.composer-leading-action, .composer-expand-action)
         svg {
-        width: clamp(10px, 4.577vw, 18px);
-        height: clamp(10px, 4.577vw, 18px);
+        width: clamp(16px, 6.865vw, 24px);
+        height: clamp(16px, 6.865vw, 24px);
+    }
+
+    .app-shell[data-layout='mobile'][data-view='chat'] .send-button svg {
+        width: clamp(14px, 5.95vw, 21px);
+        height: clamp(14px, 5.95vw, 21px);
     }
 }
 

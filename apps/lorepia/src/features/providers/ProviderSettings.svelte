@@ -1318,7 +1318,7 @@
         width: clamp(87px, 24.714vw, 108px);
         height: clamp(87px, 24.714vw, 108px);
         flex: none;
-        overflow: hidden;
+        overflow: visible;
         border: 1px solid var(--accent-line);
         border-radius: 50%;
         background: var(--brand-logo-bg);
@@ -1336,6 +1336,7 @@
 
     .settings-avatar-badge {
         position: absolute;
+        z-index: 1;
         right: -2px;
         bottom: -2px;
         display: grid;
@@ -1343,7 +1344,8 @@
         height: 36px;
         border: 4px solid var(--bg);
         border-radius: 50%;
-        background: var(--surface-raised);
+        background: var(--surface-active);
+        box-shadow: var(--shadow-1);
         color: var(--accent);
         place-items: center;
     }

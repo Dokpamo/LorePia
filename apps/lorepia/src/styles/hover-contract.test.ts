@@ -94,7 +94,10 @@ describe('pointer interaction styling', () => {
         expect(appCss).toContain('mask-image: var(--logo-mask);');
         expect(themeSource).toContain("const DEFAULT_THEME_PREFERENCE: ThemePreference = 'light';");
         expect(providerSettingsSource).toMatch(
-            /\.settings-avatar-wrap\s*\{[^}]*background:\s*var\(--brand-logo-bg\);[^}]*box-shadow:\s*var\(--shadow-2\);/s,
+            /\.settings-avatar-wrap\s*\{[^}]*overflow:\s*visible;[^}]*background:\s*var\(--brand-logo-bg\);[^}]*box-shadow:\s*var\(--shadow-2\);/s,
+        );
+        expect(providerSettingsSource).toMatch(
+            /\.settings-avatar-badge\s*\{[^}]*z-index:\s*1;[^}]*background:\s*var\(--surface-active\);[^}]*box-shadow:\s*var\(--shadow-1\);/s,
         );
         expect(providerSettingsSource).toMatch(
             /\.settings-avatar\s*\{[^}]*position:\s*absolute;[^}]*border-radius:\s*50%;/s,
@@ -153,7 +156,7 @@ describe('pointer interaction styling', () => {
             /\.mobile-top-action\s*\{[^}]*width:\s*var\(--mobile-top-action\);[^}]*height:\s*var\(--mobile-top-action\);[^}]*border-radius:\s*50%;[^}]*background:\s*var\(--surface-raised\);[^}]*box-shadow:\s*var\(--shadow-1\);/s,
         );
         expect(appCss).toMatch(
-            /\.app-shell\[data-layout='mobile'\] \.sub-header\s*\{[^}]*position:\s*absolute;[^}]*z-index:\s*10;[^}]*border:\s*0;[^}]*background:\s*transparent;[^}]*inset:\s*0 0 auto;[^}]*pointer-events:\s*none;/s,
+            /\.app-shell\[data-layout='mobile'\] \.sub-header\s*\{[^}]*position:\s*absolute;[^}]*z-index:\s*10;[^}]*grid-template-columns:\s*var\(--mobile-top-action\) minmax\(0,\s*1fr\) var\(--mobile-top-action\);[^}]*border:\s*0;[^}]*background:\s*transparent;[^}]*inset:\s*0 0 auto;[^}]*pointer-events:\s*none;/s,
         );
         expect(appCss).toMatch(
             /\.app-shell\[data-layout='mobile'\] \.sub-header > \.mobile-top-action\s*\{[^}]*pointer-events:\s*auto;/s,
@@ -171,7 +174,10 @@ describe('pointer interaction styling', () => {
             /\.sub-header h1\s*\{[^}]*grid-column:\s*2;[^}]*padding-inline:\s*8px;[^}]*text-align:\s*center;/s,
         );
         expect(appCss).toMatch(
-            /\.app-shell\[data-layout='mobile'\] \.sub-header h1\s*\{[^}]*height:\s*var\(--mobile-top-action\);[^}]*display:\s*flex;[^}]*align-self:\s*center;[^}]*border-radius:\s*var\(--radius-pill\);[^}]*margin-top:\s*0;[^}]*background:\s*color-mix\(in srgb,\s*var\(--surface-raised\) 94%,\s*transparent\);[^}]*box-shadow:\s*var\(--shadow-1\);/s,
+            /\.app-shell\[data-layout='mobile'\] \.sub-header h1\s*\{[^}]*height:\s*var\(--mobile-top-action\);[^}]*display:\s*flex;[^}]*align-self:\s*center;[^}]*justify-content:\s*center;[^}]*padding-inline:\s*0;[^}]*margin:\s*0;[^}]*background:\s*transparent;[^}]*box-shadow:\s*none;/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.chat-pane \.chat-identity\s*\{[^}]*border-radius:\s*var\(--radius-pill\);[^}]*background:\s*color-mix\(in srgb,\s*var\(--surface-raised\) 94%,\s*transparent\);[^}]*box-shadow:\s*var\(--shadow-1\);/s,
         );
         expect(appCss).toMatch(
             /\.app-shell\[data-layout='desktop'\] \.sub-header\s*\{[^}]*position:\s*relative;[^}]*border-bottom:\s*1px solid color-mix\(in srgb,\s*var\(--line\) 72%,\s*transparent\);[^}]*background:\s*var\(--bg\);/s,
@@ -647,6 +653,12 @@ describe('pointer interaction styling', () => {
             /\.composer-action-row > button:not\(\.composer-expand-action\)\s*\{[^}]*pointer-events:\s*auto;/s,
         );
         expect(appCss).toMatch(
+            /\.composer-leading-action\s*\{[^}]*width:\s*var\(--composer-button-size\);[^}]*border:\s*0;[^}]*background:\s*transparent;[^}]*place-items:\s*center;/s,
+        );
+        expect(appCss).toMatch(
+            /\.composer-expand-action\s*\{[^}]*height:\s*var\(--composer-button-size\);[^}]*border:\s*0;[^}]*background:\s*transparent;[^}]*opacity:\s*0;/s,
+        );
+        expect(appCss).toMatch(
             /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.composer-action-row\s*\{[^}]*gap:\s*var\(--composer-action-gap\);/s,
         );
         expect(appCss).toMatch(
@@ -663,6 +675,12 @@ describe('pointer interaction styling', () => {
         );
         expect(appCss).toContain(
             ':is(.composer-leading-action, .composer-expand-action.available, .send-button)',
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\][\s\S]*?:is\(\.composer-leading-action,\s*\.composer-expand-action\)[\s\S]*?svg\s*\{[^}]*width:\s*clamp\(16px,\s*6\.865vw,\s*24px\);[^}]*height:\s*clamp\(16px,\s*6\.865vw,\s*24px\);/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.send-button svg\s*\{[^}]*width:\s*clamp\(14px,\s*5\.95vw,\s*21px\);[^}]*height:\s*clamp\(14px,\s*5\.95vw,\s*21px\);/s,
         );
         expect(appCss).toMatch(
             /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.composer-field\s*\{[^}]*--composer-button-size:\s*var\(--composer-control-size\);[^}]*--composer-collapsed-size:\s*clamp\(44px,\s*17\.98vw,\s*66px\);/s,
@@ -686,6 +704,12 @@ describe('pointer interaction styling', () => {
         );
         expect(appCss).toMatch(
             /\.composer-fullscreen-header\s*\{[^}]*--composer-control-size:\s*44px;[^}]*--composer-button-size:\s*var\(--composer-control-size\);/s,
+        );
+        expect(appCss).toMatch(
+            /\.composer-fullscreen-close\s*\{[^}]*width:\s*var\(--composer-control-size,\s*44px\);[^}]*border:\s*0;[^}]*background:\s*transparent;[^}]*place-items:\s*center;/s,
+        );
+        expect(appCss).toMatch(
+            /\.composer-fullscreen-close svg\s*\{[^}]*width:\s*24px;[^}]*height:\s*24px;/s,
         );
         expect(appCss).toMatch(
             /\.composer-fullscreen-close\s*\{[^}]*width:\s*var\(--composer-control-size,\s*44px\);[^}]*height:\s*var\(--composer-control-size,\s*44px\);/s,
@@ -796,10 +820,19 @@ describe('pointer interaction styling', () => {
         expect(chatPaneSource).not.toContain('message-action-reveal');
         expect(appCss).toMatch(/\.sub-header h1\s*\{[^}]*font-size:\s*var\(--detail-ui-type\);/s);
         expect(appCss).toMatch(
-            /\.app-shell\[data-layout='mobile'\] \.sub-header h1\s*\{[^}]*height:\s*var\(--mobile-top-action\);[^}]*display:\s*flex;[^}]*align-self:\s*center;[^}]*align-items:\s*center;[^}]*justify-content:\s*center;[^}]*border-radius:\s*var\(--radius-pill\);[^}]*margin-top:\s*0;/s,
+            /\.app-shell\[data-layout='mobile'\] \.sub-header h1\s*\{[^}]*height:\s*var\(--mobile-top-action\);[^}]*display:\s*flex;[^}]*align-self:\s*center;[^}]*align-items:\s*center;[^}]*justify-content:\s*center;[^}]*padding-inline:\s*0;[^}]*margin:\s*0;/s,
         );
         expect(chatPaneSource).toContain('{#snippet roomControls(');
         expect(chatPaneSource).toMatch(/<OrchestrationQuickDrawer[\s\S]*\{roomControls\}/);
+        expect(appSource.match(/<ArrowLeft aria-hidden="true" \/>/g)).toHaveLength(2);
+        expect(chatPaneSource).toContain('<ArrowLeft class="chat-back-icon" aria-hidden="true" />');
+        expect(orchestrationQuickDrawerSource).toContain(
+            "import { Menu, X } from '@lucide/svelte';",
+        );
+        expect(orchestrationQuickDrawerSource).toContain(
+            '<Menu class="orchestration-toggle-icon" aria-hidden="true" />',
+        );
+        expect(orchestrationQuickDrawerSource).not.toMatch(/SlidersHorizontal|EllipsisVertical/);
         expect(chatPaneSource).not.toContain('class="chat-toolbar"');
         expect(appCss).not.toContain('.chat-toolbar-new-operation');
         expect(appCss).not.toContain('.chat-pane .chat-toolbar');

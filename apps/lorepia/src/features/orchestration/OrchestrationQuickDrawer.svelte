@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { SlidersHorizontal, X } from '@lucide/svelte';
+    import { Menu, X } from '@lucide/svelte';
     import { tr } from '../../lib/i18n';
     import { tick, type Snippet } from 'svelte';
 
@@ -215,7 +215,7 @@
         aria-controls="orchestration-quick-drawer"
         onclick={() => void setOpen(!open)}
     >
-        <SlidersHorizontal class="orchestration-toggle-icon" aria-hidden="true" />
+        <Menu class="orchestration-toggle-icon" aria-hidden="true" />
         {#if orchestrationState.dirty_room_config}
             <span class="dirty-dot" aria-label={$tr('quick.dirty')}></span>
         {/if}
