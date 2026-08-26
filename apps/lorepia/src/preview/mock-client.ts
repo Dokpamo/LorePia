@@ -27,6 +27,7 @@ import type {
 } from '../features/personas/persona-contracts';
 import {
     DEMO_BOOTSTRAP,
+    DEMO_ARCHIVE_MAIN_MESSAGE_IDS,
     DEMO_BRANCHES,
     DEMO_CATALOG_HISTORY,
     DEMO_CATALOG_STATUS,
@@ -91,17 +92,7 @@ export function createPreviewClient(): PreviewClient {
         connections.map((connection) => [connection.id, 'available']),
     );
     const branchMessageIds = new Map<string, string[]>([
-        [
-            'branch-archive-main',
-            [
-                'message-archive-1',
-                'message-archive-2',
-                'message-archive-3',
-                'message-archive-4',
-                'message-archive-5',
-                'message-archive-6',
-            ],
-        ],
+        ['branch-archive-main', [...DEMO_ARCHIVE_MAIN_MESSAGE_IDS]],
         [
             'branch-archive-map',
             [

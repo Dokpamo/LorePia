@@ -143,6 +143,11 @@
     const drafts = new SvelteMap<string, string>();
     let activeMessageActionId = $state<string | null>(null);
     let stableMessageActionLayoutId: string | null = null;
+    let messageDayFollowerKey = $state('');
+    let messageDayFollowerLabel = $state('');
+    let messageDayFollowerVisible = $state(false);
+    let messageDayFollowerPush = $state(0);
+    let messageDayFollowerUpdateEpoch = 0;
     let composerExpanded = $state(false);
     let composerCanFullscreen = $state(false);
     let composerOverflows = $state(false);
@@ -483,6 +488,80 @@
         )}`;
     }
 
+    function hideMessageDayFollower(): void {
+        messageDayFollowerVisible = false;
+        messageDayFollowerPush = 0;
+    }
+
+    function updateMessageDayFollower(scroller: HTMLDivElement): void {
+        const viewportRect = scroller.getBoundingClientRect();
+        const viewportTop = viewportRect.top;
+        const viewportBottom =
+            viewportRect.bottom > viewportTop
+                ? viewportRect.bottom
+                : viewportTop + (scroller.clientHeight || viewportHeight);
+        const stickyTop = viewportTop + 8;
+        const rows = Array.from(scroller.querySelectorAll<HTMLElement>('[data-message-day]'));
+        const firstVisibleRow = rows.find((row) => {
+            const rect = row.getBoundingClientRect();
+            return rect.bottom > stickyTop && rect.top < viewportBottom;
+        });
+        const dayKey = firstVisibleRow?.dataset.messageDay;
+        const dayLabel = firstVisibleRow?.dataset.messageDayLabel;
+        if (firstVisibleRow === undefined || dayKey === undefined || dayLabel === undefined) {
+            hideMessageDayFollower();
+            return;
+        }
+
+        const ownDivider = firstVisibleRow.querySelector<HTMLElement>('.message-date-divider');
+        if (ownDivider !== null && ownDivider.getBoundingClientRect().top > stickyTop) {
+            hideMessageDayFollower();
+            return;
+        }
+
+        const nextDayDivider = Array.from(
+            scroller.querySelectorAll<HTMLElement>('[data-message-day-divider]'),
+        )
+            .filter((divider) => {
+                if (divider.dataset.messageDayDivider === dayKey) return false;
+                return divider.getBoundingClientRect().top > stickyTop;
+            })
+            .sort(
+                (left, right) =>
+                    left.getBoundingClientRect().top - right.getBoundingClientRect().top,
+            )[0];
+        const followerChip = scroller.querySelector<HTMLElement>(
+            '.message-date-follower .message-date-chip',
+        );
+        const inlineChip = ownDivider?.querySelector<HTMLElement>('.message-date-chip') ?? null;
+        const followerChipHeight = followerChip?.getBoundingClientRect().height ?? 0;
+        const inlineChipHeight = inlineChip?.getBoundingClientRect().height ?? 0;
+        const chipHeight =
+            followerChipHeight > 0
+                ? followerChipHeight
+                : inlineChipHeight > 0
+                  ? inlineChipHeight
+                  : 24;
+        const push = nextDayDivider
+            ? Math.min(0, nextDayDivider.getBoundingClientRect().top - stickyTop - chipHeight)
+            : 0;
+
+        messageDayFollowerKey = dayKey;
+        messageDayFollowerLabel = dayLabel;
+        messageDayFollowerPush = push;
+        messageDayFollowerVisible = true;
+    }
+
+    function scheduleMessageDayFollowerUpdate(scroller: HTMLDivElement): void {
+        const updateEpoch = ++messageDayFollowerUpdateEpoch;
+        void tick().then(() => {
+            if (updateEpoch !== messageDayFollowerUpdateEpoch || messageScroller !== scroller) {
+                return;
+            }
+            updateMessageDayFollower(scroller);
+        });
+    }
+
     function startsMessageDay(message: MessageDto, globalIndex: number): boolean {
         if (globalIndex === 0) return true;
         const previous = messageCollection.items[globalIndex - 1];
@@ -491,6 +570,23 @@
             messageDayKey(previous.created_at) !== messageDayKey(message.created_at)
         );
     }
+
+    $effect(() => {
+        const scroller = messageScroller;
+        if (
+            scroller === null ||
+            !Number.isFinite(scrollTop) ||
+            !Number.isFinite(viewportHeight) ||
+            virtualWindow.start < 0 ||
+            virtualWindow.end < 0 ||
+            virtualLayoutRevision < 0 ||
+            branchKey === ''
+        ) {
+            hideMessageDayFollower();
+            return;
+        }
+        scheduleMessageDayFollowerUpdate(scroller);
+    });
     const hasLiveResponse = $derived(
         appState.chat.live_assistant_message_id !== null ||
             appState.chat.streaming_text !== '' ||
@@ -1583,6 +1679,17 @@
             onpointerdown={handleMessageScrollPointerDown}
             onscroll={handleScroll}
         >
+            <div
+                class:visible={messageDayFollowerVisible}
+                class="message-date-follower"
+                data-visible={messageDayFollowerVisible}
+                style={`--message-day-push-y: ${String(messageDayFollowerPush)}px`}
+                aria-hidden="true"
+            >
+                <time class="message-date-chip" datetime={messageDayFollowerKey}
+                    >{messageDayFollowerLabel}</time
+                >
+            </div>
             {#if appState.messages.phase === 'loading'}
                 <div class="state-panel" role="status">메시지를 불러오는 중입니다.</div>
             {:else if appState.messages.phase === 'error'}
@@ -1606,6 +1713,8 @@
                     {#each visibleMessages as message, localIndex (message.id)}
                         {@const globalIndex = virtualWindow.start + localIndex}
                         {@const showsDay = startsMessageDay(message, globalIndex)}
+                        {@const dayKey = messageDayKey(message.created_at)}
+                        {@const dayLabel = formatMessageDay(message.created_at)}
                         {@const turnLabel =
                             message.role === 'user'
                                 ? '내 메시지'
@@ -1621,6 +1730,8 @@
                                     message.id === messageFocusRequest.end_message_id)}
                             class="message-item"
                             data-message-id={message.id}
+                            data-message-day={dayKey}
+                            data-message-day-label={dayLabel}
                             use:measureMessage={{ messageId: message.id, epoch: measurementEpoch }}
                             tabindex="-1"
                             aria-setsize={messageCollection.items.length}
@@ -1630,10 +1741,11 @@
                                 <div
                                     class="message-date-divider"
                                     role="separator"
-                                    aria-label={formatMessageDay(message.created_at)}
+                                    aria-label={dayLabel}
+                                    data-message-day-divider={dayKey}
                                 >
-                                    <time datetime={messageDayKey(message.created_at)}>
-                                        {formatMessageDay(message.created_at)}
+                                    <time class="message-date-chip" datetime={dayKey}>
+                                        {dayLabel}
                                     </time>
                                 </div>
                             {/if}

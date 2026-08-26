@@ -6,7 +6,11 @@ import App from '../app/App.svelte';
 import { LorepiaAppController } from '../app/app-controller';
 import { OrchestrationController } from '../features/orchestration/orchestration-controller';
 import { PersonaController } from '../features/personas/persona-controller';
-import { DEMO_INITIAL_CHARACTER_ID, DEMO_INITIAL_CONVERSATION_ID } from './demo-data';
+import {
+    DEMO_ARCHIVE_MAIN_MESSAGE_IDS,
+    DEMO_INITIAL_CHARACTER_ID,
+    DEMO_INITIAL_CONVERSATION_ID,
+} from './demo-data';
 import { createPreviewClient } from './mock-client';
 
 afterEach(() => cleanup());
@@ -31,7 +35,7 @@ describe('preview demo client', () => {
         expect(characters).toHaveLength(4);
         expect(conversations).toHaveLength(2);
         expect(branches).toHaveLength(2);
-        expect(messages).toHaveLength(6);
+        expect(messages).toHaveLength(DEMO_ARCHIVE_MAIN_MESSAGE_IDS.length);
         expect(providers.templates).toHaveLength(2);
         expect(providers.connections).toHaveLength(1);
         expect(routes).toHaveLength(1);
@@ -111,7 +115,10 @@ describe('preview demo client', () => {
 
         appState = get(app.state);
         expect(appState.messages.phase).toBe('ready');
-        expect(appState.messages.items).toHaveLength(6);
+        expect(appState.messages.items).toHaveLength(DEMO_ARCHIVE_MAIN_MESSAGE_IDS.length);
+        expect(appState.messages.items.map((message) => message.id)).toEqual(
+            DEMO_ARCHIVE_MAIN_MESSAGE_IDS,
+        );
         expect(appState.branches).toHaveLength(2);
 
         const conversationState = appState.conversation_state;

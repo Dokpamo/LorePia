@@ -261,6 +261,148 @@ describe('ChatPane transcript chrome', () => {
         controller.destroy();
     });
 
+    it('hands a day pill to the sticky position continuously and lets the next day push it away', async () => {
+        const appState = chatReadyState();
+        appState.messages.items = [
+            {
+                id: 'thursday-one',
+                conversation_id: 'conversation-1',
+                parent_id: null,
+                role: 'assistant',
+                content: '목요일 첫 메시지',
+                status: 'complete',
+                generation_id: 'generation-thursday-one',
+                created_at: '2026-08-20T19:00:00',
+            },
+            {
+                id: 'thursday-two',
+                conversation_id: 'conversation-1',
+                parent_id: 'thursday-one',
+                role: 'user',
+                content: '목요일 두 번째 메시지',
+                status: 'complete',
+                generation_id: null,
+                created_at: '2026-08-20T19:02:00',
+            },
+            {
+                id: 'monday-one',
+                conversation_id: 'conversation-1',
+                parent_id: 'thursday-two',
+                role: 'assistant',
+                content: '월요일 첫 메시지',
+                status: 'complete',
+                generation_id: 'generation-monday-one',
+                created_at: '2026-08-24T21:37:00',
+            },
+        ];
+
+        const { controller } = renderChat(appState);
+        const scroller = screen.getByLabelText('메시지 기록');
+        const follower = document.querySelector<HTMLElement>('.message-date-follower');
+        const followerChip = follower?.querySelector<HTMLElement>('.message-date-chip') ?? null;
+        const thursdayOne = document.querySelector<HTMLElement>('[data-message-id="thursday-one"]');
+        const thursdayTwo = document.querySelector<HTMLElement>('[data-message-id="thursday-two"]');
+        const mondayOne = document.querySelector<HTMLElement>('[data-message-id="monday-one"]');
+        const thursdayDivider = document.querySelector<HTMLElement>(
+            '[data-message-day-divider="2026-08-20"]',
+        );
+        const mondayDivider = document.querySelector<HTMLElement>(
+            '[data-message-day-divider="2026-08-24"]',
+        );
+        if (
+            follower === null ||
+            followerChip === null ||
+            thursdayOne === null ||
+            thursdayTwo === null ||
+            mondayOne === null ||
+            thursdayDivider === null ||
+            mondayDivider === null
+        ) {
+            throw new Error('date follower fixture is incomplete');
+        }
+
+        Object.defineProperties(scroller, {
+            clientHeight: { configurable: true, value: 500 },
+            scrollHeight: { configurable: true, value: 1_200 },
+        });
+        vi.spyOn(scroller, 'getBoundingClientRect').mockReturnValue(
+            DOMRect.fromRect({ x: 0, y: 100, width: 342, height: 500 }),
+        );
+        let stage: 'before-stick' | 'thursday' | 'next-visible' | 'next-colliding' | 'monday' =
+            'before-stick';
+        vi.spyOn(thursdayOne, 'getBoundingClientRect').mockImplementation(() =>
+            stage === 'next-colliding' || stage === 'monday'
+                ? DOMRect.fromRect({ y: -200, height: 50 })
+                : DOMRect.fromRect({ y: 100, height: 120 }),
+        );
+        vi.spyOn(thursdayTwo, 'getBoundingClientRect').mockImplementation(() => {
+            if (stage === 'next-colliding') return DOMRect.fromRect({ y: 60, height: 60 });
+            if (stage === 'monday') return DOMRect.fromRect({ y: -140, height: 50 });
+            return DOMRect.fromRect({ y: 220, height: 120 });
+        });
+        vi.spyOn(mondayOne, 'getBoundingClientRect').mockImplementation(() => {
+            if (stage === 'before-stick' || stage === 'thursday') {
+                return DOMRect.fromRect({ y: 650, height: 120 });
+            }
+            if (stage === 'next-visible') return DOMRect.fromRect({ y: 550, height: 120 });
+            if (stage === 'next-colliding') return DOMRect.fromRect({ y: 120, height: 160 });
+            return DOMRect.fromRect({ y: 108, height: 160 });
+        });
+        vi.spyOn(thursdayDivider, 'getBoundingClientRect').mockImplementation(() =>
+            DOMRect.fromRect({ y: stage === 'before-stick' ? 120 : 108, height: 30 }),
+        );
+        vi.spyOn(mondayDivider, 'getBoundingClientRect').mockImplementation(() => {
+            if (stage === 'before-stick' || stage === 'thursday') {
+                return DOMRect.fromRect({ y: 650, height: 30 });
+            }
+            if (stage === 'next-visible') return DOMRect.fromRect({ y: 550, height: 30 });
+            if (stage === 'next-colliding') return DOMRect.fromRect({ y: 120, height: 30 });
+            return DOMRect.fromRect({ y: 108, height: 30 });
+        });
+        vi.spyOn(followerChip, 'getBoundingClientRect').mockReturnValue(
+            DOMRect.fromRect({ y: 108, width: 138, height: 22 }),
+        );
+
+        scroller.scrollTop = 100;
+        await fireEvent.scroll(scroller);
+        await waitFor(() => expect(follower).toHaveAttribute('data-visible', 'false'));
+
+        stage = 'thursday';
+        scroller.scrollTop = 200;
+        await fireEvent.scroll(scroller);
+        await waitFor(() => {
+            expect(follower).toHaveAttribute('data-visible', 'true');
+            expect(follower).toHaveTextContent('2026년 8월 20일 목요일');
+        });
+
+        stage = 'next-visible';
+        scroller.scrollTop = 201;
+        await fireEvent.scroll(scroller);
+        await waitFor(() => {
+            expect(follower).toHaveAttribute('data-visible', 'true');
+            expect(follower).toHaveTextContent('2026년 8월 20일 목요일');
+            expect(follower.style.getPropertyValue('--message-day-push-y')).toBe('0px');
+        });
+
+        stage = 'next-colliding';
+        scroller.scrollTop = 600;
+        await fireEvent.scroll(scroller);
+        await waitFor(() => {
+            expect(follower).toHaveAttribute('data-visible', 'true');
+            expect(follower.style.getPropertyValue('--message-day-push-y')).toBe('-10px');
+        });
+
+        stage = 'monday';
+        scroller.scrollTop = 700;
+        await fireEvent.scroll(scroller);
+        await waitFor(() => {
+            expect(follower).toHaveAttribute('data-visible', 'true');
+            expect(follower).toHaveTextContent('2026년 8월 24일 월요일');
+            expect(follower.style.getPropertyValue('--message-day-push-y')).toBe('0px');
+        });
+        controller.destroy();
+    });
+
     it('uses a compact empty input that expands for writing and reveals send after text', async () => {
         const { controller } = renderChat();
         const composer = screen.getByRole('form', { name: '메시지 작성' });

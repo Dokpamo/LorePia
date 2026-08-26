@@ -183,6 +183,129 @@ export const DEMO_BRANCHES: ConversationBranchDto[] = [
     },
 ];
 
+const DEMO_ARCHIVE_THURSDAY_TURNS: readonly {
+    role: 'user' | 'assistant';
+    content: string;
+    minute: number;
+}[] = [
+    {
+        role: 'user',
+        content: '세 기록이 같은 항로를 가리키는지 먼저 비교해 볼 수 있을까요?',
+        minute: 4,
+    },
+    {
+        role: 'assistant',
+        content: '가능해요. 표지의 문장과 기록된 조류 방향부터 나란히 놓아 볼게요.',
+        minute: 6,
+    },
+    {
+        role: 'user',
+        content: '은빛 해협의 항해 일지에는 마지막 출항일이 언제라고 적혀 있어요?',
+        minute: 8,
+    },
+    {
+        role: 'assistant',
+        content: '1801년 6월 17일이에요. 다만 선장이 남긴 서명은 그보다 사흘 뒤로 되어 있네요.',
+        minute: 10,
+    },
+    {
+        role: 'user',
+        content: '항해가 시작된 뒤에 서명했다는 뜻일까요?',
+        minute: 12,
+    },
+    {
+        role: 'assistant',
+        content:
+            '그럴 수도 있지만, 종이 가장자리에 소금기가 거의 없어요. 육지에서 나중에 끼워 넣은 장일 가능성도 있어요.',
+        minute: 14,
+    },
+    {
+        role: 'user',
+        content: '표류자의 수기와 필체도 비교해 줘요.',
+        minute: 16,
+    },
+    {
+        role: 'assistant',
+        content:
+            '두 기록 모두 숫자 7의 끝을 길게 올려 쓰지만, 잉크 성분은 달라요. 같은 사람이 다른 시기에 썼다고 단정하기는 어렵겠어요.',
+        minute: 18,
+    },
+    {
+        role: 'user',
+        content: '해도 부록 IV에서 지워진 부분은 복원할 수 있나요?',
+        minute: 20,
+    },
+    {
+        role: 'assistant',
+        content:
+            '*얇은 빛판 위에 해도를 펼친다.* 희미한 압흔이 남아 있어서 항로의 절반 정도는 따라갈 수 있어요.',
+        minute: 22,
+    },
+    {
+        role: 'user',
+        content: '그 항로가 지도에 없는 섬으로 이어지나요?',
+        minute: 24,
+    },
+    {
+        role: 'assistant',
+        content:
+            '정확히는 섬이 아니라 빈 해역에서 멈춰요. 좌표 옆에는 작은 초승달 표시가 반복되어 있고요.',
+        minute: 26,
+    },
+    {
+        role: 'user',
+        content: '초승달 표시는 출항 시간일 수도 있겠네요.',
+        minute: 28,
+    },
+    {
+        role: 'assistant',
+        content:
+            '좋은 추측이에요. 세 기록 모두 새벽 썰물 때 방향이 바뀐다고 적혀 있으니 서로 연결되는 단서일 수 있어요.',
+        minute: 30,
+    },
+    {
+        role: 'user',
+        content: '오늘은 여기까지 정리하고, 다음에는 표류자의 수기를 자세히 읽어볼게요.',
+        minute: 32,
+    },
+    {
+        role: 'assistant',
+        content:
+            '표식과 날짜를 순서대로 묶어 두었어요. 다시 오시면 바로 이어서 살펴볼 수 있게 이 자리에 보관해 둘게요.',
+        minute: 34,
+    },
+];
+
+function archiveThursdayMessageId(index: number): string {
+    return `message-archive-thursday-${String(index + 1).padStart(2, '0')}`;
+}
+
+export const DEMO_ARCHIVE_THURSDAY_MESSAGES: MessageDto[] = DEMO_ARCHIVE_THURSDAY_TURNS.map(
+    (turn, index) => ({
+        id: archiveThursdayMessageId(index),
+        conversation_id: DEMO_INITIAL_CONVERSATION_ID,
+        parent_id: index === 0 ? 'message-archive-3' : archiveThursdayMessageId(index - 1),
+        role: turn.role,
+        content: turn.content,
+        status: 'complete',
+        generation_id:
+            turn.role === 'assistant'
+                ? `generation-archive-thursday-${String(index + 1).padStart(2, '0')}`
+                : null,
+        created_at: `2026-08-20T10:${String(turn.minute).padStart(2, '0')}:00.000Z`,
+    }),
+);
+
+export const DEMO_ARCHIVE_MAIN_MESSAGE_IDS = [
+    'message-archive-1',
+    'message-archive-2',
+    'message-archive-3',
+    ...DEMO_ARCHIVE_THURSDAY_MESSAGES.map((message) => message.id),
+    'message-archive-4',
+    'message-archive-5',
+    'message-archive-6',
+];
+
 export const DEMO_MESSAGES: MessageDto[] = [
     {
         id: 'message-archive-1',
@@ -216,10 +339,11 @@ export const DEMO_MESSAGES: MessageDto[] = [
         generation_id: 'generation-archive-2',
         created_at: '2026-08-20T10:02:00.000Z',
     },
+    ...DEMO_ARCHIVE_THURSDAY_MESSAGES,
     {
         id: 'message-archive-4',
         conversation_id: DEMO_INITIAL_CONVERSATION_ID,
-        parent_id: 'message-archive-3',
+        parent_id: 'message-archive-thursday-16',
         role: 'user',
         content: '표류자의 수기부터 보여줘. 지도에 없는 섬이 언급됐는지도 궁금해.',
         status: 'complete',

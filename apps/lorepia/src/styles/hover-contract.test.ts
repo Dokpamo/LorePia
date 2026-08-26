@@ -211,13 +211,23 @@ describe('pointer interaction styling', () => {
             /\.message-actions button svg\s*\{[^}]*width:\s*15px;[^}]*height:\s*15px;[^}]*stroke-width:\s*1\.8;/s,
         );
         expect(appCss).toMatch(
-            /\.message-date-divider time\s*\{[^}]*font-size:\s*0\.75rem;[^}]*font-weight:\s*650;/s,
+            /\.message-date-chip\s*\{[^}]*font-size:\s*0\.75rem;[^}]*font-weight:\s*650;/s,
         );
         expect(appCss).toMatch(
             /\.message-time\s*\{[^}]*font-size:\s*0\.6875rem;[^}]*font-weight:\s*500;/s,
         );
         expect(appCss).toMatch(
-            /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.message-date-divider time\s*\{[^}]*font-size:\s*clamp\(10px,\s*3\.204vw,\s*12px\);/s,
+            /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.message-date-chip\s*\{[^}]*font-size:\s*clamp\(10px,\s*3\.204vw,\s*12px\);/s,
+        );
+        expect(chatPaneSource).toContain('class="message-date-follower"');
+        expect(appCss).toMatch(
+            /\.message-date-follower\s*\{[^}]*position:\s*sticky;[^}]*top:\s*8px;[^}]*height:\s*0;/s,
+        );
+        expect(appCss).toMatch(
+            /\.message-date-follower\s*\{[^}]*transform:\s*translateY\(var\(--message-day-push-y,\s*0px\)\);/s,
+        );
+        expect(appCss).toMatch(
+            /\.message-date-follower \.message-date-chip\s*\{[^}]*position:\s*absolute;[^}]*left:\s*50%;[^}]*transform:\s*translateX\(-50%\);/s,
         );
         expect(appCss).toMatch(
             /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.message-time\s*\{[^}]*font-size:\s*clamp\(9px,\s*2\.975vw,\s*11px\);/s,

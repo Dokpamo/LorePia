@@ -1740,7 +1740,7 @@ textarea {
     grid-column: 1 / -1;
 }
 
-.message-date-divider time {
+.message-date-chip {
     padding: 5px 11px;
     border: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
     border-radius: var(--radius-pill);
@@ -1752,13 +1752,42 @@ textarea {
     backdrop-filter: blur(10px);
 }
 
+.message-date-follower {
+    position: sticky;
+    z-index: 5;
+    top: 8px;
+    display: flex;
+    height: 0;
+    justify-content: center;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(var(--message-day-push-y, 0px));
+}
+
+.message-date-follower.visible {
+    opacity: 1;
+}
+
+.message-date-follower .message-date-chip {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    flex: none;
+    transform: translateX(-50%);
+    white-space: nowrap;
+}
+
 .app-shell[data-layout='mobile'][data-view='chat'] .message-date-divider {
     padding: clamp(5px, 2.746vw, 12px) 0 clamp(3px, 1.831vw, 8px);
 }
 
-.app-shell[data-layout='mobile'][data-view='chat'] .message-date-divider time {
+.app-shell[data-layout='mobile'][data-view='chat'] .message-date-chip {
     padding: clamp(2px, 1.144vw, 5px) clamp(5px, 2.517vw, 11px);
     font-size: clamp(10px, 3.204vw, 12px);
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .message-date-follower {
+    top: clamp(4px, 1.831vw, 8px);
 }
 
 .message-avatar {
