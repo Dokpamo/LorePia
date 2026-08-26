@@ -1732,12 +1732,14 @@ textarea {
 }
 
 .message-date-divider {
+    position: sticky;
+    z-index: 11;
+    top: 0;
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 12px 0 8px;
+    padding: 8px 0;
     color: var(--ink-muted);
-    grid-column: 1 / -1;
 }
 
 .message-date-chip {
@@ -1752,42 +1754,14 @@ textarea {
     backdrop-filter: blur(10px);
 }
 
-.message-date-follower {
-    position: sticky;
-    z-index: 5;
-    top: 8px;
-    display: flex;
-    height: 0;
-    justify-content: center;
-    opacity: 0;
-    pointer-events: none;
-    transform: translateY(var(--message-day-push-y, 0px));
-}
-
-.message-date-follower.visible {
-    opacity: 1;
-}
-
-.message-date-follower .message-date-chip {
-    position: absolute;
-    top: 0;
-    left: 50%;
-    flex: none;
-    transform: translateX(-50%);
-    white-space: nowrap;
-}
-
 .app-shell[data-layout='mobile'][data-view='chat'] .message-date-divider {
-    padding: clamp(5px, 2.746vw, 12px) 0 clamp(3px, 1.831vw, 8px);
+    top: calc(0px - clamp(10px, 4.119vw, 18px));
+    padding: 0 0 clamp(3px, 1.831vw, 8px);
 }
 
 .app-shell[data-layout='mobile'][data-view='chat'] .message-date-chip {
     padding: clamp(2px, 1.144vw, 5px) clamp(5px, 2.517vw, 11px);
     font-size: clamp(10px, 3.204vw, 12px);
-}
-
-.app-shell[data-layout='mobile'][data-view='chat'] .message-date-follower {
-    top: clamp(4px, 1.831vw, 8px);
 }
 
 .message-avatar {
@@ -2560,18 +2534,6 @@ textarea {
     .composer-fullscreen-header
     :is(.composer-fullscreen-close, .send-button) {
     transform: translate3d(0, 0, 0);
-    transition: transform var(--composer-fullscreen-open-duration)
-        var(--composer-fullscreen-open-easing);
-}
-
-.composer-fullscreen-close-icon {
-    transform: rotate(0deg);
-    transition: transform var(--composer-fullscreen-close-duration)
-        var(--composer-fullscreen-close-easing);
-}
-
-.composer-fullscreen.open .composer-fullscreen-close-icon {
-    transform: rotate(45deg);
     transition: transform var(--composer-fullscreen-open-duration)
         var(--composer-fullscreen-open-easing);
 }

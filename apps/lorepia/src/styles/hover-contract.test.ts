@@ -219,16 +219,14 @@ describe('pointer interaction styling', () => {
         expect(appCss).toMatch(
             /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.message-date-chip\s*\{[^}]*font-size:\s*clamp\(10px,\s*3\.204vw,\s*12px\);/s,
         );
-        expect(chatPaneSource).toContain('class="message-date-follower"');
+        expect(chatPaneSource).not.toContain('message-date-follower');
         expect(appCss).toMatch(
-            /\.message-date-follower\s*\{[^}]*position:\s*sticky;[^}]*top:\s*8px;[^}]*height:\s*0;/s,
+            /\.message-date-divider\s*\{[^}]*position:\s*sticky;[^}]*z-index:\s*11;[^}]*top:\s*0;[^}]*display:\s*flex;/s,
         );
         expect(appCss).toMatch(
-            /\.message-date-follower\s*\{[^}]*transform:\s*translateY\(var\(--message-day-push-y,\s*0px\)\);/s,
+            /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.message-date-divider\s*\{[^}]*top:\s*calc\(0px - clamp\(10px,\s*4\.119vw,\s*18px\)\);[^}]*padding:\s*0 0 clamp\(3px,\s*1\.831vw,\s*8px\);/s,
         );
-        expect(appCss).toMatch(
-            /\.message-date-follower \.message-date-chip\s*\{[^}]*position:\s*absolute;[^}]*left:\s*50%;[^}]*transform:\s*translateX\(-50%\);/s,
-        );
+        expect(appCss).not.toContain('.message-date-follower');
         expect(appCss).toMatch(
             /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.message-time\s*\{[^}]*font-size:\s*clamp\(9px,\s*2\.975vw,\s*11px\);/s,
         );
@@ -699,12 +697,6 @@ describe('pointer interaction styling', () => {
             /\.composer-fullscreen\.open\s+\.composer-fullscreen-header\s+:is\(\.composer-fullscreen-close,\s*\.send-button\)\s*\{[^}]*transform:\s*translate3d\(0,\s*0,\s*0\);[^}]*transition:\s*transform var\(--composer-fullscreen-open-duration\)[^}]*var\(--composer-fullscreen-open-easing\);/s,
         );
         expect(appCss).toMatch(
-            /\.composer-fullscreen-close-icon\s*\{[^}]*transform:\s*rotate\(0deg\);[^}]*transition:\s*transform var\(--composer-fullscreen-close-duration\)[^}]*var\(--composer-fullscreen-close-easing\);/s,
-        );
-        expect(appCss).toMatch(
-            /\.composer-fullscreen\.open \.composer-fullscreen-close-icon\s*\{[^}]*transform:\s*rotate\(45deg\);[^}]*transition:\s*transform var\(--composer-fullscreen-open-duration\)[^}]*var\(--composer-fullscreen-open-easing\);/s,
-        );
-        expect(appCss).toMatch(
             /\.composer-fullscreen-text-region\s*\{[^}]*--composer-fullscreen-text-size:\s*1rem;[^}]*--composer-fullscreen-text-line-height:\s*1\.6;[^}]*transform:\s*translate3d\([^}]*var\(--composer-text-origin-x,\s*0px\)[^}]*var\(--composer-text-origin-y,\s*0px\)[^}]*\);[^}]*transform-origin:\s*0 0;[^}]*transition:\s*transform var\(--composer-fullscreen-close-duration\)[^}]*var\(--composer-fullscreen-close-easing\);[^}]*will-change:\s*transform;/s,
         );
         expect(appCss).toMatch(
@@ -727,6 +719,7 @@ describe('pointer interaction styling', () => {
         expect(appCss).not.toContain('opacity 120ms ease 240ms');
         expect(chatPaneSource).toContain('<Plus aria-hidden="true" />');
         expect(chatPaneSource).toContain('<Maximize2 aria-hidden="true" />');
+        expect(chatPaneSource).toContain('<Minimize2 aria-hidden="true" />');
         expect(chatPaneSource).toContain('<ArrowUp class="chat-send-icon" aria-hidden="true" />');
         expect(chatPaneSource).toContain('class="composer-text-region"');
         expect(chatPaneSource).toContain('class="composer-action-row"');
@@ -749,7 +742,6 @@ describe('pointer interaction styling', () => {
         expect(chatPaneSource).toContain('bind:this={fullscreenCloseButton}');
         expect(chatPaneSource).toContain('bind:this={fullscreenSendButton}');
         expect(chatPaneSource).toContain('bind:this={fullscreenTextRegion}');
-        expect(chatPaneSource).toContain('class="composer-fullscreen-close-icon"');
         expect(appCss).toMatch(
             /:root\s*\{[^}]*--panel-open-duration:\s*420ms;[^}]*--panel-close-duration:\s*360ms;[^}]*--panel-open-easing:\s*cubic-bezier\(0\.22,\s*1,\s*0\.36,\s*1\);[^}]*--panel-close-easing:\s*cubic-bezier\(0\.65,\s*0,\s*0\.35,\s*1\);/s,
         );

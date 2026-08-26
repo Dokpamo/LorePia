@@ -6,6 +6,7 @@
         Copy,
         GitBranch,
         Maximize2,
+        Minimize2,
         Pencil,
         Plus,
         RefreshCw,
@@ -43,6 +44,7 @@
     } from './interaction-room-controller';
     import {
         VIRTUAL_MESSAGE_BLOCK_PADDING,
+        VIRTUAL_MESSAGE_DOM_LIMIT,
         VirtualMessageLayoutIndex,
         VirtualMessageMeasurements,
         computeAnchoredScrollTop,
@@ -66,6 +68,7 @@
     interface MessageMeasurementInput {
         messageId: string;
         epoch: number;
+        includesDayDivider: boolean;
     }
 
     interface ScrollAnchorSnapshot {
@@ -143,11 +146,6 @@
     const drafts = new SvelteMap<string, string>();
     let activeMessageActionId = $state<string | null>(null);
     let stableMessageActionLayoutId: string | null = null;
-    let messageDayFollowerKey = $state('');
-    let messageDayFollowerLabel = $state('');
-    let messageDayFollowerVisible = $state(false);
-    let messageDayFollowerPush = $state(0);
-    let messageDayFollowerUpdateEpoch = 0;
     let composerExpanded = $state(false);
     let composerCanFullscreen = $state(false);
     let composerOverflows = $state(false);
@@ -432,13 +430,32 @@
         layout: virtualLayout,
         revision: virtualLayoutRevision,
     });
-    const virtualWindow = $derived(
-        computeVirtualMessageWindow(
+    const virtualWindow = $derived.by(() => {
+        const window = computeVirtualMessageWindow(
             virtualLayoutSnapshot.layout,
             Math.max(0, scrollTop - VIRTUAL_MESSAGE_BLOCK_PADDING),
             viewportHeight,
-        ),
-    );
+        );
+        const firstRenderedMessage = messageCollection.items[window.start];
+        if (firstRenderedMessage === undefined) return window;
+        const firstRenderedDay = messageDayKey(firstRenderedMessage.created_at);
+        let dayStart = window.start;
+        while (dayStart > 0) {
+            const previous = messageCollection.items[dayStart - 1];
+            if (previous === undefined || messageDayKey(previous.created_at) !== firstRenderedDay) {
+                break;
+            }
+            dayStart -= 1;
+        }
+        if (dayStart === window.start || window.end - dayStart > VIRTUAL_MESSAGE_DOM_LIMIT) {
+            return window;
+        }
+        return {
+            ...window,
+            start: dayStart,
+            topSpacer: virtualMessageOffset(virtualLayoutSnapshot.layout, dayStart),
+        };
+    });
     const visibleMessages = $derived(
         messageCollection.items.slice(virtualWindow.start, virtualWindow.end),
     );
@@ -488,80 +505,6 @@
         )}`;
     }
 
-    function hideMessageDayFollower(): void {
-        messageDayFollowerVisible = false;
-        messageDayFollowerPush = 0;
-    }
-
-    function updateMessageDayFollower(scroller: HTMLDivElement): void {
-        const viewportRect = scroller.getBoundingClientRect();
-        const viewportTop = viewportRect.top;
-        const viewportBottom =
-            viewportRect.bottom > viewportTop
-                ? viewportRect.bottom
-                : viewportTop + (scroller.clientHeight || viewportHeight);
-        const stickyTop = viewportTop + 8;
-        const rows = Array.from(scroller.querySelectorAll<HTMLElement>('[data-message-day]'));
-        const firstVisibleRow = rows.find((row) => {
-            const rect = row.getBoundingClientRect();
-            return rect.bottom > stickyTop && rect.top < viewportBottom;
-        });
-        const dayKey = firstVisibleRow?.dataset.messageDay;
-        const dayLabel = firstVisibleRow?.dataset.messageDayLabel;
-        if (firstVisibleRow === undefined || dayKey === undefined || dayLabel === undefined) {
-            hideMessageDayFollower();
-            return;
-        }
-
-        const ownDivider = firstVisibleRow.querySelector<HTMLElement>('.message-date-divider');
-        if (ownDivider !== null && ownDivider.getBoundingClientRect().top > stickyTop) {
-            hideMessageDayFollower();
-            return;
-        }
-
-        const nextDayDivider = Array.from(
-            scroller.querySelectorAll<HTMLElement>('[data-message-day-divider]'),
-        )
-            .filter((divider) => {
-                if (divider.dataset.messageDayDivider === dayKey) return false;
-                return divider.getBoundingClientRect().top > stickyTop;
-            })
-            .sort(
-                (left, right) =>
-                    left.getBoundingClientRect().top - right.getBoundingClientRect().top,
-            )[0];
-        const followerChip = scroller.querySelector<HTMLElement>(
-            '.message-date-follower .message-date-chip',
-        );
-        const inlineChip = ownDivider?.querySelector<HTMLElement>('.message-date-chip') ?? null;
-        const followerChipHeight = followerChip?.getBoundingClientRect().height ?? 0;
-        const inlineChipHeight = inlineChip?.getBoundingClientRect().height ?? 0;
-        const chipHeight =
-            followerChipHeight > 0
-                ? followerChipHeight
-                : inlineChipHeight > 0
-                  ? inlineChipHeight
-                  : 24;
-        const push = nextDayDivider
-            ? Math.min(0, nextDayDivider.getBoundingClientRect().top - stickyTop - chipHeight)
-            : 0;
-
-        messageDayFollowerKey = dayKey;
-        messageDayFollowerLabel = dayLabel;
-        messageDayFollowerPush = push;
-        messageDayFollowerVisible = true;
-    }
-
-    function scheduleMessageDayFollowerUpdate(scroller: HTMLDivElement): void {
-        const updateEpoch = ++messageDayFollowerUpdateEpoch;
-        void tick().then(() => {
-            if (updateEpoch !== messageDayFollowerUpdateEpoch || messageScroller !== scroller) {
-                return;
-            }
-            updateMessageDayFollower(scroller);
-        });
-    }
-
     function startsMessageDay(message: MessageDto, globalIndex: number): boolean {
         if (globalIndex === 0) return true;
         const previous = messageCollection.items[globalIndex - 1];
@@ -571,22 +514,6 @@
         );
     }
 
-    $effect(() => {
-        const scroller = messageScroller;
-        if (
-            scroller === null ||
-            !Number.isFinite(scrollTop) ||
-            !Number.isFinite(viewportHeight) ||
-            virtualWindow.start < 0 ||
-            virtualWindow.end < 0 ||
-            virtualLayoutRevision < 0 ||
-            branchKey === ''
-        ) {
-            hideMessageDayFollower();
-            return;
-        }
-        scheduleMessageDayFollowerUpdate(scroller);
-    });
     const hasLiveResponse = $derived(
         appState.chat.live_assistant_message_id !== null ||
             appState.chat.streaming_text !== '' ||
@@ -1024,16 +951,26 @@
             observer?.disconnect();
             observer = null;
             if (typeof ResizeObserver === 'undefined') return;
-            const { epoch, messageId } = nextInput;
-            observer = new ResizeObserver(([entry]) => {
-                if (!entry) return;
-                const borderBoxHeight = entry.borderBoxSize[0]?.blockSize;
+            const { epoch, messageId, includesDayDivider } = nextInput;
+            const dayDivider =
+                includesDayDivider && node.previousElementSibling instanceof HTMLElement
+                    ? node.previousElementSibling.matches('.message-date-divider')
+                        ? node.previousElementSibling
+                        : null
+                    : null;
+            observer = new ResizeObserver((entries) => {
+                const nodeEntry = entries.find((entry) => entry.target === node);
+                const borderBoxHeight = nodeEntry?.borderBoxSize[0]?.blockSize;
                 const rectHeight = node.getBoundingClientRect().height;
-                const height =
-                    borderBoxHeight ?? (rectHeight > 0 ? rectHeight : entry.contentRect.height);
-                recordMessageMeasurement(epoch, messageId, height);
+                const messageHeight =
+                    rectHeight > 0
+                        ? rectHeight
+                        : (borderBoxHeight ?? nodeEntry?.contentRect.height ?? 0);
+                const dividerHeight = dayDivider?.getBoundingClientRect().height ?? 0;
+                recordMessageMeasurement(epoch, messageId, messageHeight + dividerHeight);
             });
             observer.observe(node);
+            if (dayDivider !== null) observer.observe(dayDivider);
         };
         connect(input);
         return {
@@ -1679,17 +1616,6 @@
             onpointerdown={handleMessageScrollPointerDown}
             onscroll={handleScroll}
         >
-            <div
-                class:visible={messageDayFollowerVisible}
-                class="message-date-follower"
-                data-visible={messageDayFollowerVisible}
-                style={`--message-day-push-y: ${String(messageDayFollowerPush)}px`}
-                aria-hidden="true"
-            >
-                <time class="message-date-chip" datetime={messageDayFollowerKey}
-                    >{messageDayFollowerLabel}</time
-                >
-            </div>
             {#if appState.messages.phase === 'loading'}
                 <div class="state-panel" role="status">메시지를 불러오는 중입니다.</div>
             {:else if appState.messages.phase === 'error'}
@@ -1721,6 +1647,18 @@
                                 : message.role === 'assistant'
                                   ? '캐릭터 메시지'
                                   : '시스템 메시지'}
+                        {#if showsDay}
+                            <li
+                                class="message-date-divider"
+                                role="separator"
+                                aria-label={dayLabel}
+                                data-message-day-divider={dayKey}
+                            >
+                                <time class="message-date-chip" datetime={dayKey}>
+                                    {dayLabel}
+                                </time>
+                            </li>
+                        {/if}
                         <li
                             class:from-user={message.role === 'user'}
                             class:has-date-divider={showsDay}
@@ -1730,25 +1668,15 @@
                                     message.id === messageFocusRequest.end_message_id)}
                             class="message-item"
                             data-message-id={message.id}
-                            data-message-day={dayKey}
-                            data-message-day-label={dayLabel}
-                            use:measureMessage={{ messageId: message.id, epoch: measurementEpoch }}
+                            use:measureMessage={{
+                                messageId: message.id,
+                                epoch: measurementEpoch,
+                                includesDayDivider: showsDay,
+                            }}
                             tabindex="-1"
                             aria-setsize={messageCollection.items.length}
                             aria-posinset={virtualWindow.start + localIndex + 1}
                         >
-                            {#if showsDay}
-                                <div
-                                    class="message-date-divider"
-                                    role="separator"
-                                    aria-label={dayLabel}
-                                    data-message-day-divider={dayKey}
-                                >
-                                    <time class="message-date-chip" datetime={dayKey}>
-                                        {dayLabel}
-                                    </time>
-                                </div>
-                            {/if}
                             <span class="message-avatar" aria-hidden="true"
                                 >{message.role === 'user'
                                     ? '나'
@@ -2063,7 +1991,7 @@
                     aria-label="전체화면 입력 닫기"
                     onclick={() => void setComposerFullscreen(false)}
                 >
-                    <Plus class="composer-fullscreen-close-icon" aria-hidden="true" />
+                    <Minimize2 aria-hidden="true" />
                 </button>
                 <span aria-hidden="true"></span>
                 {#if draft.trim().length > 0}
