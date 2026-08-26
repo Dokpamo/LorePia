@@ -93,6 +93,13 @@
     --shadow-1: 0 1px 2px rgb(43 42 40 / 5%);
     --shadow-2: 0 8px 32px rgb(43 42 40 / 9%);
     --shadow-3: 0 24px 64px rgb(43 42 40 / 18%);
+    --composer-morph-filter: drop-shadow(0 8px 16px rgb(43 42 40 / 9%));
+
+    /* Full-surface reveals share one rhythm, whether they grow or slide in. */
+    --panel-open-duration: 420ms;
+    --panel-close-duration: 360ms;
+    --panel-open-easing: cubic-bezier(0.22, 1, 0.36, 1);
+    --panel-close-easing: cubic-bezier(0.65, 0, 0.35, 1);
 
     /* Controls scale through narrow phones, then stop at the 437px logical reference. */
     --touch: clamp(25px, 10.069vw, 44px);
@@ -190,6 +197,7 @@
         --shadow-1: 0 1px 2px rgb(0 0 0 / 45%);
         --shadow-2: 0 8px 32px rgb(0 0 0 / 55%);
         --shadow-3: 0 24px 64px rgb(0 0 0 / 65%);
+        --composer-morph-filter: drop-shadow(0 8px 16px rgb(0 0 0 / 55%));
     }
 }
 
@@ -238,6 +246,7 @@
     --shadow-1: 0 1px 2px rgb(0 0 0 / 45%);
     --shadow-2: 0 8px 32px rgb(0 0 0 / 55%);
     --shadow-3: 0 24px 64px rgb(0 0 0 / 65%);
+    --composer-morph-filter: drop-shadow(0 8px 16px rgb(0 0 0 / 55%));
 }
 
 * {
@@ -1376,9 +1385,19 @@ textarea {
 /* ----------------------------------------------------------------- chat */
 
 .chat-pane {
+    --chat-side-inset: var(--gutter);
+    --composer-overlay-height: 78px;
+    --composer-field-height: 54px;
+    --composer-field-bottom-inset: 8px;
+    --composer-fullscreen-open-duration: var(--panel-open-duration);
+    --composer-fullscreen-close-duration: var(--panel-close-duration);
+    --composer-fullscreen-open-easing: var(--panel-open-easing);
+    --composer-fullscreen-close-easing: var(--panel-close-easing);
+
     display: flex;
     height: 100%;
     min-height: 0;
+    position: relative;
     flex-direction: column;
     overflow: hidden;
     background: var(--bg);
@@ -1386,6 +1405,8 @@ textarea {
 
 /* The mobile thread is a room layered over a quiet message canvas. */
 .app-shell[data-layout='mobile'][data-view='chat'] .chat-pane {
+    --chat-side-inset: max(clamp(8px, 3.4vw, 15px), calc((100% - var(--reading)) / 2));
+
     position: relative;
     background-color: color-mix(in srgb, var(--ink) 2%, var(--bg));
     background-image:
@@ -1425,6 +1446,24 @@ textarea {
     );
     content: '';
     inset: 0 0 auto;
+    pointer-events: none;
+}
+
+/* Let the thread dissolve into the page behind the floating composer. */
+.app-shell[data-layout='mobile'][data-view='chat'] .chat-pane::after {
+    position: absolute;
+    z-index: 5;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    height: calc(var(--composer-overlay-height) + clamp(12px, 4.577vw, 20px));
+    background: linear-gradient(
+        to bottom,
+        transparent 0,
+        var(--bg) clamp(12px, 4.577vw, 20px),
+        var(--bg) 100%
+    );
+    content: '';
     pointer-events: none;
 }
 
@@ -1651,13 +1690,19 @@ textarea {
 
 .message-scroll {
     overflow-y: auto;
-    padding: 0 var(--gutter);
+    overflow-anchor: none;
+    padding: 0 var(--chat-side-inset) calc(var(--composer-overlay-height) + var(--chat-side-inset));
     background: var(--bg);
     overscroll-behavior: contain;
 }
 
 .app-shell[data-layout='mobile'] .message-scroll {
     padding-inline: max(var(--gutter), calc((100% - var(--reading)) / 2));
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .message-scroll {
+    padding-inline: var(--chat-side-inset);
+    background: transparent;
 }
 
 .message-list {
@@ -1676,9 +1721,11 @@ textarea {
  * alternation is the entire visual grammar of the transcript.
  */
 .message-item {
+    --message-turn-spacing: 15px;
+
     display: grid;
     max-width: 100%;
-    padding: 6px 0;
+    padding: var(--message-turn-spacing) 0;
     column-gap: 10px;
     grid-template-columns: 32px minmax(0, 1fr);
     scroll-margin-block: 24px;
@@ -1699,7 +1746,7 @@ textarea {
     border-radius: var(--radius-pill);
     background: color-mix(in srgb, var(--surface-raised) 90%, transparent);
     box-shadow: var(--shadow-1);
-    font-size: 0.6875rem;
+    font-size: 0.75rem;
     font-weight: 650;
     line-height: 1;
     backdrop-filter: blur(10px);
@@ -1711,6 +1758,7 @@ textarea {
 
 .app-shell[data-layout='mobile'][data-view='chat'] .message-date-divider time {
     padding: clamp(2px, 1.144vw, 5px) clamp(5px, 2.517vw, 11px);
+    font-size: clamp(10px, 3.204vw, 12px);
 }
 
 .message-avatar {
@@ -1751,10 +1799,15 @@ textarea {
     display: block;
     padding: 4px 0 0;
     color: var(--ink-subtle);
-    font-size: 0.65625rem;
+    font-size: 0.6875rem;
+    font-weight: 500;
     font-variant-numeric: tabular-nums;
     line-height: 1;
     text-align: right;
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .message-time {
+    font-size: clamp(9px, 2.975vw, 11px);
 }
 
 .message-body {
@@ -1809,7 +1862,8 @@ textarea {
 }
 
 .app-shell[data-layout='mobile'][data-view='chat'] .message-item {
-    padding: clamp(2px, 1.144vw, 5px) 0;
+    --message-turn-spacing: clamp(5px, 2.86vw, 12.5px);
+
     grid-template-columns: minmax(0, 1fr);
 }
 
@@ -1851,24 +1905,37 @@ textarea {
 }
 
 .app-shell[data-layout='mobile'][data-view='chat'] .message-item .message-actions {
+    --message-action-size: clamp(26px, 8.696vw, 32px);
+    --message-actions-duration: 360ms;
+    --message-actions-easing: cubic-bezier(0.16, 1, 0.3, 1);
+
     max-height: 0;
     padding-top: 0;
     overflow: hidden;
+    overflow-anchor: none;
     grid-column: 1;
     opacity: 0;
     pointer-events: none;
     visibility: hidden;
     transition:
-        max-height 140ms ease,
-        padding 140ms ease,
-        opacity 110ms ease;
+        max-height var(--message-actions-duration) var(--message-actions-easing),
+        padding-top var(--message-actions-duration) var(--message-actions-easing),
+        opacity var(--message-actions-duration) var(--message-actions-easing),
+        visibility 0s linear var(--message-actions-duration);
 }
 
-.app-shell[data-layout='mobile'][data-view='chat'] .message-item:focus-within .message-actions {
-    max-height: 36px;
+.app-shell[data-layout='mobile'][data-view='chat']
+    .message-item:is(.actions-open, :focus-within)
+    .message-actions {
+    max-height: var(--message-action-size);
     padding-top: 4px;
     opacity: 1;
     pointer-events: auto;
+    transition:
+        max-height var(--message-actions-duration) var(--message-actions-easing),
+        padding-top var(--message-actions-duration) var(--message-actions-easing),
+        opacity var(--message-actions-duration) var(--message-actions-easing),
+        visibility 0s;
     visibility: visible;
 }
 
@@ -1919,7 +1986,7 @@ textarea {
     display: flex;
     flex-wrap: wrap;
     padding-top: 4px;
-    gap: 2px;
+    gap: 4px;
     opacity: 0;
     transition: opacity 110ms ease;
 }
@@ -1935,14 +2002,40 @@ textarea {
 }
 
 .message-actions button {
-    min-height: 32px;
-    padding: 0 9px;
+    display: grid;
+    width: 30px;
+    min-width: 30px;
+    height: 30px;
+    min-height: 30px;
+    padding: 0;
     border-color: transparent;
     border-radius: var(--radius-pill);
     background: transparent;
     color: var(--ink-muted);
-    font-size: 0.6875rem;
-    font-weight: 400;
+    place-items: center;
+}
+
+.message-actions button svg {
+    width: 15px;
+    height: 15px;
+    flex: none;
+    fill: none;
+    stroke: currentcolor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.8;
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .message-actions button {
+    width: var(--message-action-size);
+    min-width: var(--message-action-size);
+    height: var(--message-action-size);
+    min-height: var(--message-action-size);
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .message-actions button svg {
+    width: clamp(13px, 4.119vw, 16px);
+    height: clamp(13px, 4.119vw, 16px);
 }
 
 .inline-editor {
@@ -2009,54 +2102,82 @@ textarea {
 
 /* ------------------------------------------------------------ composer */
 
-/*
- * The composer docks above the tab bar at every width, the way a native
- * keyboard accessory does: a pill field and a round send button. The tab bar
- * below it owns the safe-area inset.
- */
+/* The field is the only visible composer surface; its surrounding dock is clear. */
 .composer {
+    --composer-dock-top-inset: 8px;
+
     display: block;
-    padding: 8px var(--gutter);
-    background: color-mix(in srgb, var(--bg) 92%, transparent);
+    position: absolute;
+    z-index: 6;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    padding: var(--composer-dock-top-inset) var(--chat-side-inset);
+    border: 0;
+    background: none;
+    box-shadow: none;
+    pointer-events: none;
 }
 
 .app-shell[data-layout='mobile'][data-view='chat'] .composer {
-    padding: clamp(3px, 1.373vw, 6px) max(var(--gutter), calc((100% - var(--reading)) / 2))
-        calc(clamp(5px, 2.288vw, 10px) + env(safe-area-inset-bottom));
+    --composer-dock-top-inset: clamp(3px, 1.373vw, 6px);
+
+    padding: var(--composer-dock-top-inset) var(--chat-side-inset)
+        calc(clamp(7px, 3.2vw, 14px) + env(safe-area-inset-bottom));
     border: 0;
     margin: 0;
-    background: linear-gradient(to top, var(--bg) 72%, transparent);
+    background: none;
+    box-shadow: none;
 }
 
 .composer-field {
     --composer-control-size: 44px;
+    --composer-button-size: var(--composer-control-size);
     --composer-corner: calc(var(--composer-control-size) / 2 + 5px);
-    --composer-expanded-size: clamp(96px, 18dvh, 140px);
+    --composer-collapsed-size: 54px;
+    --composer-field-inset: 4px;
+    --composer-inline-action-gap: var(--composer-text-action-gap);
+    --composer-text-action-gap: 6px;
+    --composer-action-gap: 4px;
+    --composer-action-bottom: calc(
+        (var(--composer-collapsed-size) - var(--composer-control-size)) / 2
+    );
+    --composer-text-size: calc(1.45em + 13px);
+    --composer-expanded-min: clamp(82px, 11dvh, 96px);
+    --composer-expanded-corner: var(--radius-lg);
+    --composer-max-size: clamp(142px, 22dvh, 190px);
+    --composer-motion-duration: 360ms;
+    --composer-motion-easing: cubic-bezier(0.22, 1, 0.36, 1);
 
-    display: flex;
-    min-height: 54px;
-    align-items: flex-end;
-    padding: 4px;
-    border: 1px solid var(--line);
+    display: block;
+    height: var(--composer-collapsed-size);
+    min-height: var(--composer-collapsed-size);
+    max-height: var(--composer-max-size);
+    position: relative;
+    z-index: 1;
+    overflow: hidden;
+    padding: 0;
+    border: 0;
     border-radius: var(--composer-corner);
     background: var(--surface-raised);
     box-shadow: var(--shadow-2);
-    gap: 4px;
+    pointer-events: auto;
     transition:
-        min-height 260ms cubic-bezier(0.22, 1, 0.36, 1),
-        border-radius 220ms ease,
-        border-color 140ms ease;
+        height var(--composer-motion-duration) var(--composer-motion-easing),
+        border-radius var(--composer-motion-duration) var(--composer-motion-easing);
+    will-change: height, border-radius;
 }
 
 .composer-leading-action {
     display: grid;
-    width: var(--composer-control-size);
-    min-width: var(--composer-control-size);
-    min-height: var(--composer-control-size);
+    width: var(--composer-button-size);
+    height: var(--composer-button-size);
+    min-width: var(--composer-button-size);
+    min-height: var(--composer-button-size);
     padding: 0;
     border: 0;
     border-radius: 50%;
-    background: transparent;
+    background: var(--surface-active);
     color: var(--ink-muted);
     place-items: center;
 }
@@ -2071,45 +2192,181 @@ textarea {
     stroke-width: 1.8;
 }
 
-.composer-field:focus-within {
-    min-height: var(--composer-expanded-size);
-    border-color: var(--accent-line);
-    border-radius: var(--radius-lg);
+.composer-field.expanded {
+    height: clamp(
+        var(--composer-expanded-min),
+        calc(
+            var(--composer-text-size) + var(--composer-control-size) +
+                var(--composer-text-action-gap) + var(--composer-field-inset) +
+                var(--composer-action-bottom)
+        ),
+        var(--composer-max-size)
+    );
+    border-radius: var(--composer-expanded-corner);
 }
 
-.composer textarea {
-    max-height: 38vh;
-    min-height: var(--composer-control-size);
-    flex: 1;
+.composer-text-region {
+    position: absolute;
+    z-index: 1;
+    top: var(--composer-field-inset);
+    right: var(--composer-field-inset);
+    bottom: var(--composer-field-inset);
+    left: calc(
+        var(--composer-field-inset) + var(--composer-button-size) +
+            var(--composer-inline-action-gap)
+    );
+    height: auto;
+    max-height: calc(
+        var(--composer-max-size) - var(--composer-control-size) - var(--composer-text-action-gap) -
+            var(--composer-field-inset) - var(--composer-field-inset)
+    );
+    overflow: hidden;
+    transition:
+        right var(--composer-motion-duration) var(--composer-motion-easing),
+        left var(--composer-motion-duration) var(--composer-motion-easing);
+}
+
+.composer-field:is(.expanded, .measuring) .composer-text-region {
+    right: var(--composer-field-inset);
+    bottom: calc(
+        var(--composer-action-bottom) + var(--composer-control-size) +
+            var(--composer-text-action-gap)
+    );
+    left: var(--composer-field-inset);
+}
+
+.composer-field.measuring .composer-text-region {
+    transition: none;
+}
+
+.composer-text-region textarea {
+    width: 100%;
+    height: 100%;
+    max-height: 100%;
+    min-height: 0;
     padding: calc((var(--composer-control-size) - 1.45em) / 2) 12px;
     border: 0;
     border-radius: calc(var(--composer-control-size) / 2);
     outline: 0;
     background: transparent;
-    field-sizing: content;
     font-size: 0.9375rem;
     line-height: 1.45;
+    overflow: hidden;
     resize: none;
-    transition:
-        min-height 260ms cubic-bezier(0.22, 1, 0.36, 1),
-        padding 220ms ease,
-        border-radius 220ms ease;
+    white-space: nowrap;
+    transition: none;
 }
 
-.composer-field:focus-within textarea {
-    min-height: calc(var(--composer-expanded-size) - 10px);
-    padding-block: 12px;
+.composer-field:is(.expanded, .measuring) .composer-text-region textarea {
+    padding: 9px 14px 0;
     border-radius: calc(var(--radius-lg) - 5px);
+    overflow-y: hidden;
+    white-space: pre-wrap;
 }
 
-.composer textarea:focus-visible {
+.composer-field.overflows .composer-text-region textarea {
+    overflow-y: auto;
+}
+
+.composer-text-region textarea:focus-visible {
     outline: 0;
 }
 
-.send-button {
-    width: var(--composer-control-size);
-    min-width: var(--composer-control-size);
+.composer-action-row {
+    display: flex;
+    position: absolute;
+    z-index: 2;
+    right: var(--composer-field-inset);
+    bottom: var(--composer-action-bottom);
+    left: var(--composer-field-inset);
+    height: var(--composer-control-size);
     min-height: var(--composer-control-size);
+    align-items: center;
+    padding: 0;
+    gap: var(--composer-action-gap);
+    pointer-events: none;
+    transition: none;
+}
+
+/*
+ * A draft keeps its actions after focus leaves, but the field itself returns
+ * to the compact rail. Reserve the trailing controls so the first visible
+ * line never slides underneath send or fullscreen while the rail closes.
+ */
+.composer-field.has-draft:not(.expanded) .composer-text-region {
+    right: calc(
+        var(--composer-field-inset) + var(--composer-button-size) +
+            var(--composer-inline-action-gap)
+    );
+}
+
+.composer-field.has-draft.can-fullscreen:not(.expanded) .composer-text-region {
+    right: calc(
+        var(--composer-field-inset) + var(--composer-button-size) + var(--composer-button-size) +
+            var(--composer-action-gap) + var(--composer-inline-action-gap)
+    );
+}
+
+.composer-action-row > button:not(.composer-expand-action) {
+    flex: none;
+    pointer-events: auto;
+}
+
+.composer-action-spacer {
+    display: block;
+    flex: 1;
+}
+
+.composer-expand-action {
+    display: grid;
+    width: 0;
+    height: var(--composer-button-size);
+    min-width: 0;
+    min-height: var(--composer-button-size);
+    flex: none;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: var(--surface-active);
+    color: var(--ink-subtle);
+    opacity: 0;
+    place-items: center;
+    pointer-events: none;
+    transform: scale(0.82);
+    transform-origin: 100% 50%;
+    transition:
+        width var(--composer-motion-duration) var(--composer-motion-easing),
+        min-width var(--composer-motion-duration) var(--composer-motion-easing),
+        opacity calc(var(--composer-motion-duration) * 0.72) ease,
+        transform var(--composer-motion-duration) var(--composer-motion-easing);
+}
+
+.composer-expand-action.available {
+    width: var(--composer-button-size);
+    min-width: var(--composer-button-size);
+    opacity: 1;
+    pointer-events: auto;
+    transform: scale(1);
+}
+
+.composer-expand-action:not(.available) {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.composer-expand-action svg {
+    width: 17px;
+    height: 17px;
+    fill: none;
+    stroke: currentcolor;
+    stroke-width: 1.8;
+}
+
+.send-button {
+    width: var(--composer-button-size, var(--composer-control-size, 44px));
+    height: var(--composer-button-size, var(--composer-control-size, 44px));
+    min-width: var(--composer-button-size, var(--composer-control-size, 44px));
+    min-height: var(--composer-button-size, var(--composer-control-size, 44px));
     padding: 0;
     border-radius: 50%;
 }
@@ -2125,43 +2382,248 @@ textarea {
 }
 
 .app-shell[data-layout='mobile'][data-view='chat'] .composer-field {
-    --composer-control-size: calc(var(--mobile-top-action) - clamp(4px, 1.373vw, 6px));
-    --composer-expanded-size: clamp(88px, 18dvh, 128px);
+    --composer-control-size: clamp(28px, 11.35vw, 42px);
+    --composer-button-size: var(--composer-control-size);
+    --composer-collapsed-size: clamp(44px, 17.98vw, 66px);
+    --composer-corner: calc(var(--composer-collapsed-size) / 2);
+    --composer-field-inset: clamp(5px, 2.18vw, 8px);
+    --composer-inline-action-gap: clamp(10px, 4.36vw, 16px);
+    --composer-text-action-gap: clamp(7px, 2.99vw, 11px);
+    --composer-action-gap: clamp(4px, 1.63vw, 6px);
+    --composer-expanded-min: clamp(68px, 27.7vw, 102px);
+    --composer-expanded-corner: clamp(14px, 5.72vw, 22px);
+    --composer-max-size: clamp(112px, 22dvh, 182px);
 
-    min-height: var(--mobile-top-action);
-    padding: clamp(2px, 0.686vw, 3px);
-    box-shadow: var(--shadow-1);
+    min-height: var(--composer-collapsed-size);
+    background: var(--surface-raised);
+    box-shadow: var(--shadow-2);
 }
 
-.app-shell[data-layout='mobile'][data-view='chat'] .composer textarea {
-    min-height: var(--composer-control-size);
+.app-shell[data-layout='mobile'][data-view='chat'] .composer-text-region textarea {
     padding: calc((var(--composer-control-size) - 1.45em) / 2) clamp(4px, 1.831vw, 8px);
-    font-size: var(--detail-support-type);
+    font-size: clamp(10px, 4.36vw, 16px);
 }
 
-.app-shell[data-layout='mobile'][data-view='chat'] .composer-field:focus-within {
-    min-height: var(--composer-expanded-size);
+.app-shell[data-layout='mobile'][data-view='chat']
+    .composer-field:is(.expanded, .measuring)
+    .composer-text-region
+    textarea {
+    padding: clamp(5px, 2.288vw, 10px) clamp(5px, 2.18vw, 10px) 0;
 }
 
-.app-shell[data-layout='mobile'][data-view='chat'] .composer-field:focus-within textarea {
-    min-height: calc(var(--composer-expanded-size) - 10px);
-    padding-block: 12px;
+.app-shell[data-layout='mobile'][data-view='chat']
+    :is(.composer-leading-action, .composer-expand-action.available, .send-button) {
+    width: var(--composer-button-size);
+    height: var(--composer-button-size);
+    min-width: var(--composer-button-size);
+    min-height: var(--composer-button-size);
 }
 
-.app-shell[data-layout='mobile'][data-view='chat'] :is(.composer-leading-action, .send-button) {
-    width: var(--composer-control-size);
-    min-width: var(--composer-control-size);
-    min-height: var(--composer-control-size);
+.app-shell[data-layout='mobile'][data-view='chat'] .composer-action-row {
+    gap: var(--composer-action-gap);
 }
 
-.app-shell[data-layout='mobile'][data-view='chat'] :is(.composer-leading-action, .send-button) svg {
-    width: clamp(14px, 5.492vw, 24px);
-    height: clamp(14px, 5.492vw, 24px);
+.app-shell[data-layout='mobile'][data-view='chat']
+    :is(.composer-leading-action, .composer-expand-action, .send-button)
+    svg {
+    width: clamp(10px, 4.577vw, 18px);
+    height: clamp(10px, 4.577vw, 18px);
 }
 
 .composer .danger.compact {
     min-height: 44px;
     border-radius: var(--radius-pill);
+}
+
+.composer-fullscreen {
+    --composer-fullscreen-top: 64px;
+    --composer-origin-top: calc(
+        100% - var(--composer-field-height) - var(--composer-field-bottom-inset)
+    );
+    --composer-origin-right: var(--chat-side-inset);
+    --composer-origin-bottom: var(--composer-field-bottom-inset);
+    --composer-origin-left: var(--chat-side-inset);
+    --composer-origin-radius: calc(var(--composer-field-height) / 2);
+
+    display: grid;
+    position: absolute;
+    z-index: 32;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    height: calc(100% - var(--composer-fullscreen-top));
+    border: 0;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    background: var(--surface-raised);
+    filter: var(--composer-morph-filter);
+    grid-template-rows: auto minmax(0, 1fr);
+    overflow: hidden;
+    pointer-events: auto;
+    clip-path: inset(
+        var(--composer-origin-top) var(--composer-origin-right) var(--composer-origin-bottom)
+            var(--composer-origin-left) round var(--composer-origin-radius)
+    );
+    visibility: hidden;
+    transition:
+        clip-path var(--composer-fullscreen-close-duration) var(--composer-fullscreen-close-easing),
+        visibility 0s linear var(--composer-fullscreen-close-duration);
+}
+
+.composer-fullscreen.open {
+    clip-path: inset(0 round var(--radius-lg) var(--radius-lg) 0 0);
+    pointer-events: auto;
+    visibility: visible;
+    transition:
+        clip-path var(--composer-fullscreen-open-duration) var(--composer-fullscreen-open-easing),
+        visibility 0s;
+}
+
+.composer-fullscreen-header {
+    --composer-control-size: 44px;
+    --composer-button-size: var(--composer-control-size);
+
+    display: grid;
+    align-items: center;
+    padding: 16px var(--gutter) 8px;
+    grid-template-columns:
+        var(--composer-control-size, 44px) minmax(0, 1fr)
+        var(--composer-control-size, 44px);
+}
+
+.composer-fullscreen-close {
+    display: grid;
+    width: var(--composer-control-size, 44px);
+    height: var(--composer-control-size, 44px);
+    min-width: var(--composer-control-size, 44px);
+    min-height: var(--composer-control-size, 44px);
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: var(--surface-active);
+    color: var(--ink);
+    place-items: center;
+}
+
+.composer-fullscreen-close svg {
+    width: 22px;
+    height: 22px;
+    fill: none;
+    stroke: currentcolor;
+    stroke-width: 1.8;
+}
+
+.composer-fullscreen-header .send-button {
+    justify-self: end;
+}
+
+.composer-fullscreen-header :is(.composer-fullscreen-close, .send-button) {
+    transform: translate3d(
+        var(--composer-control-origin-x, 0px),
+        var(--composer-control-origin-y, 0px),
+        0
+    );
+    transition: transform var(--composer-fullscreen-close-duration)
+        var(--composer-fullscreen-close-easing);
+    will-change: transform;
+}
+
+.composer-fullscreen.open
+    .composer-fullscreen-header
+    :is(.composer-fullscreen-close, .send-button) {
+    transform: translate3d(0, 0, 0);
+    transition: transform var(--composer-fullscreen-open-duration)
+        var(--composer-fullscreen-open-easing);
+}
+
+.composer-fullscreen-close-icon {
+    transform: rotate(0deg);
+    transition: transform var(--composer-fullscreen-close-duration)
+        var(--composer-fullscreen-close-easing);
+}
+
+.composer-fullscreen.open .composer-fullscreen-close-icon {
+    transform: rotate(45deg);
+    transition: transform var(--composer-fullscreen-open-duration)
+        var(--composer-fullscreen-open-easing);
+}
+
+.composer-fullscreen-text-region {
+    --composer-fullscreen-text-size: 1rem;
+    --composer-fullscreen-text-line-height: 1.6;
+
+    min-height: 0;
+    position: relative;
+    transform: translate3d(
+        var(--composer-text-origin-x, 0px),
+        var(--composer-text-origin-y, 0px),
+        0
+    );
+    transform-origin: 0 0;
+    transition: transform var(--composer-fullscreen-close-duration)
+        var(--composer-fullscreen-close-easing);
+    will-change: transform;
+}
+
+.composer-fullscreen.open .composer-fullscreen-text-region {
+    transform: translate3d(0, 0, 0);
+    transition: transform var(--composer-fullscreen-open-duration)
+        var(--composer-fullscreen-open-easing);
+}
+
+.composer-fullscreen textarea {
+    display: block;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    padding: 12px max(24px, var(--gutter)) 24px;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: var(--ink);
+    font: inherit;
+    font-size: var(--composer-text-origin-font-size, var(--composer-fullscreen-text-size));
+    line-height: var(
+        --composer-text-origin-line-height,
+        var(--composer-fullscreen-text-line-height)
+    );
+    resize: none;
+    transition:
+        font-size var(--composer-fullscreen-close-duration) var(--composer-fullscreen-close-easing),
+        line-height var(--composer-fullscreen-close-duration)
+            var(--composer-fullscreen-close-easing);
+}
+
+.composer-fullscreen.open textarea {
+    font-size: var(--composer-fullscreen-text-size);
+    line-height: var(--composer-fullscreen-text-line-height);
+    transition:
+        font-size var(--composer-fullscreen-open-duration) var(--composer-fullscreen-open-easing),
+        line-height var(--composer-fullscreen-open-duration) var(--composer-fullscreen-open-easing);
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .composer-fullscreen {
+    --composer-fullscreen-top: calc(
+        var(--mobile-root-header) + env(safe-area-inset-top) + clamp(3px, 1.373vw, 6px)
+    );
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .composer-fullscreen-header {
+    --composer-control-size: clamp(28px, 11.35vw, 42px);
+    --composer-button-size: var(--composer-control-size);
+
+    padding: clamp(12px, 4.119vw, 18px) var(--gutter) clamp(5px, 1.831vw, 8px);
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .composer-fullscreen-close svg {
+    width: clamp(10px, 4.577vw, 18px);
+    height: clamp(10px, 4.577vw, 18px);
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .composer-fullscreen textarea {
+    --composer-fullscreen-text-size: var(--detail-ui-type);
+
+    padding: clamp(7px, 2.746vw, 12px) clamp(16px, 5.492vw, 24px)
+        calc(clamp(16px, 5.492vw, 24px) + env(safe-area-inset-bottom));
 }
 
 /* ------------------------------------------------------- status boxes */
@@ -2792,10 +3254,10 @@ textarea {
     }
 
     .app-shell[data-layout='mobile'][data-view='chat']
-        :is(.composer-leading-action, .send-button)
+        :is(.composer-leading-action, .composer-expand-action, .send-button)
         svg {
-        width: clamp(14px, 5.492vw, 20px);
-        height: clamp(14px, 5.492vw, 20px);
+        width: clamp(10px, 4.577vw, 18px);
+        height: clamp(10px, 4.577vw, 18px);
     }
 }
 

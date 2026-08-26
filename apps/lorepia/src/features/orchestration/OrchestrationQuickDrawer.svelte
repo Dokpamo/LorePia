@@ -660,8 +660,8 @@
         pointer-events: none;
         transform: translateX(-50%);
         transition:
-            bottom 360ms cubic-bezier(0.65, 0, 0.35, 1),
-            visibility 0s linear 360ms;
+            bottom var(--panel-close-duration) var(--panel-close-easing),
+            visibility 0s linear var(--panel-close-duration);
         visibility: hidden;
     }
 
@@ -669,7 +669,7 @@
         bottom: calc(12px - var(--sheet-drag-y, 0px));
         pointer-events: auto;
         transition:
-            bottom 420ms cubic-bezier(0.22, 1, 0.36, 1),
+            bottom var(--panel-open-duration) var(--panel-open-easing),
             visibility 0s;
         visibility: visible;
     }

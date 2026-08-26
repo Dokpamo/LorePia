@@ -1,5 +1,18 @@
 <script lang="ts">
-    import { ArrowUp, ArrowLeft, Plus, Sparkles } from '@lucide/svelte';
+    import {
+        ArrowLeft,
+        ArrowUp,
+        Check,
+        Copy,
+        GitBranch,
+        Maximize2,
+        Pencil,
+        Plus,
+        RefreshCw,
+        Sparkles,
+        Trash2,
+        X,
+    } from '@lucide/svelte';
     import MarkdownText from './MarkdownText.svelte';
     import { onMount, tick } from 'svelte';
     import type { KeyboardEventHandler } from 'svelte/elements';
@@ -112,6 +125,7 @@
     let pendingMessageCollectionEpoch = 0;
     let pendingMeasurementScrollEpoch = 0;
     let pendingMeasurementPinBottom = false;
+    let pendingMeasurementPreserveScrollPosition = false;
     let pendingMeasurementAnchor: ScrollAnchorSnapshot | null = null;
     let stableMeasurementAnchor: ScrollAnchorSnapshot | null = null;
     let stableAnchorCaptureEpoch = 0;
@@ -127,6 +141,240 @@
     let observedGenerationId: string | null = null;
     let observedLiveAssistantMessageId: string | null = null;
     const drafts = new SvelteMap<string, string>();
+    let activeMessageActionId = $state<string | null>(null);
+    let stableMessageActionLayoutId: string | null = null;
+    let composerExpanded = $state(false);
+    let composerCanFullscreen = $state(false);
+    let composerOverflows = $state(false);
+    let composerFullscreen = $state(false);
+    let composerField = $state<HTMLDivElement | null>(null);
+    let composerLeadingAction = $state<HTMLButtonElement | null>(null);
+    let composerSendButton = $state<HTMLButtonElement | null>(null);
+    let fullscreenComposerSurface = $state<HTMLFormElement | null>(null);
+    let fullscreenCloseButton = $state<HTMLButtonElement | null>(null);
+    let fullscreenSendButton = $state<HTMLButtonElement | null>(null);
+    let fullscreenTextRegion = $state<HTMLDivElement | null>(null);
+    let fullscreenComposerTextarea = $state<HTMLTextAreaElement | null>(null);
+
+    function measureComposer(node: HTMLTextAreaElement, draftValue: string) {
+        let observer: ResizeObserver | null = null;
+        let observedWidth: number | null = null;
+        let scrollAnchorFrame: number | null = null;
+        let overlayScrollFrame: number | null = null;
+        let updateQueued = false;
+        let pendingExpandedMeasurement: boolean | null = null;
+        const field = node.closest<HTMLElement>('.composer-field');
+        const composer = field?.closest<HTMLElement>('.composer');
+        const chatPane = field?.closest<HTMLElement>('.chat-pane');
+        const resizeTarget = composer ?? field ?? node;
+
+        if (draftValue.trim().length === 0) {
+            composerCanFullscreen = false;
+            composerOverflows = false;
+        }
+
+        const update = (measureExpanded = composerExpanded): void => {
+            const appliesMeasurementLayout =
+                measureExpanded && field !== null && !field.classList.contains('expanded');
+            if (appliesMeasurementLayout) field.classList.add('measuring');
+            const style = getComputedStyle(node);
+            const parsedFontSize = Number.parseFloat(style.fontSize);
+            const fontSize =
+                Number.isFinite(parsedFontSize) && parsedFontSize >= 8 ? parsedFontSize : 16;
+            const parsedLineHeight = Number.parseFloat(style.lineHeight);
+            const lineHeight =
+                Number.isFinite(parsedLineHeight) && parsedLineHeight > fontSize
+                    ? parsedLineHeight
+                    : fontSize *
+                      (Number.isFinite(parsedLineHeight) && parsedLineHeight > 0
+                          ? parsedLineHeight
+                          : 1.45);
+            const padding =
+                (Number.parseFloat(style.paddingTop) || 0) +
+                (Number.parseFloat(style.paddingBottom) || 0);
+            const previousInlineHeight = node.style.height;
+            node.style.height = '0px';
+            const scrollHeight = Math.max(lineHeight + padding, node.scrollHeight);
+            node.style.height = previousInlineHeight;
+            const contentHeight = Math.max(lineHeight, scrollHeight - padding);
+            const lineCount = Math.max(1, Math.ceil((contentHeight - 1) / lineHeight));
+            const textRegion = node.closest<HTMLElement>('.composer-text-region');
+            const parsedMaximumHeight = Number.parseFloat(
+                textRegion ? getComputedStyle(textRegion).maxHeight : '',
+            );
+            const maximumHeight =
+                Number.isFinite(parsedMaximumHeight) && parsedMaximumHeight >= lineHeight + padding
+                    ? parsedMaximumHeight
+                    : scrollHeight;
+            if (appliesMeasurementLayout) field.classList.remove('measuring');
+            const nextTextSize = Math.ceil(Math.min(scrollHeight, maximumHeight));
+            field?.style.setProperty('--composer-text-size', `${String(nextTextSize)}px`);
+            const overflows = scrollHeight > maximumHeight + 1;
+            composerOverflows = overflows;
+            if (!overflows) {
+                if (scrollAnchorFrame !== null) cancelAnimationFrame(scrollAnchorFrame);
+                let remainingFrames = 3;
+                const anchorVisibleLines = (): void => {
+                    node.scrollTop = 0;
+                    remainingFrames -= 1;
+                    if (remainingFrames > 0) {
+                        scrollAnchorFrame = requestAnimationFrame(anchorVisibleLines);
+                        return;
+                    }
+                    scrollAnchorFrame = null;
+                };
+                node.scrollTop = 0;
+                scrollAnchorFrame = requestAnimationFrame(anchorVisibleLines);
+            } else if (scrollAnchorFrame !== null) {
+                cancelAnimationFrame(scrollAnchorFrame);
+                scrollAnchorFrame = null;
+            }
+            if (node.value.trim().length === 0) {
+                composerCanFullscreen = false;
+                return;
+            }
+            composerCanFullscreen = lineCount >= 2 || overflows;
+        };
+        const scheduleUpdate = (measureExpanded?: boolean): void => {
+            if (measureExpanded !== undefined) {
+                pendingExpandedMeasurement = measureExpanded;
+            }
+            if (updateQueued) return;
+            updateQueued = true;
+            queueMicrotask(() => {
+                updateQueued = false;
+                const nextExpandedMeasurement = pendingExpandedMeasurement ?? composerExpanded;
+                pendingExpandedMeasurement = null;
+                update(nextExpandedMeasurement);
+            });
+        };
+        const handleInput = (): void => update(composerExpanded);
+        const handleFocusIn = (event: FocusEvent): void => {
+            if (event.relatedTarget instanceof Node && field?.contains(event.relatedTarget)) return;
+            if (composerExpanded) return;
+            // Resolve the final text height before the single expansion transition starts.
+            update(true);
+            composerExpanded = true;
+        };
+        const handleFocusOut = (event: FocusEvent): void => {
+            if (event.relatedTarget instanceof Node && field?.contains(event.relatedTarget)) return;
+            if (!composerExpanded) return;
+            if (node.value.trim().length > 0) return;
+            composerExpanded = false;
+            scheduleUpdate(false);
+        };
+        const syncComposerOverlay = (fieldHeight: number): void => {
+            if (
+                composer === null ||
+                composer === undefined ||
+                chatPane === null ||
+                chatPane === undefined
+            ) {
+                return;
+            }
+            const composerStyle = getComputedStyle(composer);
+            const bottomInset = Number.parseFloat(composerStyle.paddingBottom) || 0;
+            const verticalPadding =
+                (Number.parseFloat(composerStyle.paddingTop) || 0) + bottomInset;
+            const overlayHeight = Math.ceil(fieldHeight + verticalPadding);
+            chatPane.style.setProperty(
+                '--composer-field-height',
+                `${String(Math.ceil(fieldHeight))}px`,
+            );
+            chatPane.style.setProperty(
+                '--composer-field-bottom-inset',
+                `${String(Math.ceil(bottomInset))}px`,
+            );
+            const previousOverlayHeight = Number.parseFloat(
+                chatPane.style.getPropertyValue('--composer-overlay-height'),
+            );
+            if (
+                Number.isFinite(previousOverlayHeight) &&
+                Math.abs(previousOverlayHeight - overlayHeight) < 0.5
+            ) {
+                return;
+            }
+            chatPane.style.setProperty('--composer-overlay-height', `${String(overlayHeight)}px`);
+            const scroller = messageScroller;
+            const composerOwnsFocus = field?.contains(document.activeElement) ?? false;
+            const overlayDelta = Number.isFinite(previousOverlayHeight)
+                ? overlayHeight - previousOverlayHeight
+                : 0;
+            if ((!nearBottom && !(composerExpanded && composerOwnsFocus)) || scroller === null) {
+                return;
+            }
+            if (
+                activeMessageActionId !== null &&
+                composerExpanded &&
+                composerOwnsFocus &&
+                Number.isFinite(previousOverlayHeight)
+            ) {
+                const anchoredScrollTop = scroller.scrollTop + overlayDelta;
+                applyProgrammaticScrollPosition(scroller, anchoredScrollTop);
+                if (overlayScrollFrame !== null) cancelAnimationFrame(overlayScrollFrame);
+                overlayScrollFrame = requestAnimationFrame(() => {
+                    overlayScrollFrame = null;
+                    applyProgrammaticScrollPosition(scroller, anchoredScrollTop);
+                });
+                return;
+            }
+            // Keep the final bubble above the floating field in the same layout
+            // frame. Waiting for the next frame lets the padding change mark the
+            // transcript as no longer near the bottom and clips its last line.
+            applyProgrammaticScrollPosition(scroller, scroller.scrollHeight);
+            if (overlayScrollFrame !== null) cancelAnimationFrame(overlayScrollFrame);
+            overlayScrollFrame = requestAnimationFrame(() => {
+                overlayScrollFrame = null;
+                applyProgrammaticScrollPosition(scroller, scroller.scrollHeight);
+            });
+        };
+
+        node.addEventListener('input', handleInput);
+        node.addEventListener('focus', handleFocusIn);
+        node.addEventListener('blur', handleFocusOut);
+        field?.addEventListener('focusin', handleFocusIn);
+        field?.addEventListener('focusout', handleFocusOut);
+        if (typeof ResizeObserver !== 'undefined') {
+            observer = new ResizeObserver((entries) => {
+                for (const entry of entries) {
+                    if (entry.target === field) {
+                        const borderBoxHeight = entry.borderBoxSize[0]?.blockSize;
+                        syncComposerOverlay(borderBoxHeight ?? entry.contentRect.height);
+                        continue;
+                    }
+                    const nextWidth = entry.contentRect.width;
+                    if (observedWidth !== null && Math.abs(nextWidth - observedWidth) < 0.5)
+                        continue;
+                    observedWidth = nextWidth;
+                    scheduleUpdate();
+                }
+            });
+            observer.observe(resizeTarget);
+            if (field !== null && field !== resizeTarget) observer.observe(field);
+        }
+        scheduleUpdate();
+
+        return {
+            update(nextDraft: string): void {
+                if (nextDraft.trim().length === 0) {
+                    composerCanFullscreen = false;
+                    composerOverflows = false;
+                }
+                scheduleUpdate();
+            },
+            destroy(): void {
+                node.removeEventListener('input', handleInput);
+                node.removeEventListener('focus', handleFocusIn);
+                node.removeEventListener('blur', handleFocusOut);
+                field?.removeEventListener('focusin', handleFocusIn);
+                field?.removeEventListener('focusout', handleFocusOut);
+                observer?.disconnect();
+                if (scrollAnchorFrame !== null) cancelAnimationFrame(scrollAnchorFrame);
+                if (overlayScrollFrame !== null) cancelAnimationFrame(overlayScrollFrame);
+                chatPane?.style.removeProperty('--composer-overlay-height');
+            },
+        };
+    }
 
     function projectDisplayMessages(
         items: MessageDto[],
@@ -189,6 +437,17 @@
     const visibleMessages = $derived(
         messageCollection.items.slice(virtualWindow.start, virtualWindow.end),
     );
+
+    $effect(() => {
+        const activeMessageId = activeMessageActionId;
+        if (
+            activeMessageId !== null &&
+            messageCollection.indexesById[activeMessageId] === undefined
+        ) {
+            activeMessageActionId = null;
+            stableMessageActionLayoutId = null;
+        }
+    });
 
     const KOREAN_WEEKDAYS = ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일'];
 
@@ -263,6 +522,10 @@
             if (activeDraftKey !== '') drafts.set(activeDraftKey, draft);
             draft = drafts.get(nextKey) ?? '';
             activeDraftKey = nextKey;
+            composerExpanded = false;
+            composerFullscreen = false;
+            composerCanFullscreen = false;
+            composerOverflows = false;
         }
     });
 
@@ -526,7 +789,10 @@
         };
     }
 
-    function scheduleMeasurementFlush(anchorBeforeInvalidation?: ScrollAnchorSnapshot): void {
+    function scheduleMeasurementFlush(
+        anchorBeforeInvalidation?: ScrollAnchorSnapshot,
+        preserveScrollPosition = false,
+    ): void {
         const nextMeasurementEpoch = messageMeasurements.epoch;
         if (
             !measurementFlushQueued ||
@@ -536,11 +802,19 @@
             pendingMeasurementEpoch = nextMeasurementEpoch;
             pendingMessageCollectionEpoch = messageCollectionEpoch;
             pendingMeasurementScrollEpoch = scrollAnchorEpoch;
-            pendingMeasurementPinBottom = nearBottom;
-            pendingMeasurementAnchor = nearBottom
-                ? null
-                : (anchorBeforeInvalidation ?? stableMeasurementAnchor ?? captureScrollAnchor());
-        } else if (nearBottom) {
+            pendingMeasurementPreserveScrollPosition = preserveScrollPosition;
+            pendingMeasurementPinBottom = nearBottom && !preserveScrollPosition;
+            pendingMeasurementAnchor =
+                nearBottom || preserveScrollPosition
+                    ? null
+                    : (anchorBeforeInvalidation ??
+                      stableMeasurementAnchor ??
+                      captureScrollAnchor());
+        } else if (preserveScrollPosition) {
+            pendingMeasurementPreserveScrollPosition = true;
+            pendingMeasurementPinBottom = false;
+            pendingMeasurementAnchor = null;
+        } else if (!pendingMeasurementPreserveScrollPosition && nearBottom) {
             pendingMeasurementPinBottom = true;
             pendingMeasurementAnchor = null;
         }
@@ -557,6 +831,7 @@
         const anchor = pendingMeasurementAnchor;
         measurementFlushQueued = false;
         pendingMeasurementPinBottom = false;
+        pendingMeasurementPreserveScrollPosition = false;
         pendingMeasurementAnchor = null;
         const scroller = messageScroller;
         if (
@@ -644,7 +919,7 @@
                 messageScroller.clientHeight || viewportHeight,
             );
         }
-        scheduleMeasurementFlush();
+        scheduleMeasurementFlush(undefined, messageId === stableMessageActionLayoutId);
     }
 
     function measureMessage(node: HTMLElement, input: MessageMeasurementInput) {
@@ -769,6 +1044,17 @@
         void captureStableAnchorAfterRender(captureEpoch);
     }
 
+    function handleMessageScrollPointerDown(event: PointerEvent): void {
+        const target = event.target;
+        if (target instanceof Element && target.closest('[data-message-id]') !== null) return;
+        activeMessageActionId = null;
+    }
+
+    function activateMessageActions(messageId: string): void {
+        stableMessageActionLayoutId = messageId;
+        activeMessageActionId = messageId;
+    }
+
     async function captureStableAnchorAfterRender(captureEpoch: number): Promise<void> {
         await tick();
         if (captureEpoch !== stableAnchorCaptureEpoch || nearBottom) return;
@@ -782,6 +1068,7 @@
             const accepted = await controller.sendMessage(draft);
             if (accepted) {
                 draft = '';
+                composerFullscreen = false;
                 if (activeDraftKey !== '') drafts.delete(activeDraftKey);
             }
             attemptApprovalRefreshEpoch += 1;
@@ -814,6 +1101,123 @@
             void submit();
         }
     };
+
+    const onFullscreenComposerKeydown: KeyboardEventHandler<HTMLTextAreaElement> = (event) => {
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            void setComposerFullscreen(false);
+            return;
+        }
+        onComposerKeydown(event);
+    };
+
+    function setComposerControlOrigin(
+        source: HTMLButtonElement | null,
+        target: HTMLButtonElement | null,
+    ): void {
+        if (source === null || target === null) return;
+
+        const sourceRect = source.getBoundingClientRect();
+        const previousTransition = target.style.transition;
+        const previousTransform = target.style.transform;
+
+        // Measure the target at its layout position rather than at a previous
+        // morph offset, then install the new start point without painting it.
+        target.style.transition = 'none';
+        target.style.transform = 'none';
+        const targetRect = target.getBoundingClientRect();
+        const originX =
+            sourceRect.left + sourceRect.width / 2 - (targetRect.left + targetRect.width / 2);
+        const originY =
+            sourceRect.top + sourceRect.height / 2 - (targetRect.top + targetRect.height / 2);
+
+        target.style.setProperty('--composer-control-origin-x', `${String(originX)}px`);
+        target.style.setProperty('--composer-control-origin-y', `${String(originY)}px`);
+        if (previousTransform === '') target.style.removeProperty('transform');
+        else target.style.transform = previousTransform;
+        target.getBoundingClientRect();
+        if (previousTransition === '') target.style.removeProperty('transition');
+        else target.style.transition = previousTransition;
+    }
+
+    function syncFullscreenControlOrigins(): void {
+        setComposerControlOrigin(composerLeadingAction, fullscreenCloseButton);
+        setComposerControlOrigin(composerSendButton, fullscreenSendButton);
+    }
+
+    function syncFullscreenTextOrigin(): void {
+        const source = composerTextarea;
+        const target = fullscreenComposerTextarea;
+        const targetRegion = fullscreenTextRegion;
+        if (source === null || target === null || targetRegion === null) return;
+
+        const sourceRect = source.getBoundingClientRect();
+        const sourceStyle = getComputedStyle(source);
+        const previousTransition = targetRegion.style.transition;
+        const previousTransform = targetRegion.style.transform;
+
+        targetRegion.style.transition = 'none';
+        targetRegion.style.transform = 'none';
+        const targetRect = target.getBoundingClientRect();
+        const targetStyle = getComputedStyle(target);
+        const sourceTextLeft = sourceRect.left + (Number.parseFloat(sourceStyle.paddingLeft) || 0);
+        const sourceTextTop = sourceRect.top + (Number.parseFloat(sourceStyle.paddingTop) || 0);
+        const targetTextLeft = targetRect.left + (Number.parseFloat(targetStyle.paddingLeft) || 0);
+        const targetTextTop = targetRect.top + (Number.parseFloat(targetStyle.paddingTop) || 0);
+
+        targetRegion.style.setProperty(
+            '--composer-text-origin-x',
+            `${String(sourceTextLeft - targetTextLeft)}px`,
+        );
+        targetRegion.style.setProperty(
+            '--composer-text-origin-y',
+            `${String(sourceTextTop - targetTextTop)}px`,
+        );
+        targetRegion.style.setProperty('--composer-text-origin-font-size', sourceStyle.fontSize);
+        targetRegion.style.setProperty(
+            '--composer-text-origin-line-height',
+            sourceStyle.lineHeight,
+        );
+        if (previousTransform === '') targetRegion.style.removeProperty('transform');
+        else targetRegion.style.transform = previousTransform;
+        targetRegion.getBoundingClientRect();
+        if (previousTransition === '') targetRegion.style.removeProperty('transition');
+        else targetRegion.style.transition = previousTransition;
+    }
+
+    function syncFullscreenSurfaceOrigin(): void {
+        const source = composerField;
+        const target = fullscreenComposerSurface;
+        if (source === null || target === null) return;
+
+        const sourceRect = source.getBoundingClientRect();
+        const targetRect = target.getBoundingClientRect();
+        const originTop = Math.max(0, sourceRect.top - targetRect.top);
+        const originRight = Math.max(0, targetRect.right - sourceRect.right);
+        const originBottom = Math.max(0, targetRect.bottom - sourceRect.bottom);
+        const originLeft = Math.max(0, sourceRect.left - targetRect.left);
+        const originRadius = getComputedStyle(source).borderTopLeftRadius || '0px';
+
+        target.style.setProperty('--composer-origin-top', `${String(originTop)}px`);
+        target.style.setProperty('--composer-origin-right', `${String(originRight)}px`);
+        target.style.setProperty('--composer-origin-bottom', `${String(originBottom)}px`);
+        target.style.setProperty('--composer-origin-left', `${String(originLeft)}px`);
+        target.style.setProperty('--composer-origin-radius', originRadius);
+    }
+
+    async function setComposerFullscreen(nextOpen: boolean): Promise<void> {
+        if (nextOpen && !composerCanFullscreen) return;
+        if (composerFullscreen === nextOpen) return;
+        syncFullscreenSurfaceOrigin();
+        syncFullscreenControlOrigins();
+        syncFullscreenTextOrigin();
+        composerFullscreen = nextOpen;
+        await tick();
+        const target = nextOpen ? fullscreenComposerTextarea : composerTextarea;
+        target?.focus({ preventScroll: true });
+        const cursor = target?.value.length ?? 0;
+        target?.setSelectionRange(cursor, cursor);
+    }
 
     function setMode(mode: ConversationMode): void {
         void controller.setConversationMode(mode);
@@ -1171,10 +1575,12 @@
 
         <div
             class="message-scroll"
+            role="region"
             aria-label="메시지 기록"
             tabindex="-1"
             style:scroll-behavior="auto"
             bind:this={messageScroller}
+            onpointerdown={handleMessageScrollPointerDown}
             onscroll={handleScroll}
         >
             {#if appState.messages.phase === 'loading'}
@@ -1209,6 +1615,7 @@
                         <li
                             class:from-user={message.role === 'user'}
                             class:has-date-divider={showsDay}
+                            class:actions-open={activeMessageActionId === message.id}
                             class:memory-source-boundary={messageFocusRequest !== null &&
                                 (message.id === messageFocusRequest.start_message_id ||
                                     message.id === messageFocusRequest.end_message_id)}
@@ -1285,7 +1692,12 @@
                             {:else}
                                 <!-- The focusable bubble replaces the removed three-dot disclosure on touch and keyboard. -->
                                 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-                                <article class="message-body" aria-label={turnLabel} tabindex="0">
+                                <article
+                                    class="message-body"
+                                    aria-label={turnLabel}
+                                    tabindex="0"
+                                    onfocus={() => activateMessageActions(message.id)}
+                                >
                                     <MarkdownText text={message.content} />
                                     {#if message.status !== 'complete'}
                                         <span class="message-status">{message.status}</span>
@@ -1297,60 +1709,77 @@
                                     </footer>
                                 </article>
                                 <div class="message-actions" aria-label="메시지 작업">
-                                    <button type="button" onclick={() => void copyMessage(message)}>
-                                        복사
+                                    <button
+                                        type="button"
+                                        aria-label="복사"
+                                        title="복사"
+                                        onclick={() => void copyMessage(message)}
+                                    >
+                                        <Copy aria-hidden="true" />
                                     </button>
                                     <button
                                         type="button"
+                                        aria-label="여기서 분기"
+                                        title="여기서 분기"
                                         disabled={appState.chat.active_generation_id !== null}
                                         onclick={() => void controller.createBranch(message.id)}
                                     >
-                                        여기서 분기
+                                        <GitBranch aria-hidden="true" />
                                     </button>
                                     {#if message.role === 'user'}
                                         <button
                                             type="button"
+                                            aria-label="편집"
+                                            title="편집"
                                             disabled={appState.chat.active_generation_id !== null}
                                             onclick={() => beginEdit(message)}
                                         >
-                                            편집
+                                            <Pencil aria-hidden="true" />
                                         </button>
                                     {:else if message.role === 'assistant'}
                                         <button
                                             type="button"
+                                            aria-label="재생성"
+                                            title="재생성"
                                             disabled={appState.chat.active_generation_id !== null}
                                             onclick={() =>
                                                 void controller.regenerateAssistantMessage(
                                                     message.id,
                                                 )}
                                         >
-                                            재생성
+                                            <RefreshCw aria-hidden="true" />
                                         </button>
                                     {/if}
                                     {#if pendingRemoveId === message.id}
                                         <button
                                             class="danger"
                                             type="button"
+                                            aria-label="제거 확인"
+                                            title="제거 확인"
                                             onclick={() => {
                                                 pendingRemoveId = null;
                                                 void controller.removeMessage(message.id);
                                             }}
                                         >
-                                            제거 확인
+                                            <Check aria-hidden="true" />
                                         </button>
                                         <button
                                             type="button"
+                                            aria-label="취소"
+                                            title="취소"
                                             onclick={() => (pendingRemoveId = null)}
                                         >
-                                            취소
+                                            <X aria-hidden="true" />
                                         </button>
                                     {:else}
                                         <button
                                             type="button"
+                                            aria-label="여기부터 제거"
+                                            title="여기부터 제거"
                                             disabled={appState.chat.active_generation_id !== null}
                                             onclick={() => (pendingRemoveId = message.id)}
                                         >
-                                            여기부터 제거
+                                            <Trash2 aria-hidden="true" />
                                         </button>
                                     {/if}
                                 </div>
@@ -1424,45 +1853,111 @@
         <form
             class="composer"
             aria-label="메시지 작성"
+            aria-hidden={composerFullscreen}
+            inert={composerFullscreen}
             onsubmit={(event) => {
                 event.preventDefault();
                 void submit();
             }}
         >
             <label class="sr-only" for="chat-draft">메시지</label>
-            <div class="composer-field">
-                <button
-                    class="composer-leading-action"
-                    type="button"
-                    aria-label="추가"
-                    onclick={() => composerTextarea?.focus()}
-                >
-                    <Plus aria-hidden="true" />
-                </button>
-                <textarea
-                    id="chat-draft"
-                    bind:this={composerTextarea}
-                    bind:value={draft}
-                    rows="1"
-                    maxlength="131072"
-                    disabled={appState.chat.phase === 'loading' ||
-                        appState.chat.active_generation_id !== null ||
-                        appState.conversation_state === null}
-                    oncompositionstart={() => (compositionActive = true)}
-                    oncompositionend={() => (compositionActive = false)}
-                    onkeydown={onComposerKeydown}></textarea>
-                {#if appState.chat.active_generation_id !== null}
+            <div
+                class="composer-field"
+                bind:this={composerField}
+                class:has-draft={draft.trim().length > 0}
+                class:expanded={composerExpanded}
+                class:can-fullscreen={composerCanFullscreen}
+                class:overflows={composerOverflows}
+            >
+                <div class="composer-text-region">
+                    <textarea
+                        id="chat-draft"
+                        bind:this={composerTextarea}
+                        bind:value={draft}
+                        use:measureComposer={draft}
+                        rows="1"
+                        maxlength="131072"
+                        disabled={appState.chat.phase === 'loading' ||
+                            appState.chat.active_generation_id !== null ||
+                            appState.conversation_state === null}
+                        oncompositionstart={() => (compositionActive = true)}
+                        oncompositionend={() => (compositionActive = false)}
+                        onkeydown={onComposerKeydown}></textarea>
+                </div>
+                <div class="composer-action-row">
                     <button
-                        class="danger compact"
+                        class="composer-leading-action"
+                        bind:this={composerLeadingAction}
                         type="button"
-                        aria-label="응답 생성 취소"
-                        onclick={() => void controller.cancelGeneration()}
+                        aria-label="추가"
+                        onclick={() => composerTextarea?.focus()}
                     >
-                        중지
+                        <Plus aria-hidden="true" />
                     </button>
-                {:else if draft.trim().length > 0}
+                    <span class="composer-action-spacer" aria-hidden="true"></span>
+                    <button
+                        class="composer-expand-action"
+                        class:available={composerCanFullscreen}
+                        type="button"
+                        aria-label="전체화면으로 작성"
+                        aria-hidden={!composerCanFullscreen}
+                        tabindex={composerCanFullscreen ? 0 : -1}
+                        disabled={!composerCanFullscreen}
+                        onclick={() => void setComposerFullscreen(true)}
+                    >
+                        <Maximize2 aria-hidden="true" />
+                    </button>
+                    {#if appState.chat.active_generation_id !== null}
+                        <button
+                            class="danger compact composer-trailing-action"
+                            type="button"
+                            aria-label="응답 생성 취소"
+                            onclick={() => void controller.cancelGeneration()}
+                        >
+                            중지
+                        </button>
+                    {:else if draft.trim().length > 0}
+                        <button
+                            class="primary send-button composer-trailing-action"
+                            bind:this={composerSendButton}
+                            type="submit"
+                            disabled={sending}
+                            aria-label="메시지 보내기"
+                        >
+                            <ArrowUp class="chat-send-icon" aria-hidden="true" />
+                        </button>
+                    {/if}
+                </div>
+            </div>
+        </form>
+
+        <form
+            class="composer-fullscreen"
+            bind:this={fullscreenComposerSurface}
+            class:open={composerFullscreen}
+            aria-label="전체화면 메시지 작성"
+            aria-hidden={!composerFullscreen}
+            inert={!composerFullscreen}
+            onsubmit={(event) => {
+                event.preventDefault();
+                void submit();
+            }}
+        >
+            <header class="composer-fullscreen-header">
+                <button
+                    class="composer-fullscreen-close"
+                    bind:this={fullscreenCloseButton}
+                    type="button"
+                    aria-label="전체화면 입력 닫기"
+                    onclick={() => void setComposerFullscreen(false)}
+                >
+                    <Plus class="composer-fullscreen-close-icon" aria-hidden="true" />
+                </button>
+                <span aria-hidden="true"></span>
+                {#if draft.trim().length > 0}
                     <button
                         class="primary send-button"
+                        bind:this={fullscreenSendButton}
                         type="submit"
                         disabled={sending}
                         aria-label="메시지 보내기"
@@ -1470,6 +1965,20 @@
                         <ArrowUp class="chat-send-icon" aria-hidden="true" />
                     </button>
                 {/if}
+            </header>
+            <div class="composer-fullscreen-text-region" bind:this={fullscreenTextRegion}>
+                <label class="sr-only" for="chat-draft-fullscreen">전체화면 메시지</label>
+                <textarea
+                    id="chat-draft-fullscreen"
+                    bind:this={fullscreenComposerTextarea}
+                    bind:value={draft}
+                    maxlength="131072"
+                    disabled={appState.chat.phase === 'loading' ||
+                        appState.chat.active_generation_id !== null ||
+                        appState.conversation_state === null}
+                    oncompositionstart={() => (compositionActive = true)}
+                    oncompositionend={() => (compositionActive = false)}
+                    onkeydown={onFullscreenComposerKeydown}></textarea>
             </div>
         </form>
     {/if}

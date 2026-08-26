@@ -198,6 +198,78 @@ describe('pointer interaction styling', () => {
         );
     });
 
+    it('keeps message actions icon-only and gives timestamps a legible hierarchy', () => {
+        expect(chatPaneSource).toContain('<Copy aria-hidden="true" />');
+        expect(chatPaneSource).toContain('<GitBranch aria-hidden="true" />');
+        expect(chatPaneSource).toContain('<Pencil aria-hidden="true" />');
+        expect(chatPaneSource).toContain('<RefreshCw aria-hidden="true" />');
+        expect(chatPaneSource).toContain('<Trash2 aria-hidden="true" />');
+        expect(appCss).toMatch(
+            /\.message-actions button\s*\{[^}]*width:\s*30px;[^}]*height:\s*30px;[^}]*place-items:\s*center;/s,
+        );
+        expect(appCss).toMatch(
+            /\.message-actions button svg\s*\{[^}]*width:\s*15px;[^}]*height:\s*15px;[^}]*stroke-width:\s*1\.8;/s,
+        );
+        expect(appCss).toMatch(
+            /\.message-date-divider time\s*\{[^}]*font-size:\s*0\.75rem;[^}]*font-weight:\s*650;/s,
+        );
+        expect(appCss).toMatch(
+            /\.message-time\s*\{[^}]*font-size:\s*0\.6875rem;[^}]*font-weight:\s*500;/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.message-date-divider time\s*\{[^}]*font-size:\s*clamp\(10px,\s*3\.204vw,\s*12px\);/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.message-time\s*\{[^}]*font-size:\s*clamp\(9px,\s*2\.975vw,\s*11px\);/s,
+        );
+    });
+
+    it('floats the white composer without changing the message bubble treatment', () => {
+        expect(appCss).not.toContain('--bubble-shadow');
+        expect(appCss).toMatch(
+            /\.composer-field\s*\{[^}]*background:\s*var\(--surface-raised\);[^}]*box-shadow:\s*var\(--shadow-2\);/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.message-item \.message-body\s*\{[^}]*background:\s*var\(--bubble-char-bg\);[^}]*box-shadow:\s*var\(--shadow-1\);/s,
+        );
+    });
+
+    it('spaces transcript turns at 2.5x and reveals mobile message actions as one motion', () => {
+        const mobileMessageActions =
+            /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.message-item \.message-actions\s*\{(?<body>[^}]*)\}/s.exec(
+                appCss,
+            )?.groups?.body ?? '';
+
+        expect(appCss).toMatch(
+            /\.message-item\s*\{[^}]*--message-turn-spacing:\s*15px;[^}]*padding:\s*var\(--message-turn-spacing\) 0;/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.message-item\s*\{[^}]*--message-turn-spacing:\s*clamp\(5px,\s*2\.86vw,\s*12\.5px\);/s,
+        );
+        expect(appCss).toMatch(/\.message-scroll\s*\{[^}]*overflow-anchor:\s*none;/s);
+        expect(mobileMessageActions).toContain('overflow-anchor: none;');
+        expect(mobileMessageActions).toContain(
+            '--message-action-size: clamp(26px, 8.696vw, 32px);',
+        );
+        expect(mobileMessageActions).toContain('--message-actions-duration: 360ms;');
+        expect(mobileMessageActions).toContain(
+            '--message-actions-easing: cubic-bezier(0.16, 1, 0.3, 1);',
+        );
+        expect(mobileMessageActions).not.toContain('position: absolute;');
+        expect(mobileMessageActions).not.toMatch(/(?:^|\n)\s*top:/);
+        expect(mobileMessageActions).toContain(
+            'max-height var(--message-actions-duration) var(--message-actions-easing)',
+        );
+        expect(mobileMessageActions).toContain(
+            'padding-top var(--message-actions-duration) var(--message-actions-easing)',
+        );
+        expect(mobileMessageActions).not.toContain('clip-path');
+        expect(mobileMessageActions).not.toContain('transform:');
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\][\s\S]*?\.message-item:is\(\.actions-open,\s*:focus-within\)[\s\S]*?\.message-actions\s*\{[^}]*max-height:\s*var\(--message-action-size\);[^}]*padding-top:\s*4px;[^}]*opacity:\s*1;/s,
+        );
+    });
+
     it('omits decorative right arrows from every destination row', () => {
         for (const source of [
             providerSettingsSource,
@@ -389,7 +461,9 @@ describe('pointer interaction styling', () => {
         expect(conversationPaneSource).toMatch(
             /\.conversation-pane\.root-view \.entity-list\s*\{[^}]*padding:\s*8px 8px calc\(/s,
         );
-        expect(appCss).toMatch(/\.message-scroll\s*\{[^}]*padding:\s*0 var\(--gutter\);/s);
+        expect(appCss).toMatch(
+            /\.message-scroll\s*\{[^}]*padding:\s*0 var\(--chat-side-inset\)\s*calc\(var\(--composer-overlay-height\) \+ var\(--chat-side-inset\)\);/s,
+        );
         expect(providerSettingsSource).toMatch(
             /:global\(\.app-shell\[data-layout='mobile'\]\) \.provider-scroll\.settings-home-scroll\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;[^}]*padding-bottom:/s,
         );
@@ -501,25 +575,220 @@ describe('pointer interaction styling', () => {
             /\.app-shell\[data-layout='mobile'\] \.setting-row\s*\{[^}]*min-height:\s*clamp\(37px,\s*15\.561vw,\s*68px\);/s,
         );
         expect(appCss).toMatch(
-            /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.composer-field\s*\{[^}]*min-height:\s*var\(--mobile-top-action\);/s,
+            /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.composer-field\s*\{[^}]*--composer-control-size:\s*clamp\(28px,\s*11\.35vw,\s*42px\);[^}]*--composer-button-size:\s*var\(--composer-control-size\);[^}]*--composer-collapsed-size:\s*clamp\(44px,\s*17\.98vw,\s*66px\);[^}]*--composer-corner:\s*calc\(var\(--composer-collapsed-size\) \/ 2\);[^}]*min-height:\s*var\(--composer-collapsed-size\);[^}]*background:\s*var\(--surface-raised\);[^}]*box-shadow:\s*var\(--shadow-2\);/s,
         );
         expect(appCss).toMatch(
-            /\.composer-field\s*\{[^}]*--composer-expanded-size:\s*clamp\(96px,\s*18dvh,\s*140px\);[^}]*border-radius:\s*var\(--composer-corner\);[^}]*transition:[^}]*min-height 260ms/s,
+            /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.composer\s*\{[^}]*--composer-dock-top-inset:\s*clamp\(3px,\s*1\.373vw,\s*6px\);[^}]*padding:\s*var\(--composer-dock-top-inset\)\s*var\(--chat-side-inset\)\s*calc\([^}]*env\(safe-area-inset-bottom\)\);[^}]*background:\s*none;[^}]*box-shadow:\s*none;/s,
         );
         expect(appCss).toMatch(
-            /\.composer-field:focus-within\s*\{[^}]*min-height:\s*var\(--composer-expanded-size\);[^}]*border-radius:\s*var\(--radius-lg\);/s,
+            /\.composer\s*\{[^}]*--composer-dock-top-inset:\s*8px;[^}]*position:\s*absolute;[^}]*z-index:\s*6;[^}]*right:\s*0;[^}]*bottom:\s*0;[^}]*left:\s*0;[^}]*background:\s*none;[^}]*box-shadow:\s*none;[^}]*pointer-events:\s*none;/s,
+        );
+        expect(appCss).not.toContain('.composer::before');
+        expect(appCss).not.toContain('.composer::after');
+        expect(appCss).not.toContain('--composer-dock-fade-size');
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.composer-text-region textarea\s*\{[^}]*font-size:\s*clamp\(10px,\s*4\.36vw,\s*16px\);/s,
         );
         expect(appCss).toMatch(
-            /\.composer-field:focus-within textarea\s*\{[^}]*min-height:\s*calc\(var\(--composer-expanded-size\) - 10px\);[^}]*padding-block:\s*12px;/s,
+            /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\][\s\S]*?\.composer-field:is\(\.expanded,\s*\.measuring\)[\s\S]*?\.composer-text-region[\s\S]*?textarea\s*\{[^}]*padding:\s*clamp\(5px,\s*2\.288vw,\s*10px\) clamp\(5px,\s*2\.18vw,\s*10px\) 0;/s,
         );
         expect(appCss).toMatch(
-            /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.composer-field:focus-within\s*\{[^}]*min-height:\s*var\(--composer-expanded-size\);/s,
+            /\.composer-field\s*\{[^}]*--composer-collapsed-size:\s*54px;[^}]*--composer-text-action-gap:\s*6px;[^}]*--composer-expanded-min:\s*clamp\(82px,\s*11dvh,\s*96px\);[^}]*--composer-motion-duration:\s*360ms;[^}]*display:\s*block;[^}]*height:\s*var\(--composer-collapsed-size\);[^}]*overflow:\s*hidden;[^}]*border:\s*0;[^}]*background:\s*var\(--surface-raised\);[^}]*box-shadow:\s*var\(--shadow-2\);[^}]*pointer-events:\s*auto;[^}]*transition:[^}]*height var\(--composer-motion-duration\) var\(--composer-motion-easing\),[^}]*border-radius var\(--composer-motion-duration\) var\(--composer-motion-easing\);[^}]*will-change:\s*height,\s*border-radius;/s,
         );
         expect(appCss).toMatch(
-            /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.composer-field:focus-within textarea\s*\{[^}]*min-height:\s*calc\(var\(--composer-expanded-size\) - 10px\);[^}]*padding-block:\s*12px;/s,
+            /\.composer-field\.expanded\s*\{[^}]*height:\s*clamp\([^}]*var\(--composer-text-size\)[^}]*var\(--composer-text-action-gap\)[^}]*var\(--composer-max-size\)[^}]*border-radius:\s*var\(--composer-expanded-corner\);/s,
         );
+        expect(appCss).not.toMatch(/\.composer-field:focus-within\s*\{[^}]*height:/s);
+        expect(appCss).toMatch(
+            /\.composer-text-region\s*\{[^}]*position:\s*absolute;[^}]*top:\s*var\(--composer-field-inset\);[^}]*bottom:\s*var\(--composer-field-inset\);[^}]*height:\s*auto;[^}]*max-height:\s*calc\([^}]*var\(--composer-text-action-gap\)[^}]*transition:[^}]*right var\(--composer-motion-duration\)[^}]*left var\(--composer-motion-duration\)[^}]*;/s,
+        );
+        expect(appCss).not.toMatch(
+            /\.composer-text-region\s*\{[^}]*transition:[^}]*bottom var\(--composer-motion-duration\)/s,
+        );
+        expect(appCss).not.toMatch(/\.composer-text-region\s*\{[^}]*will-change:/s);
+        expect(appCss).toMatch(
+            /\.composer-field:is\(\.expanded,\s*\.measuring\) \.composer-text-region\s*\{[^}]*bottom:\s*calc\([^}]*var\(--composer-text-action-gap\)[^}]*left:\s*var\(--composer-field-inset\);/s,
+        );
+        expect(appCss).toMatch(
+            /\.composer-field\.measuring \.composer-text-region\s*\{[^}]*transition:\s*none;/s,
+        );
+        expect(appCss).not.toMatch(
+            /\.composer-text-region\s*\{[^}]*height var\(--composer-motion-duration\)/s,
+        );
+        expect(appCss).toMatch(
+            /\.composer-text-region textarea\s*\{[^}]*height:\s*100%;[^}]*min-height:\s*0;[^}]*overflow:\s*hidden;[^}]*white-space:\s*nowrap;[^}]*transition:\s*none;/s,
+        );
+        expect(appCss).toMatch(
+            /\.composer-field:is\(\.expanded,\s*\.measuring\) \.composer-text-region textarea\s*\{[^}]*overflow-y:\s*hidden;[^}]*white-space:\s*pre-wrap;/s,
+        );
+        expect(appCss).toMatch(
+            /\.composer-field\.overflows \.composer-text-region textarea\s*\{[^}]*overflow-y:\s*auto;/s,
+        );
+        expect(appCss).not.toMatch(/field-sizing:\s*content;/);
+        expect(appCss).toMatch(
+            /\.composer-action-row\s*\{[^}]*display:\s*flex;[^}]*position:\s*absolute;[^}]*bottom:\s*var\(--composer-action-bottom\);[^}]*height:\s*var\(--composer-control-size\);[^}]*pointer-events:\s*none;[^}]*transition:\s*none;/s,
+        );
+        expect(appCss).not.toMatch(/\.composer-field\.expanded \.composer-action-row\s*\{/s);
+        expect(appCss).toMatch(
+            /\.composer-field\.has-draft:not\(\.expanded\) \.composer-text-region\s*\{[^}]*right:\s*calc\([^}]*var\(--composer-button-size\)[^}]*var\(--composer-inline-action-gap\)[^}]*\);/s,
+        );
+        expect(appCss).toMatch(
+            /\.composer-field\.has-draft\.can-fullscreen:not\(\.expanded\) \.composer-text-region\s*\{[^}]*right:\s*calc\([^}]*var\(--composer-button-size\)[^}]*var\(--composer-action-gap\)[^}]*var\(--composer-inline-action-gap\)[^}]*\);/s,
+        );
+        expect(appCss).toMatch(
+            /\.composer-action-row > button:not\(\.composer-expand-action\)\s*\{[^}]*pointer-events:\s*auto;/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.composer-action-row\s*\{[^}]*gap:\s*var\(--composer-action-gap\);/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.composer-field\s*\{[^}]*--composer-field-inset:\s*clamp\(5px,\s*2\.18vw,\s*8px\);[^}]*--composer-inline-action-gap:\s*clamp\(10px,\s*4\.36vw,\s*16px\);[^}]*--composer-text-action-gap:\s*clamp\(7px,\s*2\.99vw,\s*11px\);[^}]*--composer-action-gap:\s*clamp\(4px,\s*1\.63vw,\s*6px\);[^}]*--composer-expanded-min:\s*clamp\(68px,\s*27\.7vw,\s*102px\);[^}]*--composer-expanded-corner:\s*clamp\(14px,\s*5\.72vw,\s*22px\);[^}]*background:\s*var\(--surface-raised\);[^}]*box-shadow:\s*var\(--shadow-2\);/s,
+        );
+        expect(appCss).toMatch(
+            /\.composer-expand-action\s*\{[^}]*width:\s*0;[^}]*height:\s*var\(--composer-button-size\);[^}]*min-width:\s*0;[^}]*min-height:\s*var\(--composer-button-size\);[^}]*opacity:\s*0;[^}]*transform:\s*scale\(0\.82\);[^}]*transition:[^}]*width var\(--composer-motion-duration\)[^}]*opacity calc\(var\(--composer-motion-duration\) \* 0\.72\)[^}]*transform var\(--composer-motion-duration\)/s,
+        );
+        expect(appCss).toMatch(
+            /\.composer-expand-action\.available\s*\{[^}]*width:\s*var\(--composer-button-size\);[^}]*min-width:\s*var\(--composer-button-size\);[^}]*opacity:\s*1;[^}]*pointer-events:\s*auto;[^}]*transform:\s*scale\(1\);/s,
+        );
+        expect(appCss).toMatch(
+            /\.composer-expand-action:not\(\.available\)\s*\{[^}]*opacity:\s*0;[^}]*pointer-events:\s*none;/s,
+        );
+        expect(appCss).toContain(
+            ':is(.composer-leading-action, .composer-expand-action.available, .send-button)',
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.composer-field\s*\{[^}]*--composer-button-size:\s*var\(--composer-control-size\);[^}]*--composer-collapsed-size:\s*clamp\(44px,\s*17\.98vw,\s*66px\);/s,
+        );
+        expect(appCss).toMatch(
+            /\.composer-fullscreen\s*\{[^}]*--composer-origin-top:\s*calc\([^}]*var\(--composer-field-height\)[^}]*var\(--composer-field-bottom-inset\)[^}]*\);[^}]*--composer-origin-right:\s*var\(--chat-side-inset\);[^}]*--composer-origin-bottom:\s*var\(--composer-field-bottom-inset\);[^}]*--composer-origin-left:\s*var\(--chat-side-inset\);[^}]*--composer-origin-radius:\s*calc\(var\(--composer-field-height\) \/ 2\);[^}]*position:\s*absolute;[^}]*bottom:\s*0;[^}]*background:\s*var\(--surface-raised\);[^}]*filter:\s*var\(--composer-morph-filter\);[^}]*overflow:\s*hidden;[^}]*pointer-events:\s*auto;[^}]*clip-path:\s*inset\([^}]*var\(--composer-origin-top\)[^}]*var\(--composer-origin-right\)[^}]*var\(--composer-origin-bottom\)[^}]*var\(--composer-origin-left\)[^}]*round var\(--composer-origin-radius\)[^}]*\);[^}]*visibility:\s*hidden;/s,
+        );
+        expect(appCss).toMatch(
+            /\.composer-fullscreen\s*\{[^}]*transition:[^}]*clip-path var\(--composer-fullscreen-close-duration\)[^}]*var\(--composer-fullscreen-close-easing\),[^}]*visibility 0s linear var\(--composer-fullscreen-close-duration\);/s,
+        );
+        expect(appCss).toMatch(
+            /\.composer-fullscreen\.open\s*\{[^}]*clip-path:\s*inset\(0 round var\(--radius-lg\) var\(--radius-lg\) 0 0\);[^}]*pointer-events:\s*auto;[^}]*visibility:\s*visible;[^}]*transition:[^}]*clip-path var\(--composer-fullscreen-open-duration\)[^}]*var\(--composer-fullscreen-open-easing\),[^}]*visibility 0s;/s,
+        );
+        expect(chatPaneSource).toContain('target?.focus({ preventScroll: true });');
+        expect(appCss.match(/--composer-morph-filter:/g)).toHaveLength(3);
+        expect(appCss).not.toContain(".composer[aria-hidden='true'] .composer-field");
+        expect(appCss).not.toMatch(/\.composer-fullscreen\s*\{[^}]*will-change:/s);
+        expect(appCss).not.toContain('.composer-fullscreen::before');
+        expect(appCss).not.toContain(
+            '.composer-fullscreen :is(.composer-fullscreen-header, textarea)',
+        );
+        expect(appCss).toMatch(
+            /\.composer-fullscreen-header\s*\{[^}]*--composer-control-size:\s*44px;[^}]*--composer-button-size:\s*var\(--composer-control-size\);/s,
+        );
+        expect(appCss).toMatch(
+            /\.composer-fullscreen-close\s*\{[^}]*width:\s*var\(--composer-control-size,\s*44px\);[^}]*height:\s*var\(--composer-control-size,\s*44px\);/s,
+        );
+        expect(appCss).toMatch(
+            /\.composer-fullscreen-header\s+:is\(\.composer-fullscreen-close,\s*\.send-button\)\s*\{[^}]*transform:\s*translate3d\([^}]*var\(--composer-control-origin-x,\s*0px\)[^}]*var\(--composer-control-origin-y,\s*0px\)[^}]*\);[^}]*transition:\s*transform var\(--composer-fullscreen-close-duration\)[^}]*var\(--composer-fullscreen-close-easing\);[^}]*will-change:\s*transform;/s,
+        );
+        expect(appCss).toMatch(
+            /\.composer-fullscreen\.open\s+\.composer-fullscreen-header\s+:is\(\.composer-fullscreen-close,\s*\.send-button\)\s*\{[^}]*transform:\s*translate3d\(0,\s*0,\s*0\);[^}]*transition:\s*transform var\(--composer-fullscreen-open-duration\)[^}]*var\(--composer-fullscreen-open-easing\);/s,
+        );
+        expect(appCss).toMatch(
+            /\.composer-fullscreen-close-icon\s*\{[^}]*transform:\s*rotate\(0deg\);[^}]*transition:\s*transform var\(--composer-fullscreen-close-duration\)[^}]*var\(--composer-fullscreen-close-easing\);/s,
+        );
+        expect(appCss).toMatch(
+            /\.composer-fullscreen\.open \.composer-fullscreen-close-icon\s*\{[^}]*transform:\s*rotate\(45deg\);[^}]*transition:\s*transform var\(--composer-fullscreen-open-duration\)[^}]*var\(--composer-fullscreen-open-easing\);/s,
+        );
+        expect(appCss).toMatch(
+            /\.composer-fullscreen-text-region\s*\{[^}]*--composer-fullscreen-text-size:\s*1rem;[^}]*--composer-fullscreen-text-line-height:\s*1\.6;[^}]*transform:\s*translate3d\([^}]*var\(--composer-text-origin-x,\s*0px\)[^}]*var\(--composer-text-origin-y,\s*0px\)[^}]*\);[^}]*transform-origin:\s*0 0;[^}]*transition:\s*transform var\(--composer-fullscreen-close-duration\)[^}]*var\(--composer-fullscreen-close-easing\);[^}]*will-change:\s*transform;/s,
+        );
+        expect(appCss).toMatch(
+            /\.composer-fullscreen\.open \.composer-fullscreen-text-region\s*\{[^}]*transform:\s*translate3d\(0,\s*0,\s*0\);[^}]*transition:\s*transform var\(--composer-fullscreen-open-duration\)[^}]*var\(--composer-fullscreen-open-easing\);/s,
+        );
+        expect(appCss).toMatch(
+            /\.composer-fullscreen textarea\s*\{[^}]*display:\s*block;[^}]*height:\s*100%;[^}]*font-size:\s*var\(--composer-text-origin-font-size,\s*var\(--composer-fullscreen-text-size\)\);[^}]*line-height:\s*var\([^}]*--composer-text-origin-line-height,[^}]*var\(--composer-fullscreen-text-line-height\)[^}]*\);[^}]*transition:[^}]*font-size var\(--composer-fullscreen-close-duration\)[^}]*var\(--composer-fullscreen-close-easing\),[^}]*line-height var\(--composer-fullscreen-close-duration\)[^}]*var\(--composer-fullscreen-close-easing\);/s,
+        );
+        expect(appCss).toMatch(
+            /\.composer-fullscreen\.open textarea\s*\{[^}]*font-size:\s*var\(--composer-fullscreen-text-size\);[^}]*line-height:\s*var\(--composer-fullscreen-text-line-height\);[^}]*transition:[^}]*font-size var\(--composer-fullscreen-open-duration\)[^}]*var\(--composer-fullscreen-open-easing\),[^}]*line-height var\(--composer-fullscreen-open-duration\)[^}]*var\(--composer-fullscreen-open-easing\);/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.composer-fullscreen textarea\s*\{[^}]*--composer-fullscreen-text-size:\s*var\(--detail-ui-type\);/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.composer-fullscreen-header\s*\{[^}]*--composer-control-size:\s*clamp\(28px,\s*11\.35vw,\s*42px\);[^}]*--composer-button-size:\s*var\(--composer-control-size\);/s,
+        );
+        expect(appCss).not.toContain('opacity 220ms ease 110ms');
+        expect(appCss).not.toContain('transform 360ms cubic-bezier(0.22, 1, 0.36, 1) 80ms');
+        expect(appCss).not.toContain('opacity 120ms ease 240ms');
         expect(chatPaneSource).toContain('<Plus aria-hidden="true" />');
+        expect(chatPaneSource).toContain('<Maximize2 aria-hidden="true" />');
         expect(chatPaneSource).toContain('<ArrowUp class="chat-send-icon" aria-hidden="true" />');
+        expect(chatPaneSource).toContain('class="composer-text-region"');
+        expect(chatPaneSource).toContain('class="composer-action-row"');
+        expect(chatPaneSource).toContain('class:can-fullscreen={composerCanFullscreen}');
+        expect(chatPaneSource).toContain('class:expanded={composerExpanded}');
+        expect(chatPaneSource).toContain('class:available={composerCanFullscreen}');
+        expect(chatPaneSource).toContain('aria-hidden={!composerCanFullscreen}');
+        expect(chatPaneSource).toContain('class:overflows={composerOverflows}');
+        expect(chatPaneSource).toContain('class="composer-fullscreen"');
+        expect(chatPaneSource).toContain('syncFullscreenControlOrigins();');
+        expect(chatPaneSource).toContain('syncFullscreenTextOrigin();');
+        expect(chatPaneSource).toContain("'--composer-control-origin-x'");
+        expect(chatPaneSource).toContain("'--composer-control-origin-y'");
+        expect(chatPaneSource).toContain("'--composer-text-origin-x'");
+        expect(chatPaneSource).toContain("'--composer-text-origin-y'");
+        expect(chatPaneSource).toContain('bind:this={composerLeadingAction}');
+        expect(chatPaneSource).toContain('bind:this={composerSendButton}');
+        expect(chatPaneSource).toContain('bind:this={composerField}');
+        expect(chatPaneSource).toContain('bind:this={fullscreenComposerSurface}');
+        expect(chatPaneSource).toContain('bind:this={fullscreenCloseButton}');
+        expect(chatPaneSource).toContain('bind:this={fullscreenSendButton}');
+        expect(chatPaneSource).toContain('bind:this={fullscreenTextRegion}');
+        expect(chatPaneSource).toContain('class="composer-fullscreen-close-icon"');
+        expect(appCss).toMatch(
+            /:root\s*\{[^}]*--panel-open-duration:\s*420ms;[^}]*--panel-close-duration:\s*360ms;[^}]*--panel-open-easing:\s*cubic-bezier\(0\.22,\s*1,\s*0\.36,\s*1\);[^}]*--panel-close-easing:\s*cubic-bezier\(0\.65,\s*0,\s*0\.35,\s*1\);/s,
+        );
+        expect(appCss).toMatch(
+            /\.chat-pane\s*\{[^}]*--chat-side-inset:\s*var\(--gutter\);[^}]*--composer-overlay-height:\s*78px;[^}]*--composer-field-height:\s*54px;[^}]*--composer-field-bottom-inset:\s*8px;[^}]*--composer-fullscreen-open-duration:\s*var\(--panel-open-duration\);[^}]*--composer-fullscreen-close-duration:\s*var\(--panel-close-duration\);[^}]*--composer-fullscreen-open-easing:\s*var\(--panel-open-easing\);[^}]*--composer-fullscreen-close-easing:\s*var\(--panel-close-easing\);/s,
+        );
+        expect(orchestrationQuickDrawerSource).toMatch(
+            /\.quick-drawer\s*\{[^}]*transition:[^}]*bottom var\(--panel-close-duration\) var\(--panel-close-easing\),[^}]*visibility 0s linear var\(--panel-close-duration\);/s,
+        );
+        expect(orchestrationQuickDrawerSource).toMatch(
+            /\.quick-drawer\.open\s*\{[^}]*transition:[^}]*bottom var\(--panel-open-duration\) var\(--panel-open-easing\),[^}]*visibility 0s;/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.chat-pane\s*\{[^}]*--chat-side-inset:\s*max\([^}]*var\(--reading\)[^}]*\);/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.message-scroll\s*\{[^}]*padding-inline:\s*var\(--chat-side-inset\);[^}]*background:\s*transparent;/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.chat-pane::after\s*\{[^}]*z-index:\s*5;[^}]*height:\s*calc\(var\(--composer-overlay-height\) \+ clamp\(12px,\s*4\.577vw,\s*20px\)\);[^}]*background:\s*linear-gradient\([^}]*var\(--bg\)[^}]*\);[^}]*pointer-events:\s*none;/s,
+        );
+        expect(appCss).not.toMatch(
+            /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.message-scroll\s*\{[^}]*(?:-webkit-)?mask-image:/s,
+        );
+        expect(chatPaneSource).toContain("chatPane.style.setProperty('--composer-overlay-height'");
+        expect(chatPaneSource).toContain("'--composer-field-height'");
+        expect(chatPaneSource).toContain("'--composer-field-bottom-inset'");
+        expect(chatPaneSource).toContain('observer.observe(field)');
+        const composerMaximumRead = chatPaneSource.indexOf(
+            'textRegion ? getComputedStyle(textRegion).maxHeight',
+        );
+        const composerHeightWrite = chatPaneSource.indexOf(
+            "field?.style.setProperty('--composer-text-size'",
+        );
+        expect(composerMaximumRead).toBeGreaterThan(-1);
+        expect(composerMaximumRead).toBeLessThan(composerHeightWrite);
+        const composerFinalMeasurement = chatPaneSource.indexOf('update(true);');
+        const composerExpansionStart = chatPaneSource.indexOf(
+            'composerExpanded = true;',
+            composerFinalMeasurement,
+        );
+        expect(composerFinalMeasurement).toBeGreaterThan(-1);
+        expect(composerExpansionStart).toBeGreaterThan(composerFinalMeasurement);
+        expect(chatPaneSource).toMatch(
+            /const handleFocusOut[\s\S]*?node\.value\.trim\(\)\.length > 0[\s\S]*?composerExpanded = false;/,
+        );
+        expect(chatPaneSource).not.toContain('--composer-line-offset');
+        expect(chatPaneSource).toContain('aria-hidden={!composerFullscreen}');
+        expect(chatPaneSource).toContain('inert={!composerFullscreen}');
         const removedPlaceholder = `placeholder="${String.fromCodePoint(47700, 49884, 51648)}"`;
         expect(chatPaneSource).not.toContain(removedPlaceholder);
         expect(chatPaneSource).not.toContain('message-action-reveal');
