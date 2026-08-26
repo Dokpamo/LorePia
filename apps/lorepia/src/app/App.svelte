@@ -4,9 +4,11 @@
         ChevronRight,
         CircleAlert,
         House,
-        MessageSquare,
+        MessageCircleMore,
+        Settings,
         SlidersHorizontal,
         Sparkles,
+        SquarePen,
     } from '@lucide/svelte';
     import { tr } from '../lib/i18n';
     import { onMount, untrack } from 'svelte';
@@ -1166,7 +1168,7 @@
                 aria-current={view === 'chat' ? 'page' : undefined}
                 onclick={showChat}
             >
-                <MessageSquare class="nav-icon" aria-hidden="true" />
+                <MessageCircleMore class="nav-icon" aria-hidden="true" />
                 <span class="tab-label">{$tr('app.tab.chat')}</span>
             </button>
             <button
@@ -1175,7 +1177,7 @@
                 aria-current={view === 'create' ? 'page' : undefined}
                 onclick={openCreate}
             >
-                {@render createIcon()}
+                <SquarePen class="nav-icon" aria-hidden="true" />
                 <span class="tab-label">{$tr('app.tab.create')}</span>
             </button>
             <button
@@ -1184,7 +1186,7 @@
                 aria-current={view === 'settings' ? 'page' : undefined}
                 onclick={openSettings}
             >
-                {@render settingsIcon()}
+                <Settings class="nav-icon" aria-hidden="true" />
                 <span class="tab-label">{$tr('app.tab.providers')}</span>
             </button>
         </nav>
