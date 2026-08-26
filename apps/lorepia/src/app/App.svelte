@@ -63,8 +63,28 @@
     const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
     const SIDEBAR_EXIT_SETTLE_MS = 260;
     const MOBILE_TOP_FADE_DISTANCE_PX = 48;
+    const BACK_SWIPE_EDGE_PX = 28;
+    const BACK_SWIPE_AXIS_LOCK_PX = 8;
+    const BACK_SWIPE_COMMIT_MIN_PX = 64;
+    const BACK_SWIPE_COMMIT_MAX_PX = 120;
+    const BACK_SWIPE_COMMIT_RATIO = 0.22;
+    const BACK_SWIPE_FLING_MIN_PX = 32;
+    const BACK_SWIPE_FLING_VELOCITY = 0.55;
+    const BACK_SWIPE_SETTLE_MS = 240;
+    const BACK_SWIPE_COMMIT_MS = 190;
     type MainView = 'home' | 'chat' | 'create' | 'settings';
     type HomeSection = 'characters' | 'conversations';
+    type BackSwipePhase = 'idle' | 'tracking' | 'dragging' | 'settling' | 'committing';
+
+    interface BackSwipePointer {
+        pointerId: number;
+        startX: number;
+        startY: number;
+        lastX: number;
+        lastTime: number;
+        velocityX: number;
+        viewportWidth: number;
+    }
 
     interface Props {
         client?: LorepiaClient;
@@ -116,11 +136,214 @@
         (MemoryRecordSourceNavigationDto & { request_id: number }) | null
     >(null);
     let nextMessageFocusRequestId = 0;
+    let backSwipePhase = $state<BackSwipePhase>('idle');
+    let backSwipeOffset = $state(0);
+    let backSwipePointer: BackSwipePointer | null = null;
+    let backSwipeTimer: ReturnType<typeof setTimeout> | undefined;
+    let suppressBackSwipeClickUntil = 0;
 
     function sidebarMotionDuration(duration: number): number {
         return typeof window !== 'undefined' && window.matchMedia(REDUCED_MOTION).matches
             ? 0
             : duration;
+    }
+
+    function backSwipeAvailable(): boolean {
+        if (isDesktop) return false;
+        if (view === 'chat') return chatThreadOpen;
+        if (view === 'create') return studioSection !== null;
+        return view === 'settings' && settingsSection !== null;
+    }
+
+    function clearBackSwipeTimer(): void {
+        if (backSwipeTimer === undefined) return;
+        clearTimeout(backSwipeTimer);
+        backSwipeTimer = undefined;
+    }
+
+    function resetBackSwipe(): void {
+        clearBackSwipeTimer();
+        backSwipePointer = null;
+        backSwipePhase = 'idle';
+        backSwipeOffset = 0;
+    }
+
+    function performBackSwipeNavigation(): void {
+        if (view === 'chat' && chatThreadOpen) {
+            showChat();
+            return;
+        }
+        if (view === 'create' && studioSection !== null) {
+            closeStudioSection();
+            return;
+        }
+        if (view === 'settings' && settingsSection !== null) closeSettingsSection();
+    }
+
+    function backSwipeViewportWidth(target: HTMLElement): number {
+        const boundsWidth = target.getBoundingClientRect().width;
+        const measuredWidth = boundsWidth || target.clientWidth || window.innerWidth;
+        return Math.max(1, measuredWidth || 393);
+    }
+
+    function backSwipeCommitDistance(viewportWidth: number): number {
+        return Math.min(
+            BACK_SWIPE_COMMIT_MAX_PX,
+            Math.max(BACK_SWIPE_COMMIT_MIN_PX, viewportWidth * BACK_SWIPE_COMMIT_RATIO),
+        );
+    }
+
+    function backSwipeBlockedByModal(target: HTMLElement): boolean {
+        return Array.from(
+            target.querySelectorAll<HTMLElement>('[role="dialog"], [aria-modal="true"]'),
+        ).some((modal) => {
+            if (modal instanceof HTMLDialogElement) return modal.open;
+            return (
+                !modal.hidden &&
+                modal.getAttribute('aria-hidden') !== 'true' &&
+                !modal.hasAttribute('inert')
+            );
+        });
+    }
+
+    function releaseBackSwipePointer(event: PointerEvent): void {
+        const target = event.currentTarget as HTMLElement;
+        if (
+            typeof target.hasPointerCapture === 'function' &&
+            typeof target.releasePointerCapture === 'function' &&
+            target.hasPointerCapture(event.pointerId)
+        ) {
+            target.releasePointerCapture(event.pointerId);
+        }
+    }
+
+    function settleBackSwipe(): void {
+        backSwipePointer = null;
+        backSwipePhase = 'settling';
+        backSwipeOffset = 0;
+        clearBackSwipeTimer();
+        const duration = sidebarMotionDuration(BACK_SWIPE_SETTLE_MS);
+        if (duration === 0) {
+            resetBackSwipe();
+            return;
+        }
+        backSwipeTimer = setTimeout(resetBackSwipe, duration);
+    }
+
+    function commitBackSwipe(viewportWidth: number): void {
+        backSwipePointer = null;
+        backSwipePhase = 'committing';
+        backSwipeOffset = viewportWidth;
+        suppressBackSwipeClickUntil = Date.now() + 120;
+        clearBackSwipeTimer();
+        const finish = (): void => {
+            backSwipeTimer = undefined;
+            performBackSwipeNavigation();
+            resetBackSwipe();
+        };
+        const duration = sidebarMotionDuration(BACK_SWIPE_COMMIT_MS);
+        if (duration === 0) {
+            queueMicrotask(finish);
+            return;
+        }
+        backSwipeTimer = setTimeout(finish, duration);
+    }
+
+    function handleBackSwipePointerDown(event: PointerEvent): void {
+        if (!backSwipeAvailable() || backSwipePhase === 'committing') return;
+        if (!event.isPrimary || event.button !== 0) return;
+
+        const target = event.currentTarget as HTMLElement;
+        if (backSwipeBlockedByModal(target)) return;
+        const bounds = target.getBoundingClientRect();
+        const edgeX = event.clientX - bounds.left;
+        if (edgeX < 0 || edgeX > BACK_SWIPE_EDGE_PX) return;
+
+        clearBackSwipeTimer();
+        const pointerId = Number.isFinite(event.pointerId) ? event.pointerId : 1;
+        backSwipePointer = {
+            pointerId,
+            startX: event.clientX,
+            startY: event.clientY,
+            lastX: event.clientX,
+            lastTime: event.timeStamp,
+            velocityX: 0,
+            viewportWidth: backSwipeViewportWidth(target),
+        };
+        backSwipePhase = 'tracking';
+        backSwipeOffset = 0;
+    }
+
+    function handleBackSwipePointerMove(event: PointerEvent): void {
+        const pointer = backSwipePointer;
+        if (event.pointerId !== pointer?.pointerId) return;
+
+        const deltaX = event.clientX - pointer.startX;
+        const deltaY = event.clientY - pointer.startY;
+        const absoluteX = Math.abs(deltaX);
+        const absoluteY = Math.abs(deltaY);
+        if (backSwipePhase === 'tracking') {
+            if (absoluteX < BACK_SWIPE_AXIS_LOCK_PX && absoluteY < BACK_SWIPE_AXIS_LOCK_PX) return;
+            if (deltaX <= 0 || absoluteY >= absoluteX) {
+                resetBackSwipe();
+                return;
+            }
+            if (absoluteX < absoluteY * 1.2) return;
+            backSwipePhase = 'dragging';
+            const target = event.currentTarget as HTMLElement;
+            if (typeof target.setPointerCapture === 'function') {
+                target.setPointerCapture(pointer.pointerId);
+            }
+        }
+        if (backSwipePhase !== 'dragging') return;
+
+        event.preventDefault();
+        const elapsed = event.timeStamp - pointer.lastTime;
+        if (elapsed > 0) {
+            pointer.velocityX = Math.max(0, (event.clientX - pointer.lastX) / elapsed);
+        }
+        pointer.lastX = event.clientX;
+        pointer.lastTime = event.timeStamp;
+        backSwipeOffset = Math.min(pointer.viewportWidth, Math.max(0, deltaX));
+    }
+
+    function handleBackSwipePointerUp(event: PointerEvent): void {
+        const pointer = backSwipePointer;
+        if (event.pointerId !== pointer?.pointerId) return;
+        releaseBackSwipePointer(event);
+        if (backSwipePhase !== 'dragging') {
+            resetBackSwipe();
+            return;
+        }
+
+        event.preventDefault();
+        const distance = Math.max(0, event.clientX - pointer.startX);
+        const commits =
+            distance >= backSwipeCommitDistance(pointer.viewportWidth) ||
+            (distance >= BACK_SWIPE_FLING_MIN_PX && pointer.velocityX >= BACK_SWIPE_FLING_VELOCITY);
+        if (commits) {
+            commitBackSwipe(pointer.viewportWidth);
+            return;
+        }
+        settleBackSwipe();
+    }
+
+    function handleBackSwipePointerCancel(event: PointerEvent): void {
+        const pointer = backSwipePointer;
+        if (event.pointerId !== pointer?.pointerId) return;
+        releaseBackSwipePointer(event);
+        if (backSwipePhase === 'dragging') {
+            settleBackSwipe();
+            return;
+        }
+        resetBackSwipe();
+    }
+
+    function handleBackSwipeClickCapture(event: MouseEvent): void {
+        if (Date.now() > suppressBackSwipeClickUntil) return;
+        suppressBackSwipeClickUntil = 0;
+        event.preventDefault();
+        event.stopPropagation();
     }
 
     function showHome(): void {
@@ -478,6 +701,7 @@
         });
         void controller.start();
         return () => {
+            resetBackSwipe();
             cancelSidebarUnmount();
             layout.removeEventListener('change', syncLayout);
             window.removeEventListener('resize', syncLayout);
@@ -544,7 +768,13 @@
     <meta name="description" content={$tr('app.description')} />
 </svelte:head>
 
-<div class="app-shell" data-view={view} data-layout={isDesktop ? 'desktop' : 'mobile'}>
+<div
+    class="app-shell"
+    data-view={view}
+    data-layout={isDesktop ? 'desktop' : 'mobile'}
+    data-back-swipe={backSwipePhase}
+    style:--back-swipe-offset={`${String(backSwipeOffset)}px`}
+>
     <div class="sidebar-rail" aria-hidden={!isDesktop} inert={!isDesktop}>
         {#if sidebarContentMounted && appState.bootstrap.phase !== 'error'}
             <aside class="sidebar" aria-label={$tr('app.nav.label')}>
@@ -594,7 +824,15 @@
             </div>
         </main>
     {:else}
-        <main id="main-content" class="main">
+        <main
+            id="main-content"
+            class="main"
+            onpointerdowncapture={handleBackSwipePointerDown}
+            onpointermove={handleBackSwipePointerMove}
+            onpointerup={handleBackSwipePointerUp}
+            onpointercancel={handleBackSwipePointerCancel}
+            onclickcapture={handleBackSwipeClickCapture}
+        >
             {#if view === 'home'}
                 <section class="mobile-root home-view" aria-label={$tr('app.tab.home')}>
                     <LibraryPane

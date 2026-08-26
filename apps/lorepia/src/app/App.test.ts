@@ -175,6 +175,45 @@ function setViewportWidth(width: number): (nextWidth: number) => void {
     };
 }
 
+async function swipePointer(
+    target: Element,
+    {
+        startX,
+        startY,
+        endX,
+        endY,
+        pointerId = 7,
+    }: {
+        startX: number;
+        startY: number;
+        endX: number;
+        endY: number;
+        pointerId?: number;
+    },
+): Promise<void> {
+    await fireEvent.pointerDown(target, {
+        pointerId,
+        isPrimary: true,
+        button: 0,
+        clientX: startX,
+        clientY: startY,
+    });
+    await fireEvent.pointerMove(target, {
+        pointerId,
+        isPrimary: true,
+        buttons: 1,
+        clientX: endX,
+        clientY: endY,
+    });
+    await fireEvent.pointerUp(target, {
+        pointerId,
+        isPrimary: true,
+        button: 0,
+        clientX: endX,
+        clientY: endY,
+    });
+}
+
 afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
@@ -375,6 +414,80 @@ describe('App responsive shell', () => {
         await waitFor(() =>
             expect(screen.getByRole('heading', { name: '프롬프트' })).toHaveFocus(),
         );
+    });
+
+    it('pops one pushed mobile route per committed left-edge swipe', async () => {
+        setViewportWidth(393);
+        const rendered = render(App, {
+            client: appClient(vi.fn().mockResolvedValue(BOOTSTRAP)),
+        });
+
+        await screen.findByRole('heading', { name: '캐릭터' });
+        await fireEvent.click(screen.getByRole('button', { name: '생성' }));
+        await fireEvent.click(await screen.findByRole('button', { name: '프롬프트 설계' }));
+        await fireEvent.click(screen.getByRole('button', { name: /프롬프트 블록/ }));
+
+        const shell = rendered.container.querySelector('.app-shell');
+        const gestureSurface = rendered.container.querySelector('#main-content');
+        expect(shell).not.toBeNull();
+        expect(gestureSurface).not.toBeNull();
+        expect(screen.getByRole('heading', { name: '프롬프트 블록' })).toBeVisible();
+
+        await swipePointer(gestureSurface as HTMLElement, {
+            startX: 44,
+            startY: 220,
+            endX: 170,
+            endY: 224,
+        });
+        expect(screen.getByRole('heading', { name: '프롬프트 블록' })).toBeVisible();
+
+        await swipePointer(gestureSurface as HTMLElement, {
+            startX: 8,
+            startY: 220,
+            endX: 18,
+            endY: 310,
+        });
+        expect(screen.getByRole('heading', { name: '프롬프트 블록' })).toBeVisible();
+
+        const modal = document.createElement('div');
+        modal.setAttribute('role', 'dialog');
+        modal.setAttribute('aria-modal', 'true');
+        gestureSurface?.append(modal);
+        await swipePointer(gestureSurface as HTMLElement, {
+            startX: 8,
+            startY: 220,
+            endX: 132,
+            endY: 225,
+        });
+        expect(screen.getByRole('heading', { name: '프롬프트 블록' })).toBeVisible();
+
+        modal.setAttribute('aria-hidden', 'true');
+        modal.setAttribute('inert', '');
+
+        await swipePointer(gestureSurface as HTMLElement, {
+            startX: 8,
+            startY: 220,
+            endX: 132,
+            endY: 225,
+        });
+        await waitFor(() => {
+            expect(screen.getByRole('heading', { name: '프롬프트' })).toBeVisible();
+        });
+        expect(screen.getByRole('button', { name: /프롬프트 블록/ })).toBeVisible();
+        expect(rendered.container.querySelector('.tab-bar')).not.toBeInTheDocument();
+
+        await swipePointer(gestureSurface as HTMLElement, {
+            startX: 8,
+            startY: 220,
+            endX: 132,
+            endY: 225,
+            pointerId: 8,
+        });
+        await waitFor(() => {
+            expect(screen.getByRole('button', { name: '프롬프트 설계' })).toBeVisible();
+        });
+        expect(rendered.container.querySelector('.tab-bar')).toBeVisible();
+        expect(shell).toHaveAttribute('data-back-swipe', 'idle');
     });
 
     it('enters a full settings screen with the standard back action and no root tabs', async () => {
