@@ -416,7 +416,7 @@ describe('App responsive shell', () => {
         );
     });
 
-    it('pops one pushed mobile route per committed left-edge swipe', async () => {
+    it('reveals the previous page and pops one mobile route from a swipe started anywhere', async () => {
         setViewportWidth(393);
         const rendered = render(App, {
             client: appClient(vi.fn().mockResolvedValue(BOOTSTRAP)),
@@ -432,19 +432,15 @@ describe('App responsive shell', () => {
         expect(shell).not.toBeNull();
         expect(gestureSurface).not.toBeNull();
         expect(screen.getByRole('heading', { name: '프롬프트 블록' })).toBeVisible();
+        expect(shell).toHaveAttribute('data-back-swipe-underlay', 'ready');
+        const underlay = rendered.container.querySelector('.back-swipe-underlay');
+        expect(underlay).toHaveTextContent('프롬프트');
+        expect(underlay?.querySelector('[id]')).toBeNull();
 
         await swipePointer(gestureSurface as HTMLElement, {
-            startX: 44,
+            startX: 196,
             startY: 220,
-            endX: 170,
-            endY: 224,
-        });
-        expect(screen.getByRole('heading', { name: '프롬프트 블록' })).toBeVisible();
-
-        await swipePointer(gestureSurface as HTMLElement, {
-            startX: 8,
-            startY: 220,
-            endX: 18,
+            endX: 206,
             endY: 310,
         });
         expect(screen.getByRole('heading', { name: '프롬프트 블록' })).toBeVisible();
@@ -454,9 +450,9 @@ describe('App responsive shell', () => {
         modal.setAttribute('aria-modal', 'true');
         gestureSurface?.append(modal);
         await swipePointer(gestureSurface as HTMLElement, {
-            startX: 8,
+            startX: 196,
             startY: 220,
-            endX: 132,
+            endX: 320,
             endY: 225,
         });
         expect(screen.getByRole('heading', { name: '프롬프트 블록' })).toBeVisible();
@@ -464,22 +460,45 @@ describe('App responsive shell', () => {
         modal.setAttribute('aria-hidden', 'true');
         modal.setAttribute('inert', '');
 
-        await swipePointer(gestureSurface as HTMLElement, {
-            startX: 8,
-            startY: 220,
-            endX: 132,
-            endY: 225,
+        await fireEvent.pointerDown(gestureSurface as HTMLElement, {
+            pointerId: 7,
+            isPrimary: true,
+            button: 0,
+            clientX: 196,
+            clientY: 220,
+        });
+        await fireEvent.pointerMove(gestureSurface as HTMLElement, {
+            pointerId: 7,
+            isPrimary: true,
+            buttons: 1,
+            clientX: 320,
+            clientY: 225,
+        });
+        expect(shell).toHaveAttribute('data-back-swipe', 'dragging');
+        expect((shell as HTMLElement).style.getPropertyValue('--back-swipe-offset')).toBe('124px');
+        expect(
+            Number.parseFloat(
+                (shell as HTMLElement).style.getPropertyValue('--back-swipe-page-radius'),
+            ),
+        ).toBeGreaterThan(0);
+        await fireEvent.pointerUp(gestureSurface as HTMLElement, {
+            pointerId: 7,
+            isPrimary: true,
+            button: 0,
+            clientX: 320,
+            clientY: 225,
         });
         await waitFor(() => {
             expect(screen.getByRole('heading', { name: '프롬프트' })).toBeVisible();
         });
         expect(screen.getByRole('button', { name: /프롬프트 블록/ })).toBeVisible();
         expect(rendered.container.querySelector('.tab-bar')).not.toBeInTheDocument();
+        expect(underlay?.querySelector('.back-swipe-tab-bar')).toBeInTheDocument();
 
         await swipePointer(gestureSurface as HTMLElement, {
-            startX: 8,
+            startX: 250,
             startY: 220,
-            endX: 132,
+            endX: 374,
             endY: 225,
             pointerId: 8,
         });

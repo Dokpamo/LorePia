@@ -494,29 +494,99 @@ textarea {
 }
 
 /*
- * Pushed handheld screens follow a left-edge drag before committing the same
- * action as their visible back button. The shell remains clipped, so the
- * moving page never exposes or shifts the host window around it.
+ * Mobile push navigation keeps a still, inert snapshot of the actual previous
+ * page under the live page. During an interactive pop the old page catches up
+ * with a short parallax while the live page becomes a clipped, rounded device
+ * surface that follows the pointer.
  */
-.app-shell[data-layout='mobile'][data-back-swipe='dragging'] .main,
-.app-shell[data-layout='mobile'][data-back-swipe='settling'] .main,
-.app-shell[data-layout='mobile'][data-back-swipe='committing'] .main {
-    transform: translate3d(var(--back-swipe-offset), 0, 0);
-    box-shadow: -12px 0 28px color-mix(in srgb, var(--ink) 12%, transparent);
-    will-change: transform;
+.app-shell[data-layout='mobile'] > .back-swipe-underlay {
+    position: absolute;
+    z-index: 0;
+    display: flex;
+    overflow: clip;
+    background: var(--bg);
+    inset: 0;
+    opacity: 0;
+    pointer-events: none;
+    transform: translate3d(var(--back-swipe-underlay-x), 0, 0)
+        scale(var(--back-swipe-underlay-scale));
+    transform-origin: center;
+    visibility: hidden;
 }
 
-.app-shell[data-layout='mobile'][data-back-swipe='dragging'] .main {
+.app-shell[data-layout='mobile'][data-back-swipe-underlay='ready'] > .back-swipe-underlay {
+    opacity: 1;
+    visibility: visible;
+}
+
+.back-swipe-underlay::after {
+    position: absolute;
+    z-index: 3;
+    background: var(--brand-ink);
+    content: '';
+    inset: 0;
+    opacity: var(--back-swipe-underlay-dim);
+    pointer-events: none;
+}
+
+.back-swipe-snapshot-page {
+    position: relative;
+    display: flex;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+    background: var(--bg);
+    overflow: clip;
+}
+
+.back-swipe-snapshot-page > .main {
+    z-index: 1;
+    height: 100%;
+}
+
+.app-shell[data-layout='mobile'] > .main {
+    z-index: 2;
+}
+
+.app-shell[data-layout='mobile'][data-back-swipe='dragging'] > .main,
+.app-shell[data-layout='mobile'][data-back-swipe='settling'] > .main,
+.app-shell[data-layout='mobile'][data-back-swipe='committing'] > .main {
+    border-radius: var(--back-swipe-page-radius);
+    clip-path: inset(0 round var(--back-swipe-page-radius));
+    overflow: clip;
+    transform: translate3d(var(--back-swipe-offset), 0, 0);
+    box-shadow:
+        -14px 0 34px color-mix(in srgb, var(--brand-ink) 18%, transparent),
+        -1px 0 0 color-mix(in srgb, var(--line-strong) 72%, transparent);
+    will-change: transform, border-radius, clip-path;
+}
+
+.app-shell[data-layout='mobile'][data-back-swipe='dragging'] > .main,
+.app-shell[data-layout='mobile'][data-back-swipe='dragging'] > .back-swipe-underlay {
     transition: none;
 }
 
-.app-shell[data-layout='mobile'][data-back-swipe='settling'] .main {
-    transition: transform 240ms cubic-bezier(0.22, 0.61, 0.36, 1);
+.app-shell[data-layout='mobile'][data-back-swipe='settling'] > .main,
+.app-shell[data-layout='mobile'][data-back-swipe='settling'] > .back-swipe-underlay {
+    transition:
+        transform 260ms cubic-bezier(0.22, 0.61, 0.36, 1),
+        border-radius 260ms cubic-bezier(0.22, 0.61, 0.36, 1),
+        clip-path 260ms cubic-bezier(0.22, 0.61, 0.36, 1),
+        opacity 180ms ease-out;
 }
 
-.app-shell[data-layout='mobile'][data-back-swipe='committing'] .main {
+.app-shell[data-layout='mobile'][data-back-swipe='committing'] > .main {
     pointer-events: none;
-    transition: transform 190ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.app-shell[data-layout='mobile'][data-back-swipe='committing'] > .main,
+.app-shell[data-layout='mobile'][data-back-swipe='committing'] > .back-swipe-underlay {
+    transition:
+        transform 300ms cubic-bezier(0.32, 0.72, 0, 1),
+        border-radius 300ms cubic-bezier(0.32, 0.72, 0, 1),
+        clip-path 300ms cubic-bezier(0.32, 0.72, 0, 1),
+        opacity 180ms ease-out;
 }
 
 .app-shell[data-layout='desktop'] {
@@ -693,6 +763,31 @@ textarea {
  * competing with the composer for the same horizon.
  */
 .tab-bar {
+    position: absolute;
+    z-index: 20;
+    right: auto;
+    bottom: calc(clamp(4px, 1.831vw, 8px) + env(safe-area-inset-bottom));
+    left: 50%;
+    display: flex;
+    width: min(calc(100% - var(--gutter) - var(--gutter)), 560px);
+    height: var(--mobile-nav);
+    min-height: var(--mobile-nav);
+    padding: clamp(2px, 0.686vw, 3px);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-pill);
+    margin: 0;
+    background: var(--surface-raised);
+    box-shadow: var(--shadow-2);
+    gap: clamp(1px, 0.458vw, 2px);
+    transform: translateX(-50%);
+}
+
+/*
+ * The inert navigation copied into a back-swipe snapshot deliberately uses a
+ * different class so live tab-bar queries never mistake the preview for the
+ * active controls. Keep its frame visually identical to the real bar.
+ */
+.back-swipe-tab-bar {
     position: absolute;
     z-index: 20;
     right: auto;

@@ -63,7 +63,6 @@
     const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
     const SIDEBAR_EXIT_SETTLE_MS = 260;
     const MOBILE_TOP_FADE_DISTANCE_PX = 48;
-    const BACK_SWIPE_EDGE_PX = 28;
     const BACK_SWIPE_AXIS_LOCK_PX = 8;
     const BACK_SWIPE_COMMIT_MIN_PX = 64;
     const BACK_SWIPE_COMMIT_MAX_PX = 120;
@@ -71,7 +70,9 @@
     const BACK_SWIPE_FLING_MIN_PX = 32;
     const BACK_SWIPE_FLING_VELOCITY = 0.55;
     const BACK_SWIPE_SETTLE_MS = 240;
-    const BACK_SWIPE_COMMIT_MS = 190;
+    const BACK_SWIPE_COMMIT_MS = 300;
+    const BACK_SWIPE_EXIT_OVERFLOW_PX = 24;
+    const BACK_SWIPE_UNDERLAY_PARALLAX_PX = 22;
     type MainView = 'home' | 'chat' | 'create' | 'settings';
     type HomeSection = 'characters' | 'conversations';
     type BackSwipePhase = 'idle' | 'tracking' | 'dragging' | 'settling' | 'committing';
@@ -84,6 +85,17 @@
         lastTime: number;
         velocityX: number;
         viewportWidth: number;
+    }
+
+    interface BackSwipeSnapshot {
+        routeKey: string;
+        root: HTMLDivElement;
+    }
+
+    interface MobileRouteDescriptor {
+        key: string;
+        view: MainView;
+        pushed: boolean;
     }
 
     interface Props {
@@ -136,11 +148,17 @@
         (MemoryRecordSourceNavigationDto & { request_id: number }) | null
     >(null);
     let nextMessageFocusRequestId = 0;
+    let mainElement = $state<HTMLElement>();
+    let backSwipeUnderlayElement = $state<HTMLDivElement>();
+    let backSwipeUnderlayReady = $state(false);
     let backSwipePhase = $state<BackSwipePhase>('idle');
     let backSwipeOffset = $state(0);
+    let backSwipeProgress = $state(0);
     let backSwipePointer: BackSwipePointer | null = null;
     let backSwipeTimer: ReturnType<typeof setTimeout> | undefined;
     let suppressBackSwipeClickUntil = 0;
+    let backSwipeSnapshots: BackSwipeSnapshot[] = [];
+    let renderedMobileRoute: MobileRouteDescriptor | null = null;
 
     function sidebarMotionDuration(duration: number): number {
         return typeof window !== 'undefined' && window.matchMedia(REDUCED_MOTION).matches
@@ -149,7 +167,7 @@
     }
 
     function backSwipeAvailable(): boolean {
-        if (isDesktop) return false;
+        if (isDesktop || !backSwipeUnderlayReady) return false;
         if (view === 'chat') return chatThreadOpen;
         if (view === 'create') return studioSection !== null;
         return view === 'settings' && settingsSection !== null;
@@ -166,7 +184,173 @@
         backSwipePointer = null;
         backSwipePhase = 'idle';
         backSwipeOffset = 0;
+        backSwipeProgress = 0;
     }
+
+    function mobileRouteDescriptor(): MobileRouteDescriptor {
+        if (view === 'chat') {
+            return {
+                key: chatThreadOpen ? 'chat:thread' : 'chat:root',
+                view,
+                pushed: chatThreadOpen,
+            };
+        }
+        if (view === 'create') {
+            const section = studioSection ?? 'root';
+            return {
+                key: `create:${section}:${studioDetailPage ?? ''}`,
+                view,
+                pushed: studioSection !== null,
+            };
+        }
+        if (view === 'settings') {
+            const section = settingsSection ?? 'root';
+            return {
+                key: `settings:${section}:${settingsDetailPage ?? ''}:${settingsEditorMode ?? ''}:${personaEditorMode ?? ''}`,
+                view,
+                pushed: settingsSection !== null,
+            };
+        }
+        return { key: 'home:root', view, pushed: false };
+    }
+
+    function copySnapshotElementState(source: HTMLElement, clone: HTMLElement): void {
+        const sources = [source, ...source.querySelectorAll<HTMLElement>('*')];
+        const clones = [clone, ...clone.querySelectorAll<HTMLElement>('*')];
+        const count = Math.min(sources.length, clones.length);
+        for (let index = 0; index < count; index += 1) {
+            const sourceElement = sources[index];
+            const cloneElement = clones[index];
+            if (!sourceElement || !cloneElement) continue;
+            if (sourceElement.scrollTop !== 0) {
+                cloneElement.dataset.snapshotScrollTop = String(sourceElement.scrollTop);
+            }
+            if (sourceElement.scrollLeft !== 0) {
+                cloneElement.dataset.snapshotScrollLeft = String(sourceElement.scrollLeft);
+            }
+            if (
+                sourceElement instanceof HTMLInputElement &&
+                cloneElement instanceof HTMLInputElement
+            ) {
+                cloneElement.value = sourceElement.value;
+                cloneElement.checked = sourceElement.checked;
+            } else if (
+                sourceElement instanceof HTMLTextAreaElement &&
+                cloneElement instanceof HTMLTextAreaElement
+            ) {
+                cloneElement.value = sourceElement.value;
+            } else if (
+                sourceElement instanceof HTMLSelectElement &&
+                cloneElement instanceof HTMLSelectElement
+            ) {
+                cloneElement.value = sourceElement.value;
+            }
+        }
+    }
+
+    function snapshotClone(source: HTMLElement): HTMLElement {
+        const clone = source.cloneNode(true) as HTMLElement;
+        copySnapshotElementState(source, clone);
+        return clone;
+    }
+
+    function captureBackSwipeSnapshot(routeKey: string): BackSwipeSnapshot | null {
+        const currentMain = mainElement;
+        if (!currentMain) return null;
+
+        const root = document.createElement('div');
+        root.className = 'back-swipe-snapshot-page';
+        root.dataset.snapshotRoute = routeKey;
+        root.append(snapshotClone(currentMain));
+
+        const shell = currentMain.parentElement;
+        const tabBar = shell
+            ? Array.from(shell.children).find((element) => element.classList.contains('tab-bar'))
+            : undefined;
+        if (tabBar instanceof HTMLElement) {
+            const tabBarClone = snapshotClone(tabBar);
+            tabBarClone.classList.remove('tab-bar');
+            tabBarClone.classList.add('back-swipe-tab-bar');
+            root.append(tabBarClone);
+        }
+
+        root.querySelectorAll<HTMLElement>('[id]').forEach((element) =>
+            element.removeAttribute('id'),
+        );
+        root.querySelectorAll<HTMLElement>('[autofocus]').forEach((element) =>
+            element.removeAttribute('autofocus'),
+        );
+        return { routeKey, root };
+    }
+
+    function restoreBackSwipeSnapshotState(root: HTMLElement): void {
+        root.querySelectorAll<HTMLElement>('[data-snapshot-scroll-top]').forEach((element) => {
+            element.scrollTop = Number(element.dataset.snapshotScrollTop ?? 0);
+        });
+        root.querySelectorAll<HTMLElement>('[data-snapshot-scroll-left]').forEach((element) => {
+            element.scrollLeft = Number(element.dataset.snapshotScrollLeft ?? 0);
+        });
+    }
+
+    function renderBackSwipeUnderlay(): void {
+        const underlay = backSwipeUnderlayElement;
+        if (!underlay) return;
+        const snapshot = backSwipeSnapshots.at(-1);
+        underlay.replaceChildren();
+        if (!snapshot) {
+            backSwipeUnderlayReady = false;
+            return;
+        }
+        underlay.append(snapshot.root);
+        backSwipeUnderlayReady = true;
+        queueMicrotask(() => restoreBackSwipeSnapshotState(snapshot.root));
+    }
+
+    function clearBackSwipeSnapshots(): void {
+        backSwipeSnapshots = [];
+        renderBackSwipeUnderlay();
+    }
+
+    $effect.pre(() => {
+        const nextRoute = mobileRouteDescriptor();
+        const currentMain = mainElement;
+        const underlay = backSwipeUnderlayElement;
+        if (!currentMain || !underlay) {
+            renderedMobileRoute = nextRoute;
+            return;
+        }
+        if (isDesktop) {
+            renderedMobileRoute = nextRoute;
+            clearBackSwipeSnapshots();
+            return;
+        }
+
+        const previousRoute = renderedMobileRoute;
+        if (previousRoute === null || previousRoute.key === nextRoute.key) {
+            renderedMobileRoute = nextRoute;
+            return;
+        }
+        if (previousRoute.view !== nextRoute.view) {
+            renderedMobileRoute = nextRoute;
+            clearBackSwipeSnapshots();
+            return;
+        }
+
+        const previousSnapshot = backSwipeSnapshots.at(-1);
+        if (previousSnapshot?.routeKey === nextRoute.key) {
+            backSwipeSnapshots.pop();
+            renderBackSwipeUnderlay();
+        } else if (nextRoute.pushed) {
+            const snapshot = captureBackSwipeSnapshot(previousRoute.key);
+            if (snapshot) {
+                backSwipeSnapshots.push(snapshot);
+                renderBackSwipeUnderlay();
+            }
+        } else {
+            clearBackSwipeSnapshots();
+        }
+        renderedMobileRoute = nextRoute;
+    });
 
     function performBackSwipeNavigation(): void {
         if (view === 'chat' && chatThreadOpen) {
@@ -221,6 +405,7 @@
         backSwipePointer = null;
         backSwipePhase = 'settling';
         backSwipeOffset = 0;
+        backSwipeProgress = 0;
         clearBackSwipeTimer();
         const duration = sidebarMotionDuration(BACK_SWIPE_SETTLE_MS);
         if (duration === 0) {
@@ -233,7 +418,8 @@
     function commitBackSwipe(viewportWidth: number): void {
         backSwipePointer = null;
         backSwipePhase = 'committing';
-        backSwipeOffset = viewportWidth;
+        backSwipeOffset = viewportWidth + BACK_SWIPE_EXIT_OVERFLOW_PX;
+        backSwipeProgress = 1;
         suppressBackSwipeClickUntil = Date.now() + 120;
         clearBackSwipeTimer();
         const finish = (): void => {
@@ -255,10 +441,6 @@
 
         const target = event.currentTarget as HTMLElement;
         if (backSwipeBlockedByModal(target)) return;
-        const bounds = target.getBoundingClientRect();
-        const edgeX = event.clientX - bounds.left;
-        if (edgeX < 0 || edgeX > BACK_SWIPE_EDGE_PX) return;
-
         clearBackSwipeTimer();
         const pointerId = Number.isFinite(event.pointerId) ? event.pointerId : 1;
         backSwipePointer = {
@@ -272,6 +454,7 @@
         };
         backSwipePhase = 'tracking';
         backSwipeOffset = 0;
+        backSwipeProgress = 0;
     }
 
     function handleBackSwipePointerMove(event: PointerEvent): void {
@@ -305,6 +488,7 @@
         pointer.lastX = event.clientX;
         pointer.lastTime = event.timeStamp;
         backSwipeOffset = Math.min(pointer.viewportWidth, Math.max(0, deltaX));
+        backSwipeProgress = Math.min(1, backSwipeOffset / pointer.viewportWidth);
     }
 
     function handleBackSwipePointerUp(event: PointerEvent): void {
@@ -702,6 +886,7 @@
         void controller.start();
         return () => {
             resetBackSwipe();
+            clearBackSwipeSnapshots();
             cancelSidebarUnmount();
             layout.removeEventListener('change', syncLayout);
             window.removeEventListener('resize', syncLayout);
@@ -773,7 +958,12 @@
     data-view={view}
     data-layout={isDesktop ? 'desktop' : 'mobile'}
     data-back-swipe={backSwipePhase}
+    data-back-swipe-underlay={backSwipeUnderlayReady ? 'ready' : 'empty'}
     style:--back-swipe-offset={`${String(backSwipeOffset)}px`}
+    style:--back-swipe-underlay-x={`${String((backSwipeProgress - 1) * BACK_SWIPE_UNDERLAY_PARALLAX_PX)}px`}
+    style:--back-swipe-underlay-scale={String(0.982 + backSwipeProgress * 0.018)}
+    style:--back-swipe-underlay-dim={String((1 - backSwipeProgress) * 0.12)}
+    style:--back-swipe-page-radius={`${String(Math.min(1, backSwipeProgress * 3) * 28)}px`}
 >
     <div class="sidebar-rail" aria-hidden={!isDesktop} inert={!isDesktop}>
         {#if sidebarContentMounted && appState.bootstrap.phase !== 'error'}
@@ -825,6 +1015,7 @@
         </main>
     {:else}
         <main
+            bind:this={mainElement}
             id="main-content"
             class="main"
             onpointerdowncapture={handleBackSwipePointerDown}
@@ -950,6 +1141,13 @@
             {/if}
         </main>
     {/if}
+
+    <div
+        bind:this={backSwipeUnderlayElement}
+        class="back-swipe-underlay"
+        aria-hidden="true"
+        inert
+    ></div>
 
     {#if !isDesktop && studioSection === null && !(view === 'chat' && chatThreadOpen) && !(view === 'settings' && settingsSection !== null)}
         <nav class="tab-bar" aria-label={$tr('app.nav.label')}>
