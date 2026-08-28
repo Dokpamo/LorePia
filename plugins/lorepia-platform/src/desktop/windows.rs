@@ -626,29 +626,37 @@ impl PinnedExportDirectory {
         source: &File,
         destination_name: &OsStr,
     ) -> PlatformResult<()> {
-        self.verify_identity()?;
-        rename_open_file_at(source, &self.parent, destination_name)?;
+        self.verify_identity()
+            .map_err(|error| windows_export_test_error("verify parent before rename", error))?;
+        rename_open_file_at(source, &self.parent, destination_name)
+            .map_err(|error| windows_export_test_error("rename open file", error))?;
         source
             .sync_all()
-            .map_err(|_| PlatformError::new(PlatformErrorCode::StorageUnavailable))?;
-        self.verify_identity()?;
+            .map_err(|error| windows_export_test_error("flush renamed file", error))?;
+        self.verify_identity()
+            .map_err(|error| windows_export_test_error("verify parent after rename", error))?;
 
         // The promoted file remains intentionally exclusive. Reopening it for
         // path metadata can conflict with that handle, so validate its type on
         // the handle and bind the destination path separately by file ID.
         let destination_metadata = source
             .metadata()
-            .map_err(|_| PlatformError::new(PlatformErrorCode::StorageUnavailable))?;
+            .map_err(|error| windows_export_test_error("read renamed handle metadata", error))?;
+        let source_identity = windows_file_identity(source, PlatformErrorCode::StorageUnavailable)
+            .map_err(|error| windows_export_test_error("read renamed handle identity", error))?;
+        let destination_identity = windows_path_identity(
+            &self.path.join(destination_name),
+            PlatformErrorCode::StorageUnavailable,
+        )
+        .map_err(|error| windows_export_test_error("open destination identity", error))?;
         if !destination_metadata.is_file()
             || destination_metadata.file_attributes()
                 & ::windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT.0
                 != 0
-            || windows_file_identity(source, PlatformErrorCode::StorageUnavailable)?
-                != windows_path_identity(
-                    &self.path.join(destination_name),
-                    PlatformErrorCode::StorageUnavailable,
-                )?
+            || source_identity != destination_identity
         {
+            #[cfg(test)]
+            eprintln!("Windows export promotion failed final handle/type identity validation");
             return Err(PlatformError::new(PlatformErrorCode::StorageUnavailable));
         }
         Ok(())
@@ -659,6 +667,14 @@ impl PinnedExportDirectory {
             let _ = std::fs::remove_file(self.path.join(name));
         }
     }
+}
+
+fn windows_export_test_error(stage: &'static str, error: impl std::fmt::Debug) -> PlatformError {
+    #[cfg(test)]
+    eprintln!("Windows export promotion failed at {stage}: {error:?}");
+    #[cfg(not(test))]
+    let _ = (stage, error);
+    PlatformError::new(PlatformErrorCode::StorageUnavailable)
 }
 fn pin_canonical_directory_chain(
     path: &Path,
@@ -803,7 +819,13 @@ fn windows_path_identity(
             None,
         )
     }
-    .map_err(|_| PlatformError::new(error_code))?;
+    .map_err(|error| {
+        #[cfg(test)]
+        eprintln!("Windows path identity open failed: {error:?}");
+        #[cfg(not(test))]
+        let _ = error;
+        PlatformError::new(error_code)
+    })?;
     // SAFETY: CreateFileW returned one owned handle and File assumes exactly
     // that ownership, closing it once at the end of this function.
     let file = unsafe { File::from_raw_handle(handle.0) };
@@ -829,7 +851,13 @@ fn windows_file_identity(
             information_bytes,
         )
     }
-    .map_err(|_| PlatformError::new(error_code))?;
+    .map_err(|error| {
+        #[cfg(test)]
+        eprintln!("Windows handle identity query failed: {error:?}");
+        #[cfg(not(test))]
+        let _ = error;
+        PlatformError::new(error_code)
+    })?;
     // SAFETY: a successful FileIdInfo query initializes the complete structure.
     let information = unsafe { information.assume_init() };
     Ok(windows_file_identity_from_information(information))
@@ -960,7 +988,7 @@ fn rename_open_file_at(
             buffer_length,
         )
     }
-    .map_err(|_| PlatformError::new(PlatformErrorCode::StorageUnavailable))
+    .map_err(|error| windows_export_test_error("SetFileInformationByHandle rename", error))
 }
 
 fn null_terminated_wide(path: &Path) -> Vec<u16> {
