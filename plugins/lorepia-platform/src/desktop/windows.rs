@@ -14,7 +14,8 @@ use ::windows::{
     Storage::Pickers::FileOpenPicker,
     Win32::{
         Foundation::{
-            E_ABORT, E_POINTER, ERROR_CANCELLED, ERROR_NOT_FOUND, ERROR_SHARING_VIOLATION, HLOCAL,
+            E_ABORT, E_POINTER, ERROR_CALL_NOT_IMPLEMENTED, ERROR_CANCELLED,
+            ERROR_INVALID_PARAMETER, ERROR_NOT_FOUND, ERROR_SHARING_VIOLATION, HLOCAL,
             RPC_E_CHANGED_MODE,
         },
         Security::Cryptography::{
@@ -22,7 +23,7 @@ use ::windows::{
         },
         Storage::FileSystem::{
             FILE_DISPOSITION_INFO, FILE_ID_INFO, FileDispositionInfo, FileIdInfo, FileRenameInfo,
-            GetFileInformationByHandleEx, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+            FileRenameInfoEx, GetFileInformationByHandleEx, MOVEFILE_WRITE_THROUGH, MoveFileExW,
             SetFileInformationByHandle,
         },
         System::{
@@ -1016,6 +1017,7 @@ fn rename_open_file_in_pinned_directory(
     destination_name: &OsStr,
 ) -> PlatformResult<()> {
     const REPLACE_IF_EXISTS: u32 = 0x0000_0001;
+    const POSIX_SEMANTICS: u32 = 0x0000_0002;
     const MAXIMUM_SHARING_RETRIES: usize = 200;
 
     validate_export_file_name(destination_name)?;
@@ -1051,7 +1053,7 @@ fn rename_open_file_in_pinned_directory(
     // ancestor chain keep the parent stable during the brief promotion mode.
     unsafe {
         info.write(RawFileRenameInfo {
-            replace_if_exists_or_flags: REPLACE_IF_EXISTS,
+            replace_if_exists_or_flags: REPLACE_IF_EXISTS | POSIX_SEMANTICS,
             root_directory: ::windows::Win32::Foundation::HANDLE::default(),
             file_name_length,
             file_name: [0],
@@ -1063,21 +1065,38 @@ fn rename_open_file_in_pinned_directory(
         );
     }
 
-    // Antivirus and indexers can briefly open an existing destination without
-    // delete sharing. Retry that one transient result only, with a hard bound.
+    // FileRenameInfoEx provides Windows 10's atomic POSIX replacement when an
+    // existing target lacks delete sharing. Older systems fall back to the
+    // classic class; transient scanner locks still receive a bounded retry.
+    let mut information_class = FileRenameInfoEx;
     for attempt in 0..=MAXIMUM_SHARING_RETRIES {
         // SAFETY: the source handle and initialized buffer stay live and
         // unchanged for every synchronous retry.
         let result = unsafe {
             SetFileInformationByHandle(
                 ::windows::Win32::Foundation::HANDLE(source.as_raw_handle()),
-                FileRenameInfo,
+                information_class,
                 info.cast(),
                 buffer_length,
             )
         };
         match result {
             Ok(()) => return Ok(()),
+            Err(error)
+                if information_class == FileRenameInfoEx
+                    && matches!(
+                        error.code(),
+                        code if code == HRESULT::from_win32(ERROR_INVALID_PARAMETER.0)
+                            || code == HRESULT::from_win32(ERROR_CALL_NOT_IMPLEMENTED.0)
+                    ) =>
+            {
+                information_class = FileRenameInfo;
+                // SAFETY: `info` remains the uniquely borrowed, initialized
+                // header in `buffer`; legacy FileRenameInfo reads this as TRUE.
+                unsafe {
+                    (*info).replace_if_exists_or_flags = REPLACE_IF_EXISTS;
+                }
+            }
             Err(error)
                 if attempt < MAXIMUM_SHARING_RETRIES
                     && error.code() == HRESULT::from_win32(ERROR_SHARING_VIOLATION.0) =>
