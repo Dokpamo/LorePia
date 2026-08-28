@@ -14,7 +14,8 @@ use ::windows::{
     Storage::Pickers::FileOpenPicker,
     Win32::{
         Foundation::{
-            E_ABORT, E_POINTER, ERROR_CANCELLED, ERROR_NOT_FOUND, HLOCAL, RPC_E_CHANGED_MODE,
+            E_ABORT, E_POINTER, ERROR_CANCELLED, ERROR_NOT_FOUND, ERROR_SHARING_VIOLATION, HLOCAL,
+            RPC_E_CHANGED_MODE,
         },
         Security::Cryptography::{
             CRYPT_INTEGER_BLOB, CRYPTPROTECT_UI_FORBIDDEN, CryptProtectData, CryptUnprotectData,
@@ -1015,6 +1016,7 @@ fn rename_open_file_in_pinned_directory(
     destination_name: &OsStr,
 ) -> PlatformResult<()> {
     const REPLACE_IF_EXISTS: u32 = 0x0000_0001;
+    const MAXIMUM_SHARING_RETRIES: usize = 200;
 
     validate_export_file_name(destination_name)?;
     let destination_path = parent.join(destination_name);
@@ -1059,14 +1061,38 @@ fn rename_open_file_in_pinned_directory(
             (&raw mut (*info).file_name).cast::<u16>(),
             destination.len(),
         );
-        SetFileInformationByHandle(
-            ::windows::Win32::Foundation::HANDLE(source.as_raw_handle()),
-            FileRenameInfo,
-            info.cast(),
-            buffer_length,
-        )
     }
-    .map_err(|error| windows_export_test_error("SetFileInformationByHandle rename", error))
+
+    // Antivirus and indexers can briefly open an existing destination without
+    // delete sharing. Retry that one transient result only, with a hard bound.
+    for attempt in 0..=MAXIMUM_SHARING_RETRIES {
+        // SAFETY: the source handle and initialized buffer stay live and
+        // unchanged for every synchronous retry.
+        let result = unsafe {
+            SetFileInformationByHandle(
+                ::windows::Win32::Foundation::HANDLE(source.as_raw_handle()),
+                FileRenameInfo,
+                info.cast(),
+                buffer_length,
+            )
+        };
+        match result {
+            Ok(()) => return Ok(()),
+            Err(error)
+                if attempt < MAXIMUM_SHARING_RETRIES
+                    && error.code() == HRESULT::from_win32(ERROR_SHARING_VIOLATION.0) =>
+            {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err(error) => {
+                return Err(windows_export_test_error(
+                    "SetFileInformationByHandle rename",
+                    error,
+                ));
+            }
+        }
+    }
+    unreachable!("bounded rename loop always returns")
 }
 
 fn validate_export_file_name(name: &OsStr) -> PlatformResult<()> {
