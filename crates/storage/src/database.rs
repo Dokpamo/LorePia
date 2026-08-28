@@ -10831,6 +10831,9 @@ fn harden_private_path(path: &Path, directory: bool) -> CoreResult<()> {
 }
 
 #[cfg(not(unix))]
+// Keep one fallible cross-platform contract so callers cannot accidentally skip
+// a future Windows hardening failure when native ACL enforcement is added.
+#[allow(clippy::unnecessary_wraps)]
 fn harden_private_path(_path: &Path, _directory: bool) -> CoreResult<()> {
     Ok(())
 }
@@ -10873,6 +10876,9 @@ fn harden_owned_tree_permissions(root: &Path) -> CoreResult<()> {
 }
 
 #[cfg(not(unix))]
+// This mirrors the Unix implementation's fallible contract at the shared call
+// site; Windows ACL hardening is intentionally tracked as follow-up work.
+#[allow(clippy::unnecessary_wraps)]
 fn harden_owned_tree_permissions(_root: &Path) -> CoreResult<()> {
     Ok(())
 }

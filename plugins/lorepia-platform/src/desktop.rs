@@ -22,12 +22,14 @@ use sha2::{Digest, Sha256};
 use uuid::{Uuid, Version};
 
 use crate::{
-    CredentialStatus, NativeCaptureStatus, NativeCredential, NativeCredentialEffect,
-    NativeCredentialEffectContext, NativeSensitiveText, PlatformError, PlatformErrorCode,
-    PlatformResult, StagedImport,
+    CredentialStatus, NativeCaptureStatus, NativeCredential, NativeCredentialEffectContext,
+    NativeSensitiveText, PlatformError, PlatformErrorCode, PlatformResult, StagedImport,
     model::NativeSavedContentSource,
     validation::{MAXIMUM_CREDENTIAL_WRITE_BYTES, validate_reference},
 };
+
+#[cfg(any(target_os = "macos", windows))]
+use crate::NativeCredentialEffect;
 
 #[cfg(any(target_os = "macos", windows))]
 use crate::validation::{
