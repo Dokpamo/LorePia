@@ -38,6 +38,8 @@ use crate::validation::{
 mod macos;
 #[cfg(windows)]
 pub(crate) mod windows;
+#[cfg(any(windows, test))]
+mod windows_bound_record;
 
 pub(crate) struct DesktopPlatform<R: Runtime> {
     #[cfg(any(target_os = "macos", windows))]
@@ -1653,10 +1655,6 @@ fn read_windows_bound_record_file_with_limit_and_access(
     maximum_bytes: usize,
     delete_access: bool,
 ) -> PlatformResult<(File, Vec<u8>)> {
-    validate_windows_locator_file(
-        &std::fs::symlink_metadata(path)
-            .map_err(|_| PlatformError::new(PlatformErrorCode::CredentialRecoveryRequired))?,
-    )?;
     let mut options = OpenOptions::new();
     #[cfg(windows)]
     {
@@ -1673,9 +1671,7 @@ fn read_windows_bound_record_file_with_limit_and_access(
         let _ = delete_access;
         options.read(true);
     }
-    let mut file = options
-        .open(path)
-        .map_err(|_| PlatformError::new(PlatformErrorCode::CredentialRecoveryRequired))?;
+    let mut file = windows_bound_record::open(&options, path)?;
     validate_windows_locator_file(
         &file
             .metadata()
