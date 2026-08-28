@@ -74,6 +74,12 @@ def main() -> int:
             ".github/workflows/release.yml unsigned candidate job must not receive signing secrets"
         )
 
+    ci = REPO_ROOT / ".github/workflows/ci.yml"
+    if ci.is_file() and "runner.temp" in ci.read_text(encoding="utf-8"):
+        failures.append(
+            ".github/workflows/ci.yml job environment must not use unavailable runner.temp context"
+        )
+
     if failures:
         for failure in failures:
             print(f"workflow security: {failure}", file=sys.stderr)
