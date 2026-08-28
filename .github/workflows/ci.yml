@@ -148,6 +148,10 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      - name: Windows platform regression tests
+        if: matrix.os == 'windows-latest'
+        run: cargo test -p tauri-plugin-lorepia-platform --lib
+
       - name: Test
         run: cargo test --workspace
 

@@ -633,7 +633,11 @@ impl PinnedExportDirectory {
             .map_err(|_| PlatformError::new(PlatformErrorCode::StorageUnavailable))?;
         self.verify_identity()?;
 
-        let destination_metadata = std::fs::symlink_metadata(self.path.join(destination_name))
+        // The promoted file remains intentionally exclusive. Reopening it for
+        // path metadata can conflict with that handle, so validate its type on
+        // the handle and bind the destination path separately by file ID.
+        let destination_metadata = source
+            .metadata()
             .map_err(|_| PlatformError::new(PlatformErrorCode::StorageUnavailable))?;
         if !destination_metadata.is_file()
             || destination_metadata.file_attributes()
