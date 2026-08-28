@@ -1058,9 +1058,27 @@ fn visit_files(root: &Path, visit: &mut impl FnMut(&Path, &[u8])) {
             match fs::read(&path) {
                 Ok(bytes) => visit(&path, &bytes),
                 Err(error) if error.kind() == ErrorKind::NotFound => {}
+                Err(error) if is_live_owner_lock_sharing_violation(&path, &error) => {}
                 Err(error) => panic!("read {}: {error}", path.display()),
             }
         }
+    }
+}
+
+// Windows deliberately opens the live owner lock with no sharing. Keep that
+// product invariant while allowing this test-only data scan to inspect the rest.
+fn is_live_owner_lock_sharing_violation(path: &Path, error: &std::io::Error) -> bool {
+    #[cfg(windows)]
+    {
+        path.file_name()
+            .is_some_and(|name| name == std::ffi::OsStr::new(".lorepia-owner.lock"))
+            && matches!(error.raw_os_error(), Some(32 | 33))
+    }
+
+    #[cfg(not(windows))]
+    {
+        let _ = (path, error);
+        false
     }
 }
 
