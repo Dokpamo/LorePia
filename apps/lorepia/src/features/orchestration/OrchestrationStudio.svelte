@@ -4,6 +4,7 @@
         ArrowDown,
         ArrowUp,
         BriefcaseBusiness,
+        ChevronRight,
         GripVertical,
         Lightbulb,
         TextAlignStart,
@@ -52,6 +53,7 @@
     import PromptPresetHistory from './PromptPresetHistory.svelte';
     import TaskProfilesPanel from './TaskProfilesPanel.svelte';
     import DetailActionBar from '../../components/detail/DetailActionBar.svelte';
+    import ChoiceField from '../../components/ChoiceField.svelte';
 
     interface Props {
         client?: LorepiaClient &
@@ -66,7 +68,9 @@
         section?: StudioSection | null;
         detailPage?: string | null;
         onOpenSection?: (section: StudioSection) => void;
+        desktop?: boolean;
         showIndexHeader?: boolean;
+        titlebarOverlay?: boolean;
     }
 
     type StudioDetailPage =
@@ -214,7 +218,9 @@
         section = null,
         detailPage = $bindable(null),
         onOpenSection = () => undefined,
+        desktop = false,
         showIndexHeader = true,
+        titlebarOverlay = false,
     }: Props = $props();
     let blockSearch = $state('');
     let blockZoneFilter = $state('all');
@@ -655,6 +661,14 @@
             ),
         });
     }
+
+    function openDesktopDestination(
+        studioSection: StudioSection,
+        destination: StudioDetailPage,
+    ): void {
+        onOpenSection(studioSection);
+        detailPage = destination;
+    }
 </script>
 
 {#snippet tileMark(id: StudioSection)}
@@ -681,42 +695,88 @@
 >
     {#if section === null}
         {#if showIndexHeader}
-            <header class="index-header studio-index-header">
-                <h2 id="orchestration-studio-title">{$translate('studio.title')}</h2>
+            <header
+                class="index-header studio-index-header"
+                data-tauri-drag-region={titlebarOverlay ? '' : undefined}
+            >
+                <h2
+                    id="orchestration-studio-title"
+                    data-tauri-drag-region={titlebarOverlay ? '' : undefined}
+                >
+                    {$translate('studio.title')}
+                </h2>
             </header>
         {/if}
 
-        <div class="studio-home">
-            <ul
-                class="setting-list studio-destination-list"
-                aria-label={$translate('studio.tools.label')}
-            >
+        {#if desktop}
+            <div class="studio-desktop-dashboard" aria-label={$translate('studio.tools.label')}>
                 {#each STUDIO_SECTIONS as id (id)}
-                    <li>
-                        <button
-                            class="setting-row studio-destination-row"
-                            type="button"
-                            onclick={() => onOpenSection(id)}
-                        >
-                            <span class="setting-icon" aria-hidden="true">
+                    <section class="studio-desktop-group">
+                        <header class="studio-desktop-group-header">
+                            <span class="studio-desktop-group-icon" aria-hidden="true">
                                 {@render tileMark(id)}
                             </span>
-                            <span class="setting-content">
-                                <span class="setting-copy">
-                                    <strong>
-                                        {$translate(
-                                            id === 'prompt'
-                                                ? 'studio.feature.prompt.title'
-                                                : `studio.section.${id}.title`,
-                                        )}
-                                    </strong>
-                                </span>
+                            <span>
+                                <strong>
+                                    {$translate(
+                                        id === 'prompt'
+                                            ? 'studio.feature.prompt.title'
+                                            : `studio.section.${id}.title`,
+                                    )}
+                                </strong>
+                                <small>{$translate(`studio.section.${id}.hint`)}</small>
                             </span>
-                        </button>
-                    </li>
+                        </header>
+                        <div class="studio-desktop-tools">
+                            {#each STUDIO_DETAIL_DESTINATIONS[id] as destination (destination.id)}
+                                <button
+                                    type="button"
+                                    onclick={() => openDesktopDestination(id, destination.id)}
+                                >
+                                    <span>
+                                        <strong>{destination.title}</strong>
+                                        <small>{destination.description}</small>
+                                    </span>
+                                    <ChevronRight aria-hidden="true" />
+                                </button>
+                            {/each}
+                        </div>
+                    </section>
                 {/each}
-            </ul>
-        </div>
+            </div>
+        {:else}
+            <div class="studio-home">
+                <ul
+                    class="setting-list studio-destination-list"
+                    aria-label={$translate('studio.tools.label')}
+                >
+                    {#each STUDIO_SECTIONS as id (id)}
+                        <li>
+                            <button
+                                class="setting-row studio-destination-row"
+                                type="button"
+                                onclick={() => onOpenSection(id)}
+                            >
+                                <span class="setting-icon" aria-hidden="true">
+                                    {@render tileMark(id)}
+                                </span>
+                                <span class="setting-content">
+                                    <span class="setting-copy">
+                                        <strong>
+                                            {$translate(
+                                                id === 'prompt'
+                                                    ? 'studio.feature.prompt.title'
+                                                    : `studio.section.${id}.title`,
+                                            )}
+                                        </strong>
+                                    </span>
+                                </span>
+                            </button>
+                        </li>
+                    {/each}
+                </ul>
+            </div>
+        {/if}
     {/if}
 
     {#if orchestrationState.phase === 'loading'}
@@ -798,23 +858,31 @@
                                         placeholder="이름, 종류, 구역, 출처"
                                     />
                                 </label>
-                                <label>
-                                    <span>블록 구역 필터</span>
-                                    <select bind:value={blockZoneFilter}>
-                                        <option value="all">모든 구역</option>
-                                        {#each blockZoneOverview as [zone] (zone)}
-                                            <option value={zone}>{zone}</option>
-                                        {/each}
-                                    </select>
-                                </label>
-                                <label>
-                                    <span>블록 활성 상태 필터</span>
-                                    <select bind:value={blockStatusFilter}>
-                                        <option value="all">전체 상태</option>
-                                        <option value="enabled">사용 중</option>
-                                        <option value="disabled">꺼짐</option>
-                                    </select>
-                                </label>
+                                <ChoiceField
+                                    id="prompt-block-zone-filter"
+                                    label="블록 구역 필터"
+                                    value={blockZoneFilter}
+                                    options={[
+                                        { value: 'all', label: '모든 구역' },
+                                        ...blockZoneOverview.map(([zone]) => ({
+                                            value: zone,
+                                            label: zone,
+                                        })),
+                                    ]}
+                                    onSelect={(value: string) => (blockZoneFilter = value)}
+                                />
+                                <ChoiceField
+                                    id="prompt-block-status-filter"
+                                    label="블록 활성 상태 필터"
+                                    value={blockStatusFilter}
+                                    options={[
+                                        { value: 'all', label: '전체 상태' },
+                                        { value: 'enabled', label: '사용 중' },
+                                        { value: 'disabled', label: '꺼짐' },
+                                    ]}
+                                    onSelect={(value) =>
+                                        (blockStatusFilter = value as typeof blockStatusFilter)}
+                                />
                                 <button
                                     type="button"
                                     disabled={blockSearch === '' &&
@@ -1073,101 +1141,92 @@
                                                                             />
                                                                             <span>블록 사용</span>
                                                                         </label>
-                                                                        <label>
-                                                                            <span>역할</span>
-                                                                            <select
-                                                                                value={editableBlock.role_hint}
-                                                                                onchange={(event) =>
-                                                                                    controller.stageEditablePromptBlock(
-                                                                                        editableBlock.id,
-                                                                                        {
-                                                                                            role_hint:
-                                                                                                event
-                                                                                                    .currentTarget
-                                                                                                    .value as CreatorPromptBlockDocumentDto['role_hint'],
-                                                                                        },
-                                                                                    )}
-                                                                            >
-                                                                                <option
-                                                                                    value="system"
-                                                                                    >system</option
-                                                                                >
-                                                                                <option
-                                                                                    value="developer"
-                                                                                    >developer</option
-                                                                                >
-                                                                                <option value="user"
-                                                                                    >user</option
-                                                                                >
-                                                                                <option
-                                                                                    value="assistant"
-                                                                                    >assistant</option
-                                                                                >
-                                                                                <option
-                                                                                    value="provider_default"
-                                                                                    >provider
-                                                                                    default</option
-                                                                                >
-                                                                            </select>
-                                                                        </label>
-                                                                        <label>
-                                                                            <span>삽입 구역</span>
-                                                                            <select
-                                                                                value={editableBlock.placement_zone}
-                                                                                onchange={(event) =>
-                                                                                    controller.stageEditablePromptBlock(
-                                                                                        editableBlock.id,
-                                                                                        {
-                                                                                            placement_zone:
-                                                                                                event
-                                                                                                    .currentTarget
-                                                                                                    .value as CreatorPromptBlockPlacementZone,
-                                                                                        },
-                                                                                    )}
-                                                                            >
-                                                                                <option
-                                                                                    value="preset_instruction"
-                                                                                    >preset
-                                                                                    instruction</option
-                                                                                >
-                                                                                <option
-                                                                                    value="character_context"
-                                                                                    >character
-                                                                                    context</option
-                                                                                >
-                                                                                <option
-                                                                                    value="retrieved_context"
-                                                                                    >retrieved
-                                                                                    context</option
-                                                                                >
-                                                                                <option
-                                                                                    value="older_history"
-                                                                                    >older history</option
-                                                                                >
-                                                                                <option
-                                                                                    value="recent_enhancement"
-                                                                                    >recent
-                                                                                    enhancement</option
-                                                                                >
-                                                                                <option
-                                                                                    value="recent_history"
-                                                                                    >recent history</option
-                                                                                >
-                                                                                <option
-                                                                                    value="post_history"
-                                                                                    >post history</option
-                                                                                >
-                                                                                <option
-                                                                                    value="latest_user"
-                                                                                    >latest user</option
-                                                                                >
-                                                                                <option
-                                                                                    value="assistant_prefill"
-                                                                                    >assistant
-                                                                                    prefill</option
-                                                                                >
-                                                                            </select>
-                                                                        </label>
+                                                                        <ChoiceField
+                                                                            id={`prompt-block-role-${editableBlock.id}`}
+                                                                            label="역할"
+                                                                            value={editableBlock.role_hint}
+                                                                            options={[
+                                                                                {
+                                                                                    value: 'system',
+                                                                                    label: 'system',
+                                                                                },
+                                                                                {
+                                                                                    value: 'developer',
+                                                                                    label: 'developer',
+                                                                                },
+                                                                                {
+                                                                                    value: 'user',
+                                                                                    label: 'user',
+                                                                                },
+                                                                                {
+                                                                                    value: 'assistant',
+                                                                                    label: 'assistant',
+                                                                                },
+                                                                                {
+                                                                                    value: 'provider_default',
+                                                                                    label: 'provider default',
+                                                                                },
+                                                                            ]}
+                                                                            onSelect={(value) =>
+                                                                                controller.stageEditablePromptBlock(
+                                                                                    editableBlock.id,
+                                                                                    {
+                                                                                        role_hint:
+                                                                                            value as CreatorPromptBlockDocumentDto['role_hint'],
+                                                                                    },
+                                                                                )}
+                                                                        />
+                                                                        <ChoiceField
+                                                                            id={`prompt-block-placement-${editableBlock.id}`}
+                                                                            label="삽입 구역"
+                                                                            value={editableBlock.placement_zone}
+                                                                            options={[
+                                                                                {
+                                                                                    value: 'preset_instruction',
+                                                                                    label: 'preset instruction',
+                                                                                },
+                                                                                {
+                                                                                    value: 'character_context',
+                                                                                    label: 'character context',
+                                                                                },
+                                                                                {
+                                                                                    value: 'retrieved_context',
+                                                                                    label: 'retrieved context',
+                                                                                },
+                                                                                {
+                                                                                    value: 'older_history',
+                                                                                    label: 'older history',
+                                                                                },
+                                                                                {
+                                                                                    value: 'recent_enhancement',
+                                                                                    label: 'recent enhancement',
+                                                                                },
+                                                                                {
+                                                                                    value: 'recent_history',
+                                                                                    label: 'recent history',
+                                                                                },
+                                                                                {
+                                                                                    value: 'post_history',
+                                                                                    label: 'post history',
+                                                                                },
+                                                                                {
+                                                                                    value: 'latest_user',
+                                                                                    label: 'latest user',
+                                                                                },
+                                                                                {
+                                                                                    value: 'assistant_prefill',
+                                                                                    label: 'assistant prefill',
+                                                                                },
+                                                                            ]}
+                                                                            onSelect={(value) =>
+                                                                                controller.stageEditablePromptBlock(
+                                                                                    editableBlock.id,
+                                                                                    {
+                                                                                        placement_zone:
+                                                                                            value as CreatorPromptBlockPlacementZone,
+                                                                                    },
+                                                                                )}
+                                                                        />
                                                                         <label>
                                                                             <span>우선순위</span>
                                                                             <input
@@ -1276,86 +1335,72 @@
                                                                                     )}
                                                                             />
                                                                         </label>
-                                                                        <label>
-                                                                            <span
-                                                                                >오버플로 정책</span
-                                                                            >
-                                                                            <select
-                                                                                value={editableBlock.overflow_policy}
-                                                                                onchange={(event) =>
-                                                                                    controller.stageEditablePromptBlock(
-                                                                                        editableBlock.id,
-                                                                                        {
-                                                                                            overflow_policy:
-                                                                                                event
-                                                                                                    .currentTarget
-                                                                                                    .value as CreatorPromptBlockDocumentDto['overflow_policy'],
-                                                                                        },
-                                                                                    )}
-                                                                            >
-                                                                                <option
-                                                                                    value="reject"
-                                                                                    >reject</option
-                                                                                >
-                                                                                <option
-                                                                                    value="drop_block"
-                                                                                    >drop block</option
-                                                                                >
-                                                                                <option
-                                                                                    value="trim_head"
-                                                                                    >trim head</option
-                                                                                >
-                                                                                <option
-                                                                                    value="trim_tail"
-                                                                                    >trim tail</option
-                                                                                >
-                                                                                <option
-                                                                                    value="keep_latest_items"
-                                                                                    >keep latest
-                                                                                    items</option
-                                                                                >
-                                                                                <option
-                                                                                    value="summarize"
-                                                                                    >summarize</option
-                                                                                >
-                                                                                <option
-                                                                                    value="reduce_knowledge_entries"
-                                                                                    >reduce
-                                                                                    knowledge
-                                                                                    entries</option
-                                                                                >
-                                                                            </select>
-                                                                        </label>
-                                                                        <label>
-                                                                            <span
-                                                                                >내부 메시지 병합</span
-                                                                            >
-                                                                            <select
-                                                                                value={editableBlock.merge_policy}
-                                                                                onchange={(event) =>
-                                                                                    controller.stageEditablePromptBlock(
-                                                                                        editableBlock.id,
-                                                                                        {
-                                                                                            merge_policy:
-                                                                                                event
-                                                                                                    .currentTarget
-                                                                                                    .value as CreatorPromptBlockDocumentDto['merge_policy'],
-                                                                                        },
-                                                                                    )}
-                                                                            >
-                                                                                <option
-                                                                                    value="separate_message"
-                                                                                    >separate
-                                                                                    message</option
-                                                                                >
-                                                                                <option
-                                                                                    value="merge_with_previous_same_role"
-                                                                                    >merge with
-                                                                                    previous same
-                                                                                    role</option
-                                                                                >
-                                                                            </select>
-                                                                        </label>
+                                                                        <ChoiceField
+                                                                            id={`prompt-block-overflow-${editableBlock.id}`}
+                                                                            label="오버플로 정책"
+                                                                            value={editableBlock.overflow_policy}
+                                                                            options={[
+                                                                                {
+                                                                                    value: 'reject',
+                                                                                    label: 'reject',
+                                                                                },
+                                                                                {
+                                                                                    value: 'drop_block',
+                                                                                    label: 'drop block',
+                                                                                },
+                                                                                {
+                                                                                    value: 'trim_head',
+                                                                                    label: 'trim head',
+                                                                                },
+                                                                                {
+                                                                                    value: 'trim_tail',
+                                                                                    label: 'trim tail',
+                                                                                },
+                                                                                {
+                                                                                    value: 'keep_latest_items',
+                                                                                    label: 'keep latest items',
+                                                                                },
+                                                                                {
+                                                                                    value: 'summarize',
+                                                                                    label: 'summarize',
+                                                                                },
+                                                                                {
+                                                                                    value: 'reduce_knowledge_entries',
+                                                                                    label: 'reduce knowledge entries',
+                                                                                },
+                                                                            ]}
+                                                                            onSelect={(value) =>
+                                                                                controller.stageEditablePromptBlock(
+                                                                                    editableBlock.id,
+                                                                                    {
+                                                                                        overflow_policy:
+                                                                                            value as CreatorPromptBlockDocumentDto['overflow_policy'],
+                                                                                    },
+                                                                                )}
+                                                                        />
+                                                                        <ChoiceField
+                                                                            id={`prompt-block-merge-${editableBlock.id}`}
+                                                                            label="내부 메시지 병합"
+                                                                            value={editableBlock.merge_policy}
+                                                                            options={[
+                                                                                {
+                                                                                    value: 'separate_message',
+                                                                                    label: 'separate message',
+                                                                                },
+                                                                                {
+                                                                                    value: 'merge_with_previous_same_role',
+                                                                                    label: 'merge with previous same role',
+                                                                                },
+                                                                            ]}
+                                                                            onSelect={(value) =>
+                                                                                controller.stageEditablePromptBlock(
+                                                                                    editableBlock.id,
+                                                                                    {
+                                                                                        merge_policy:
+                                                                                            value as CreatorPromptBlockDocumentDto['merge_policy'],
+                                                                                    },
+                                                                                )}
+                                                                        />
                                                                     </div>
 
                                                                     {#each BLOCK_JSON_FIELDS as [field, label] (`${editableBlock.id}:${field}`)}
@@ -1422,165 +1467,140 @@
                                                                             >
                                                                         </label>
                                                                         {#if editableCache}
-                                                                            <label>
-                                                                                <span
-                                                                                    >캐시 모드</span
-                                                                                >
-                                                                                <select
-                                                                                    value={editableCache.mode}
-                                                                                    onchange={(
-                                                                                        event,
-                                                                                    ) =>
-                                                                                        controller.stageEditablePromptCacheBoundary(
-                                                                                            editableBlock.id,
-                                                                                            {
-                                                                                                mode: event
-                                                                                                    .currentTarget
-                                                                                                    .value as typeof editableCache.mode,
-                                                                                            },
-                                                                                        )}
-                                                                                >
-                                                                                    <option
-                                                                                        value="automatic"
-                                                                                        >automatic</option
-                                                                                    >
-                                                                                    <option
-                                                                                        value="explicit"
-                                                                                        >explicit</option
-                                                                                    >
-                                                                                    <option
-                                                                                        value="disabled"
-                                                                                        >disabled</option
-                                                                                    >
-                                                                                </select>
-                                                                            </label>
-                                                                            <label>
-                                                                                <span>캐시 TTL</span
-                                                                                >
-                                                                                <select
-                                                                                    value={editableCache.ttl}
-                                                                                    onchange={(
-                                                                                        event,
-                                                                                    ) =>
-                                                                                        controller.stageEditablePromptCacheBoundary(
-                                                                                            editableBlock.id,
-                                                                                            {
-                                                                                                ttl: event
-                                                                                                    .currentTarget
-                                                                                                    .value as typeof editableCache.ttl,
-                                                                                            },
-                                                                                        )}
-                                                                                >
-                                                                                    <option
-                                                                                        value="provider_default"
-                                                                                        >provider
-                                                                                        default</option
-                                                                                    >
-                                                                                    <option
-                                                                                        value="short"
-                                                                                        >short</option
-                                                                                    >
-                                                                                    <option
-                                                                                        value="long"
-                                                                                        >long</option
-                                                                                    >
-                                                                                </select>
-                                                                            </label>
-                                                                            <label>
-                                                                                <span
-                                                                                    >역할 필터</span
-                                                                                >
-                                                                                <select
+                                                                            <ChoiceField
+                                                                                id={`prompt-cache-mode-${editableBlock.id}`}
+                                                                                label="캐시 모드"
+                                                                                value={editableCache.mode}
+                                                                                options={[
+                                                                                    {
+                                                                                        value: 'automatic',
+                                                                                        label: 'automatic',
+                                                                                    },
+                                                                                    {
+                                                                                        value: 'explicit',
+                                                                                        label: 'explicit',
+                                                                                    },
+                                                                                    {
+                                                                                        value: 'disabled',
+                                                                                        label: 'disabled',
+                                                                                    },
+                                                                                ]}
+                                                                                onSelect={(value) =>
+                                                                                    controller.stageEditablePromptCacheBoundary(
+                                                                                        editableBlock.id,
+                                                                                        {
+                                                                                            mode: value as typeof editableCache.mode,
+                                                                                        },
+                                                                                    )}
+                                                                            />
+                                                                            <ChoiceField
+                                                                                id={`prompt-cache-ttl-${editableBlock.id}`}
+                                                                                label="캐시 TTL"
+                                                                                value={editableCache.ttl}
+                                                                                options={[
+                                                                                    {
+                                                                                        value: 'provider_default',
+                                                                                        label: 'provider default',
+                                                                                    },
+                                                                                    {
+                                                                                        value: 'short',
+                                                                                        label: 'short',
+                                                                                    },
+                                                                                    {
+                                                                                        value: 'long',
+                                                                                        label: 'long',
+                                                                                    },
+                                                                                ]}
+                                                                                onSelect={(value) =>
+                                                                                    controller.stageEditablePromptCacheBoundary(
+                                                                                        editableBlock.id,
+                                                                                        {
+                                                                                            ttl: value as typeof editableCache.ttl,
+                                                                                        },
+                                                                                    )}
+                                                                            />
+                                                                            <ChoiceField
+                                                                                id={`prompt-cache-role-filter-${editableBlock.id}`}
+                                                                                label="역할 필터"
+                                                                                value={editableCache
+                                                                                    .role_filter
+                                                                                    .kind}
+                                                                                options={[
+                                                                                    {
+                                                                                        value: 'all',
+                                                                                        label: 'all',
+                                                                                    },
+                                                                                    {
+                                                                                        value: 'system_like',
+                                                                                        label: 'system like',
+                                                                                    },
+                                                                                    {
+                                                                                        value: 'exact_role',
+                                                                                        label: 'exact role',
+                                                                                    },
+                                                                                ]}
+                                                                                onSelect={(value) =>
+                                                                                    controller.stageEditablePromptCacheBoundary(
+                                                                                        editableBlock.id,
+                                                                                        {
+                                                                                            role_filter:
+                                                                                                value ===
+                                                                                                'exact_role'
+                                                                                                    ? {
+                                                                                                          kind: 'exact_role',
+                                                                                                          role: 'system',
+                                                                                                      }
+                                                                                                    : {
+                                                                                                          kind: value as
+                                                                                                              | 'all'
+                                                                                                              | 'system_like',
+                                                                                                      },
+                                                                                        },
+                                                                                    )}
+                                                                            />
+                                                                            {#if editableCache.role_filter.kind === 'exact_role'}
+                                                                                <ChoiceField
+                                                                                    id={`prompt-cache-exact-role-${editableBlock.id}`}
+                                                                                    label="정확한 역할"
                                                                                     value={editableCache
                                                                                         .role_filter
-                                                                                        .kind}
-                                                                                    onchange={(
-                                                                                        event,
+                                                                                        .role}
+                                                                                    options={[
+                                                                                        {
+                                                                                            value: 'system',
+                                                                                            label: 'system',
+                                                                                        },
+                                                                                        {
+                                                                                            value: 'developer',
+                                                                                            label: 'developer',
+                                                                                        },
+                                                                                        {
+                                                                                            value: 'user',
+                                                                                            label: 'user',
+                                                                                        },
+                                                                                        {
+                                                                                            value: 'assistant',
+                                                                                            label: 'assistant',
+                                                                                        },
+                                                                                        {
+                                                                                            value: 'provider_default',
+                                                                                            label: 'provider default',
+                                                                                        },
+                                                                                    ]}
+                                                                                    onSelect={(
+                                                                                        value,
                                                                                     ) =>
                                                                                         controller.stageEditablePromptCacheBoundary(
                                                                                             editableBlock.id,
                                                                                             {
                                                                                                 role_filter:
-                                                                                                    event
-                                                                                                        .currentTarget
-                                                                                                        .value ===
-                                                                                                    'exact_role'
-                                                                                                        ? {
-                                                                                                              kind: 'exact_role',
-                                                                                                              role: 'system',
-                                                                                                          }
-                                                                                                        : {
-                                                                                                              kind: event
-                                                                                                                  .currentTarget
-                                                                                                                  .value as
-                                                                                                                  | 'all'
-                                                                                                                  | 'system_like',
-                                                                                                          },
+                                                                                                    {
+                                                                                                        kind: 'exact_role',
+                                                                                                        role: value as CreatorPromptBlockDocumentDto['role_hint'],
+                                                                                                    },
                                                                                             },
                                                                                         )}
-                                                                                >
-                                                                                    <option
-                                                                                        value="all"
-                                                                                        >all</option
-                                                                                    >
-                                                                                    <option
-                                                                                        value="system_like"
-                                                                                        >system like</option
-                                                                                    >
-                                                                                    <option
-                                                                                        value="exact_role"
-                                                                                        >exact role</option
-                                                                                    >
-                                                                                </select>
-                                                                            </label>
-                                                                            {#if editableCache.role_filter.kind === 'exact_role'}
-                                                                                <label>
-                                                                                    <span
-                                                                                        >정확한 역할</span
-                                                                                    >
-                                                                                    <select
-                                                                                        value={editableCache
-                                                                                            .role_filter
-                                                                                            .role}
-                                                                                        onchange={(
-                                                                                            event,
-                                                                                        ) =>
-                                                                                            controller.stageEditablePromptCacheBoundary(
-                                                                                                editableBlock.id,
-                                                                                                {
-                                                                                                    role_filter:
-                                                                                                        {
-                                                                                                            kind: 'exact_role',
-                                                                                                            role: event
-                                                                                                                .currentTarget
-                                                                                                                .value as CreatorPromptBlockDocumentDto['role_hint'],
-                                                                                                        },
-                                                                                                },
-                                                                                            )}
-                                                                                    >
-                                                                                        <option
-                                                                                            value="system"
-                                                                                            >system</option
-                                                                                        >
-                                                                                        <option
-                                                                                            value="developer"
-                                                                                            >developer</option
-                                                                                        >
-                                                                                        <option
-                                                                                            value="user"
-                                                                                            >user</option
-                                                                                        >
-                                                                                        <option
-                                                                                            value="assistant"
-                                                                                            >assistant</option
-                                                                                        >
-                                                                                        <option
-                                                                                            value="provider_default"
-                                                                                            >provider
-                                                                                            default</option
-                                                                                        >
-                                                                                    </select>
-                                                                                </label>
+                                                                                />
                                                                             {/if}
                                                                         {/if}
                                                                     </div>
@@ -1821,6 +1841,7 @@
                         {#if appState.memory_supervisor.status !== null}
                             <p
                                 class="bounded-note"
+                                class:error={appState.memory_supervisor.status.phase === 'failed'}
                                 role={appState.memory_supervisor.status.phase === 'failed'
                                     ? 'alert'
                                     : 'status'}
@@ -1840,7 +1861,7 @@
                             </p>
                         {/if}
                         {#if appState.memory_supervisor.error !== null}
-                            <p class="bounded-note" role="status">
+                            <p class="bounded-note error" role="alert">
                                 {appState.memory_supervisor.error}
                             </p>
                         {/if}
@@ -3338,21 +3359,19 @@
                                     placeholder="블록, 역할, 배치, 파라미터, 구조 diff"
                                 />
                             </label>
-                            <label>
-                                <span>표시 필터</span>
-                                <select
-                                    value={expertFilter}
-                                    onchange={(event) =>
-                                        (expertFilter = event.currentTarget
-                                            .value as typeof expertFilter)}
-                                >
-                                    <option value="all">전체</option>
-                                    <option value="messages">최종 메시지 구조</option>
-                                    <option value="provider">제공자 변환 구조</option>
-                                    <option value="parameters">적용 파라미터</option>
-                                    <option value="diff">역할·배치 diff</option>
-                                </select>
-                            </label>
+                            <ChoiceField
+                                id="expert-preview-filter"
+                                label="표시 필터"
+                                value={expertFilter}
+                                options={[
+                                    { value: 'all', label: '전체' },
+                                    { value: 'messages', label: '최종 메시지 구조' },
+                                    { value: 'provider', label: '제공자 변환 구조' },
+                                    { value: 'parameters', label: '적용 파라미터' },
+                                    { value: 'diff', label: '역할·배치 diff' },
+                                ]}
+                                onSelect={(value) => (expertFilter = value as typeof expertFilter)}
+                            />
                         </div>
                         <p class="bounded-note" role="note">
                             비공개 프롬프트 본문과 원시 제공자 요청은 Rust 내부에만 유지됩니다. 이
@@ -3797,6 +3816,146 @@
         font-size: 1.5rem;
     }
 
+    :global(.app-shell[data-layout='desktop']) .studio-index-header {
+        min-height: 34px;
+    }
+
+    :global(.app-shell[data-layout='desktop']) .studio-index-header h2 {
+        font-size: 28px;
+        font-weight: 600;
+        line-height: 1.2;
+        letter-spacing: -0.025em;
+    }
+
+    :global(.app-shell[data-layout='desktop']) .orchestration-studio.index {
+        gap: 24px;
+    }
+
+    .studio-desktop-dashboard {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        align-items: start;
+        gap: 12px;
+    }
+
+    .studio-desktop-group {
+        min-width: 0;
+        overflow: hidden;
+        border: 1px solid var(--desktop-divider);
+        border-radius: 14px;
+        background: var(--surface-raised);
+    }
+
+    .studio-desktop-group-header {
+        display: flex;
+        min-height: 64px;
+        align-items: center;
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--desktop-divider);
+        gap: 11px;
+    }
+
+    .studio-desktop-group-header > span:last-child {
+        display: grid;
+        min-width: 0;
+        gap: 3px;
+    }
+
+    .studio-desktop-group-header strong,
+    .studio-desktop-tools strong {
+        color: var(--ink);
+        font-size: 13px;
+        font-weight: 620;
+        line-height: 1.25;
+    }
+
+    .studio-desktop-group-header small,
+    .studio-desktop-tools small {
+        overflow: hidden;
+        color: var(--ink-muted);
+        font-size: 11px;
+        font-weight: 500;
+        line-height: 1.35;
+        text-overflow: ellipsis;
+    }
+
+    .studio-desktop-group-header small {
+        white-space: nowrap;
+    }
+
+    .studio-desktop-group-icon {
+        display: grid;
+        width: 30px;
+        height: 30px;
+        flex: none;
+        border-radius: 8px;
+        background: var(--surface-sunken);
+        color: var(--ink);
+        place-items: center;
+    }
+
+    .studio-desktop-group-icon :global(svg) {
+        width: 16px;
+        height: 16px;
+        stroke-width: 1.8;
+    }
+
+    .studio-desktop-tools {
+        display: grid;
+    }
+
+    .studio-desktop-tools button {
+        display: flex;
+        min-width: 0;
+        min-height: 52px;
+        align-items: center;
+        justify-content: space-between;
+        padding: 9px 12px 9px 14px;
+        border: 0;
+        border-bottom: 1px solid var(--desktop-divider);
+        border-radius: 0;
+        background: transparent;
+        gap: 10px;
+        text-align: left;
+    }
+
+    .studio-desktop-tools button:last-child {
+        border-bottom: 0;
+    }
+
+    .studio-desktop-tools button > span {
+        display: grid;
+        min-width: 0;
+        gap: 2px;
+    }
+
+    .studio-desktop-tools button small {
+        display: block;
+        white-space: nowrap;
+    }
+
+    .studio-desktop-tools button > :global(svg) {
+        width: 15px;
+        height: 15px;
+        flex: none;
+        color: var(--ink-muted);
+        stroke-width: 1.7;
+    }
+
+    .studio-desktop-tools button:hover {
+        background: var(--surface-sunken);
+    }
+
+    .studio-desktop-tools button:focus-visible {
+        outline-offset: -3px;
+    }
+
+    @media (max-width: 1120px) {
+        .studio-desktop-dashboard {
+            grid-template-columns: minmax(0, 1fr);
+        }
+    }
+
     .studio-home {
         display: grid;
     }
@@ -4062,7 +4221,7 @@
     }
 
     .orchestration-studio
-        :is(input[type='text'], input[type='search'], input[type='number'], select, textarea) {
+        :is(input[type='text'], input[type='search'], input[type='number'], textarea) {
         width: 100%;
         min-width: 0;
         box-sizing: border-box;
@@ -4072,7 +4231,7 @@
         -webkit-appearance: none;
         appearance: none;
         background: color-mix(in srgb, var(--surface-sunken) 26%, var(--surface-raised));
-        box-shadow: inset 0 1px 2px rgb(16 18 24 / 3%);
+        box-shadow: var(--control-inset-shadow);
         caret-color: var(--accent);
         color: var(--ink);
         font-size: var(--detail-support-type);
@@ -4082,8 +4241,7 @@
             box-shadow 140ms ease;
     }
 
-    .orchestration-studio
-        :is(input[type='text'], input[type='search'], input[type='number'], select) {
+    .orchestration-studio :is(input[type='text'], input[type='search'], input[type='number']) {
         min-height: clamp(48px, 13.73vw, 60px);
     }
 
@@ -4093,38 +4251,23 @@
     }
 
     .orchestration-studio
-        :is(
-            input[type='text'],
-            input[type='search'],
-            input[type='number'],
-            select,
-            textarea
-        ):hover:not(:focus, :disabled) {
+        :is(input[type='text'], input[type='search'], input[type='number'], textarea):hover:not(
+            :focus,
+            :disabled
+        ) {
         border-color: var(--line);
     }
 
     .orchestration-studio
-        :is(
-            input[type='text'],
-            input[type='search'],
-            input[type='number'],
-            select,
-            textarea
-        ):focus {
+        :is(input[type='text'], input[type='search'], input[type='number'], textarea):focus {
         border-color: var(--accent);
         outline: none;
     }
 
     .orchestration-studio
-        :is(
-            input[type='text'],
-            input[type='search'],
-            input[type='number'],
-            select,
-            textarea
-        ):disabled {
+        :is(input[type='text'], input[type='search'], input[type='number'], textarea):disabled {
         cursor: not-allowed;
-        opacity: 0.55;
+        opacity: var(--disabled-opacity);
     }
 
     .studio-status,
@@ -4138,12 +4281,25 @@
     }
 
     .studio-status.error,
+    .bounded-note.error,
     .conflict-list {
-        color: var(--danger);
+        border-color: var(--status-error-border);
+        color: var(--status-error-fg);
+        background: var(--status-error-bg);
     }
 
     .bounded-note {
-        color: var(--warning);
+        border: 1px solid var(--status-warning-border);
+        color: var(--status-warning-fg);
+        background: var(--status-warning-bg);
+    }
+
+    .drawer-status.error {
+        padding: 10px 12px;
+        border: 1px solid var(--status-error-border);
+        border-radius: var(--radius-sm);
+        color: var(--status-error-fg);
+        background: var(--status-error-bg);
     }
 
     .search-field,
@@ -4487,7 +4643,7 @@
     .template-slot-row > button {
         justify-self: end;
         border: 0;
-        color: #ff0000;
+        color: var(--status-error-fg);
         background: transparent;
         box-shadow: none;
     }

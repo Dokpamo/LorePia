@@ -62,7 +62,7 @@
     }
 
     .detail-action-bar :global(.detail-action--destructive) {
-        color: #ff0000;
+        color: var(--status-error-fg);
     }
 
     .detail-action-bar :global(.detail-action--borderless) {
@@ -87,6 +87,55 @@
         transition:
             left 300ms cubic-bezier(0.22, 0.61, 0.36, 1),
             width 300ms cubic-bezier(0.22, 0.61, 0.36, 1);
+    }
+
+    :global(.app-shell[data-layout='desktop'] .provider-pane) .detail-action-bar:not(.fixed) {
+        right: var(--settings-gutter);
+        bottom: 20px;
+        left: auto;
+        width: auto;
+        height: 32px;
+        min-height: 32px;
+        gap: 6px;
+        transform: none;
+    }
+
+    :global(.app-shell[data-layout='desktop'] .provider-pane)
+        .detail-action-bar:not(.fixed)
+        :global(.detail-action) {
+        width: auto;
+        min-width: 92px;
+        min-height: 32px;
+        flex: 0 0 auto;
+        padding-inline: 12px;
+        border-radius: var(--radius-sm);
+        box-shadow: none;
+        font-size: 11px;
+        font-weight: 600;
+    }
+
+    :global(.app-shell[data-layout='desktop']) .detail-action-bar.fixed {
+        right: max(20px, calc((100vw - var(--sidebar) - var(--settings)) / 2));
+        bottom: 16px;
+        left: auto;
+        width: auto;
+        height: 34px;
+        min-height: 34px;
+        gap: 6px;
+        transform: none;
+        transition: none;
+    }
+
+    :global(.app-shell[data-layout='desktop']) .detail-action-bar.fixed :global(.detail-action) {
+        width: auto;
+        min-width: 112px;
+        min-height: 34px;
+        flex: 0 0 auto;
+        padding-inline: 14px;
+        border-radius: var(--radius-sm);
+        box-shadow: none;
+        font-size: 11px;
+        font-weight: 620;
     }
 
     @media (prefers-reduced-motion: reduce) {

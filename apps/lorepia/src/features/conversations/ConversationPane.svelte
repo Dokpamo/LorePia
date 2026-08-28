@@ -1,6 +1,7 @@
 <script lang="ts">
     import { MessageSquarePlus, Search, X } from '@lucide/svelte';
     import { onMount, tick } from 'svelte';
+    import ChoiceField from '../../components/ChoiceField.svelte';
     import { tr } from '../../lib/i18n';
     import type { LorepiaAppState, LorepiaAppController } from '../../app/app-controller';
     import type { CharacterDto, ConversationDto, LorepiaClient } from '../../lib/ipc/contracts';
@@ -288,29 +289,26 @@
                 (greeting) => greeting.enabled,
             )}
             <div class="greeting-picker">
-                <label for="conversation-greeting-selector"
-                    >{$tr('conversation.greeting.label')}</label
-                >
-                <select
+                <ChoiceField
                     id="conversation-greeting-selector"
+                    label={$tr('conversation.greeting.label')}
                     value={appState.greeting_catalog.selected_greeting_id ?? ''}
+                    options={enabledGreetings.length === 0
+                        ? [{ value: '', label: $tr('conversation.greeting.none') }]
+                        : appState.greeting_catalog.value.greetings.map((greeting) => ({
+                              value: greeting.id,
+                              disabled: !greeting.enabled,
+                              label: `${greeting.id} · ${
+                                  greeting.kind === 'default'
+                                      ? $tr('conversation.greeting.default')
+                                      : $tr('conversation.greeting.alternate')
+                              }${greeting.enabled ? '' : $tr('conversation.greeting.disabled')}`,
+                          }))}
                     disabled={enabledGreetings.length === 0}
-                    onchange={(event) => controller.selectGreeting(event.currentTarget.value)}
-                >
-                    {#if enabledGreetings.length === 0}
-                        <option value="">{$tr('conversation.greeting.none')}</option>
-                    {/if}
-                    {#each appState.greeting_catalog.value.greetings as greeting (greeting.id)}
-                        <option value={greeting.id} disabled={!greeting.enabled}>
-                            {greeting.id} · {greeting.kind === 'default'
-                                ? $tr('conversation.greeting.default')
-                                : $tr('conversation.greeting.alternate')}{greeting.enabled
-                                ? ''
-                                : $tr('conversation.greeting.disabled')}
-                        </option>
-                    {/each}
-                </select>
-                <small>{$tr('conversation.greeting.note')}</small>
+                    onSelect={(value: string) => controller.selectGreeting(value)}
+                    hint={$tr('conversation.greeting.note')}
+                    className="greeting-choice"
+                />
             </div>
         {/if}
     {/if}
@@ -733,22 +731,10 @@
         border-bottom: 1px solid var(--line);
     }
 
-    .greeting-picker label {
+    .greeting-picker :global(.greeting-choice) {
         font-size: 0.6875rem;
-        font-weight: 600;
     }
 
-    .greeting-picker select {
-        width: 100%;
-        min-width: 0;
-        padding-inline: 10px;
-        border: 1px solid var(--line);
-        border-radius: var(--radius-sm);
-        color: var(--ink);
-        background: var(--surface-raised);
-    }
-
-    .greeting-picker small,
     .greeting-status {
         color: var(--ink-muted);
         font-size: 0.6875rem;
@@ -761,7 +747,32 @@
     }
 
     .greeting-status.error {
-        color: var(--danger);
+        border-color: var(--status-error-border);
+        color: var(--status-error-fg);
+        background: var(--status-error-bg);
+    }
+
+    :global(.app-shell[data-layout='desktop']) .greeting-picker {
+        display: block;
+        padding: 0 4px 4px;
+        border-bottom: 0;
+    }
+
+    :global(.app-shell[data-layout='desktop'])
+        .greeting-picker
+        :global(.greeting-choice :is(.choice-field-label, .choice-field-hint)) {
+        display: none;
+    }
+
+    :global(.app-shell[data-layout='desktop'])
+        .greeting-picker
+        :global(.greeting-choice .choice-trigger.field) {
+        min-height: 28px;
+        padding-inline: 8px 24px;
+        border-color: transparent;
+        background: transparent;
+        color: var(--ink-muted);
+        font-size: 11px;
     }
 
     :global(.app-shell[data-layout='mobile']) .conversation-pane.root-view .entity-list {
@@ -849,7 +860,7 @@
         }
 
         :global(.navigator) .pane-header .new-conversation-button:disabled {
-            opacity: 0.45;
+            opacity: var(--disabled-opacity);
         }
 
         .new-conversation-mark {

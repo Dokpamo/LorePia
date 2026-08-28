@@ -1,5 +1,7 @@
 <script lang="ts">
     import { tick } from 'svelte';
+    import ChoiceField from '../../components/ChoiceField.svelte';
+    import ToggleSwitch from '../../components/ToggleSwitch.svelte';
     import DetailActionBar from '../../components/detail/DetailActionBar.svelte';
     import DetailPage from '../../components/detail/DetailPage.svelte';
     import { tr } from '../../lib/i18n';
@@ -296,14 +298,18 @@
                     void startDiscovery();
                 }}
             >
-                <label>
-                    <span>탐색 입력</span>
-                    <select bind:value={sourceMode}>
-                        <option value="site">사이트 URL</option>
-                        <option value="known_provider">알려진 템플릿</option>
-                        <option value="curl">cURL 붙여넣기</option>
-                    </select>
-                </label>
+                <ChoiceField
+                    id="discovery-source-mode"
+                    label="탐색 입력"
+                    value={sourceMode}
+                    options={[
+                        { value: 'site', label: '사이트 URL' },
+                        { value: 'known_provider', label: '알려진 템플릿' },
+                        { value: 'curl', label: 'cURL 붙여넣기' },
+                    ]}
+                    onSelect={(value: string) =>
+                        (sourceMode = value as 'site' | 'known_provider' | 'curl')}
+                />
                 <label>
                     <span>연결 ID</span>
                     <input bind:value={connectionId} required autocomplete="off" />
@@ -322,35 +328,48 @@
                     <span>문서 URL (선택)</span>
                     <input bind:value={docsUrl} type="url" autocomplete="url" />
                 </label>
-                <label>
-                    <span>설정 도우미 모델 (선택)</span>
-                    <select bind:value={preferredAssistantId}>
-                        <option value="">사용 안 함</option>
-                        {#each workspace.routes as route (route.id)}
-                            <option value={route.id}>{route.display_name ?? route.model_id}</option>
-                        {/each}
-                    </select>
-                </label>
+                <ChoiceField
+                    id="discovery-assistant-route"
+                    label="설정 도우미 모델 (선택)"
+                    value={preferredAssistantId}
+                    options={[
+                        { value: '', label: '사용 안 함' },
+                        ...workspace.routes.map((route) => ({
+                            value: route.id,
+                            label: route.display_name ?? route.model_id,
+                        })),
+                    ]}
+                    onSelect={(value: string) => (preferredAssistantId = value)}
+                />
                 {#if sourceMode === 'known_provider'}
-                    <label>
-                        <span>템플릿</span>
-                        <select bind:value={templateId} required>
-                            <option value="">선택</option>
-                            {#each workspace.templates as template (template.id)}
-                                <option value={template.id}>{template.display_name}</option>
-                            {/each}
-                        </select>
-                    </label>
+                    <ChoiceField
+                        id="discovery-template"
+                        label="템플릿"
+                        value={templateId}
+                        options={[
+                            { value: '', label: '선택' },
+                            ...workspace.templates.map((template) => ({
+                                value: template.id,
+                                label: template.display_name,
+                            })),
+                        ]}
+                        onSelect={(value: string) => (templateId = value)}
+                        required
+                    />
                 {:else if sourceMode === 'curl'}
                     <p class="wide">
                         cURL을 클립보드에 복사한 뒤 탐색 시작을 누르세요. 네이티브 계층이 한 번만
                         캡처하고 WebView에는 원문을 전달하지 않습니다.
                     </p>
                 {/if}
-                <label class="check-row">
-                    <input type="checkbox" bind:checked={credentialRequested} />
-                    <span>운영체제 자격증명 슬롯 필요</span>
-                </label>
+                <div class="check-row">
+                    <ToggleSwitch
+                        label="운영체제 자격증명 슬롯 필요"
+                        checked={credentialRequested}
+                        showLabel
+                        onChange={(checked: boolean) => (credentialRequested = checked)}
+                    />
+                </div>
             </form>
         {:else if routedSessionId === null}
             {#if workspace.discoveries.length === 0}
@@ -481,26 +500,38 @@
 
                         <details class="assistant-failure">
                             <summary>도우미 실패를 기록해야 하는 경우</summary>
-                            <label>
-                                <span>실패 종류</span>
-                                <select bind:value={assistantFailureKind}>
-                                    <option value="transport">transport</option>
-                                    <option value="timeout">timeout</option>
-                                    <option value="rate_limited">rate_limited</option>
-                                    <option value="invalid_structured_output"
-                                        >invalid_structured_output</option
-                                    >
-                                    <option value="draft_revision_required"
-                                        >draft_revision_required</option
-                                    >
-                                    <option value="provider_rejected">provider_rejected</option>
-                                    <option value="internal">internal</option>
-                                </select>
-                            </label>
-                            <label class="check-row">
-                                <input type="checkbox" bind:checked={assistantFailureRetryable} />
-                                <span>재시도 가능</span>
-                            </label>
+                            <ChoiceField
+                                id="discovery-assistant-failure"
+                                label="실패 종류"
+                                value={assistantFailureKind}
+                                options={[
+                                    { value: 'transport', label: 'transport' },
+                                    { value: 'timeout', label: 'timeout' },
+                                    { value: 'rate_limited', label: 'rate_limited' },
+                                    {
+                                        value: 'invalid_structured_output',
+                                        label: 'invalid_structured_output',
+                                    },
+                                    {
+                                        value: 'draft_revision_required',
+                                        label: 'draft_revision_required',
+                                    },
+                                    { value: 'provider_rejected', label: 'provider_rejected' },
+                                    { value: 'internal', label: 'internal' },
+                                ]}
+                                onSelect={(value: string) =>
+                                    (assistantFailureKind =
+                                        value as DiscoveryAssistantFailureKindInput)}
+                            />
+                            <div class="check-row">
+                                <ToggleSwitch
+                                    label="재시도 가능"
+                                    checked={assistantFailureRetryable}
+                                    showLabel
+                                    onChange={(checked: boolean) =>
+                                        (assistantFailureRetryable = checked)}
+                                />
+                            </div>
                             <button
                                 type="button"
                                 disabled={busy}
@@ -666,11 +697,21 @@
                 {#if actionKind === 'reconcile_unknown_outcome' && workspace.discovery_approval_proposal}
                     <div class="action-block">
                         <h4>알 수 없는 결과 수동 확정</h4>
-                        <select bind:value={unknownResolution}>
-                            <option value="confirmed_no_effect">외부 효과 없음 확인</option>
-                            <option value="confirmed_compensated">보상 완료 확인</option>
-                            <option value="manually_reconciled_as_failed">실패로 수동 정리</option>
-                        </select>
+                        <ChoiceField
+                            id="discovery-unknown-resolution"
+                            label="확정 방식"
+                            value={unknownResolution}
+                            options={[
+                                { value: 'confirmed_no_effect', label: '외부 효과 없음 확인' },
+                                { value: 'confirmed_compensated', label: '보상 완료 확인' },
+                                {
+                                    value: 'manually_reconciled_as_failed',
+                                    label: '실패로 수동 정리',
+                                },
+                            ]}
+                            onSelect={(value: string) =>
+                                (unknownResolution = value as typeof unknownResolution)}
+                        />
                     </div>
                 {/if}
 
@@ -969,8 +1010,7 @@
         font-weight: 700;
     }
 
-    label :is(input:not([type='checkbox']), select),
-    .action-block > select {
+    label input:not([type='checkbox']) {
         width: 100%;
         min-width: 0;
         min-height: clamp(48px, 13.73vw, 60px);
@@ -978,7 +1018,7 @@
         border: 1.5px solid var(--line);
         border-radius: var(--radius-md);
         background: color-mix(in srgb, var(--surface-sunken) 26%, var(--surface-raised));
-        box-shadow: inset 0 1px 2px rgb(16 18 24 / 3%);
+        box-shadow: var(--control-inset-shadow);
         caret-color: var(--accent);
         color: var(--ink);
         font-size: var(--detail-support-type);
@@ -988,13 +1028,11 @@
             box-shadow 140ms ease;
     }
 
-    label :is(input:not([type='checkbox']), select):hover:not(:focus, :disabled),
-    .action-block > select:hover:not(:focus, :disabled) {
+    label input:not([type='checkbox']):hover:not(:focus, :disabled) {
         border-color: var(--line);
     }
 
-    label :is(input:not([type='checkbox']), select):focus,
-    .action-block > select:focus {
+    label input:not([type='checkbox']):focus {
         border-color: var(--accent);
         outline: none;
     }
@@ -1011,17 +1049,7 @@
     }
 
     .check-row {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-    }
-
-    .check-row input {
-        width: 20px;
-        height: 20px;
-        flex: none;
-        margin: 0;
-        accent-color: var(--accent);
+        min-width: 0;
     }
 
     .session-list {

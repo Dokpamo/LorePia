@@ -112,7 +112,7 @@
                 <p>{$tr('persona.loading')}</p>
             </div>
         {:else if personaState.phase === 'error'}
-            <div class="persona-feedback warning" role="alert">
+            <div class="persona-feedback error" role="alert">
                 <p>{personaState.error}</p>
                 <button
                     type="button"
@@ -247,8 +247,16 @@
         margin: 0;
     }
 
+    .persona-feedback.error {
+        border: 1px solid var(--status-error-border);
+        color: var(--status-error-fg);
+        background: var(--status-error-bg);
+    }
+
     .persona-feedback.warning {
-        color: var(--danger);
+        border: 1px solid var(--status-warning-border);
+        color: var(--status-warning-fg);
+        background: var(--status-warning-bg);
     }
 
     .persona-editor-page {
@@ -275,7 +283,7 @@
         -webkit-appearance: none;
         appearance: none;
         background: color-mix(in srgb, var(--surface-sunken) 26%, var(--surface-raised));
-        box-shadow: inset 0 1px 2px rgb(16 18 24 / 3%);
+        box-shadow: var(--control-inset-shadow);
         caret-color: var(--accent);
         color: var(--ink);
         font-size: var(--detail-support-type);
@@ -305,7 +313,7 @@
 
     .persona-form :is(input, textarea):disabled {
         cursor: not-allowed;
-        opacity: 0.55;
+        opacity: var(--disabled-opacity);
     }
 
     .persona-bar-action :global(.persona-add-icon) {

@@ -87,7 +87,7 @@ describe('Studio pushed-screen shell', () => {
             'class:studio-detail-has-actions={studioDetailHasFixedActions(',
         );
         expect(appSource).toMatch(
-            /!isDesktop\s+&&\s+studioSection === null[\s\S]*?<nav class="tab-bar"/,
+            /!isDesktop\s+&&\s+!\(view === 'create' && studioSection !== null\)[\s\S]*?<nav class="tab-bar"/,
         );
     });
 

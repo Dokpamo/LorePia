@@ -2,6 +2,7 @@
     import { Activity, ListChecks, Plus, SlidersHorizontal, Telescope } from '@lucide/svelte';
     import { tick } from 'svelte';
     import type { LorepiaAppController, LorepiaAppState } from '../../app/app-controller';
+    import ChoiceField from '../../components/ChoiceField.svelte';
     import DetailActionBar from '../../components/detail/DetailActionBar.svelte';
     import DetailPage from '../../components/detail/DetailPage.svelte';
     import {
@@ -362,19 +363,20 @@
 {#snippet capabilityContent()}
     {#if detailMode === null}
         <div class="route-form direct-form" aria-label="Capability 모델 라우트">
-            <label>
-                <span>모델 라우트</span>
-                <select
-                    value={selectedRouteId}
-                    disabled={busy}
-                    onchange={(event) => void loadRoute(event.currentTarget.value)}
-                >
-                    <option value="">선택</option>
-                    {#each workspace.routes as route (route.id)}
-                        <option value={route.id}>{route.display_name ?? route.model_id}</option>
-                    {/each}
-                </select>
-            </label>
+            <ChoiceField
+                id="capability-model-route"
+                label="모델 라우트"
+                value={selectedRouteId}
+                options={[
+                    { value: '', label: '선택' },
+                    ...workspace.routes.map((route) => ({
+                        value: route.id,
+                        label: route.display_name ?? route.model_id,
+                    })),
+                ]}
+                disabled={busy}
+                onSelect={(value: string) => void loadRoute(value)}
+            />
         </div>
 
         <ul class="setting-list capability-index" aria-label="Capability 영역">
@@ -459,14 +461,17 @@
         {/if}
     {:else if detailMode === 'effective'}
         <div class="direct-form effective-form">
-            <label>
-                <span>Capability 키</span>
-                <select bind:value={selectedCapabilityKey} disabled={busy || !routeIsLoaded}>
-                    {#each CAPABILITY_KEYS as key (key)}
-                        <option value={key}>{CAPABILITY_LABELS[key]} · {key}</option>
-                    {/each}
-                </select>
-            </label>
+            <ChoiceField
+                id="effective-capability-key"
+                label="Capability 키"
+                value={selectedCapabilityKey}
+                options={CAPABILITY_KEYS.map((key) => ({
+                    value: key,
+                    label: `${CAPABILITY_LABELS[key]} · ${key}`,
+                }))}
+                disabled={busy || !routeIsLoaded}
+                onSelect={(value: string) => (selectedCapabilityKey = value as CapabilityKeyInput)}
+            />
         </div>
 
         {#if effectiveCapability}
@@ -579,31 +584,42 @@
                 void saveOverride();
             }}
         >
-            <label>
-                <span>Capability 키</span>
-                <select bind:value={overrideKey} disabled={busy || !routeIsLoaded}>
-                    {#each CAPABILITY_KEYS as key (key)}
-                        <option value={key}>{CAPABILITY_LABELS[key]} · {key}</option>
-                    {/each}
-                </select>
-            </label>
-            <label>
-                <span>값 종류</span>
-                <select bind:value={overrideValueKind} disabled={busy || !routeIsLoaded}>
-                    <option value="boolean">Boolean</option>
-                    <option value="integer">Integer</option>
-                    <option value="enum_values">Enum 목록</option>
-                </select>
-            </label>
+            <ChoiceField
+                id="override-capability-key"
+                label="Capability 키"
+                value={overrideKey}
+                options={CAPABILITY_KEYS.map((key) => ({
+                    value: key,
+                    label: `${CAPABILITY_LABELS[key]} · ${key}`,
+                }))}
+                disabled={busy || !routeIsLoaded}
+                onSelect={(value: string) => (overrideKey = value as CapabilityKeyInput)}
+            />
+            <ChoiceField
+                id="override-value-kind"
+                label="값 종류"
+                value={overrideValueKind}
+                options={[
+                    { value: 'boolean', label: 'Boolean' },
+                    { value: 'integer', label: 'Integer' },
+                    { value: 'enum_values', label: 'Enum 목록' },
+                ]}
+                disabled={busy || !routeIsLoaded}
+                onSelect={(value: string) => (overrideValueKind = value as OverrideValueKind)}
+            />
 
             {#if overrideValueKind === 'boolean'}
-                <label>
-                    <span>Boolean 값</span>
-                    <select bind:value={booleanValue} disabled={busy || !routeIsLoaded}>
-                        <option value={true}>true</option>
-                        <option value={false}>false</option>
-                    </select>
-                </label>
+                <ChoiceField
+                    id="override-boolean-value"
+                    label="Boolean 값"
+                    value={String(booleanValue)}
+                    options={[
+                        { value: 'true', label: 'true' },
+                        { value: 'false', label: 'false' },
+                    ]}
+                    disabled={busy || !routeIsLoaded}
+                    onSelect={(value: string) => (booleanValue = value === 'true')}
+                />
             {:else if overrideValueKind === 'integer'}
                 <label>
                     <span>정수 값</span>
@@ -626,21 +642,28 @@
                 </label>
             {/if}
 
-            <label>
-                <span>상태</span>
-                <select bind:value={overrideStatus} disabled={busy || !routeIsLoaded}>
-                    <option value="verified">검증됨</option>
-                    <option value="unsupported">지원하지 않음</option>
-                    <option value="unknown">알 수 없음</option>
-                    <option value="conditional">조건부</option>
-                </select>
-            </label>
+            <ChoiceField
+                id="override-status"
+                label="상태"
+                value={overrideStatus}
+                options={[
+                    { value: 'verified', label: '검증됨' },
+                    { value: 'unsupported', label: '지원하지 않음' },
+                    { value: 'unknown', label: '알 수 없음' },
+                    { value: 'conditional', label: '조건부' },
+                ]}
+                disabled={busy || !routeIsLoaded}
+                onSelect={(value: string) =>
+                    (overrideStatus = value as CapabilityOverrideStatusInput)}
+            />
             <label>
                 <span>만료 시각 (선택)</span>
                 <input
-                    type="datetime-local"
+                    type="text"
                     bind:value={expiresAt}
                     disabled={busy || !routeIsLoaded}
+                    placeholder="2026-08-27T22:30"
+                    inputmode="text"
                 />
             </label>
 
@@ -895,7 +918,7 @@
         font-weight: 700;
     }
 
-    .direct-form :is(input, select, textarea) {
+    .direct-form :is(input, textarea) {
         width: 100%;
         min-width: 0;
         min-height: clamp(48px, 13.73vw, 60px);
@@ -905,7 +928,7 @@
         border-radius: var(--radius-md);
         appearance: none;
         background: color-mix(in srgb, var(--surface-sunken) 26%, var(--surface-raised));
-        box-shadow: inset 0 1px 2px rgb(16 18 24 / 3%);
+        box-shadow: var(--control-inset-shadow);
         caret-color: var(--accent);
         color: var(--ink);
         font: inherit;
@@ -920,18 +943,18 @@
         resize: vertical;
     }
 
-    .direct-form :is(input, select, textarea):hover:not(:focus, :disabled) {
+    .direct-form :is(input, textarea):hover:not(:focus, :disabled) {
         border-color: var(--line);
     }
 
-    .direct-form :is(input, select, textarea):focus {
+    .direct-form :is(input, textarea):focus {
         border-color: var(--accent);
         outline: none;
     }
 
-    .direct-form :is(input, select, textarea):disabled {
+    .direct-form :is(input, textarea):disabled {
         cursor: not-allowed;
-        opacity: 0.55;
+        opacity: var(--disabled-opacity);
     }
 
     .route-form {
@@ -994,7 +1017,7 @@
 
     .read-only-row {
         cursor: default;
-        opacity: 0.72;
+        opacity: var(--read-only-opacity);
     }
 
     .empty-note {
@@ -1028,7 +1051,8 @@
     }
 
     .effective-result.warning {
-        border-color: color-mix(in srgb, var(--danger), transparent 55%);
+        border-color: var(--status-warning-border);
+        background: var(--status-warning-bg);
     }
 
     .effective-result > div {
@@ -1100,7 +1124,7 @@
 
     .badges .warning-badge {
         background: transparent;
-        color: var(--danger);
+        color: var(--status-warning-fg);
     }
 
     .read-list {
@@ -1172,8 +1196,12 @@
     }
 
     .form-error {
+        padding: 10px 12px;
+        border: 1px solid var(--status-error-border);
+        border-radius: var(--radius-sm);
         margin: 0;
-        color: var(--danger);
+        color: var(--status-error-fg);
+        background: var(--status-error-bg);
         font-size: var(--detail-support-type);
         font-weight: 700;
     }

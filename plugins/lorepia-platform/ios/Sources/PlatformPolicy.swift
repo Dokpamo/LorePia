@@ -11,7 +11,7 @@ enum PlatformPolicy {
   static let maximumCredentialReadBytes = 32 * 1_024
   static let maximumCredentialWriteBytes = 16 * 1_024
   static let maximumSensitiveCaptureBytes: UInt64 = 1_024 * 1_024
-  static let maximumImportBytes: UInt64 = 128 * 1_024 * 1_024
+  static let maximumImportBytes: UInt64 = 256 * 1_024 * 1_024
   static let copyBufferBytes = 64 * 1_024
   static let maximumDisplayNameCharacters = 255
   static let maximumExportNameBytes = 128

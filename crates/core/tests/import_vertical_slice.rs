@@ -1,8 +1,13 @@
-use std::{fs, io::Write};
+use std::{
+    fs::{self, File},
+    io::Write,
+};
 
 use lorepia_core::{Core, CoreConfig};
 use lorepia_domain::CoreErrorCode;
+use sha2::{Digest, Sha256};
 use tempfile::{NamedTempFile, tempdir};
+use zip::{CompressionMethod, ZipWriter, write::SimpleFileOptions};
 
 #[test]
 fn inspect_review_commit_and_restart_uses_the_reviewed_snapshot() {
@@ -102,6 +107,160 @@ fn charx_assets_are_content_addressed_and_the_avatar_survives_restart() {
         Some(avatar_hash.as_str())
     );
     assert!(avatar_path.is_file());
+}
+
+#[test]
+fn commit_uses_the_card_declared_main_icon_instead_of_archive_order() {
+    let root = tempdir().expect("temporary data root");
+    let source_dir = tempdir().expect("temporary source directory");
+    let package = source_dir.path().join("declared-main.charx");
+    let file = File::create(&package).expect("create package");
+    let mut archive = ZipWriter::new(file);
+    let options = SimpleFileOptions::default()
+        .compression_method(CompressionMethod::Stored)
+        .unix_permissions(0o644);
+    archive
+        .start_file("card.json", options)
+        .expect("start card");
+    archive
+        .write_all(
+            br#"{
+                "spec":"chara_card_v3",
+                "data":{
+                    "name":"Declared main",
+                    "assets":[
+                        {"type":"expression","name":"first","uri":"embeded://assets/expressions/first.png"},
+                        {"type":"expression","name":"duplicate","uri":"embeded://assets/expressions/duplicate.png"},
+                        {"type":"icon","name":"main","uri":"embeded://assets/icon/main.png"}
+                    ]
+                }
+            }"#,
+        )
+        .expect("write card");
+    let first_image = b"\x89PNG\r\n\x1a\nfirst";
+    let main_image = b"\x89PNG\r\n\x1a\nmain";
+    archive
+        .start_file("assets/expressions/first.png", options)
+        .expect("start first image");
+    archive.write_all(first_image).expect("write first image");
+    archive
+        .start_file("assets/icon/main.png", options)
+        .expect("start main image");
+    archive.write_all(main_image).expect("write main image");
+    archive
+        .start_file("assets/expressions/duplicate.png", options)
+        .expect("start duplicate image");
+    archive
+        .write_all(first_image)
+        .expect("write duplicate image");
+    archive.finish().expect("finish package");
+
+    let core = Core::open(CoreConfig::new(root.path())).expect("open core");
+    let review = core.inspect_import(&package).expect("inspect package");
+    assert_eq!(
+        review
+            .representative_image
+            .as_ref()
+            .map(|image| image.logical_asset_id.as_str()),
+        Some("assets/icon/main.png")
+    );
+
+    let character = core.commit_import(&review.id).expect("commit package");
+    let content = core
+        .get_character_content(&character.id)
+        .expect("load character content");
+    assert_eq!(content.value.assets.len(), 3);
+    let first_image_hash = format!("{:x}", Sha256::digest(first_image));
+    let duplicate_hash_assets = content
+        .value
+        .assets
+        .iter()
+        .filter(|asset| asset.sha256.as_str() == first_image_hash.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(duplicate_hash_assets.len(), 2);
+    assert_ne!(duplicate_hash_assets[0].id, duplicate_hash_assets[1].id);
+    assert_eq!(
+        character.avatar_asset_hash.as_deref(),
+        Some(format!("{:x}", Sha256::digest(main_image)).as_str())
+    );
+}
+
+#[test]
+fn external_full_runtime_card_commits_executable_knowledge_and_output_rules() {
+    let Ok(path) = std::env::var("LOREPIA_FULL_CARD_FIXTURE") else {
+        return;
+    };
+    let root = tempdir().expect("temporary data root");
+    let core = Core::open(CoreConfig::new(root.path())).expect("open core");
+    let review = core
+        .inspect_import(&path)
+        .expect("inspect full runtime card");
+    assert!(
+        review.is_allowed(),
+        "review blockers: {:?}",
+        review.blocked_reasons
+    );
+    let character = core
+        .commit_import(&review.id)
+        .expect("commit full runtime card");
+    let content = core
+        .get_character_content(&character.id)
+        .expect("load full character content");
+    assert_eq!(content.value.assets.len(), 1_411);
+    assert_eq!(content.value.runtime.transforms.len(), 34);
+    assert_eq!(content.value.runtime.scripts.len(), 1);
+    assert!(content.value.runtime.background_markup.len() > 30_000);
+    let book_id = content
+        .value
+        .knowledge_book
+        .as_ref()
+        .and_then(|reference| reference.id.as_ref())
+        .expect("knowledge book id");
+    let book = core
+        .get_knowledge_book(book_id)
+        .expect("load executable knowledge book");
+    assert_eq!(book.value.entries.len(), 68);
+    assert_eq!(book.value.scan_depth, 5);
+    assert_eq!(book.value.token_budget.max_tokens, 80_000);
+    let expanded_profile = book
+        .value
+        .entries
+        .iter()
+        .find(|entry| entry.name == "이도윤 프로필")
+        .expect("profile with named knowledge slots");
+    assert!(
+        expanded_profile
+            .content
+            .contains("childhood friends and lovers")
+    );
+    assert!(!expanded_profile.content.contains("{{position::"));
+
+    let transform_set_id = content
+        .value
+        .runtime
+        .transform_set_id
+        .as_ref()
+        .expect("output transform set id");
+    let transforms = core
+        .get_transform_set(transform_set_id)
+        .expect("load executable output transforms");
+    assert_eq!(
+        transforms
+            .value
+            .rules
+            .iter()
+            .filter(|rule| rule.phase == lorepia_domain::TransformPhase::ProviderOutputCanonical)
+            .count(),
+        17
+    );
+    assert!(
+        transforms
+            .value
+            .rules
+            .iter()
+            .any(|rule| rule.phase == lorepia_domain::TransformPhase::DisplayOnly)
+    );
+    assert!(transforms.value.enabled);
 }
 
 #[test]

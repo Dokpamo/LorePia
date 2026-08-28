@@ -6,6 +6,7 @@ mod hashing;
 mod package;
 mod path;
 mod png;
+mod runtime;
 
 use std::{
     fs::File,
@@ -61,6 +62,16 @@ pub struct CharacterImportPlan {
     pub plan_hash: String,
 }
 
+struct InspectedCharacterSource {
+    kind: ContentKind,
+    metadata: adapters::CardMetadata,
+    representative_image: Option<ImportImagePreview>,
+    asset_count: u32,
+    estimated_size: u64,
+    warnings: Vec<ImportWarning>,
+    blocked_reasons: Vec<String>,
+}
+
 /// Inspect an untrusted staging file without writing to the final library.
 pub fn inspect_file(path: &Path, limits: ImportLimits) -> CoreResult<ImportInspection> {
     inspect_character_file(path, limits).map(|plan| plan.inspection)
@@ -74,105 +85,138 @@ pub fn inspect_character_file(
 ) -> CoreResult<CharacterImportPlan> {
     let source_metadata = validated_source_metadata(path, limits)?;
     let source_sha256 = sha256_file(path)?;
-
-    let mut reader = BufReader::new(File::open(path).map_err(storage_error)?);
-    let mut magic = [0_u8; 4];
-    let read = reader.read(&mut magic).map_err(storage_error)?;
-    let extension = path
-        .extension()
-        .and_then(|value| value.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-
-    let (
-        kind,
-        metadata,
-        representative_image,
-        asset_count,
-        estimated_size,
-        mut warnings,
-        blocked_reasons,
-    ) = if read == magic.len() && is_zip_signature(magic) {
-        let mut inspected = archive::inspect_archive(path, limits, &source_sha256)?;
-        if extension != "charx" && extension != "zip" {
-            let mut extension_warnings = inspected_extension_warning(&extension, "CHARX/ZIP");
-            extension_warnings.append(&mut inspected.warnings);
-            inspected.warnings = extension_warnings;
-        }
-        (
-            ContentKind::CharxPackage,
-            inspected.metadata,
-            inspected.representative_image,
-            inspected.asset_count,
-            inspected.total_uncompressed,
-            inspected.warnings,
-            inspected.blocked_reasons,
-        )
-    } else if read == magic.len() && png::has_png_magic(&magic) {
-        // The signature check only reads the first four bytes, so re-read the
-        // file and let the extractor validate the full eight-byte signature.
-        let bytes = std::fs::read(path).map_err(storage_error)?;
-        let card = png::extract_card_metadata(&bytes)?;
-        let metadata = adapters::parse_card_json_with_source(&card, &source_sha256)?;
-        let mut warnings = inspected_extension_warning(&extension, "PNG");
-        warnings.extend(promoted_card_warning(&metadata));
-        let source_size = source_metadata.len();
-        (
-            ContentKind::CharacterCardPng,
-            metadata,
-            Some(ImportImagePreview {
-                logical_asset_id: PNG_AVATAR_ASSET_ID.to_owned(),
-                media_type: PNG_MEDIA_TYPE.to_owned(),
-                size_bytes: source_size,
-            }),
-            1,
-            source_size,
-            warnings,
-            Vec::new(),
-        )
-    } else {
-        let bytes = std::fs::read(path).map_err(storage_error)?;
-        let metadata = adapters::parse_card_json_with_source(&bytes, &source_sha256)?;
-        let estimated_size = metadata.len_bytes;
-        let mut warnings = inspected_extension_warning(&extension, "JSON");
-        warnings.extend(promoted_card_warning(&metadata));
-        (
-            ContentKind::CharacterCardV3,
-            metadata,
-            None,
-            0,
-            estimated_size,
-            warnings,
-            Vec::new(),
-        )
-    };
-
-    warnings.sort_by(|left, right| {
+    let mut source = inspect_character_source(path, limits, &source_sha256, source_metadata.len())?;
+    source.warnings.sort_by(|left, right| {
         left.code
             .cmp(&right.code)
             .then_with(|| left.message.cmp(&right.message))
     });
-
-    let character_content = metadata.content;
+    let character_content = source.metadata.content;
     let inspection = ImportInspection {
         id: InspectionId::new(),
-        kind,
-        display_name: metadata.name,
-        description: metadata.description,
-        representative_image,
+        kind: source.kind,
+        display_name: source.metadata.name,
+        description: source.metadata.description,
+        representative_image: source.representative_image,
         source_sha256,
         source_size: source_metadata.len(),
-        estimated_stored_size: estimated_size,
-        asset_count,
-        warnings,
-        blocked_reasons,
-        unsupported_optional_fields: metadata.unsupported_optional_fields,
+        estimated_stored_size: source.estimated_size,
+        asset_count: source.asset_count,
+        warnings: source.warnings,
+        blocked_reasons: source.blocked_reasons,
+        unsupported_optional_fields: source.metadata.unsupported_optional_fields,
     };
     let plan_hash = character_plan_hash(&inspection, &character_content)?;
     Ok(CharacterImportPlan {
         inspection,
         character_content,
         plan_hash,
+    })
+}
+
+fn inspect_character_source(
+    path: &Path,
+    limits: ImportLimits,
+    source_sha256: &str,
+    source_size: u64,
+) -> CoreResult<InspectedCharacterSource> {
+    let mut reader = BufReader::new(File::open(path).map_err(storage_error)?);
+    let mut magic = [0_u8; 4];
+    let read = reader.read(&mut magic).map_err(storage_error)?;
+    let is_direct_archive = read == magic.len() && is_zip_signature(magic);
+    let is_embedded_archive =
+        !is_direct_archive && archive::has_embedded_character_archive(path, limits)?;
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if is_direct_archive || is_embedded_archive {
+        inspect_archive_source(path, limits, source_sha256, &extension, is_embedded_archive)
+    } else if read == magic.len() && png::has_png_magic(&magic) {
+        inspect_png_source(path, source_sha256, &extension, source_size)
+    } else {
+        inspect_json_source(path, source_sha256, &extension)
+    }
+}
+
+fn inspect_archive_source(
+    path: &Path,
+    limits: ImportLimits,
+    source_sha256: &str,
+    extension: &str,
+    embedded: bool,
+) -> CoreResult<InspectedCharacterSource> {
+    let nonportable_policy = adapters::NonPortableContentPolicy::Omit;
+    let mut inspected = archive::inspect_archive(path, limits, source_sha256, nonportable_policy)?;
+    if !matches!(extension, "charx" | "zip") {
+        let mut extension_warnings = inspected_extension_warning(extension, "CHARX/ZIP");
+        extension_warnings.append(&mut inspected.warnings);
+        inspected.warnings = extension_warnings;
+    }
+    if embedded {
+        inspected.warnings.push(ImportWarning {
+            code: "embedded_character_card".to_owned(),
+            message: "A character card archive was detected inside another file.".to_owned(),
+        });
+    }
+    Ok(InspectedCharacterSource {
+        kind: ContentKind::CharxPackage,
+        metadata: inspected.metadata,
+        representative_image: inspected.representative_image,
+        asset_count: inspected.asset_count,
+        estimated_size: inspected.total_uncompressed,
+        warnings: inspected.warnings,
+        blocked_reasons: inspected.blocked_reasons,
+    })
+}
+
+fn inspect_png_source(
+    path: &Path,
+    source_sha256: &str,
+    extension: &str,
+    source_size: u64,
+) -> CoreResult<InspectedCharacterSource> {
+    // The routing check reads four bytes; the extractor validates the full
+    // eight-byte PNG signature and bounded metadata chunks.
+    let bytes = std::fs::read(path).map_err(storage_error)?;
+    let card = png::extract_card_metadata(&bytes)?;
+    let metadata = adapters::parse_card_json_with_source(&card, source_sha256)?;
+    let mut warnings = inspected_extension_warning(extension, "PNG");
+    warnings.extend(promoted_card_warning(&metadata));
+    Ok(InspectedCharacterSource {
+        kind: ContentKind::CharacterCardPng,
+        metadata,
+        representative_image: Some(ImportImagePreview {
+            logical_asset_id: PNG_AVATAR_ASSET_ID.to_owned(),
+            media_type: PNG_MEDIA_TYPE.to_owned(),
+            size_bytes: source_size,
+        }),
+        asset_count: 1,
+        estimated_size: source_size,
+        warnings,
+        blocked_reasons: Vec::new(),
+    })
+}
+
+fn inspect_json_source(
+    path: &Path,
+    source_sha256: &str,
+    extension: &str,
+) -> CoreResult<InspectedCharacterSource> {
+    let bytes = std::fs::read(path).map_err(storage_error)?;
+    let metadata = adapters::parse_card_json_with_source(&bytes, source_sha256)?;
+    let estimated_size = metadata.len_bytes;
+    let mut warnings = inspected_extension_warning(extension, "JSON");
+    warnings.extend(promoted_card_warning(&metadata));
+    Ok(InspectedCharacterSource {
+        kind: ContentKind::CharacterCardV3,
+        metadata,
+        representative_image: None,
+        asset_count: 0,
+        estimated_size,
+        warnings,
+        blocked_reasons: Vec::new(),
     })
 }
 
@@ -244,8 +288,13 @@ pub fn prepare_import(
         });
     }
     let staged_assets = if inspection.is_allowed() && inspection.kind == ContentKind::CharxPackage {
-        let assets =
-            archive::stage_archive_assets(path, limits, asset_staging_directory, &inspection.id.0)?;
+        let assets = archive::stage_archive_assets(
+            path,
+            limits,
+            asset_staging_directory,
+            &inspection.id.0,
+            adapters::NonPortableContentPolicy::Omit,
+        )?;
         let current_hash = sha256_file(path)?;
         let current_size = path.metadata().map_err(storage_error)?.len();
         if current_hash != inspection.source_sha256 || current_size != inspection.source_size {

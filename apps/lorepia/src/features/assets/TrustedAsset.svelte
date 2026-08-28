@@ -293,15 +293,18 @@
         inset: 0;
         place-items: center;
         padding: 0.25rem;
-        color: currentcolor;
-        background: color-mix(in srgb, Canvas 82%, transparent);
+        border: 1px solid var(--status-info-border);
+        color: var(--status-info-fg);
+        background: color-mix(in srgb, var(--status-info-bg) 88%, transparent);
         font-size: 0.7rem;
         line-height: 1.1;
         text-align: center;
     }
 
     .asset-error {
-        color: var(--danger);
+        border-color: var(--status-error-border);
+        color: var(--status-error-fg);
+        background: color-mix(in srgb, var(--status-error-bg) 92%, transparent);
     }
 
     .asset-metadata {

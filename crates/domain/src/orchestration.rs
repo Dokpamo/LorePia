@@ -1727,6 +1727,7 @@ pub const MAX_SAFE_REGEX_CHARS: usize = 4_096;
 pub const MAX_IDENTIFIER_CHARS: usize = 256;
 pub const MAX_NAME_CHARS: usize = 512;
 pub const MAX_VARIABLE_TEXT_CHARS: usize = 16_384;
+pub const MAX_KNOWLEDGE_ENTRY_TEXT_CHARS: usize = 64 * 1_024;
 pub const MAX_VARIABLE_LIST_ITEMS: usize = 256;
 const UNSUPPORTED_SAFE_REGEX_SYNTAX: [&str; 7] =
     ["(?=", "(?!", "(?<=", "(?<!", "\\1", "\\2", "\\k"];
@@ -3367,7 +3368,7 @@ impl ValidateOrchestration for KnowledgeBook {
                 &format!("entries[{index}].content"),
                 &entry.content,
                 1,
-                MAX_VARIABLE_TEXT_CHARS,
+                MAX_KNOWLEDGE_ENTRY_TEXT_CHARS,
             )?;
             if entry.importance > 100 || entry.activation_probability_basis_points > 10_000 {
                 return Err(OrchestrationValidationError::new(

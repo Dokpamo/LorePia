@@ -151,6 +151,7 @@ import type {
     CharacterDto,
     CharacterGreetingCatalogDto,
     CharacterGreetingSelectionInput,
+    CharacterRenderProfileDto,
     ChatStreamItemDto,
     ConversationBranchDto,
     ConversationDto,
@@ -163,6 +164,7 @@ import type {
     EditUserMessageInput,
     GenerationPresetDto,
     GenerationPresetInput,
+    GenerateRuntimeTextInput,
     GenerationStartedDto,
     GenerationTargetDto,
     GenerationAttemptProposalDecisionReceiptDto,
@@ -215,6 +217,7 @@ import type {
     RemoveMessageInput,
     RequestPreviewDto,
     SendMessageInput,
+    RuntimeTextGenerationDto,
     AppSettingsDto,
     DiscoveryApprovalRecordDto,
     DiscoveryAssistantFailureKindInput,
@@ -251,6 +254,7 @@ export const LOREPIA_COMMANDS = {
     listCharacters: 'list_characters',
     getCharacter: 'get_character',
     getCharacterGreetingCatalog: 'get_character_greeting_catalog',
+    getCharacterRenderProfile: 'get_character_render_profile',
     resolveAssetDelivery: 'resolve_asset_delivery',
     listInteractionEffects: 'list_interaction_effects',
     acknowledgeInteractionEffect: 'acknowledge_interaction_effect',
@@ -300,6 +304,7 @@ export const LOREPIA_COMMANDS = {
     clearConversationPersona: 'clear_conversation_persona',
     listBranchMessages: 'list_branch_messages',
     listMessages: 'list_messages',
+    generateRuntimeText: 'generate_runtime_text',
     sendMessage: 'send_message',
     sendReviewedPrompt: 'send_reviewed_prompt',
     editUserMessage: 'edit_user_message',
@@ -761,6 +766,12 @@ export class LiveLorepiaClient
         });
     }
 
+    getCharacterRenderProfile(characterId: string): Promise<CharacterRenderProfileDto> {
+        return this.call(LOREPIA_COMMANDS.getCharacterRenderProfile, {
+            request: { character_id: characterId },
+        });
+    }
+
     createPersona(input: CreatePersonaInput): Promise<PersonaDto> {
         return this.call(LOREPIA_COMMANDS.createPersona, { request: input });
     }
@@ -1063,6 +1074,10 @@ export class LiveLorepiaClient
         return this.call(LOREPIA_COMMANDS.listMessages, {
             request: { conversation_id: conversationId },
         });
+    }
+
+    generateRuntimeText(input: GenerateRuntimeTextInput): Promise<RuntimeTextGenerationDto> {
+        return this.call(LOREPIA_COMMANDS.generateRuntimeText, { input });
     }
 
     sendMessage(

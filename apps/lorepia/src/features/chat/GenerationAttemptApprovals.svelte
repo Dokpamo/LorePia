@@ -353,7 +353,14 @@
 
     .reject,
     .attempt-error {
-        color: var(--danger);
+        color: var(--status-error-fg);
+    }
+
+    .attempt-error {
+        padding: 10px 12px;
+        border: 1px solid var(--status-error-border);
+        border-radius: var(--radius-sm);
+        background: var(--status-error-bg);
     }
 
     .attempt-note {

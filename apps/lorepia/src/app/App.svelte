@@ -1,19 +1,17 @@
 <script lang="ts">
     import {
         ArrowLeft,
-        ChevronRight,
         CircleAlert,
+        CirclePlus,
         House,
         MessageCircleMore,
         Settings,
         SlidersHorizontal,
         Sparkles,
-        SquarePen,
     } from '@lucide/svelte';
+    import { isTauri } from '@tauri-apps/api/core';
     import { tr } from '../lib/i18n';
     import { onMount, untrack } from 'svelte';
-    import lorepiaLogoMark from '../assets/lorepia-logo-mark.png';
-
     import {
         INITIAL_APP_STATE,
         LorepiaAppController,
@@ -35,6 +33,7 @@
         type ContentPackageState,
     } from '../features/orchestration/content-package-controller';
     import ProviderSettings from '../features/providers/ProviderSettings.svelte';
+    import DesktopSettingsSidebar from '../features/providers/DesktopSettingsSidebar.svelte';
     import type {
         SettingsDetailPage,
         SettingsSection,
@@ -62,6 +61,7 @@
      * hierarchy beside the active workspace instead.
      */
     const DESKTOP_LAYOUT = '(min-width: 900px)';
+    const DESKTOP_UTILITY_DOCK = '(min-width: 1280px)';
     const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
     const SIDEBAR_EXIT_SETTLE_MS = 260;
     const MOBILE_TOP_FADE_DISTANCE_PX = 48;
@@ -108,7 +108,13 @@
         };
     }
 
+    function usesMacosTitlebarOverlay(): boolean {
+        if (!isTauri() || typeof window === 'undefined') return false;
+        return window.navigator.platform.startsWith('Mac') && window.navigator.maxTouchPoints === 0;
+    }
+
     let { client, initialSelection }: Props = $props();
+    const nativeMacosTitlebarOverlay = untrack(usesMacosTitlebarOverlay);
     const appClient = untrack(() => client ?? createLiveLorepiaClient());
     const controller = untrack(() => new LorepiaAppController(appClient));
     const orchestrationController = untrack(() => new OrchestrationController(appClient));
@@ -125,8 +131,11 @@
     );
     let personaState = $state<PersonaState>(structuredClone(INITIAL_PERSONA_STATE));
     let view = $state<MainView>('home');
+    let settingsReturnView = $state<Exclude<MainView, 'settings'>>('home');
     let homeSection = $state<HomeSection>('characters');
     let chatThreadOpen = $state(false);
+    let chatUtilityOpen = $state(false);
+    let chatUtilityAutoCollapsed = $state(false);
     /* Settings and studio entries open as dedicated screens inside the handheld shell. */
     let settingsSection = $state<SettingsSection | null>(null);
     let settingsDetailPage = $state<SettingsDetailPage>(null);
@@ -161,6 +170,12 @@
     let suppressBackSwipeClickUntil = 0;
     let backSwipeSnapshots: BackSwipeSnapshot[] = [];
     let renderedMobileRoute: MobileRouteDescriptor | null = null;
+    const settingsNestedRoute = $derived(
+        settingsSection !== null &&
+            (settingsDetailPage !== null ||
+                settingsEditorMode !== null ||
+                personaEditorMode !== null),
+    );
 
     function sidebarMotionDuration(duration: number): number {
         return typeof window !== 'undefined' && window.matchMedia(REDUCED_MOTION).matches
@@ -535,20 +550,28 @@
     function showHome(): void {
         view = 'home';
         chatThreadOpen = false;
+        chatUtilityOpen = false;
+        chatUtilityAutoCollapsed = false;
     }
 
     function showChat(): void {
         view = 'chat';
         chatThreadOpen = false;
+        chatUtilityOpen = false;
+        chatUtilityAutoCollapsed = false;
     }
 
     function openChatThread(): void {
         view = 'chat';
         chatThreadOpen = true;
+        chatUtilityOpen = false;
+        chatUtilityAutoCollapsed = false;
     }
 
     function openCreate(): void {
         view = 'create';
+        chatUtilityOpen = false;
+        chatUtilityAutoCollapsed = false;
         studioSection = null;
         studioDetailPage = null;
     }
@@ -586,6 +609,42 @@
         pushedTopFadeProgress = Math.min(1, Math.max(0, scrollTop / MOBILE_TOP_FADE_DISTANCE_PX));
     }
 
+    function syncDetailActionViewport(node: HTMLDivElement): { destroy: () => void } {
+        const update = (): void => {
+            const shell = node.closest<HTMLElement>('.app-shell');
+            if (shell?.dataset.layout !== 'desktop') {
+                node.style.removeProperty('--detail-action-center');
+                node.style.removeProperty('--detail-action-workspace-width');
+                return;
+            }
+
+            const bounds = node.getBoundingClientRect();
+            const workspaceWidth = node.clientWidth;
+            node.style.setProperty(
+                '--detail-action-center',
+                `${String(bounds.left + workspaceWidth / 2)}px`,
+            );
+            node.style.setProperty(
+                '--detail-action-workspace-width',
+                `${String(workspaceWidth)}px`,
+            );
+        };
+        window.addEventListener('resize', update);
+        update();
+
+        return {
+            destroy(): void {
+                window.removeEventListener('resize', update);
+                node.style.removeProperty('--detail-action-center');
+                node.style.removeProperty('--detail-action-workspace-width');
+            },
+        };
+    }
+
+    $effect(() => {
+        if (chatUtilityOpen) chatUtilityAutoCollapsed = false;
+    });
+
     $effect(() => {
         const nextKey = `${view}:${studioSection ?? ''}:${studioDetailPage ?? ''}`;
         if (nextKey === studioRouteKey) return;
@@ -611,13 +670,33 @@
     });
 
     function openSettings(): void {
+        if (view !== 'settings') settingsReturnView = view;
         view = 'settings';
+        chatUtilityOpen = false;
+        chatUtilityAutoCollapsed = false;
         settingsSection = null;
         settingsDetailPage = null;
         settingsEditorMode = null;
         settingsEditorTitle = '';
         personaEditorMode = null;
         void controller.loadProviders();
+    }
+
+    function returnFromSettings(): void {
+        view = settingsReturnView;
+        settingsSection = null;
+        settingsDetailPage = null;
+        settingsEditorMode = null;
+        settingsEditorTitle = '';
+        personaEditorMode = null;
+    }
+
+    function selectDesktopSettingsSection(next: SettingsSection | null): void {
+        personaEditorMode = null;
+        settingsDetailPage = null;
+        settingsEditorMode = null;
+        settingsEditorTitle = '';
+        settingsSection = next;
     }
 
     function openSettingsSection(next: SettingsSection): void {
@@ -814,6 +893,8 @@
 
     onMount(() => {
         const layout = window.matchMedia(DESKTOP_LAYOUT);
+        const utilityDock = window.matchMedia(DESKTOP_UTILITY_DOCK);
+        let utilityDockWasWide = utilityDock.matches;
         const cancelSidebarUnmount = (): void => {
             if (sidebarUnmountTimer === undefined) return;
             clearTimeout(sidebarUnmountTimer);
@@ -821,7 +902,22 @@
         };
         const syncLayout = (): void => {
             const nextIsDesktop = layout.matches;
+            const nextUtilityDockWide = utilityDock.matches;
             cancelSidebarUnmount();
+
+            if (nextIsDesktop !== isDesktop) {
+                chatUtilityOpen = false;
+                chatUtilityAutoCollapsed = false;
+            } else if (nextIsDesktop && nextUtilityDockWide !== utilityDockWasWide) {
+                if (!nextUtilityDockWide) {
+                    chatUtilityAutoCollapsed = chatUtilityOpen;
+                    chatUtilityOpen = false;
+                } else if (chatUtilityAutoCollapsed) {
+                    chatUtilityAutoCollapsed = false;
+                    chatUtilityOpen = true;
+                }
+            }
+            utilityDockWasWide = nextUtilityDockWide;
 
             if (nextIsDesktop) {
                 sidebarContentMounted = true;
@@ -845,6 +941,7 @@
         };
         syncLayout();
         layout.addEventListener('change', syncLayout);
+        utilityDock.addEventListener('change', syncLayout);
         window.addEventListener('resize', syncLayout);
 
         let previousBootstrapPhase = appState.bootstrap.phase;
@@ -891,6 +988,7 @@
             clearBackSwipeSnapshots();
             cancelSidebarUnmount();
             layout.removeEventListener('change', syncLayout);
+            utilityDock.removeEventListener('change', syncLayout);
             window.removeEventListener('resize', syncLayout);
             unsubscribe();
             unsubscribeOrchestration();
@@ -904,42 +1002,78 @@
     });
 </script>
 
+{#snippet sidebarSwitcher()}
+    <div
+        class="sidebar-view-switcher"
+        data-section={homeSection}
+        role="group"
+        aria-label={$tr('app.sidebar.switcher')}
+    >
+        <span class="sidebar-view-thumb" aria-hidden="true"></span>
+        <button
+            class="sidebar-view-option"
+            type="button"
+            aria-pressed={homeSection === 'characters'}
+            aria-controls="sidebar-character-list"
+            onclick={() => (homeSection = 'characters')}
+        >
+            {$tr('app.sidebar.characters')}
+        </button>
+        <button
+            class="sidebar-view-option"
+            type="button"
+            aria-pressed={homeSection === 'conversations'}
+            aria-controls="sidebar-chat-list"
+            onclick={() => (homeSection = 'conversations')}
+        >
+            {$tr('app.sidebar.chat')}
+        </button>
+    </div>
+{/snippet}
+
 {#snippet navigator()}
     <div class="navigator">
-        <section class="home-section" class:open={homeSection === 'characters'}>
+        {@render sidebarSwitcher()}
+        <div class="sidebar-primary-actions">
             <button
-                class="section-toggle"
+                class="nav-row sidebar-create-row"
                 type="button"
-                aria-expanded={homeSection === 'characters'}
-                onclick={() => (homeSection = 'characters')}
+                aria-current={view === 'create' ? 'page' : undefined}
+                onclick={openCreate}
             >
-                <ChevronRight class="chevron" aria-hidden="true" />
-                <span class="section-name">{$tr('app.tab.library')}</span>
-                {#if appState.selected_character !== null}
-                    <span class="section-value">{appState.selected_character.name}</span>
-                {/if}
+                {@render createIcon()}
+                <span>{$tr('app.view.create')}</span>
             </button>
-            <LibraryPane
-                state={appState}
-                {controller}
-                client={appClient}
-                onOpenConversations={() => (homeSection = 'conversations')}
-            />
-        </section>
+        </div>
 
-        <section class="home-section" class:open={homeSection === 'conversations'}>
-            <button
-                class="section-toggle"
-                type="button"
-                aria-expanded={homeSection === 'conversations'}
-                disabled={appState.selected_character === null}
-                onclick={() => (homeSection = 'conversations')}
+        <div class="sidebar-view-panels" data-section={homeSection}>
+            <section
+                id="sidebar-character-list"
+                class="sidebar-view-panel"
+                data-panel="characters"
+                aria-label={$tr('app.sidebar.characters')}
+                aria-hidden={homeSection !== 'characters'}
+                inert={homeSection !== 'characters'}
             >
-                <ChevronRight class="chevron" aria-hidden="true" />
-                <span class="section-name">{$tr('app.tab.conversations')}</span>
-            </button>
-            <ConversationPane state={appState} {controller} onOpenChat={openChatThread} />
-        </section>
+                <LibraryPane
+                    state={appState}
+                    {controller}
+                    client={appClient}
+                    onOpenConversations={() => (homeSection = 'conversations')}
+                />
+            </section>
+
+            <section
+                id="sidebar-chat-list"
+                class="sidebar-view-panel"
+                data-panel="conversations"
+                aria-label={$tr('app.sidebar.chat')}
+                aria-hidden={homeSection !== 'conversations'}
+                inert={homeSection !== 'conversations'}
+            >
+                <ConversationPane state={appState} {controller} onOpenChat={openChatThread} />
+            </section>
+        </div>
     </div>
 {/snippet}
 
@@ -959,6 +1093,7 @@
     class="app-shell"
     data-view={view}
     data-layout={isDesktop ? 'desktop' : 'mobile'}
+    data-titlebar-overlay={nativeMacosTitlebarOverlay ? 'true' : 'false'}
     data-back-swipe={backSwipePhase}
     data-back-swipe-underlay={backSwipeUnderlayReady ? 'ready' : 'empty'}
     style:--back-swipe-offset={`${String(backSwipeOffset)}px`}
@@ -969,44 +1104,43 @@
 >
     <div class="sidebar-rail" aria-hidden={!isDesktop} inert={!isDesktop}>
         {#if sidebarContentMounted && appState.bootstrap.phase !== 'error'}
-            <aside class="sidebar" aria-label={$tr('app.nav.label')}>
-                <div class="sidebar-head">
-                    <span class="sidebar-logo" aria-hidden="true">
-                        <span
-                            class="brand-logo-mark"
-                            style:--logo-mask={`url("${lorepiaLogoMark}")`}
-                        ></span>
-                    </span>
-                    <h1 class="index-title">LorePia</h1>
-                </div>
-                {@render navigator()}
-                <div class="sidebar-foot">
-                    <button
-                        class="nav-row"
-                        type="button"
-                        aria-current={view === 'create' ? 'page' : undefined}
-                        onclick={openCreate}
+            {#if view === 'settings'}
+                <aside class="sidebar settings-sidebar-shell" aria-label="설정">
+                    <DesktopSettingsSidebar
+                        selected={settingsSection}
+                        titlebarOverlay={nativeMacosTitlebarOverlay}
+                        onSelect={selectDesktopSettingsSection}
+                        onReturn={returnFromSettings}
+                    />
+                </aside>
+            {:else}
+                <aside class="sidebar" aria-label={$tr('app.nav.label')}>
+                    <div
+                        class="sidebar-head"
+                        data-tauri-drag-region={nativeMacosTitlebarOverlay ? '' : undefined}
                     >
-                        {@render createIcon()}
-                        <span>{$tr('app.view.create')}</span>
-                    </button>
-                    <button
-                        class="nav-row"
-                        type="button"
-                        aria-current={view === 'settings' ? 'page' : undefined}
-                        onclick={openSettings}
-                    >
-                        {@render settingsIcon()}
-                        <span>{$tr('app.tab.providers')}</span>
-                    </button>
-                </div>
-            </aside>
+                        <h1
+                            class="index-title"
+                            data-tauri-drag-region={nativeMacosTitlebarOverlay ? '' : undefined}
+                        >
+                            LorePia
+                        </h1>
+                    </div>
+                    {@render navigator()}
+                    <div class="sidebar-foot">
+                        <button class="nav-row" type="button" onclick={openSettings}>
+                            {@render settingsIcon()}
+                            <span>{$tr('app.tab.providers')}</span>
+                        </button>
+                    </div>
+                </aside>
+            {/if}
         {/if}
     </div>
 
     {#if appState.bootstrap.phase === 'error'}
         <main id="main-content" class="main">
-            <div class="fatal-screen">
+            <div class="fatal-screen" role="alert">
                 <span class="large-mark" aria-hidden="true"><CircleAlert /></span>
                 <h1>{$tr('app.bootstrap.failed')}</h1>
                 <p>{appState.bootstrap.error}</p>
@@ -1041,6 +1175,9 @@
                     <ChatPane
                         {appState}
                         {controller}
+                        desktop={isDesktop}
+                        titlebarOverlay={nativeMacosTitlebarOverlay}
+                        bind:utilityOpen={chatUtilityOpen}
                         client={appClient}
                         {orchestrationState}
                         {orchestrationController}
@@ -1061,13 +1198,21 @@
             {:else if view === 'create'}
                 {#if studioSection === null}
                     {#if !isDesktop}
-                        <header class="mobile-top-frame mobile-root-header">
-                            <h1>{$tr('studio.title')}</h1>
+                        <header
+                            class="mobile-top-frame mobile-root-header"
+                            data-tauri-drag-region={nativeMacosTitlebarOverlay ? '' : undefined}
+                        >
+                            <h1
+                                data-tauri-drag-region={nativeMacosTitlebarOverlay ? '' : undefined}
+                            >
+                                {$tr('studio.title')}
+                            </h1>
                         </header>
                     {/if}
                 {:else}
                     <header
                         class="mobile-top-frame mobile-top-frame-leading sub-header"
+                        data-tauri-drag-region={nativeMacosTitlebarOverlay ? '' : undefined}
                         style:--mobile-top-fade-progress={pushedTopFadeProgress}
                     >
                         <button
@@ -1079,7 +1224,11 @@
                             <ArrowLeft aria-hidden="true" />
                         </button>
                         {#if studioSection !== null}
-                            <h1 bind:this={pushedTitleElement} tabindex="-1">
+                            <h1
+                                bind:this={pushedTitleElement}
+                                tabindex="-1"
+                                data-tauri-drag-region={nativeMacosTitlebarOverlay ? '' : undefined}
+                            >
                                 {studioDetailTitle()}
                             </h1>
                         {/if}
@@ -1087,6 +1236,7 @@
                 {/if}
                 <div
                     bind:this={studioScrollElement}
+                    use:syncDetailActionViewport
                     class="view-scroll"
                     class:studio-detail-scroll={studioSection !== null}
                     class:studio-detail-has-actions={studioDetailHasFixedActions(studioDetailPage)}
@@ -1105,13 +1255,16 @@
                         section={studioSection}
                         bind:detailPage={studioDetailPage}
                         onOpenSection={openStudioSection}
+                        desktop={isDesktop}
                         showIndexHeader={isDesktop}
+                        titlebarOverlay={nativeMacosTitlebarOverlay}
                     />
                 </div>
             {:else}
-                {#if settingsSection !== null}
+                {#if settingsSection !== null && (!isDesktop || settingsNestedRoute)}
                     <header
                         class="mobile-top-frame mobile-top-frame-leading sub-header"
+                        data-tauri-drag-region={nativeMacosTitlebarOverlay ? '' : undefined}
                         style:--mobile-top-fade-progress={pushedTopFadeProgress}
                     >
                         <button
@@ -1122,7 +1275,11 @@
                         >
                             <ArrowLeft aria-hidden="true" />
                         </button>
-                        <h1 bind:this={pushedTitleElement} tabindex="-1">
+                        <h1
+                            bind:this={pushedTitleElement}
+                            tabindex="-1"
+                            data-tauri-drag-region={nativeMacosTitlebarOverlay ? '' : undefined}
+                        >
                             {settingsDetailTitle()}
                         </h1>
                     </header>
@@ -1139,6 +1296,8 @@
                     section={settingsSection}
                     onOpenSection={openSettingsSection}
                     onDetailScroll={handlePushedDetailScroll}
+                    titlebarOverlay={nativeMacosTitlebarOverlay}
+                    desktop={isDesktop}
                 />
             {/if}
         </main>
@@ -1151,7 +1310,7 @@
         inert
     ></div>
 
-    {#if !isDesktop && studioSection === null && !(view === 'chat' && chatThreadOpen) && !(view === 'settings' && settingsSection !== null)}
+    {#if !isDesktop && !(view === 'create' && studioSection !== null) && !(view === 'chat' && chatThreadOpen) && !(view === 'settings' && settingsSection !== null)}
         <nav class="tab-bar" aria-label={$tr('app.nav.label')}>
             <button
                 class="tab"
@@ -1159,7 +1318,10 @@
                 aria-current={view === 'home' ? 'page' : undefined}
                 onclick={showHome}
             >
-                <House class="nav-icon" aria-hidden="true" />
+                <span class="nav-icon nav-icon-home" aria-hidden="true">
+                    <House class="nav-icon-home-fill-layer" />
+                    <House class="nav-icon-home-stroke-layer" />
+                </span>
                 <span class="tab-label">{$tr('app.tab.home')}</span>
             </button>
             <button
@@ -1168,7 +1330,7 @@
                 aria-current={view === 'chat' ? 'page' : undefined}
                 onclick={showChat}
             >
-                <MessageCircleMore class="nav-icon" aria-hidden="true" />
+                <MessageCircleMore class="nav-icon nav-icon-chat" aria-hidden="true" />
                 <span class="tab-label">{$tr('app.tab.chat')}</span>
             </button>
             <button
@@ -1177,7 +1339,7 @@
                 aria-current={view === 'create' ? 'page' : undefined}
                 onclick={openCreate}
             >
-                <SquarePen class="nav-icon" aria-hidden="true" />
+                <CirclePlus class="nav-icon nav-icon-create" aria-hidden="true" />
                 <span class="tab-label">{$tr('app.tab.create')}</span>
             </button>
             <button
@@ -1186,7 +1348,7 @@
                 aria-current={view === 'settings' ? 'page' : undefined}
                 onclick={openSettings}
             >
-                <Settings class="nav-icon" aria-hidden="true" />
+                <Settings class="nav-icon nav-icon-settings" aria-hidden="true" />
                 <span class="tab-label">{$tr('app.tab.providers')}</span>
             </button>
         </nav>

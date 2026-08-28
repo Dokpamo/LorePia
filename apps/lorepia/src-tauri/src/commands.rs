@@ -3,11 +3,12 @@ use std::{future::Future, pin::Pin};
 use lorepia_shell_api::{
     AssetDeliveryDto, BootstrapDto, CharacterDto, CharacterGreetingCatalogDto, ChatStreamItem,
     ConversationBranchDto, ConversationDto, ConversationStateDto, CreateConversationBranchInput,
-    CreateConversationInput, EditUserMessageInput, GenerationCredential, GenerationPresetDto,
-    GenerationSelectionInput, GenerationStartedDto, ImportInspectionDto,
+    CreateConversationInput, EditUserMessageInput, GenerateRuntimeTextInput, GenerationCredential,
+    GenerationPresetDto, GenerationSelectionInput, GenerationStartedDto, ImportInspectionDto,
     MessageActionGenerationDto, MessageDto, ModelRouteDto, RegenerateAssistantMessageInput,
-    RemoveMessageInput, RequestPreviewDto, ResolveAssetDeliveryInput, SecretCredential,
-    SelectConversationBranchInput, SendMessageInput, SetConversationModeInput, StagedImportFile,
+    RemoveMessageInput, RequestPreviewDto, ResolveAssetDeliveryInput, RuntimeTextGenerationDto,
+    SecretCredential, SelectConversationBranchInput, SendMessageInput, SetConversationModeInput,
+    StagedImportFile,
 };
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, State, ipc::Channel};
@@ -100,6 +101,17 @@ pub fn get_character_greeting_catalog(
     state
         .shell()?
         .get_character_greeting_catalog(&request.character_id)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn get_character_render_profile(
+    state: State<'_, AppState>,
+    request: CharacterRequest,
+) -> CommandResult<lorepia_shell_api::CharacterRenderProfileDto> {
+    state
+        .shell()?
+        .get_character_render_profile(&request.character_id)
         .map_err(Into::into)
 }
 
@@ -336,6 +348,22 @@ pub fn list_messages(
     state
         .shell()?
         .list_messages(&request.conversation_id)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn generate_runtime_text(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    input: GenerateRuntimeTextInput,
+) -> CommandResult<RuntimeTextGenerationDto> {
+    let shell = state.shell()?;
+    let dispatch_lease = generation_dispatch_lease(&state, &input.selection).await;
+    let credential =
+        credential_for_selection(&app, &state, &shell, &input.selection, dispatch_lease).await?;
+    shell
+        .generate_runtime_text(input, credential)
+        .await
         .map_err(Into::into)
 }
 

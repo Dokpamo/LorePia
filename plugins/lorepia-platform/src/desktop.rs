@@ -2784,7 +2784,7 @@ async fn stage_selected_file(
     staging_root: PathBuf,
 ) -> PlatformResult<Option<StagedImport>> {
     tokio::task::spawn_blocking(move || {
-        crate::staging::stage_file(&selection, &staging_root, 128 * 1024 * 1024).map(Some)
+        crate::staging::stage_file(&selection, &staging_root, 256 * 1024 * 1024).map(Some)
     })
     .await
     .map_err(|_| PlatformError::new(PlatformErrorCode::Internal))?

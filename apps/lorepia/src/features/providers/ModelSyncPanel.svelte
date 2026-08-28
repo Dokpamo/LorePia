@@ -1,6 +1,7 @@
 <script lang="ts">
     import { ListPlus } from '@lucide/svelte';
     import { tick } from 'svelte';
+    import ChoiceField from '../../components/ChoiceField.svelte';
     import DetailActionBar from '../../components/detail/DetailActionBar.svelte';
     import DetailPage from '../../components/detail/DetailPage.svelte';
     import { tr } from '../../lib/i18n';
@@ -122,15 +123,21 @@
                 void startSync();
             }}
         >
-            <label>
-                <span>{$tr('model_sync.connection')}</span>
-                <select bind:value={selectedConnectionId} required disabled={busy}>
-                    <option value="">{$tr('model_sync.select')}</option>
-                    {#each workspace.connections as connection (connection.id)}
-                        <option value={connection.id}>{connection.display_name}</option>
-                    {/each}
-                </select>
-            </label>
+            <ChoiceField
+                id="model-sync-connection"
+                label={$tr('model_sync.connection')}
+                value={selectedConnectionId}
+                options={[
+                    { value: '', label: $tr('model_sync.select') },
+                    ...workspace.connections.map((connection) => ({
+                        value: connection.id,
+                        label: connection.display_name,
+                    })),
+                ]}
+                onSelect={(value: string) => (selectedConnectionId = value)}
+                required
+                disabled={busy}
+            />
         </form>
 
         {#if workspace.connections.length === 0}
@@ -354,43 +361,6 @@
         gap: 16px;
     }
 
-    .sync-start-form label {
-        display: grid;
-        gap: 7px;
-        color: var(--ink-muted);
-        font-size: var(--detail-support-type);
-        font-weight: 700;
-    }
-
-    .sync-start-form select {
-        width: 100%;
-        min-width: 0;
-        min-height: clamp(48px, 13.73vw, 60px);
-        padding: clamp(12px, 3.432vw, 15px);
-        border: 1.5px solid var(--line);
-        border-radius: var(--radius-md);
-        appearance: none;
-        background: color-mix(in srgb, var(--surface-sunken) 26%, var(--surface-raised));
-        box-shadow: inset 0 1px 2px rgb(16 18 24 / 3%);
-        color: var(--ink);
-        font-size: var(--detail-support-type);
-        line-height: 1.5;
-    }
-
-    .sync-start-form select:hover:not(:focus, :disabled) {
-        border-color: var(--line);
-    }
-
-    .sync-start-form select:focus {
-        border-color: var(--accent);
-        outline: none;
-    }
-
-    .sync-start-form select:disabled {
-        cursor: not-allowed;
-        opacity: 0.55;
-    }
-
     .inline-note,
     .failure,
     .notice {
@@ -404,7 +374,9 @@
     }
 
     .failure {
-        color: var(--danger);
+        border: 1px solid var(--status-error-border);
+        color: var(--status-error-fg);
+        background: var(--status-error-bg);
     }
 
     .sync-job-list {

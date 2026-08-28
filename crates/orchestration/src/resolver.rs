@@ -15,6 +15,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+use crate::render_portable_text;
 use crate::template::{
     TemplateEnvironment, TemplateError, evaluate_condition, render_safe_template,
 };
@@ -600,7 +601,10 @@ where
                 let environment = template_environment(context, &context.slots);
                 Ok(default(render_safe_template(template, &environment)?))
             }
-            BlockSource::CharacterField { field } => Ok(default(character_field(context, *field))),
+            BlockSource::CharacterField { field } => Ok(default(render_portable_text(
+                &character_field(context, *field),
+                context,
+            ))),
             BlockSource::History => Self::history_messages(request, block),
             BlockSource::LatestUser => {
                 let latest = context
@@ -648,7 +652,7 @@ where
                     .map(|entry| DraftMessage {
                         requested_role: role_for_block(block),
                         authority: authority_for_provenance(block.authority, &entry.provenance),
-                        content: entry.content.clone(),
+                        content: render_portable_text(&entry.content, context),
                         source_message_ids: Vec::new(),
                         source_memory_record_ids: Vec::new(),
                         provenance: entry.provenance.clone(),

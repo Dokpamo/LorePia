@@ -36,6 +36,9 @@ pub const MAX_ORCHESTRATION_JSON_BYTES: usize = 2 * 1024 * 1024;
 pub const MAX_ORCHESTRATION_JSON_CHARS: usize = 1_000_000;
 pub const MAX_ORCHESTRATION_JSON_DEPTH: usize = 32;
 pub const MAX_ORCHESTRATION_JSON_NODES: usize = 100_000;
+const MAX_CHARACTER_CONTENT_JSON_BYTES: usize = 8 * 1024 * 1024;
+const MAX_CHARACTER_CONTENT_JSON_CHARS: usize = 4_000_000;
+const MAX_CHARACTER_CONTENT_JSON_NODES: usize = 250_000;
 pub const MAX_MEMORY_EMBEDDING_DIMENSIONS: usize = 32_768;
 
 const BUILTIN_CHAT_PRESET_ID: &str = "lorepia.builtin.chat-compatible.v1";
@@ -975,11 +978,25 @@ where
 }
 
 fn validate_json_bounds(label: &str, json: &str) -> CoreResult<()> {
-    if json.len() > MAX_ORCHESTRATION_JSON_BYTES
-        || json.chars().count() > MAX_ORCHESTRATION_JSON_CHARS
-    {
+    let character_content = matches!(label, "character_content" | "character content");
+    let max_bytes = if character_content {
+        MAX_CHARACTER_CONTENT_JSON_BYTES
+    } else {
+        MAX_ORCHESTRATION_JSON_BYTES
+    };
+    let max_chars = if character_content {
+        MAX_CHARACTER_CONTENT_JSON_CHARS
+    } else {
+        MAX_ORCHESTRATION_JSON_CHARS
+    };
+    let max_nodes = if character_content {
+        MAX_CHARACTER_CONTENT_JSON_NODES
+    } else {
+        MAX_ORCHESTRATION_JSON_NODES
+    };
+    if json.len() > max_bytes || json.chars().count() > max_chars {
         return Err(CoreError::invalid(format!(
-            "{label} exceeds the orchestration JSON storage limit"
+            "{label} exceeds its JSON storage limit"
         )));
     }
     let value = serde_json::from_str::<Value>(json)
@@ -988,7 +1005,7 @@ fn validate_json_bounds(label: &str, json: &str) -> CoreResult<()> {
     let mut visited = 0_usize;
     while let Some((node, depth)) = pending.pop() {
         visited = visited.saturating_add(1);
-        if visited > MAX_ORCHESTRATION_JSON_NODES || depth > MAX_ORCHESTRATION_JSON_DEPTH {
+        if visited > max_nodes || depth > MAX_ORCHESTRATION_JSON_DEPTH {
             return Err(CoreError::invalid(format!(
                 "{label} exceeds JSON nesting or node limits"
             )));
@@ -8250,14 +8267,16 @@ fn validate_transform_set_projection(transform_set: &TransformSet) -> CoreResult
     transform_set
         .validate()
         .map_err(|error| CoreError::invalid(error.to_string()))?;
-    if matches!(
+    let imported = matches!(
         transform_set.provenance.source_kind,
         SourceKind::ImportedStandard | SourceKind::ImportedPackage
-    ) && (transform_set.enabled
-        || transform_set
-            .rules
-            .iter()
-            .any(|rule| rule.enabled || rule.imported_enabled))
+    );
+    if imported
+        && (transform_set.enabled
+            || transform_set
+                .rules
+                .iter()
+                .any(|rule| rule.enabled || rule.imported_enabled))
     {
         return Err(CoreError::invalid(
             "imported transform sets and rules must remain disabled until reviewed",
@@ -13637,6 +13656,30 @@ fn character_content_object_id(character_id: &str) -> String {
     format!("character-content:{character_id}")
 }
 
+fn character_content_metadata_json(
+    content: &CharacterContentV1,
+    inspection_plan_sha256: Option<&str>,
+) -> CoreResult<String> {
+    // Asset descriptors are already projected into `asset_descriptors` and
+    // `asset_links`, while the immutable canonical document retains the full
+    // list. Keep this bounded metadata projection compact instead of storing a
+    // third copy that grows linearly with archive size.
+    let knowledge_book = content.knowledge_book.as_ref().map(|book| {
+        serde_json::json!({
+            "id": book.id,
+            "name": book.name,
+            "source_sha256": book.source_sha256,
+        })
+    });
+    serde_json::to_string(&serde_json::json!({
+        "schema_version": content.schema_version,
+        "knowledge_book": knowledge_book,
+        "asset_count": content.assets.len(),
+        "inspection_plan_sha256": inspection_plan_sha256,
+    }))
+    .map_err(|error| CoreError::invalid(format!("cannot encode character metadata: {error}")))
+}
+
 fn write_character_content_header(
     transaction: &Transaction<'_>,
     object_id: &str,
@@ -13657,13 +13700,7 @@ fn write_character_content_header(
         serde_json::to_string(&content.unknown_extensions).map_err(|error| {
             CoreError::invalid(format!("cannot encode character extensions: {error}"))
         })?;
-    let metadata_json = serde_json::to_string(&serde_json::json!({
-        "schema_version": content.schema_version,
-        "knowledge_book": content.knowledge_book,
-        "assets": content.assets,
-        "inspection_plan_sha256": inspection_plan_sha256,
-    }))
-    .map_err(|error| CoreError::invalid(format!("cannot encode character metadata: {error}")))?;
+    let metadata_json = character_content_metadata_json(content, inspection_plan_sha256)?;
     transaction
         .execute(
             "INSERT INTO character_content_revisions
@@ -13850,6 +13887,29 @@ pub(crate) fn write_imported_character_content(
         license: None,
         imported_at: Some(Utc::now()),
     };
+    if let Some(embedded) = content
+        .knowledge_book
+        .as_ref()
+        .and_then(|reference| reference.embedded.as_ref())
+    {
+        let book = embedded.materialize(provenance.clone());
+        // An empty inline reference is only a future link. Creating an empty
+        // native object here would claim that ID and prevent the creator from
+        // supplying its actual contents later.
+        if !book.entries.is_empty() {
+            ensure_imported_character_knowledge_book(transaction, &book)?;
+        }
+    }
+    if let Some(transform_set) = content.runtime.materialize_transform_set(Provenance {
+        // The immutable imported profile remains attached to the character.
+        // This executable set is a native projection generated from that
+        // profile, so it is not an unreviewed imported transform document.
+        source_kind: SourceKind::Generated,
+        source_id: Some(format!("character-import:{character_id}")),
+        ..provenance.clone()
+    }) {
+        ensure_imported_character_transform_set(transaction, &transform_set)?;
+    }
     let written = append_content_revision(
         transaction,
         DocumentTable::CharacterContent,
@@ -13869,6 +13929,111 @@ pub(crate) fn write_imported_character_content(
         content,
         &document_json,
         Some(inspection_plan_sha256),
+    )
+}
+
+fn ensure_imported_character_knowledge_book(
+    transaction: &Transaction<'_>,
+    book: &KnowledgeBook,
+) -> CoreResult<()> {
+    book.validate()
+        .map_err(|error| CoreError::invalid(format!("knowledge book is invalid: {error}")))?;
+    let existing = transaction
+        .query_row(
+            "SELECT revision.document_json
+             FROM content_objects AS object
+             JOIN content_object_state AS state ON state.object_id = object.id
+             JOIN content_revisions AS revision
+               ON revision.id = state.active_revision_id
+              AND revision.object_id = object.id
+             WHERE object.id = ?1
+               AND object.object_kind = 'knowledge_book'
+               AND object.deleted_at IS NULL",
+            [book.id.as_str()],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(storage_db_error)?;
+    if let Some(document_json) = existing {
+        let stored: KnowledgeBook = decode_document("knowledge book", &document_json)?;
+        if stored == *book {
+            return Ok(());
+        }
+        return Err(CoreError::invalid(format!(
+            "embedded knowledge book {} conflicts with existing content",
+            book.id.as_str()
+        )));
+    }
+    let written = append_content_revision(
+        transaction,
+        DocumentTable::KnowledgeBooks,
+        book.id.as_str(),
+        book.schema_version,
+        book,
+        &book.provenance,
+        None,
+        RevisionEventKind::Import,
+    )?;
+    let (document_json, _) = encode_document("knowledge book", book)?;
+    write_knowledge_book_projection(
+        transaction,
+        &written.revision_id,
+        book,
+        &document_json,
+        None,
+    )
+}
+
+fn ensure_imported_character_transform_set(
+    transaction: &Transaction<'_>,
+    transform_set: &TransformSet,
+) -> CoreResult<()> {
+    transform_set.validate().map_err(|error| {
+        CoreError::invalid(format!("character transform set is invalid: {error}"))
+    })?;
+    let existing = transaction
+        .query_row(
+            "SELECT revision.document_json
+             FROM content_objects AS object
+             JOIN content_object_state AS state ON state.object_id = object.id
+             JOIN content_revisions AS revision
+               ON revision.id = state.active_revision_id
+              AND revision.object_id = object.id
+             WHERE object.id = ?1
+               AND object.object_kind = 'transform_set'
+               AND object.deleted_at IS NULL",
+            [transform_set.id.as_str()],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(storage_db_error)?;
+    if let Some(document_json) = existing {
+        let stored: TransformSet = decode_document("transform set", &document_json)?;
+        if stored == *transform_set {
+            return Ok(());
+        }
+        return Err(CoreError::invalid(format!(
+            "character transform set {} conflicts with existing content",
+            transform_set.id.as_str()
+        )));
+    }
+    let written = append_content_revision(
+        transaction,
+        DocumentTable::TransformSets,
+        transform_set.id.as_str(),
+        transform_set.schema_version,
+        transform_set,
+        &transform_set.provenance,
+        None,
+        RevisionEventKind::Import,
+    )?;
+    let (document_json, _) = encode_document("transform set", transform_set)?;
+    write_transform_set_projection(
+        transaction,
+        &written.revision_id,
+        transform_set,
+        &document_json,
+        None,
     )
 }
 
@@ -14336,6 +14501,43 @@ mod tests {
 
     fn test_digest(label: &str) -> lorepia_domain::Sha256Digest {
         lorepia_domain::Sha256Digest::parse(sha256_hex(label.as_bytes())).expect("synthetic digest")
+    }
+
+    #[test]
+    fn character_content_metadata_does_not_duplicate_large_asset_lists() {
+        let content = CharacterContentV1 {
+            assets: (0..1_411)
+                .map(|index| {
+                    let digest = test_digest(&format!("character-asset-{index}"));
+                    AssetDescriptor {
+                        id: lorepia_domain::AssetId::from(format!("sha256:{}", digest.as_str())),
+                        sha256: digest,
+                        media_type: "image/png".to_owned(),
+                        role: AssetRole::Expression,
+                        name: format!("expression-{index}.png"),
+                        size_bytes: 12,
+                        width: None,
+                        height: None,
+                        duration_ms: None,
+                        source: lorepia_domain::AssetSource {
+                            kind: lorepia_domain::AssetSourceKind::CharxPackage,
+                            source_sha256: None,
+                            logical_path: Some(format!("assets/expressions/{index:04}.png")),
+                        },
+                    }
+                })
+                .collect(),
+            ..CharacterContentV1::default()
+        };
+
+        let metadata =
+            character_content_metadata_json(&content, Some(test_digest("plan").as_str()))
+                .expect("encode bounded character metadata");
+        let value: serde_json::Value =
+            serde_json::from_str(&metadata).expect("decode character metadata");
+        assert_eq!(value["asset_count"], 1_411);
+        assert!(value.get("assets").is_none());
+        assert!(metadata.len() < 262_144);
     }
 
     fn seed_legacy_knowledge_book(

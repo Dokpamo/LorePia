@@ -1105,6 +1105,11 @@ export class LorepiaAppController {
         return null;
     }
 
+    runtimeGenerationSelection(): GenerationSelectionInput | null {
+        const selection = this.generationSelection(get(this.mutable));
+        return selection === null ? null : structuredClone(selection);
+    }
+
     async sendMessage(content: string): Promise<boolean> {
         const state = get(this.mutable);
         if (state.chat.active_generation_id !== null) {

@@ -227,9 +227,9 @@
         display: grid;
         gap: 10px;
         padding: 12px;
-        border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--line));
+        border: 1px solid var(--status-warning-border);
         border-radius: 14px;
-        background: var(--surface-sunken);
+        background: var(--status-warning-bg);
     }
 
     header,
@@ -282,12 +282,23 @@
     .retry-warning,
     .retry-error {
         width: 100%;
-        color: var(--danger);
         font-size: 0.78rem;
     }
 
+    .retry-warning {
+        color: var(--status-warning-fg);
+    }
+
+    .retry-error {
+        padding: 8px 10px;
+        border: 1px solid var(--status-error-border);
+        border-radius: var(--radius-sm);
+        color: var(--status-error-fg);
+        background: var(--status-error-bg);
+    }
+
     .retry-notice {
-        color: var(--success);
+        color: var(--status-success-fg);
         font-size: 0.78rem;
     }
 

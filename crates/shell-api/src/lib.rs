@@ -34,9 +34,10 @@ pub mod test_support;
 
 pub use api::{
     ConversationGreetingSelectionInput, CreateConversationBranchInput, CreateConversationInput,
-    EditUserMessageInput, GenerationSelectionInput, RegenerateAssistantMessageInput,
-    RemoveMessageInput, SelectConversationBranchInput, SendMessageInput, SetConversationModeInput,
-    ShellApi, StartedGeneration, StartedMessageAction,
+    EditUserMessageInput, GenerateRuntimeTextInput, GenerationSelectionInput,
+    RegenerateAssistantMessageInput, RemoveMessageInput, RuntimePromptMessageInput,
+    RuntimePromptRoleInput, RuntimeTextGenerationDto, SelectConversationBranchInput,
+    SendMessageInput, SetConversationModeInput, ShellApi, StartedGeneration, StartedMessageAction,
 };
 pub use asset::{
     AssetDeliveryDto, AssetDeliveryKindDto, AssetDeliverySelector, AssetProtocolRange,
@@ -71,13 +72,15 @@ pub use discovery::{
     ProviderDiscoveryEventDto, ProviderDiscoveryReviewProposalDto, ProviderDiscoverySessionDto,
 };
 pub use dto::{
-    BootstrapDto, CharacterDto, CharacterGreetingCatalogDto, CharacterGreetingKindDto,
-    CharacterGreetingOptionDto, ChatEventDto, ChatEventKindDto, ContentKindDto,
-    ConversationBranchDto, ConversationDto, ConversationModeDto, ConversationStateDto,
-    GenerationStartedDto, GenerationTargetDto, GenerationUsageDto, HealthDto,
-    ImportImagePreviewDto, ImportInspectionDto, ImportWarningDto, MessageActionGenerationDto,
-    MessageDisplayProjectionDto, MessageDto, MessageRoleDto, MessageStatusDto,
-    MessageTransformDiagnosticDto, MessageTransformDispositionDto, MessageTransformStageDto,
+    BootstrapDto, CharacterDisplayTransformDto, CharacterDto, CharacterGreetingCatalogDto,
+    CharacterGreetingKindDto, CharacterGreetingOptionDto, CharacterRenderAssetDto,
+    CharacterRenderProfileDto, CharacterRuntimeKnowledgeDto, CharacterRuntimeScriptDto,
+    ChatEventDto, ChatEventKindDto, ContentKindDto, ConversationBranchDto, ConversationDto,
+    ConversationModeDto, ConversationStateDto, GenerationStartedDto, GenerationTargetDto,
+    GenerationUsageDto, HealthDto, ImportImagePreviewDto, ImportInspectionDto, ImportWarningDto,
+    MessageActionGenerationDto, MessageDisplayProjectionDto, MessageDto, MessageRoleDto,
+    MessageStatusDto, MessageTransformDiagnosticDto, MessageTransformDispositionDto,
+    MessageTransformStageDto,
 };
 pub use error::{ShellError, ShellErrorCode, ShellResult};
 pub use interaction::{

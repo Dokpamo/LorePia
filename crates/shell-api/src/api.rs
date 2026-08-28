@@ -3,16 +3,16 @@ use std::{fmt, path::Path};
 use lorepia_core::{
     CORE_API_VERSION, ConnectionBoundCredential, ConversationBranchId, ConversationId,
     ConversationMode, Core, CoreConfig, CoreError, DiscoveryRecoveryOwner, GenerationId,
-    GenerationOperationContext, GenerationTarget, InspectionId, MessageId, ProviderConnectionId,
-    ProviderCredentialAccessAuthority,
+    GenerationOperationContext, GenerationTarget, InspectionId, MessageId, MessageRole,
+    ProviderConnectionId, ProviderCredentialAccessAuthority, RuntimePromptMessage,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    BootstrapDto, CharacterDto, CharacterGreetingCatalogDto, ChatEventStream,
-    ConversationBranchDto, ConversationDto, ConversationModeDto, ConversationStateDto,
-    GenerationCredential, GenerationStartedDto, GenerationTargetDto, HealthDto,
-    ImportInspectionDto, MessageActionGenerationDto, MessageDto,
+    BootstrapDto, CharacterDto, CharacterGreetingCatalogDto, CharacterRenderProfileDto,
+    ChatEventStream, ConversationBranchDto, ConversationDto, ConversationModeDto,
+    ConversationStateDto, GenerationCredential, GenerationStartedDto, GenerationTargetDto,
+    HealthDto, ImportInspectionDto, MessageActionGenerationDto, MessageDto,
     ProviderCredentialAccessAuthorityContext, SecretCredential, ShellError, ShellResult,
     StagedImportFile, TaskCredentialLease, TaskCredentialReader,
     orchestration::ShellTaskCredentialBroker, sensitive::GenerationCredentialKind,
@@ -54,6 +54,44 @@ fn connection_bound_credential(
 pub enum GenerationSelectionInput {
     LegacyProfile { provider_profile_id: String },
     Target { target: GenerationTargetDto },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimePromptRoleInput {
+    System,
+    User,
+    Assistant,
+}
+
+impl From<RuntimePromptRoleInput> for MessageRole {
+    fn from(value: RuntimePromptRoleInput) -> Self {
+        match value {
+            RuntimePromptRoleInput::System => Self::System,
+            RuntimePromptRoleInput::User => Self::User,
+            RuntimePromptRoleInput::Assistant => Self::Assistant,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimePromptMessageInput {
+    pub role: RuntimePromptRoleInput,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GenerateRuntimeTextInput {
+    pub selection: GenerationSelectionInput,
+    pub messages: Vec<RuntimePromptMessageInput>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeTextGenerationDto {
+    pub result: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -256,6 +294,23 @@ impl ShellApi {
             .map_err(ShellError::from)
     }
 
+    pub fn get_character_render_profile(
+        &self,
+        character_id: &str,
+    ) -> ShellResult<CharacterRenderProfileDto> {
+        validate_identifier("character_id", character_id)?;
+        self.core
+            .get_character_content(character_id)
+            .map(|stored| {
+                CharacterRenderProfileDto::from_content(
+                    character_id.to_owned(),
+                    stored.revision_id,
+                    stored.value,
+                )
+            })
+            .map_err(ShellError::from)
+    }
+
     pub fn get_character_greeting_catalog(
         &self,
         character_id: &str,
@@ -452,6 +507,73 @@ impl ShellApi {
             .list_message_presentations(&ConversationId(conversation_id.to_owned()))
             .map(|values| values.into_iter().map(Into::into).collect())
             .map_err(ShellError::from)
+    }
+
+    /// Executes a bounded provider-neutral prompt for an imported runtime.
+    /// Native bindings still choose and read the credential; the webview can
+    /// submit neither secret material nor a raw provider request.
+    pub async fn generate_runtime_text(
+        &self,
+        input: GenerateRuntimeTextInput,
+        credential: GenerationCredential,
+    ) -> ShellResult<RuntimeTextGenerationDto> {
+        validate_selection(&input.selection)?;
+        let messages = input
+            .messages
+            .into_iter()
+            .map(|message| RuntimePromptMessage {
+                role: message.role.into(),
+                content: message.content,
+            })
+            .collect::<Vec<_>>();
+        let result = match (input.selection, credential.into_kind()) {
+            (
+                GenerationSelectionInput::LegacyProfile {
+                    provider_profile_id,
+                },
+                GenerationCredentialKind::Legacy {
+                    credential,
+                    admission_lease: _admission_lease,
+                },
+            ) => {
+                validate_identifier("provider_profile_id", &provider_profile_id)?;
+                self.core
+                    .generate_runtime_text_with_provider_profile(
+                        &provider_profile_id,
+                        &messages,
+                        credential.map(crate::SecretCredential::into_core_value),
+                    )
+                    .await
+            }
+            (
+                GenerationSelectionInput::Target { target },
+                GenerationCredentialKind::Connection {
+                    connection_id,
+                    credential,
+                    access_authority,
+                    dispatch_lease,
+                },
+            ) => {
+                validate_identifier("connection_id", &connection_id)?;
+                self.core
+                    .generate_runtime_text_with_connection_credential(
+                        &GenerationTarget::from(target),
+                        &messages,
+                        connection_bound_credential(
+                            connection_id,
+                            credential,
+                            access_authority,
+                            dispatch_lease,
+                        ),
+                    )
+                    .await
+            }
+            _ => Err(CoreError::invalid(
+                "credential context does not match the generation selection",
+            )),
+        }
+        .map_err(ShellError::from)?;
+        Ok(RuntimeTextGenerationDto { result })
     }
 
     pub fn send_message_to_branch(

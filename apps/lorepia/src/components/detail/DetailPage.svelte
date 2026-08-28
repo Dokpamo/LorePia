@@ -80,10 +80,21 @@
         align-content: start;
         padding: 16px var(--settings-gutter) calc(24px + env(safe-area-inset-bottom));
         gap: 18px;
-        overflow-y: scroll;
+        overflow-y: auto;
     }
 
     .detail-page-scroll.detail-page-has-actions {
         padding-bottom: calc(var(--mobile-nav) + 36px + env(safe-area-inset-bottom));
+    }
+
+    :global(.app-shell[data-layout='desktop']) .detail-page-scroll {
+        padding-top: 24px;
+        padding-bottom: 40px;
+        gap: 28px;
+        scrollbar-gutter: auto;
+    }
+
+    :global(.app-shell[data-layout='desktop']) .detail-page-scroll.detail-page-has-actions {
+        padding-bottom: calc(var(--mobile-nav) + 28px);
     }
 </style>

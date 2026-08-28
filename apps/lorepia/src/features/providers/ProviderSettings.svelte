@@ -32,6 +32,8 @@
     import PersonaPanel from '../personas/PersonaPanel.svelte';
     import type { PersonaController, PersonaState } from '../personas/persona-controller';
     import OpenSourceLicenses from '../licenses/OpenSourceLicenses.svelte';
+    import ChoiceField from '../../components/ChoiceField.svelte';
+    import ToggleSwitch from '../../components/ToggleSwitch.svelte';
     import DetailActionBar from '../../components/detail/DetailActionBar.svelte';
     import {
         DETAIL_SCROLL_CONTEXT,
@@ -46,6 +48,7 @@
 
     interface Props {
         appState: LorepiaAppState;
+        desktop?: boolean;
         section?: SettingsSection | null;
         onOpenSection?: (section: SettingsSection) => void;
         controller: LorepiaAppController;
@@ -56,11 +59,13 @@
         editorMode?: string | null;
         editorTitle?: string;
         onDetailScroll?: DetailScrollListener;
+        titlebarOverlay?: boolean;
     }
 
     let {
         appState,
         controller,
+        desktop = false,
         personaState,
         personaController,
         personaEditorMode = $bindable(null),
@@ -70,6 +75,7 @@
         section = null,
         onOpenSection = () => undefined,
         onDetailScroll = () => undefined,
+        titlebarOverlay = false,
     }: Props = $props();
 
     setContext<DetailScrollListener>(DETAIL_SCROLL_CONTEXT, (scrollTop) => {
@@ -88,6 +94,11 @@
         { id: 'advanced' as const },
         { id: 'licenses' as const },
     ]);
+    const themeOptions = [
+        { id: 'system' as const, label: '시스템' },
+        { id: 'light' as const, label: '라이트 모드' },
+        { id: 'dark' as const, label: '다크 모드' },
+    ];
     let settingsMenuOpen = $state(false);
     let savingKey = $state<string | null>(null);
     let selectingProfileId = $state<string | null>(null);
@@ -387,6 +398,39 @@
                 return 'ISC · MIT';
         }
     }
+
+    function settingDescription(id: SettingsSection): string {
+        switch (id) {
+            case 'appearance':
+                return '앱의 밝기와 화면 표현을 선택합니다.';
+            case 'persona':
+                return '대화에 사용할 캐릭터 페르소나를 관리합니다.';
+            case 'target':
+                return '새 대화가 기본으로 사용할 모델과 생성 프리셋입니다.';
+            case 'connections':
+                return '모델 공급자 연결과 자격증명을 관리합니다.';
+            case 'templates':
+                return '공급자 연결에 재사용할 요청 템플릿입니다.';
+            case 'discovery':
+                return '호환 가능한 공급자와 모델을 찾아 기록합니다.';
+            case 'catalog':
+                return '검증된 모델 카탈로그와 활성 리비전을 관리합니다.';
+            case 'advanced':
+                return '라우트, 프리셋과 모델 기능을 세부 조정합니다.';
+            case 'licenses':
+                return 'LorePia와 포함된 라이브러리의 라이선스를 확인합니다.';
+        }
+    }
+
+    function settingsPageTitle(): string {
+        return section === null ? '일반' : $tr(`settings.section.${section}.title`);
+    }
+
+    const desktopNestedRoute = $derived(
+        desktop &&
+            section !== null &&
+            (detailPage !== null || editorMode !== null || personaEditorMode !== null),
+    );
 </script>
 
 {#snippet tileMark(id: SettingsSection)}
@@ -425,14 +469,74 @@
     {/if}
 {/snippet}
 
+{#snippet desktopSummaryRow(id: SettingsSection)}
+    <button class="desktop-settings-summary-row" type="button" onclick={() => onOpenSection(id)}>
+        <span class="desktop-settings-summary-copy">
+            <strong>{$tr(`settings.section.${id}.title`)}</strong>
+            <small>{settingDescription(id)}</small>
+        </span>
+        <span class="desktop-settings-summary-value">{settingValue(id)}</span>
+    </button>
+{/snippet}
+
 <section
     class="provider-pane"
     aria-label={section === null
         ? $tr('app.tab.providers')
         : $tr(`settings.section.${section}.title`)}
 >
-    {#if section === null}
-        <div class="mobile-top-frame settings-toolbar" role="toolbar" aria-label="설정 도구">
+    {#if desktop && !desktopNestedRoute}
+        <header
+            class="desktop-settings-page-heading"
+            data-tauri-drag-region={titlebarOverlay ? '' : undefined}
+        >
+            <h1 data-tauri-drag-region={titlebarOverlay ? '' : undefined}>
+                {settingsPageTitle()}
+            </h1>
+        </header>
+    {/if}
+
+    {#if section === null && desktop}
+        <div
+            bind:this={settingsScrollElement}
+            class="provider-scroll desktop-settings-overview"
+            onscroll={handleSettingsDetailScroll}
+        >
+            <section class="desktop-settings-section" aria-labelledby="general-conversation-title">
+                <h2 id="general-conversation-title">대화 환경</h2>
+                <div class="desktop-settings-card">
+                    {@render desktopSummaryRow('appearance')}
+                    {@render desktopSummaryRow('persona')}
+                    {@render desktopSummaryRow('target')}
+                </div>
+            </section>
+
+            <section class="desktop-settings-section" aria-labelledby="general-provider-title">
+                <h2 id="general-provider-title">모델과 데이터</h2>
+                <div class="desktop-settings-card">
+                    {@render desktopSummaryRow('connections')}
+                    {@render desktopSummaryRow('templates')}
+                    {@render desktopSummaryRow('discovery')}
+                    {@render desktopSummaryRow('catalog')}
+                </div>
+            </section>
+
+            <section class="desktop-settings-section" aria-labelledby="general-information-title">
+                <h2 id="general-information-title">정보</h2>
+                <div class="desktop-settings-card">
+                    {@render desktopSummaryRow('advanced')}
+                    {@render desktopSummaryRow('licenses')}
+                </div>
+            </section>
+        </div>
+    {:else if section === null}
+        <div
+            class="mobile-top-frame settings-toolbar"
+            class:titlebar-overlay={titlebarOverlay}
+            role="toolbar"
+            aria-label="설정 도구"
+            data-tauri-drag-region={titlebarOverlay ? '' : undefined}
+        >
             <button
                 class="icon-button ghost mobile-top-action settings-tool-button"
                 type="button"
@@ -470,8 +574,16 @@
                         <SlidersHorizontal />
                     </span>
                 </span>
-                <div class="settings-identity-copy">
-                    <h2 id="settings-identity-title">LorePia</h2>
+                <div
+                    class="settings-identity-copy"
+                    data-tauri-drag-region={titlebarOverlay ? '' : undefined}
+                >
+                    <h2
+                        id="settings-identity-title"
+                        data-tauri-drag-region={titlebarOverlay ? '' : undefined}
+                    >
+                        LorePia
+                    </h2>
                 </div>
             </section>
             <ul class="setting-list">
@@ -560,53 +672,83 @@
             onscroll={handleSettingsDetailScroll}
         >
             {#if section === 'appearance'}
-                <ul class="setting-list detail-choice-list" aria-label="화면 모드 선택">
-                    <li>
-                        <button
-                            type="button"
-                            class="setting-row detail-choice-row"
-                            aria-pressed={$themePreference === 'system'}
-                            onclick={() => setThemePreference('system')}
-                        >
-                            <span class="setting-content">
-                                <span class="setting-copy"><strong>시스템</strong></span>
-                                {#if $themePreference === 'system'}
-                                    <Check class="detail-check" aria-hidden="true" />
-                                {/if}
-                            </span>
-                        </button>
-                    </li>
-                    <li>
-                        <button
-                            type="button"
-                            class="setting-row detail-choice-row"
-                            aria-pressed={$themePreference === 'light'}
-                            onclick={() => setThemePreference('light')}
-                        >
-                            <span class="setting-content">
-                                <span class="setting-copy"><strong>라이트</strong></span>
-                                {#if $themePreference === 'light'}
-                                    <Check class="detail-check" aria-hidden="true" />
-                                {/if}
-                            </span>
-                        </button>
-                    </li>
-                    <li>
-                        <button
-                            type="button"
-                            class="setting-row detail-choice-row"
-                            aria-pressed={$themePreference === 'dark'}
-                            onclick={() => setThemePreference('dark')}
-                        >
-                            <span class="setting-content">
-                                <span class="setting-copy"><strong>다크</strong></span>
-                                {#if $themePreference === 'dark'}
-                                    <Check class="detail-check" aria-hidden="true" />
-                                {/if}
-                            </span>
-                        </button>
-                    </li>
-                </ul>
+                {#if desktop}
+                    <section
+                        class="desktop-settings-section appearance-theme-section"
+                        aria-labelledby="appearance-theme-title"
+                    >
+                        <h2 id="appearance-theme-title">테마</h2>
+                        <div class="theme-preview-grid" role="group" aria-label="화면 모드 선택">
+                            {#each themeOptions as option (option.id)}
+                                <button
+                                    type="button"
+                                    class={`theme-preview-option theme-preview-${option.id}`}
+                                    aria-pressed={$themePreference === option.id}
+                                    onclick={() => setThemePreference(option.id)}
+                                >
+                                    <span class="theme-preview-canvas" aria-hidden="true">
+                                        <span class="theme-preview-sidebar"></span>
+                                        <span class="theme-preview-main">
+                                            <span class="theme-preview-title"></span>
+                                            <span class="theme-preview-line theme-preview-line-long"
+                                            ></span>
+                                            <span class="theme-preview-line"></span>
+                                            <span class="theme-preview-composer"></span>
+                                        </span>
+                                    </span>
+                                    <span class="theme-preview-label">
+                                        <span>{option.label}</span>
+                                        {#if $themePreference === option.id}
+                                            <Check aria-hidden="true" />
+                                        {/if}
+                                    </span>
+                                </button>
+                            {/each}
+                        </div>
+                    </section>
+
+                    <section
+                        class="desktop-settings-section"
+                        aria-labelledby="appearance-behavior-title"
+                    >
+                        <h2 id="appearance-behavior-title">표시 방식</h2>
+                        <div class="desktop-settings-card">
+                            <div class="desktop-settings-static-row">
+                                <span class="desktop-settings-summary-copy">
+                                    <strong>시스템 테마 연동</strong>
+                                    <small
+                                        >시스템 모드에서는 운영체제의 밝기 설정을 자동으로 따릅니다.</small
+                                    >
+                                </span>
+                                <span class="desktop-settings-summary-value">
+                                    {$themePreference === 'system' ? '사용' : '사용 안 함'}
+                                </span>
+                            </div>
+                        </div>
+                    </section>
+                {:else}
+                    <ul class="setting-list detail-choice-list" aria-label="화면 모드 선택">
+                        {#each themeOptions as option (option.id)}
+                            <li>
+                                <button
+                                    type="button"
+                                    class="setting-row detail-choice-row"
+                                    aria-pressed={$themePreference === option.id}
+                                    onclick={() => setThemePreference(option.id)}
+                                >
+                                    <span class="setting-content">
+                                        <span class="setting-copy"
+                                            ><strong>{option.label}</strong></span
+                                        >
+                                        {#if $themePreference === option.id}
+                                            <Check class="detail-check" aria-hidden="true" />
+                                        {/if}
+                                    </span>
+                                </button>
+                            </li>
+                        {/each}
+                    </ul>
+                {/if}
             {/if}
             {#if section !== 'appearance' && appState.providers.phase === 'loading'}
                 <div class="provider-state" role="status">프로바이더 상태를 불러오는 중입니다.</div>
@@ -662,56 +804,53 @@
                         {/if}
 
                         <div class="target-form detail-form">
-                            <label>
-                                <span>모델 라우트</span>
-                                <select
-                                    value={selectedRouteId}
-                                    disabled={settingsBusy}
-                                    onchange={(event) => changeRoute(event.currentTarget.value)}
-                                >
-                                    <option value="">선택 안 함</option>
-                                    {#each selectableRoutes as route (route.id)}
-                                        <option value={route.id}
-                                            >{route.display_name ?? route.model_id}</option
-                                        >
-                                    {/each}
-                                </select>
-                            </label>
-                            <label>
-                                <span>생성 프리셋</span>
-                                <select
-                                    value={selectedPresetId}
-                                    disabled={settingsBusy || selectedRouteId === ''}
-                                    onchange={(event) => {
-                                        selectedPresetId = event.currentTarget.value;
-                                        targetSelectionDirty = true;
-                                    }}
-                                >
-                                    <option value="">선택 안 함</option>
-                                    {#each selectedRoutePresets as preset (preset.id)}
-                                        <option value={preset.id}>{preset.display_name}</option>
-                                    {/each}
-                                </select>
-                            </label>
+                            <ChoiceField
+                                id="default-model-route"
+                                label="모델 라우트"
+                                value={selectedRouteId}
+                                options={[
+                                    { value: '', label: '선택 안 함' },
+                                    ...selectableRoutes.map((route) => ({
+                                        value: route.id,
+                                        label: route.display_name ?? route.model_id,
+                                    })),
+                                ]}
+                                disabled={settingsBusy}
+                                onSelect={changeRoute}
+                            />
+                            <ChoiceField
+                                id="default-generation-preset"
+                                label="생성 프리셋"
+                                value={selectedPresetId}
+                                options={[
+                                    { value: '', label: '선택 안 함' },
+                                    ...selectedRoutePresets.map((preset) => ({
+                                        value: preset.id,
+                                        label: preset.display_name,
+                                    })),
+                                ]}
+                                disabled={settingsBusy || selectedRouteId === ''}
+                                onSelect={(value: string) => {
+                                    selectedPresetId = value;
+                                    targetSelectionDirty = true;
+                                }}
+                            />
                         </div>
 
-                        <label class="settings-control-row">
+                        <div class="settings-control-row">
                             <span class="settings-control-copy">
                                 <strong>부분 응답 보존</strong>
                                 <small>취소·오류 시 생성된 일부 응답을 보존</small>
                             </span>
-                            <input
-                                class="settings-switch"
-                                type="checkbox"
-                                role="switch"
-                                aria-label="취소·오류 시 생성된 일부 응답을 보존"
+                            <ToggleSwitch
+                                label="취소·오류 시 생성된 일부 응답을 보존"
                                 checked={preservePartialGenerations}
                                 disabled={settingsBusy}
-                                onchange={(event) => {
-                                    preservePartialGenerations = event.currentTarget.checked;
+                                onChange={(checked: boolean) => {
+                                    preservePartialGenerations = checked;
                                 }}
                             />
-                        </label>
+                        </div>
 
                         <button
                             class="detail-secondary-action"
@@ -1208,6 +1347,27 @@
         background: var(--bg);
     }
 
+    .desktop-settings-page-heading {
+        display: flex;
+        width: 100%;
+        height: 120px;
+        min-height: 120px;
+        align-items: flex-end;
+        padding: 0 var(--settings-gutter) 24px;
+    }
+
+    .desktop-settings-page-heading h1 {
+        margin: 0;
+        font-size: 24px;
+        font-weight: 600;
+        letter-spacing: -0.025em;
+        line-height: 1.2;
+    }
+
+    .desktop-settings-page-heading[data-tauri-drag-region] {
+        -webkit-app-region: drag;
+    }
+
     .provider-scroll {
         display: grid;
         height: 0;
@@ -1215,14 +1375,256 @@
         flex: 1 1 0;
         gap: 16px;
         padding: 16px var(--settings-gutter) 24px;
-        overflow-y: scroll;
+        overflow-y: auto;
+    }
+
+    .desktop-settings-overview {
+        align-content: start;
+        padding-top: 24px;
+        padding-bottom: 40px;
+        gap: 42px;
+        scrollbar-gutter: auto;
+    }
+
+    .desktop-settings-section {
+        display: grid;
+        min-width: 0;
+        gap: 10px;
+    }
+
+    .desktop-settings-section > h2 {
+        padding-inline: 1px;
+        margin: 0;
+        color: var(--ink);
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+    }
+
+    .desktop-settings-card {
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: var(--desktop-workspace-bg);
+        box-shadow: var(--shadow-1);
+    }
+
+    .desktop-settings-summary-row,
+    .desktop-settings-static-row {
+        position: relative;
+        display: grid;
+        width: 100%;
+        min-height: 66px;
+        align-items: center;
+        padding: 10px 14px;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        color: var(--ink);
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 24px;
+        text-align: left;
+    }
+
+    .desktop-settings-summary-row + .desktop-settings-summary-row,
+    .desktop-settings-summary-row + .desktop-settings-static-row,
+    .desktop-settings-static-row + .desktop-settings-summary-row {
+        border-top: 0;
+    }
+
+    .desktop-settings-summary-row + .desktop-settings-summary-row::before,
+    .desktop-settings-summary-row + .desktop-settings-static-row::before,
+    .desktop-settings-static-row + .desktop-settings-summary-row::before {
+        position: absolute;
+        top: 0;
+        right: 14px;
+        left: 14px;
+        height: 1px;
+        background: var(--line);
+        content: '';
+        pointer-events: none;
+    }
+
+    .desktop-settings-summary-copy {
+        display: grid;
+        min-width: 0;
+        gap: 3px;
+    }
+
+    .desktop-settings-summary-copy strong {
+        font-size: 13px;
+        font-weight: 600;
+        line-height: 1.3;
+    }
+
+    .desktop-settings-summary-copy small {
+        color: var(--ink-muted);
+        font-size: 12px;
+        font-weight: 400;
+        line-height: 1.38;
+    }
+
+    .desktop-settings-summary-value {
+        max-width: 210px;
+        overflow: hidden;
+        color: var(--ink-muted);
+        font-size: 12px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .appearance-theme-section {
+        gap: 12px;
+    }
+
+    .theme-preview-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
+    }
+
+    .theme-preview-option {
+        display: grid;
+        width: 100%;
+        min-width: 0;
+        align-items: stretch;
+        justify-content: stretch;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: var(--ink-muted);
+        grid-template-columns: minmax(0, 1fr);
+        gap: 7px;
+        text-align: left;
+    }
+
+    .theme-preview-canvas {
+        position: relative;
+        display: grid;
+        width: 100%;
+        height: 174px;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: #f5f5f5;
+        grid-template-columns: 30% minmax(0, 1fr);
+    }
+
+    .theme-preview-option[aria-pressed='true'] .theme-preview-canvas {
+        box-shadow: 0 0 0 2px var(--accent);
+    }
+
+    .theme-preview-sidebar {
+        background: #dedede;
+    }
+
+    .theme-preview-main {
+        position: relative;
+        display: grid;
+        align-content: start;
+        padding: 16px 12px;
+        background: #fafafa;
+        gap: 7px;
+    }
+
+    .theme-preview-title,
+    .theme-preview-line,
+    .theme-preview-composer {
+        display: block;
+        border-radius: var(--radius-pill);
+        background: #c8c8c8;
+    }
+
+    .theme-preview-title {
+        width: 42%;
+        height: 6px;
+        margin-bottom: 4px;
+    }
+
+    .theme-preview-line {
+        width: 56%;
+        height: 4px;
+    }
+
+    .theme-preview-line-long {
+        width: 78%;
+    }
+
+    .theme-preview-composer {
+        position: absolute;
+        right: 10px;
+        bottom: 12px;
+        left: 10px;
+        height: 28px;
+        border: 1px solid #dadada;
+        background: #ffffff;
+    }
+
+    .theme-preview-dark .theme-preview-canvas {
+        border-color: #464646;
+        background: #1f1f1f;
+    }
+
+    .theme-preview-dark .theme-preview-sidebar {
+        background: #1b1b1b;
+    }
+
+    .theme-preview-dark .theme-preview-main {
+        background: #1f1f1f;
+    }
+
+    .theme-preview-dark .theme-preview-title,
+    .theme-preview-dark .theme-preview-line {
+        background: #6f6f6f;
+    }
+
+    .theme-preview-dark .theme-preview-composer {
+        border-color: #414141;
+        background: #282828;
+    }
+
+    .theme-preview-system .theme-preview-canvas::after {
+        position: absolute;
+        inset: 0 0 0 50%;
+        background: rgb(20 20 20 / 72%);
+        content: '';
+        pointer-events: none;
+    }
+
+    .theme-preview-label {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        justify-content: center;
+        color: currentcolor;
+        font-size: 12px;
+        font-weight: 500;
+        gap: 5px;
+    }
+
+    .theme-preview-option[aria-pressed='true'] .theme-preview-label {
+        color: var(--ink);
+    }
+
+    .theme-preview-label :global(svg) {
+        width: 13px;
+        height: 13px;
+        color: var(--accent);
+        stroke-width: 2.2;
     }
 
     .provider-scroll.settings-home-scroll {
+        display: flex;
+        flex-direction: column;
         gap: 0;
         padding-top: clamp(36px, 10.297vw, 45px);
         padding-bottom: 24px;
         padding-inline: var(--settings-gutter);
+    }
+
+    .settings-home-scroll .setting-list {
+        flex: none;
+        justify-content: flex-start;
     }
 
     .settings-detail-scroll {
@@ -1245,9 +1647,7 @@
     }
 
     :global(.app-shell[data-layout='mobile']) .provider-scroll.settings-home-scroll {
-        display: flex;
         min-height: 0;
-        flex-direction: column;
         padding-top: clamp(25px, 10.297vw, 45px);
         padding-bottom: calc(
             var(--mobile-nav) + clamp(11px, 5.95vw, 26px) + env(safe-area-inset-bottom)
@@ -1256,12 +1656,45 @@
 
     :global(.app-shell[data-layout='mobile']) .settings-home-scroll .setting-list {
         min-height: 0;
-        flex: none;
-        justify-content: flex-start;
         /* The fixed tab bar overlays the page, so keep a real scroll tail after the last row. */
         margin-bottom: calc(
             var(--mobile-nav) + clamp(11px, 5.95vw, 26px) + env(safe-area-inset-bottom)
         );
+    }
+
+    :global(.app-shell[data-layout='desktop']) .provider-scroll.settings-home-scroll {
+        padding-top: clamp(52px, 7.4vh, 68px);
+    }
+
+    :global(.app-shell[data-layout='desktop']) .settings-detail-scroll {
+        padding-top: 24px;
+        padding-bottom: 40px;
+        gap: 28px;
+        scrollbar-gutter: auto;
+    }
+
+    :global(.app-shell[data-layout='desktop']) .settings-identity {
+        min-height: 0;
+        justify-items: start;
+        padding: 0 calc(var(--mobile-top-action) + 8px) 26px 0;
+        margin-bottom: 0;
+        gap: 0;
+        text-align: left;
+    }
+
+    :global(.app-shell[data-layout='desktop']) .settings-avatar-wrap {
+        display: none;
+    }
+
+    :global(.app-shell[data-layout='desktop']) .settings-identity-copy {
+        justify-items: start;
+    }
+
+    :global(.app-shell[data-layout='desktop']) .settings-identity-copy h2 {
+        font-size: 28px;
+        font-weight: 600;
+        line-height: 1.2;
+        letter-spacing: -0.025em;
     }
 
     .settings-toolbar {
@@ -1269,6 +1702,10 @@
         inset: 0 0 auto;
         background: transparent;
         pointer-events: none;
+    }
+
+    .settings-toolbar.titlebar-overlay {
+        pointer-events: auto;
     }
 
     .settings-tool-button {
@@ -1429,47 +1866,11 @@
         gap: 16px;
     }
 
-    .detail-form,
-    .detail-form label {
+    .detail-form {
         display: grid;
         gap: 7px;
-    }
-
-    .detail-form {
         grid-template-columns: 1fr;
         margin: 0;
-    }
-
-    .detail-form label {
-        color: var(--ink-muted);
-        font-size: var(--detail-support-type);
-        font-weight: 700;
-    }
-
-    .detail-form :is(input, select) {
-        width: 100%;
-        min-height: clamp(48px, 13.73vw, 60px);
-        padding: clamp(12px, 3.432vw, 15px);
-        border: 1.5px solid var(--line);
-        border-radius: var(--radius-md);
-        background: color-mix(in srgb, var(--surface-sunken) 26%, var(--surface-raised));
-        box-shadow: inset 0 1px 2px rgb(16 18 24 / 3%);
-        color: var(--ink);
-        font-size: var(--detail-support-type);
-    }
-
-    .detail-form :is(input, select):hover:not(:focus, :disabled) {
-        border-color: var(--line);
-    }
-
-    .detail-form :is(input, select):focus {
-        border-color: var(--accent);
-        outline: 0;
-    }
-
-    :global(.app-shell[data-layout='mobile']) .detail-form :is(input, select) {
-        min-height: clamp(33px, 13.73vw, 60px);
-        padding: clamp(8px, 3.432vw, 15px);
     }
 
     .detail-secondary-action {
@@ -1561,7 +1962,10 @@
     }
 
     .provider-state.error {
-        color: var(--danger);
+        border: 1px solid var(--status-error-border);
+        border-radius: var(--radius-md);
+        color: var(--status-error-fg);
+        background: var(--status-error-bg);
     }
 
     .target-form {
@@ -1571,16 +1975,8 @@
         margin: 0;
     }
 
-    .target-form label {
-        display: grid;
-        gap: 7px;
-        color: var(--ink-muted);
-        font-size: var(--detail-support-type);
-        font-weight: 700;
-    }
-
-    .target-form select {
-        width: 100%;
+    :global(.app-shell[data-layout='desktop']) .target-form {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .settings-control-row {
@@ -1614,54 +2010,6 @@
         line-height: 1.35;
     }
 
-    .settings-switch {
-        position: relative;
-        width: 50px;
-        height: 30px;
-        min-height: 30px;
-        flex: none;
-        padding: 0;
-        border: 1px solid var(--line-strong);
-        border-radius: var(--radius-pill);
-        appearance: none;
-        background: var(--surface-active);
-        cursor: pointer;
-        transition:
-            background 140ms ease,
-            border-color 140ms ease;
-    }
-
-    .settings-switch::after {
-        position: absolute;
-        width: 24px;
-        height: 24px;
-        border-radius: 50%;
-        background: var(--surface-raised);
-        box-shadow: var(--shadow-1);
-        content: '';
-        inset: 2px auto auto 2px;
-        transition: transform 140ms ease;
-    }
-
-    .settings-switch:checked {
-        border-color: var(--primary-bg);
-        background: var(--primary-bg);
-    }
-
-    .settings-switch:checked::after {
-        transform: translateX(20px);
-    }
-
-    .settings-switch:focus-visible {
-        outline: 2px solid var(--accent);
-        outline-offset: 2px;
-    }
-
-    .settings-switch:disabled {
-        cursor: not-allowed;
-        opacity: 0.5;
-    }
-
     dt {
         color: var(--ink-muted);
         font-size: 0.72rem;
@@ -1679,7 +2027,11 @@
     }
 
     .inline-note.warning {
-        color: var(--warning);
+        padding: 10px 12px;
+        border: 1px solid var(--status-warning-border);
+        border-radius: var(--radius-sm);
+        color: var(--status-warning-fg);
+        background: var(--status-warning-bg);
     }
 
     @container view (max-width: 640px) {

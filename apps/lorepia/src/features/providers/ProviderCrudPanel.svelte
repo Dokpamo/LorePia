@@ -1,5 +1,7 @@
 <script lang="ts">
     import { Plus } from '@lucide/svelte';
+    import ChoiceField from '../../components/ChoiceField.svelte';
+    import ToggleSwitch from '../../components/ToggleSwitch.svelte';
     import DetailActionBar from '../../components/detail/DetailActionBar.svelte';
     import DetailPage from '../../components/detail/DetailPage.svelte';
     import type { LorepiaAppController, LorepiaAppState } from '../../app/app-controller';
@@ -742,21 +744,20 @@
                     void createConnection();
                 }}
             >
-                <label>
-                    <span>템플릿</span>
-                    <select
-                        value={connectionTemplateId}
-                        required
-                        onchange={(event) => selectTemplate(event.currentTarget.value)}
-                    >
-                        <option value="">선택</option>
-                        {#each workspace.templates as template (template.id)}
-                            <option value={template.id}>
-                                {template.display_name} · v{template.manifest_version}
-                            </option>
-                        {/each}
-                    </select>
-                </label>
+                <ChoiceField
+                    id="connection-template"
+                    label="템플릿"
+                    value={connectionTemplateId}
+                    options={[
+                        { value: '', label: '선택' },
+                        ...workspace.templates.map((template) => ({
+                            value: template.id,
+                            label: `${template.display_name} · v${String(template.manifest_version)}`,
+                        })),
+                    ]}
+                    onSelect={selectTemplate}
+                    required
+                />
                 <label>
                     <span>연결 ID</span>
                     <input bind:value={connectionId} required autocomplete="off" />
@@ -773,14 +774,18 @@
                     <span>API base path (선택)</span>
                     <input bind:value={connectionBasePath} autocomplete="off" />
                 </label>
-                <label>
-                    <span>네트워크 모드</span>
-                    <select bind:value={connectionNetworkMode}>
-                        <option value="public">공개 네트워크</option>
-                        <option value="local_loopback">로컬 루프백</option>
-                        <option value="approved_local_network">승인된 로컬 네트워크</option>
-                    </select>
-                </label>
+                <ChoiceField
+                    id="connection-network-mode"
+                    label="네트워크 모드"
+                    value={connectionNetworkMode}
+                    options={[
+                        { value: 'public', label: '공개 네트워크' },
+                        { value: 'local_loopback', label: '로컬 루프백' },
+                        { value: 'approved_local_network', label: '승인된 로컬 네트워크' },
+                    ]}
+                    onSelect={(value: string) =>
+                        (connectionNetworkMode = value as ProviderNetworkModeInput)}
+                />
                 {#if connectionNetworkMode === 'approved_local_network'}
                     <label>
                         <span>승인 origin</span>
@@ -902,29 +907,40 @@
                     void createRoute();
                 }}
             >
-                <label>
-                    <span>연결</span>
-                    <select bind:value={routeConnectionId} required>
-                        <option value="">선택</option>
-                        {#each ordinaryConnections as connection (connection.id)}
-                            <option value={connection.id}>{connection.display_name}</option>
-                        {/each}
-                    </select>
-                </label>
+                <ChoiceField
+                    id="route-connection"
+                    label="연결"
+                    value={routeConnectionId}
+                    options={[
+                        { value: '', label: '선택' },
+                        ...ordinaryConnections.map((connection) => ({
+                            value: connection.id,
+                            label: connection.display_name,
+                        })),
+                    ]}
+                    onSelect={(value: string) => (routeConnectionId = value)}
+                    required
+                />
                 <label>
                     <span>라우트 ID</span>
                     <input bind:value={routeId} required autocomplete="off" />
                 </label>
-                <label>
-                    <span>API family</span>
-                    <select bind:value={routeApiFamily}>
-                        <option value="open_ai_responses">OpenAI Responses</option>
-                        <option value="open_ai_chat_completions">OpenAI Chat Completions</option>
-                        <option value="anthropic_messages">Anthropic Messages</option>
-                        <option value="gemini_generate_content">Gemini Generate Content</option>
-                        <option value="ollama_native">Ollama Native</option>
-                    </select>
-                </label>
+                <ChoiceField
+                    id="route-api-family"
+                    label="API family"
+                    value={routeApiFamily}
+                    options={[
+                        { value: 'open_ai_responses', label: 'OpenAI Responses' },
+                        {
+                            value: 'open_ai_chat_completions',
+                            label: 'OpenAI Chat Completions',
+                        },
+                        { value: 'anthropic_messages', label: 'Anthropic Messages' },
+                        { value: 'gemini_generate_content', label: 'Gemini Generate Content' },
+                        { value: 'ollama_native', label: 'Ollama Native' },
+                    ]}
+                    onSelect={(value: string) => (routeApiFamily = value as ApiFamilyInput)}
+                />
                 <label>
                     <span>모델 ID</span>
                     <input bind:value={routeModelId} required autocomplete="off" />
@@ -933,18 +949,21 @@
                     <span>표시 이름 (선택)</span>
                     <input bind:value={routeDisplayName} autocomplete="off" />
                 </label>
-                <label>
-                    <span>상태</span>
-                    <select bind:value={routeStatus}>
-                        <option value="available">사용 가능</option>
-                        <option value="missing_temporarily">일시 누락</option>
-                        <option value="documented_only">문서에서만 확인</option>
-                        <option value="access_denied">접근 거부</option>
-                        <option value="deprecated">사용 중단 예정</option>
-                        <option value="retired">지원 종료</option>
-                        <option value="unknown">알 수 없음</option>
-                    </select>
-                </label>
+                <ChoiceField
+                    id="route-status"
+                    label="상태"
+                    value={routeStatus}
+                    options={[
+                        { value: 'available', label: '사용 가능' },
+                        { value: 'missing_temporarily', label: '일시 누락' },
+                        { value: 'documented_only', label: '문서에서만 확인' },
+                        { value: 'access_denied', label: '접근 거부' },
+                        { value: 'deprecated', label: '사용 중단 예정' },
+                        { value: 'retired', label: '지원 종료' },
+                        { value: 'unknown', label: '알 수 없음' },
+                    ]}
+                    onSelect={(value: string) => (routeStatus = value as ModelAvailabilityInput)}
+                />
                 <label>
                     <span>Deployment ID (선택)</span>
                     <input bind:value={routeDeploymentId} autocomplete="off" />
@@ -983,18 +1002,23 @@
                     <span>표시 이름 (선택)</span>
                     <input bind:value={updateRouteDisplayName} disabled={selectedRouteId === ''} />
                 </label>
-                <label>
-                    <span>상태</span>
-                    <select bind:value={updateRouteStatus} disabled={selectedRouteId === ''}>
-                        <option value="available">사용 가능</option>
-                        <option value="missing_temporarily">일시 누락</option>
-                        <option value="documented_only">문서에서만 확인</option>
-                        <option value="access_denied">접근 거부</option>
-                        <option value="deprecated">사용 중단 예정</option>
-                        <option value="retired">지원 종료</option>
-                        <option value="unknown">알 수 없음</option>
-                    </select>
-                </label>
+                <ChoiceField
+                    id="route-update-status"
+                    label="상태"
+                    value={updateRouteStatus}
+                    options={[
+                        { value: 'available', label: '사용 가능' },
+                        { value: 'missing_temporarily', label: '일시 누락' },
+                        { value: 'documented_only', label: '문서에서만 확인' },
+                        { value: 'access_denied', label: '접근 거부' },
+                        { value: 'deprecated', label: '사용 중단 예정' },
+                        { value: 'retired', label: '지원 종료' },
+                        { value: 'unknown', label: '알 수 없음' },
+                    ]}
+                    disabled={selectedRouteId === ''}
+                    onSelect={(value: string) =>
+                        (updateRouteStatus = value as ModelAvailabilityInput)}
+                />
                 {#if protectsRetainedLegacyRoute(selectedRouteId)}
                     <p class="security-note">
                         현재 기존 프로필의 모델 라우트는 프로필 연결과 함께 관리됩니다.
@@ -1046,20 +1070,21 @@
                     void savePreset();
                 }}
             >
-                <label>
-                    <span>모델 라우트</span>
-                    <select
-                        value={presetRouteId}
-                        required
-                        disabled={detailMode === 'edit'}
-                        onchange={(event) => selectPresetRoute(event.currentTarget.value)}
-                    >
-                        <option value="">선택</option>
-                        {#each ordinaryRoutes as route (route.id)}
-                            <option value={route.id}>{route.display_name ?? route.model_id}</option>
-                        {/each}
-                    </select>
-                </label>
+                <ChoiceField
+                    id="preset-model-route"
+                    label="모델 라우트"
+                    value={presetRouteId}
+                    options={[
+                        { value: '', label: '선택' },
+                        ...ordinaryRoutes.map((route) => ({
+                            value: route.id,
+                            label: route.display_name ?? route.model_id,
+                        })),
+                    ]}
+                    onSelect={selectPresetRoute}
+                    required
+                    disabled={detailMode === 'edit'}
+                />
                 <label>
                     <span>프리셋 ID</span>
                     <input
@@ -1104,10 +1129,15 @@
                         <span>Summary</span>
                         <input bind:value={reasoningSummary} required autocomplete="off" />
                     </label>
-                    <label class="toggle-row">
-                        <input type="checkbox" bind:checked={reasoningPreserveOpaqueState} />
-                        <span>프로바이더의 opaque reasoning 상태 보존</span>
-                    </label>
+                    <div class="toggle-row">
+                        <ToggleSwitch
+                            label="프로바이더의 opaque reasoning 상태 보존"
+                            checked={reasoningPreserveOpaqueState}
+                            showLabel
+                            onChange={(checked: boolean) =>
+                                (reasoningPreserveOpaqueState = checked)}
+                        />
+                    </div>
                 </fieldset>
 
                 <fieldset class="field-group">
@@ -1386,8 +1416,9 @@
     }
 
     .form-error {
-        color: var(--danger);
-        background: var(--danger-soft);
+        border: 1px solid var(--status-error-border);
+        color: var(--status-error-fg);
+        background: var(--status-error-bg);
     }
 
     .resource-form,
@@ -1404,7 +1435,7 @@
         font-weight: 700;
     }
 
-    .resource-form :is(input, select, textarea) {
+    .resource-form :is(input, textarea) {
         width: 100%;
         min-width: 0;
         box-sizing: border-box;
@@ -1414,7 +1445,7 @@
         -webkit-appearance: none;
         appearance: none;
         background: color-mix(in srgb, var(--surface-sunken) 26%, var(--surface-raised));
-        box-shadow: inset 0 1px 2px rgb(16 18 24 / 3%);
+        box-shadow: var(--control-inset-shadow);
         caret-color: var(--accent);
         color: var(--ink);
         font: inherit;
@@ -1425,22 +1456,8 @@
             box-shadow 140ms ease;
     }
 
-    .resource-form :is(input, select) {
+    .resource-form input {
         min-height: clamp(48px, 13.73vw, 60px);
-    }
-
-    .resource-form select {
-        padding-right: 38px;
-        background-image:
-            linear-gradient(45deg, transparent 50%, var(--ink-muted) 50%),
-            linear-gradient(135deg, var(--ink-muted) 50%, transparent 50%);
-        background-position:
-            calc(100% - 19px) 50%,
-            calc(100% - 14px) 50%;
-        background-repeat: no-repeat;
-        background-size:
-            5px 5px,
-            5px 5px;
     }
 
     .resource-form textarea {
@@ -1457,18 +1474,18 @@
         min-height: 200px;
     }
 
-    .resource-form :is(input, select, textarea):hover:not(:focus, :disabled) {
+    .resource-form :is(input, textarea):hover:not(:focus, :disabled) {
         border-color: var(--line);
     }
 
-    .resource-form :is(input, select, textarea):focus {
+    .resource-form :is(input, textarea):focus {
         border-color: var(--accent);
         outline: none;
     }
 
-    .resource-form :is(input, select, textarea):disabled {
+    .resource-form :is(input, textarea):disabled {
         cursor: not-allowed;
-        opacity: 0.55;
+        opacity: var(--disabled-opacity);
     }
 
     .resource-form small {
@@ -1494,18 +1511,7 @@
     }
 
     .resource-form .toggle-row {
-        display: flex;
         min-height: var(--touch);
-        align-items: center;
-        gap: 10px;
-    }
-
-    .resource-form .toggle-row input {
-        width: 20px;
-        min-height: 20px;
-        flex: none;
-        padding: 0;
-        appearance: auto;
     }
 
     .editor-utilities {

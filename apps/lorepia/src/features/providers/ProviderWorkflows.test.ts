@@ -24,6 +24,11 @@ afterEach(() => {
     vi.restoreAllMocks();
 });
 
+async function chooseSetting(label: string, option: string): Promise<void> {
+    await fireEvent.click(screen.getByLabelText(label));
+    await fireEvent.click(await screen.findByRole('option', { name: option }));
+}
+
 const ASSISTANT_ROUTE: ModelRouteDto = {
     id: 'route-assistant',
     connection_id: 'connection-assistant',
@@ -239,9 +244,7 @@ describe('provider discovery workflow', () => {
         await fireEvent.input(screen.getByLabelText('사이트 URL'), {
             target: { value: 'https://new.example' },
         });
-        await fireEvent.change(screen.getByLabelText('설정 도우미 모델 (선택)'), {
-            target: { value: 'route-assistant' },
-        });
+        await chooseSetting('설정 도우미 모델 (선택)', '설정 도우미');
         await fireEvent.click(screen.getByRole('button', { name: '탐색 시작' }));
 
         await waitFor(() => expect(begin).toHaveBeenCalledOnce());
@@ -733,9 +736,7 @@ describe('model sync workflow', () => {
 
         expect(screen.queryByRole('form', { name: '모델 동기화 시작' })).not.toBeInTheDocument();
         await fireEvent.click(screen.getByRole('button', { name: '새 모델 동기화' }));
-        await fireEvent.change(screen.getByLabelText('프로바이더 연결'), {
-            target: { value: 'connection-1' },
-        });
+        await chooseSetting('프로바이더 연결', 'Synthetic connection');
         await fireEvent.click(screen.getByRole('button', { name: '모델 동기화 시작' }));
 
         const job = {

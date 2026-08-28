@@ -144,6 +144,45 @@ function renderChatWithSettings(
     return { controller, sendMessage, orchestrationController };
 }
 
+async function swipePointer(
+    target: Element,
+    {
+        startX,
+        startY,
+        endX,
+        endY,
+        pointerId = 7,
+    }: {
+        startX: number;
+        startY: number;
+        endX: number;
+        endY: number;
+        pointerId?: number;
+    },
+): Promise<void> {
+    await fireEvent.pointerDown(target, {
+        pointerId,
+        isPrimary: true,
+        button: 0,
+        clientX: startX,
+        clientY: startY,
+    });
+    await fireEvent.pointerMove(target, {
+        pointerId,
+        isPrimary: true,
+        buttons: 1,
+        clientX: endX,
+        clientY: endY,
+    });
+    await fireEvent.pointerUp(target, {
+        pointerId,
+        isPrimary: true,
+        button: 0,
+        clientX: endX,
+        clientY: endY,
+    });
+}
+
 describe('ChatPane empty state', () => {
     it('uses an open canvas instead of a full-pane dashed placeholder frame', () => {
         const controller = new LorepiaAppController({} as LorepiaClient);
@@ -166,6 +205,71 @@ describe('ChatPane empty state', () => {
 });
 
 describe('ChatPane transcript chrome', () => {
+    it('shows desktop message tools only while the mouse is inside the turn', async () => {
+        const appState = chatReadyState();
+        appState.messages.items = [
+            {
+                id: 'assistant-hover-tools',
+                conversation_id: 'conversation-1',
+                parent_id: null,
+                role: 'assistant',
+                content: '마우스가 올라왔을 때만 도구를 보여 주세요.',
+                status: 'complete',
+                generation_id: 'generation-1',
+                created_at: '2026-08-03T19:47:00',
+            },
+        ];
+        const controller = new LorepiaAppController({} as LorepiaClient);
+        render(ChatPane, { appState, controller, desktop: true });
+        const message = screen.getByRole('article', { name: '캐릭터 메시지' });
+        const messageRow = message.closest('.message-item');
+        if (!(messageRow instanceof HTMLElement)) throw new Error('message row missing');
+
+        expect(messageRow).not.toHaveClass('actions-hovered');
+        await fireEvent.mouseEnter(messageRow);
+        expect(messageRow).toHaveClass('actions-hovered');
+        await fireEvent.mouseLeave(messageRow);
+        expect(messageRow).not.toHaveClass('actions-hovered');
+
+        controller.destroy();
+    });
+
+    it('exposes the selected conversation mode for mode-specific transcript styling', async () => {
+        const appState = chatReadyState();
+        appState.messages.items = [
+            {
+                id: 'assistant-mode-style',
+                conversation_id: 'conversation-1',
+                parent_id: null,
+                role: 'assistant',
+                content: '모드에 따라 표시 방식을 바꿔 주세요.',
+                status: 'complete',
+                generation_id: 'generation-1',
+                created_at: '2026-08-03T19:47:00',
+            },
+        ];
+        const controller = new LorepiaAppController({} as LorepiaClient);
+        const rendered = render(ChatPane, { appState, controller, desktop: true });
+        const pane = screen.getByRole('region', { name: '첫 대화' });
+
+        expect(pane).toHaveAttribute('data-conversation-mode', 'chat');
+
+        const storyState = structuredClone(appState);
+        if (storyState.conversation_state === null) {
+            throw new Error('conversation state missing');
+        }
+        storyState.conversation_state.selected_mode = 'story';
+
+        await rendered.rerender({
+            appState: storyState,
+            controller,
+            desktop: true,
+        });
+
+        expect(pane).toHaveAttribute('data-conversation-mode', 'story');
+        controller.destroy();
+    });
+
     it('keeps room controls out of the transcript and groups them inside conversation settings', async () => {
         const appState = chatReadyState();
         appState.branches = [
@@ -194,7 +298,7 @@ describe('ChatPane transcript chrome', () => {
             .mockResolvedValue(undefined);
         const selectBranch = vi.spyOn(controller, 'selectBranch').mockResolvedValue(undefined);
 
-        expect(screen.queryByRole('group', { name: '대화 모드' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('radiogroup', { name: '대화 모드' })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '새 생성 작업' })).not.toBeInTheDocument();
 
         await fireEvent.click(screen.getByRole('button', { name: '대화 설정' }));
@@ -202,8 +306,8 @@ describe('ChatPane transcript chrome', () => {
         const settingsUi = within(settings);
 
         expect(settingsUi.getByRole('heading', { name: '대화' })).toBeInTheDocument();
-        expect(settingsUi.getByRole('group', { name: '대화 모드' })).toBeInTheDocument();
-        expect(settingsUi.getByRole('button', { name: /^분기:/ })).toHaveAttribute(
+        expect(settingsUi.getByRole('radiogroup', { name: '대화 모드' })).toBeInTheDocument();
+        expect(settingsUi.getByRole('combobox', { name: /^분기:/ })).toHaveAttribute(
             'aria-expanded',
             'false',
         );
@@ -211,10 +315,10 @@ describe('ChatPane transcript chrome', () => {
             settingsUi.getByText('현재 입력을 별도의 새 요청으로 처리합니다.'),
         ).toBeInTheDocument();
 
-        await fireEvent.click(settingsUi.getByRole('button', { name: '스토리' }));
+        await fireEvent.click(settingsUi.getByRole('radio', { name: '스토리' }));
         expect(setConversationMode).toHaveBeenCalledWith('story');
-        await fireEvent.click(settingsUi.getByRole('button', { name: /^분기:/ }));
-        await fireEvent.click(settingsUi.getByRole('menuitemradio', { name: '다른 선택' }));
+        await fireEvent.click(settingsUi.getByRole('combobox', { name: /^분기:/ }));
+        await fireEvent.click(settingsUi.getByRole('option', { name: '다른 선택' }));
         expect(selectBranch).toHaveBeenCalledWith('branch-2');
 
         controller.destroy();
@@ -378,6 +482,57 @@ describe('ChatPane transcript chrome', () => {
         await fireEvent.focus(textbox);
         await fireEvent.blur(textbox);
         expect(field).not.toHaveClass('expanded');
+        controller.destroy();
+    });
+
+    it('starts and remains expanded in the desktop workspace', async () => {
+        const appState = chatReadyState();
+        const controller = new LorepiaAppController({} as LorepiaClient);
+        const rendered = render(ChatPane, { appState, controller, desktop: true });
+        const field = rendered.container.querySelector('.composer-field');
+        const textbox = screen.getByRole('textbox', { name: '메시지' });
+        const send = screen.getByRole('button', { name: '메시지 보내기' });
+
+        await waitFor(() => expect(field).toHaveClass('expanded'));
+        expect(textbox).toHaveAttribute('placeholder', '무엇이든 요청하세요');
+        expect(send).toBeDisabled();
+        await fireEvent.focus(textbox);
+        await fireEvent.blur(textbox);
+        expect(field).toHaveClass('expanded');
+        controller.destroy();
+    });
+
+    it('opens the mobile utility page with a left swipe and closes it with a right swipe', async () => {
+        const { controller } = renderChatWithSettings();
+        const pane = document.querySelector<HTMLElement>('.chat-pane');
+        if (pane === null) throw new Error('chat pane is missing');
+        vi.spyOn(pane, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 393, 852));
+
+        await swipePointer(pane, {
+            startX: 320,
+            startY: 300,
+            endX: 160,
+            endY: 304,
+        });
+        const utilityPage = await screen.findByRole('dialog', { name: '도구 패널' });
+        expect(utilityPage).toHaveClass('open');
+        expect(within(utilityPage).getByRole('button', { name: '대화 설정 열기' })).toBeVisible();
+        expect(
+            within(utilityPage).queryByRole('button', { name: /^프롬프트 프리셋:/ }),
+        ).not.toBeInTheDocument();
+
+        vi.spyOn(utilityPage, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 393, 852));
+        await swipePointer(utilityPage, {
+            startX: 80,
+            startY: 300,
+            endX: 250,
+            endY: 304,
+            pointerId: 8,
+        });
+        expect(utilityPage).toHaveClass('utility-settling');
+        await waitFor(() =>
+            expect(screen.queryByRole('dialog', { name: '도구 패널' })).not.toBeInTheDocument(),
+        );
         controller.destroy();
     });
 

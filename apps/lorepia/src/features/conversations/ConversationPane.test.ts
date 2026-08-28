@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -310,12 +310,12 @@ describe('ConversationPane greeting selector', () => {
         });
 
         const selector = screen.getByLabelText('시작 인사');
-        expect(selector).toHaveValue('default-enabled');
+        expect(selector).toHaveAttribute('role', 'combobox');
+        expect(selector).toHaveTextContent('default-enabled · 기본');
+        await fireEvent.click(selector);
+        expect(screen.getByRole('option', { name: 'default-enabled · 기본' })).toBeEnabled();
         expect(
-            within(selector).getByRole('option', { name: 'default-enabled · 기본' }),
-        ).toBeEnabled();
-        expect(
-            within(selector).getByRole('option', {
+            screen.getByRole('option', {
                 name: 'alternate-disabled · 대체 · 비활성',
             }),
         ).toBeDisabled();
@@ -323,7 +323,7 @@ describe('ConversationPane greeting selector', () => {
             screen.getByText('인사 본문은 UI로 전달하지 않으며 ID와 종류만 선택합니다.'),
         ).toBeVisible();
 
-        await fireEvent.change(selector, { target: { value: 'alternate-enabled' } });
+        await fireEvent.click(screen.getByRole('option', { name: 'alternate-enabled · 대체' }));
         expect(selectGreeting).toHaveBeenCalledWith('alternate-enabled');
 
         await fireEvent.click(screen.getByRole('button', { name: '새 대화' }));

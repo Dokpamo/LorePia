@@ -370,7 +370,9 @@
     }
 
     .history-error {
-        color: var(--danger);
+        border: 1px solid var(--status-error-border);
+        color: var(--status-error-fg);
+        background: var(--status-error-bg);
     }
 
     .rollback-review,

@@ -78,6 +78,56 @@ export interface CharacterGreetingCatalogDto {
     }[];
 }
 
+export interface CharacterRenderAssetDto {
+    asset_id: string;
+    aliases: string[];
+}
+
+export interface CharacterDisplayTransformDto {
+    pattern: string;
+    replacement: string;
+    flags: string;
+}
+
+export interface CharacterRuntimeScriptDto {
+    id: string;
+    name: string;
+    event: string;
+    language: string;
+    source: string;
+    elevated_access: boolean;
+}
+
+export interface CharacterRuntimeKnowledgeDto {
+    id: string;
+    name: string;
+    content: string;
+    enabled: boolean;
+    primary_keys: string[];
+    secondary_keys: string[];
+    constant: boolean;
+    selective: boolean;
+    case_sensitive: boolean;
+    whole_word: boolean;
+    use_regex: boolean;
+    probability_basis_points: number;
+    folder: boolean;
+}
+
+export interface CharacterRenderProfileDto {
+    character_id: string;
+    character_content_revision_id: string | null;
+    assets: CharacterRenderAssetDto[];
+    background_markup: string;
+    toggle_schema: string;
+    initial_variables: Record<string, string>;
+    output_transforms: CharacterDisplayTransformDto[];
+    display_transforms: CharacterDisplayTransformDto[];
+    runtime_scripts: CharacterRuntimeScriptDto[];
+    runtime_knowledge: CharacterRuntimeKnowledgeDto[];
+    runtime_script_count: number;
+}
+
 export interface CharacterGreetingSelectionInput {
     character_content_revision_id: string | null;
     greeting_id: string | null;
@@ -555,6 +605,22 @@ export type ChatStreamItemDto =
 export type GenerationSelectionInput =
     | { kind: 'legacy_profile'; provider_profile_id: string }
     | { kind: 'target'; target: GenerationTargetDto };
+
+export type RuntimePromptRoleInput = 'system' | 'user' | 'assistant';
+
+export interface RuntimePromptMessageInput {
+    role: RuntimePromptRoleInput;
+    content: string;
+}
+
+export interface GenerateRuntimeTextInput {
+    selection: GenerationSelectionInput;
+    messages: RuntimePromptMessageInput[];
+}
+
+export interface RuntimeTextGenerationDto {
+    result: string;
+}
 
 export interface SendMessageInput {
     conversation_id: string;
@@ -3771,6 +3837,7 @@ export interface LorepiaClient {
     listCharacters(): Promise<CharacterDto[]>;
     getCharacter(characterId: string): Promise<CharacterDto>;
     getCharacterGreetingCatalog(characterId: string): Promise<CharacterGreetingCatalogDto>;
+    getCharacterRenderProfile?(characterId: string): Promise<CharacterRenderProfileDto>;
     resolveAssetDelivery(input: ResolveAssetDeliveryInput): Promise<AssetDeliveryDto>;
     listInteractionEffects(): Promise<InteractionEffectEventDto[]>;
     acknowledgeInteractionEffect(deliveryId: string): Promise<void>;
@@ -3822,6 +3889,7 @@ export interface LorepiaClient {
     ): Promise<ConversationStateDto>;
     listBranchMessages(branchId: string): Promise<MessageDto[]>;
     listMessages(conversationId: string): Promise<MessageDto[]>;
+    generateRuntimeText?(input: GenerateRuntimeTextInput): Promise<RuntimeTextGenerationDto>;
     listInterruptedMemoryJobs(
         input: ListInterruptedMemoryJobsInput,
     ): Promise<InterruptedMemoryJobDto[]>;

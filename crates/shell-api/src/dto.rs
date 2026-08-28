@@ -1,9 +1,11 @@
+use std::collections::{BTreeMap, BTreeSet};
+
 use chrono::{DateTime, Utc};
 use lorepia_core::{
-    CHAT_EVENT_VERSION, Character, CharacterGreetingCatalog, CharacterGreetingKind,
-    CharacterGreetingOption, ChatEvent, ChatEventKind, ContentKind, Conversation,
-    ConversationBranch, ConversationMode, ConversationState, GenerationTarget, GenerationUsage,
-    HealthReport, ImportImagePreview, ImportInspection, ImportWarning, Message,
+    AssetDescriptor, CHAT_EVENT_VERSION, Character, CharacterContentV1, CharacterGreetingCatalog,
+    CharacterGreetingKind, CharacterGreetingOption, ChatEvent, ChatEventKind, ContentKind,
+    Conversation, ConversationBranch, ConversationMode, ConversationState, GenerationTarget,
+    GenerationUsage, HealthReport, ImportImagePreview, ImportInspection, ImportWarning, Message,
     MessageActionGeneration, MessagePresentation, MessageRole, MessageStatus,
     MessageTransformDiagnostic, MessageTransformDisposition, MessageTransformStage,
 };
@@ -67,6 +69,197 @@ impl From<Character> for CharacterDto {
             avatar_asset_id: value.avatar_asset_hash,
             created_at: value.created_at,
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CharacterRenderAssetDto {
+    pub asset_id: String,
+    pub aliases: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CharacterDisplayTransformDto {
+    pub pattern: String,
+    pub replacement: String,
+    pub flags: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CharacterRuntimeScriptDto {
+    pub id: String,
+    pub name: String,
+    pub event: String,
+    pub language: String,
+    pub source: String,
+    pub elevated_access: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct CharacterRuntimeKnowledgeDto {
+    pub id: String,
+    pub name: String,
+    pub content: String,
+    pub enabled: bool,
+    pub primary_keys: Vec<String>,
+    pub secondary_keys: Vec<String>,
+    pub constant: bool,
+    pub selective: bool,
+    pub case_sensitive: bool,
+    pub whole_word: bool,
+    pub use_regex: bool,
+    pub probability_basis_points: u16,
+    pub folder: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CharacterRenderProfileDto {
+    pub character_id: String,
+    pub character_content_revision_id: Option<String>,
+    pub assets: Vec<CharacterRenderAssetDto>,
+    pub background_markup: String,
+    pub toggle_schema: String,
+    pub initial_variables: BTreeMap<String, String>,
+    pub output_transforms: Vec<CharacterDisplayTransformDto>,
+    pub display_transforms: Vec<CharacterDisplayTransformDto>,
+    pub runtime_scripts: Vec<CharacterRuntimeScriptDto>,
+    pub runtime_knowledge: Vec<CharacterRuntimeKnowledgeDto>,
+    pub runtime_script_count: u32,
+}
+
+impl CharacterRenderProfileDto {
+    pub(crate) fn from_content(
+        character_id: String,
+        character_content_revision_id: Option<String>,
+        content: CharacterContentV1,
+    ) -> Self {
+        let assets = content
+            .assets
+            .iter()
+            .map(|asset| CharacterRenderAssetDto {
+                asset_id: asset.id.as_str().to_owned(),
+                aliases: character_asset_aliases(asset),
+            })
+            .collect();
+        let output_transforms = content
+            .runtime
+            .transforms
+            .iter()
+            .filter(|transform| {
+                transform.phase == lorepia_core::PortableTransformPhase::ProviderOutput
+            })
+            .map(|transform| CharacterDisplayTransformDto {
+                pattern: transform.pattern.clone(),
+                replacement: transform.replacement.clone(),
+                flags: transform.flags.clone(),
+            })
+            .collect();
+        let display_transforms = content
+            .runtime
+            .transforms
+            .iter()
+            .filter(|transform| transform.phase == lorepia_core::PortableTransformPhase::Display)
+            .map(|transform| CharacterDisplayTransformDto {
+                pattern: transform.pattern.clone(),
+                replacement: transform.replacement.clone(),
+                flags: transform.flags.clone(),
+            })
+            .collect();
+        let runtime_scripts = content
+            .runtime
+            .scripts
+            .iter()
+            .map(|script| CharacterRuntimeScriptDto {
+                id: script.id.clone(),
+                name: script.name.clone(),
+                event: script.event.clone(),
+                language: script.language.clone(),
+                source: script.source.clone(),
+                elevated_access: script.elevated_access,
+            })
+            .collect();
+        let runtime_knowledge = content
+            .knowledge_book
+            .as_ref()
+            .and_then(|book| book.embedded.as_ref())
+            .map(|book| {
+                book.entries
+                    .iter()
+                    .map(|entry| CharacterRuntimeKnowledgeDto {
+                        id: entry.id.clone(),
+                        name: entry.name.clone(),
+                        content: entry.content.clone(),
+                        enabled: entry.enabled,
+                        primary_keys: entry.primary_keys.clone(),
+                        secondary_keys: entry.secondary_keys.clone(),
+                        constant: entry.constant,
+                        selective: entry.selective,
+                        case_sensitive: entry.case_sensitive,
+                        whole_word: entry.whole_word,
+                        use_regex: entry.use_regex,
+                        probability_basis_points: entry.probability_basis_points,
+                        folder: entry.folder,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let runtime_script_count = u32::try_from(content.runtime.scripts.len()).unwrap_or(u32::MAX);
+        Self {
+            character_id,
+            character_content_revision_id,
+            assets,
+            background_markup: content.runtime.background_markup,
+            toggle_schema: content.runtime.toggle_schema,
+            initial_variables: content.runtime.initial_variables,
+            output_transforms,
+            display_transforms,
+            runtime_scripts,
+            runtime_knowledge,
+            runtime_script_count,
+        }
+    }
+}
+
+fn character_asset_aliases(asset: &AssetDescriptor) -> Vec<String> {
+    let mut aliases = BTreeSet::new();
+    add_asset_aliases(&mut aliases, &asset.name);
+    if let Some(path) = asset.source.logical_path.as_deref() {
+        add_asset_aliases(&mut aliases, path);
+        if let Some(name) = path.rsplit('/').next() {
+            add_asset_aliases(&mut aliases, name);
+        }
+    }
+    aliases.into_iter().collect()
+}
+
+fn add_asset_aliases(aliases: &mut BTreeSet<String>, value: &str) {
+    let value = value.trim();
+    if value.is_empty() || value.len() > 1_024 || value.chars().any(char::is_control) {
+        return;
+    }
+    aliases.insert(value.to_owned());
+    let mut current = value;
+    for _ in 0..2 {
+        let Some((stem, extension)) = current.rsplit_once('.') else {
+            break;
+        };
+        if stem.is_empty()
+            || extension.is_empty()
+            || extension.len() > 8
+            || !extension
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric())
+        {
+            break;
+        }
+        aliases.insert(stem.to_owned());
+        current = stem;
     }
 }
 
@@ -663,12 +856,82 @@ impl ChatEventDto {
 #[cfg(test)]
 mod tests {
     use lorepia_core::{
-        BoundedJson, ChatEvent, ChatEventKind, ConversationId, GenerationId, GenerationUsage,
-        Message, MessageId, MessagePresentation, MessageStatus, MessageTransformDiagnostic,
-        MessageTransformDisposition, MessageTransformStage, Sha256Digest,
+        BoundedJson, CharacterContentV1, ChatEvent, ChatEventKind, ConversationId, GenerationId,
+        GenerationUsage, Message, MessageId, MessagePresentation, MessageStatus,
+        MessageTransformDiagnostic, MessageTransformDisposition, MessageTransformStage,
+        Sha256Digest,
     };
 
-    use super::{ChatEventDto, ChatEventKindDto, MessageDto};
+    use super::{CharacterRenderProfileDto, ChatEventDto, ChatEventKindDto, MessageDto};
+
+    #[test]
+    fn character_render_profile_partitions_transforms_and_indexes_misleading_asset_names() {
+        let content: CharacterContentV1 = serde_json::from_value(serde_json::json!({
+            "assets": [{
+                "id": "asset-expression-1",
+                "sha256": "a".repeat(64),
+                "media_type": "image/webp",
+                "role": "expression",
+                "name": "pose.png.png",
+                "size_bytes": 12,
+                "source": {
+                    "kind": "charx_package",
+                    "logical_path": "assets/other/image/pose.png.png"
+                }
+            }],
+            "runtime": {
+                "transforms": [
+                    {
+                        "id": "output-rule",
+                        "phase": "provider_output",
+                        "pattern": "<lmg",
+                        "replacement": "<img",
+                        "flags": "g"
+                    },
+                    {
+                        "id": "display-rule",
+                        "phase": "display",
+                        "pattern": "<Status>",
+                        "replacement": "<section>",
+                        "flags": "i"
+                    }
+                ],
+                "scripts": [{
+                    "id": "script-1",
+                    "event": "start",
+                    "language": "lua",
+                    "source": "return"
+                }],
+                "background_markup": "<style>.card{color:red}</style>",
+                "initial_variables": {"mode": "0"}
+            }
+        }))
+        .expect("decode synthetic character content");
+
+        let profile = CharacterRenderProfileDto::from_content(
+            "character-1".to_owned(),
+            Some("revision-1".to_owned()),
+            content,
+        );
+
+        assert_eq!(profile.assets.len(), 1);
+        assert!(
+            profile.assets[0]
+                .aliases
+                .iter()
+                .any(|alias| alias == "pose")
+        );
+        assert!(
+            profile.assets[0]
+                .aliases
+                .iter()
+                .any(|alias| alias == "pose.png.png")
+        );
+        assert_eq!(profile.output_transforms[0].pattern, "<lmg");
+        assert_eq!(profile.display_transforms[0].pattern, "<Status>");
+        assert_eq!(profile.initial_variables["mode"], "0");
+        assert_eq!(profile.runtime_script_count, 1);
+    }
 
     #[test]
     fn event_projection_preserves_v4_wire_variant_and_omits_raw_usage_summary() {

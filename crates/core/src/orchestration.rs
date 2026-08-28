@@ -26,8 +26,9 @@ use lorepia_domain::{
     PromptSummarySourceEvidence, ProviderMessageRole, ResolvedCacheDirective, ResolvedPromptPlan,
     RoleHint, RoleMappingTrace, SelectedKnowledge, SelectedMemory, SemanticKnowledgeScore,
     SourceKind, SummaryBoundary, TaskProfile, TaskProfileId, TemplateSlot, TransformRuleId,
-    TransformSet, TransformSetId, ValidateOrchestration, VariableMap, VariableType, VariableValue,
-    VersionedJson, prompt_context_snapshot_sha256, prompt_local_user_id_sha256,
+    TransformSet, TransformSetId, ValidateOrchestration, VariableId, VariableMap, VariableRef,
+    VariableScope, VariableType, VariableValue, VersionedJson, prompt_context_snapshot_sha256,
+    prompt_local_user_id_sha256,
 };
 use lorepia_orchestration::{
     AppliedModuleRuntimePlan, KnowledgeEngine, KnowledgeSelection, KnowledgeSelectionContext,
@@ -487,6 +488,7 @@ pub(crate) struct PreparedGenerationPlan {
     pub supported_capabilities: Vec<CapabilityKey>,
     pub knowledge_logs: Vec<KnowledgeActivationLog>,
     pub approved_import_source_ids: BTreeSet<String>,
+    pub display_context: PromptResolutionContext,
     pub module_plan_sha256: Option<String>,
     pub cacheable_prefix_tokens: u32,
     pub tokenizer_id: String,
@@ -613,6 +615,7 @@ struct PromptVariableState {
 struct PromptTransformPreparation {
     transform_sets: Vec<TransformSet>,
     transform_set_revisions: BTreeMap<TransformSetId, String>,
+    approved_import_source_ids: BTreeSet<String>,
     supported_capabilities: Vec<CapabilityKey>,
     transformed_latest: TransformResult,
 }
@@ -675,6 +678,7 @@ struct PromptPlanAssembly {
     quick_settings: PromptQuickSettings,
     transform_sets: Vec<TransformSet>,
     transform_set_revisions: BTreeMap<TransformSetId, String>,
+    approved_import_source_ids: BTreeSet<String>,
     variables: VariableMap,
     supported_capabilities: Vec<CapabilityKey>,
     knowledge_logs: Vec<KnowledgeActivationLog>,
@@ -1506,6 +1510,7 @@ impl Core {
             quick_settings,
             transform_sets: transforms.transform_sets,
             transform_set_revisions: transforms.transform_set_revisions,
+            approved_import_source_ids: transforms.approved_import_source_ids,
             variables: variables.variables,
             supported_capabilities: transforms.supported_capabilities,
             knowledge_logs,
@@ -1558,7 +1563,7 @@ impl Core {
             &assembly.transform_sets,
             &assembly.variables,
             &assembly.supported_capabilities,
-            &assembly.module_overlay.approved_import_source_ids,
+            &assembly.approved_import_source_ids,
         )?;
         assembly.preparation_warnings.extend(transform_warnings);
         verify_resolved_prompt_plan(&plan).map_err(orchestration_validation_error)?;
@@ -1599,7 +1604,7 @@ impl Core {
             &assembly.variables,
             &assembly.transform_sets,
             assembly.module_overlay.plan_sha256.as_deref(),
-            &assembly.module_overlay.approved_import_source_ids,
+            &assembly.approved_import_source_ids,
             memory_semantic_evidence,
             &assembly.knowledge_semantic_evidence,
         )?;
@@ -1625,6 +1630,10 @@ impl Core {
         assembly: PromptPlanAssembly,
         resolved: ResolvedPromptAssembly,
     ) -> CoreResult<PreparedGenerationPlan> {
+        let mut display_context = assembly.request.context.clone();
+        display_context.selected_knowledge.clear();
+        display_context.selected_memory.clear();
+        display_context.context_snapshot = None;
         let preview = redacted_prompt_preview(
             &resolved.plan,
             &resolved.execution_hash,
@@ -1654,7 +1663,8 @@ impl Core {
             variables: assembly.variables,
             supported_capabilities: assembly.supported_capabilities,
             knowledge_logs: assembly.knowledge_logs,
-            approved_import_source_ids: assembly.module_overlay.approved_import_source_ids,
+            approved_import_source_ids: assembly.approved_import_source_ids,
+            display_context,
             module_plan_sha256: assembly.module_overlay.plan_sha256,
             cacheable_prefix_tokens: resolved.cacheable_prefix_tokens,
             tokenizer_id,
@@ -1898,7 +1908,8 @@ impl Core {
         module_overlay: &PromptModuleOverlay,
         input: &GenerationPlanInput<'_>,
     ) -> CoreResult<PromptVariableState> {
-        let mut variables = preset.default_values.clone();
+        let mut variables = self.character_runtime_initial_variables(input)?;
+        merge_variable_map(&mut variables, &preset.default_values);
         if let Some(binding) = binding {
             merge_variable_map(&mut variables, &binding.variable_overrides);
         }
@@ -1946,6 +1957,46 @@ impl Core {
         })
     }
 
+    fn character_runtime_initial_variables(
+        &self,
+        input: &GenerationPlanInput<'_>,
+    ) -> CoreResult<VariableMap> {
+        let values = if let Some(authority) = input.prompt_selection_authority {
+            authority
+                .character_content
+                .as_ref()
+                .map(|content| content.value.runtime.initial_variables.clone())
+                .unwrap_or_default()
+        } else {
+            match self.storage().get_character_content(&input.character.id) {
+                Ok(content) => content.value.runtime.initial_variables,
+                Err(error) if error.code == lorepia_domain::CoreErrorCode::NotFound => {
+                    BTreeMap::new()
+                }
+                Err(error) => return Err(error),
+            }
+        };
+        let mut variables = VariableMap::default();
+        for (name, value) in values {
+            let value = match value.trim().to_ascii_lowercase().as_str() {
+                "true" => VariableValue::Bool(true),
+                "false" => VariableValue::Bool(false),
+                _ => value
+                    .parse::<i64>()
+                    .map_or_else(|_| VariableValue::Text(value), VariableValue::Integer),
+            };
+            variables.insert(
+                VariableRef {
+                    scope: VariableScope::Character,
+                    namespace: None,
+                    id: VariableId::from(name),
+                },
+                value,
+            );
+        }
+        Ok(variables)
+    }
+
     fn prepare_prompt_transforms(
         &self,
         prompt_transform_sets: &[ObjectRevision<TransformSet>],
@@ -1973,6 +2024,42 @@ impl Core {
             .map(|revision| revision.value.clone())
             .collect::<Vec<_>>();
         append_exact_module_transform_sets(&mut transform_sets, &module_overlay.transform_sets)?;
+        let mut approved_import_source_ids = module_overlay.approved_import_source_ids.clone();
+        if let Some(character_transform) = self.character_runtime_transform_set(input)? {
+            let revision_id = character_transform.revision_id.clone().ok_or_else(|| {
+                CoreError::new(
+                    lorepia_domain::CoreErrorCode::StorageCorrupted,
+                    "character transform set is missing its immutable revision identity",
+                    false,
+                )
+            })?;
+            if transform_set_revisions
+                .insert(character_transform.value.id.clone(), revision_id)
+                .is_some()
+                || transform_sets
+                    .iter()
+                    .any(|set| set.id == character_transform.value.id)
+            {
+                return Err(CoreError::invalid(
+                    "character and prompt select the same transform set ambiguously",
+                ));
+            }
+            if matches!(
+                character_transform.value.provenance.source_kind,
+                SourceKind::ImportedPackage | SourceKind::ImportedStandard
+            ) {
+                let source_id = character_transform
+                    .value
+                    .provenance
+                    .source_id
+                    .clone()
+                    .ok_or_else(|| {
+                        CoreError::invalid("imported character transform set has no source ID")
+                    })?;
+                approved_import_source_ids.insert(source_id);
+            }
+            transform_sets.push(character_transform.value);
+        }
         let supported_capabilities = if let Some(authority) = input.prompt_selection_authority {
             authority.supported_capabilities.clone()
         } else {
@@ -1987,14 +2074,38 @@ impl Core {
             &latest.content,
             variables,
             &supported_capabilities,
-            &module_overlay.approved_import_source_ids,
+            &approved_import_source_ids,
         )?;
         Ok(PromptTransformPreparation {
             transform_sets,
             transform_set_revisions,
+            approved_import_source_ids,
             supported_capabilities,
             transformed_latest,
         })
+    }
+
+    fn character_runtime_transform_set(
+        &self,
+        input: &GenerationPlanInput<'_>,
+    ) -> CoreResult<Option<StoredRevision<TransformSet>>> {
+        let transform_set_id = if let Some(authority) = input.prompt_selection_authority {
+            authority
+                .character_content
+                .as_ref()
+                .and_then(|content| content.value.runtime.transform_set_id.as_ref())
+                .cloned()
+        } else {
+            match self.storage().get_character_content(&input.character.id) {
+                Ok(content) => content.value.runtime.transform_set_id,
+                Err(error) if error.code == lorepia_domain::CoreErrorCode::NotFound => None,
+                Err(error) => return Err(error),
+            }
+        };
+        transform_set_id
+            .as_ref()
+            .map(|id| self.get_transform_set(id))
+            .transpose()
     }
 
     fn prepare_prompt_conversation(

@@ -21,6 +21,8 @@
         className?: string;
         disabled?: boolean;
         showLabel?: boolean;
+        variant?: 'row' | 'field';
+        required?: boolean;
     }
 
     let {
@@ -32,6 +34,8 @@
         className = '',
         disabled = false,
         showLabel = true,
+        variant = 'row',
+        required = false,
     }: Props = $props();
     let open = $state(false);
     let placement = $state<'above' | 'below'>('below');
@@ -41,7 +45,9 @@
     let menuTop = $state(0);
     let menuLeft = $state(0);
     let menuWidth = $state(280);
+    let menuHeight = $state(0);
     let menuMaxHeight = $state(344);
+    let desktopFieldMenu = $state(false);
     let positionFrame: number | null = null;
 
     const selectedOption = $derived(options.find((option) => option.value === value) ?? null);
@@ -50,7 +56,7 @@
 
     function enabledOptionButtons(): HTMLButtonElement[] {
         return Array.from(
-            menuElement?.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]') ?? [],
+            menuElement?.querySelectorAll<HTMLButtonElement>('[role="option"]') ?? [],
         ).filter((button) => !button.disabled);
     }
 
@@ -60,17 +66,28 @@
         const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
         const viewportHeight = document.documentElement.clientHeight || window.innerHeight;
         const edge = 12;
-        const gap = 6;
-        const desiredWidth = Math.max(180, Math.min(310, viewportWidth - edge * 2));
-        const desiredHeight = Math.min(
-            Math.max(menuElement?.scrollHeight ?? 0, options.length * 54 + 20),
-            344,
-        );
+        desktopFieldMenu =
+            variant === 'field' &&
+            triggerElement.closest('.app-shell')?.getAttribute('data-layout') === 'desktop';
+        const gap = desktopFieldMenu ? 4 : 6;
+        const desiredWidth =
+            variant === 'field'
+                ? Math.min(triggerRect.width, viewportWidth - edge * 2)
+                : Math.max(180, Math.min(310, viewportWidth - edge * 2));
+        const optionHeight = variant === 'field' ? (desktopFieldMenu ? 40 : 42) : 54;
+        const menuPadding = variant === 'field' ? 12 : 20;
+        const maximumMenuHeight = variant === 'field' ? (desktopFieldMenu ? 292 : 320) : 344;
+        const calculatedContentHeight = options.length * optionHeight + menuPadding + 2;
+        const measuredContentHeight =
+            variant === 'field'
+                ? calculatedContentHeight
+                : Math.max(menuElement?.scrollHeight ?? 0, calculatedContentHeight);
+        const desiredHeight = Math.min(measuredContentHeight, maximumMenuHeight);
         const spaceBelow = Math.max(0, viewportHeight - edge - triggerRect.bottom - gap);
         const spaceAbove = Math.max(0, triggerRect.top - edge - gap);
         placement = spaceBelow >= desiredHeight || spaceBelow >= spaceAbove ? 'below' : 'above';
         const availableHeight = placement === 'below' ? spaceBelow : spaceAbove;
-        const nextMaxHeight = Math.max(48, Math.min(344, availableHeight));
+        const nextMaxHeight = Math.max(48, Math.min(maximumMenuHeight, availableHeight));
         const renderedHeight = Math.min(desiredHeight, nextMaxHeight);
         const preferredTop =
             placement === 'below'
@@ -79,12 +96,12 @@
         const maximumTop = Math.max(edge, viewportHeight - edge - renderedHeight);
 
         menuWidth = desiredWidth;
+        menuHeight = renderedHeight;
         menuMaxHeight = nextMaxHeight;
+        const preferredLeft =
+            variant === 'field' ? triggerRect.left : triggerRect.right - desiredWidth;
         menuLeft = Math.round(
-            Math.min(
-                viewportWidth - edge - desiredWidth,
-                Math.max(edge, triggerRect.right - desiredWidth),
-            ),
+            Math.min(viewportWidth - edge - desiredWidth, Math.max(edge, preferredLeft)),
         );
         menuTop = Math.round(Math.min(maximumTop, Math.max(edge, preferredTop)));
     }
@@ -101,6 +118,10 @@
     function mountPopover(node: HTMLDivElement): { destroy: () => void } {
         menuElement = node;
         let topLayerActive = false;
+        const resizeObserver =
+            typeof ResizeObserver === 'undefined'
+                ? null
+                : new ResizeObserver(() => schedulePosition());
         if (typeof node.showPopover === 'function') {
             try {
                 node.showPopover();
@@ -110,9 +131,12 @@
             }
         }
         if (!topLayerActive) node.removeAttribute('popover');
+        if (triggerElement !== null) resizeObserver?.observe(triggerElement);
+        resizeObserver?.observe(node);
         schedulePosition();
         return {
             destroy: () => {
+                resizeObserver?.disconnect();
                 if (positionFrame !== null) window.cancelAnimationFrame(positionFrame);
                 positionFrame = null;
                 if (topLayerActive && typeof node.hidePopover === 'function') {
@@ -131,7 +155,9 @@
         await tick();
         const buttons = enabledOptionButtons();
         if (buttons.length === 0) return;
-        buttons[Math.max(0, Math.min(index, buttons.length - 1))]?.focus();
+        buttons[Math.max(0, Math.min(index, buttons.length - 1))]?.focus({
+            preventScroll: true,
+        });
     }
 
     async function setOpen(next: boolean, restoreFocus = false): Promise<void> {
@@ -149,7 +175,7 @@
             await focusChoice(selectedIndex);
         } else if (restoreFocus) {
             await tick();
-            triggerElement?.focus();
+            triggerElement?.focus({ preventScroll: true });
         }
     }
 
@@ -176,7 +202,7 @@
         event.preventDefault();
         void setOpen(true).then(() => {
             const buttons = enabledOptionButtons();
-            if (event.key === 'ArrowUp') buttons.at(-1)?.focus();
+            if (event.key === 'ArrowUp') buttons.at(-1)?.focus({ preventScroll: true });
         });
     }
 
@@ -209,12 +235,17 @@
 <div bind:this={rootElement} class={`choice-popover ${className}`.trim()}>
     <button
         bind:this={triggerElement}
-        class:compact={!showLabel}
+        id={`${id}-trigger`}
+        class:compact={!showLabel && variant !== 'field'}
+        class:field={variant === 'field'}
         class="choice-trigger"
         type="button"
         {disabled}
+        data-required={required || undefined}
+        data-value={value}
         aria-label={`${label}: ${selectedLabel}`}
-        aria-haspopup="menu"
+        role="combobox"
+        aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={menuId}
         onclick={() => void setOpen(!open)}
@@ -235,23 +266,26 @@
         <div
             id={menuId}
             class:above={placement === 'above'}
+            class:field-menu={variant === 'field'}
+            class:desktop-field-menu={desktopFieldMenu}
             class="choice-menu"
             popover="manual"
             use:mountPopover
-            role="menu"
+            role="listbox"
             aria-label={`${label} ${$tr('choice.menu.label')}`}
             style:top={`${String(menuTop)}px`}
             style:left={`${String(menuLeft)}px`}
             style:width={`${String(menuWidth)}px`}
+            style:height={`${String(menuHeight)}px`}
             style:max-height={`${String(menuMaxHeight)}px`}
             in:fly={{
-                y: placement === 'below' ? -10 : 10,
-                duration: 240,
+                y: placement === 'below' ? -4 : 4,
+                duration: 170,
                 easing: quintOut,
             }}
             out:fly={{
-                y: placement === 'below' ? -5 : 5,
-                duration: 170,
+                y: placement === 'below' ? -2 : 2,
+                duration: 120,
                 easing: cubicInOut,
             }}
         >
@@ -261,8 +295,8 @@
                     class="choice-option"
                     class:selected={option.value === value}
                     disabled={option.disabled}
-                    role="menuitemradio"
-                    aria-checked={option.value === value}
+                    role="option"
+                    aria-selected={option.value === value}
                     onclick={() => choose(option)}
                     onkeydown={handleOptionKeydown}
                 >
@@ -308,6 +342,20 @@
         background: var(--surface-raised);
     }
 
+    .choice-trigger.field {
+        min-height: clamp(48px, 13.73vw, 60px);
+        box-sizing: border-box;
+        padding: clamp(12px, 3.432vw, 15px);
+        border: 1.5px solid var(--line);
+        border-radius: var(--radius-md);
+        background: color-mix(in srgb, var(--surface-sunken) 26%, var(--surface-raised));
+        box-shadow: var(--control-inset-shadow);
+    }
+
+    .choice-trigger.field:focus-visible {
+        border-color: var(--accent);
+    }
+
     .choice-copy {
         display: grid;
         min-width: 0;
@@ -343,6 +391,16 @@
         font-size: 0.75rem;
     }
 
+    .field .choice-copy {
+        display: block;
+    }
+
+    .field .choice-value {
+        color: var(--ink);
+        font-size: var(--detail-support-type, 0.8125rem);
+        line-height: 1.5;
+    }
+
     .choice-trigger :global(.choice-chevron) {
         width: 20px;
         height: 20px;
@@ -359,6 +417,9 @@
         z-index: 80;
         inset: auto;
         display: grid;
+        box-sizing: border-box;
+        align-content: start;
+        grid-auto-rows: max-content;
         padding: 10px;
         border: 0;
         border-radius: 24px;
@@ -374,6 +435,30 @@
 
     .choice-menu.above {
         transform-origin: bottom right;
+    }
+
+    .choice-menu.field-menu {
+        padding: 6px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: var(--surface-raised);
+        box-shadow: var(--shadow-3);
+        transform-origin: top left;
+    }
+
+    .choice-menu.field-menu.above {
+        transform-origin: bottom left;
+    }
+
+    .choice-menu.field-menu.desktop-field-menu {
+        border-radius: 12px;
+        background: var(--surface-raised);
+        box-shadow: var(--popover-shadow);
+        transform-origin: top left;
+    }
+
+    .choice-menu.field-menu.desktop-field-menu.above {
+        transform-origin: bottom left;
     }
 
     .choice-menu::backdrop {
@@ -403,6 +488,48 @@
         font-weight: 700;
     }
 
+    .choice-option:focus-visible {
+        outline: none;
+        background: var(--surface-hover);
+    }
+
+    .choice-option > span {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .field-menu .choice-option {
+        height: 42px;
+        min-height: 42px;
+        padding: 0 12px;
+        border-radius: 9px;
+        font-size: var(--detail-support-type, 0.8125rem);
+        font-weight: 500;
+    }
+
+    .field-menu .choice-option.selected {
+        background: var(--surface-active);
+        font-weight: 650;
+    }
+
+    .field-menu .choice-option.selected:focus-visible {
+        background: var(--surface-active);
+    }
+
+    .field-menu.desktop-field-menu .choice-option {
+        height: 40px;
+        min-height: 40px;
+        border-radius: 8px;
+    }
+
+    .field-menu.desktop-field-menu .choice-option :global(.choice-check) {
+        width: 16px;
+        height: 16px;
+        stroke-width: 2.2;
+    }
+
     .choice-option :global(.choice-check) {
         width: 21px;
         height: 21px;
@@ -415,14 +542,22 @@
     }
 
     .choice-option:disabled {
-        opacity: 0.42;
+        opacity: var(--disabled-opacity);
     }
 
     @media (hover: hover) and (pointer: fine) {
-        .choice-trigger:hover:not(:disabled),
+        :global(.app-shell:not([data-layout='desktop'][data-view='settings']))
+            .choice-trigger:hover:not(:disabled),
         .choice-option:hover:not(:disabled) {
             background: var(--surface-hover);
         }
+    }
+
+    :global(.app-shell[data-layout='desktop']) .choice-trigger.field {
+        min-height: 42px;
+        padding: 8px 11px;
+        border-width: 1px;
+        border-radius: 8px;
     }
 
     @media (prefers-reduced-motion: reduce) {

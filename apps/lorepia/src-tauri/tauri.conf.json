@@ -27,6 +27,12 @@
         "minimizable": true,
         "closable": true,
         "decorations": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": {
+          "x": 15,
+          "y": 25
+        },
         "transparent": false,
         "fullscreen": false,
         "visible": true,
@@ -37,9 +43,9 @@
       "capabilities": [],
       "csp": {
         "default-src": "'self'",
-        "script-src": "'self'",
+        "script-src": "'self' 'wasm-unsafe-eval'",
         "style-src": "'self' 'unsafe-inline'",
-        "connect-src": "ipc: http://ipc.localhost",
+        "connect-src": "'self' ipc: http://ipc.localhost",
         "img-src": "'self' data: blob: lorepia-asset: http://lorepia-asset.localhost https://lorepia-asset.localhost",
         "media-src": "'self' blob: lorepia-asset: http://lorepia-asset.localhost https://lorepia-asset.localhost",
         "font-src": "'self'",

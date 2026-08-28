@@ -712,6 +712,43 @@
         color: var(--ink-subtle);
     }
 
+    :global(.app-shell[data-layout='desktop']) .library-search {
+        min-height: 30px;
+        padding-inline: 8px;
+        border-radius: var(--radius-sm);
+        margin: 0 4px 6px;
+        box-shadow: none;
+    }
+
+    :global(.app-shell[data-layout='desktop']) .library-search input {
+        min-height: 28px;
+        font-size: 11px;
+    }
+
+    :global(.app-shell[data-layout='desktop']) .library-search :global(.library-search-icon) {
+        width: 14px;
+        height: 14px;
+    }
+
+    :global(.app-shell[data-layout='desktop']) .import-character-mark {
+        display: grid;
+        place-items: center;
+    }
+
+    :global(.app-shell[data-layout='desktop'])
+        .import-character-mark
+        :global(.import-character-icon) {
+        width: 14px;
+        height: 14px;
+        stroke-width: 1.8;
+    }
+
+    :global(.app-shell[data-layout='desktop']) .import-character-button {
+        background: var(--surface-active);
+        color: var(--ink);
+        gap: 7px;
+    }
+
     @keyframes library-search-expand {
         0% {
             right: calc(var(--library-search-edge-end) + var(--library-search-origin-after));

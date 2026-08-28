@@ -1,5 +1,6 @@
 <script lang="ts">
     import DetailActionBar from '../../components/detail/DetailActionBar.svelte';
+    import ChoiceField from '../../components/ChoiceField.svelte';
     import type { LorepiaAppState } from '../../app/app-controller';
     import { tr } from '../../lib/i18n';
     import {
@@ -218,25 +219,25 @@
                 <span>프로필 ID</span>
                 <input type="text" readonly value={profile.value.id} />
             </label>
-            <label>
-                <span>작업 종류</span>
-                <select
-                    value={profile.value.kind}
-                    disabled={busy}
-                    onchange={(event) =>
-                        controller.stageTaskProfile(profile.value.id, {
-                            kind: event.currentTarget.value as typeof profile.value.kind,
-                        })}
-                >
-                    <option value="memory_summary">memory summary</option>
-                    <option value="memory_embedding">memory embedding</option>
-                    <option value="translation">translation</option>
-                    <option value="emotion_classification">emotion classification</option>
-                    <option value="state_extraction">state extraction</option>
-                    <option value="image_prompt">image prompt</option>
-                    <option value="title_generation">title generation</option>
-                </select>
-            </label>
+            <ChoiceField
+                id={`task-profile-kind-${profile.value.id}`}
+                label="작업 종류"
+                value={profile.value.kind}
+                options={[
+                    { value: 'memory_summary', label: 'memory summary' },
+                    { value: 'memory_embedding', label: 'memory embedding' },
+                    { value: 'translation', label: 'translation' },
+                    { value: 'emotion_classification', label: 'emotion classification' },
+                    { value: 'state_extraction', label: 'state extraction' },
+                    { value: 'image_prompt', label: 'image prompt' },
+                    { value: 'title_generation', label: 'title generation' },
+                ]}
+                disabled={busy}
+                onSelect={(value) =>
+                    controller.stageTaskProfile(profile.value.id, {
+                        kind: value as typeof profile.value.kind,
+                    })}
+            />
             <label>
                 <span>모델 route ID</span>
                 <input
@@ -455,7 +456,9 @@
     }
 
     .profile-feedback.error {
-        color: var(--danger);
+        border: 1px solid var(--status-error-border);
+        color: var(--status-error-fg);
+        background: var(--status-error-bg);
     }
 
     .profile-form {
@@ -471,7 +474,7 @@
         font-weight: 700;
     }
 
-    .profile-form :is(input, select) {
+    .profile-form input {
         width: 100%;
         min-width: 0;
         min-height: clamp(48px, 13.73vw, 60px);
@@ -483,23 +486,23 @@
         appearance: none;
         color: var(--ink);
         background: color-mix(in srgb, var(--surface-sunken) 26%, var(--surface-raised));
-        box-shadow: inset 0 1px 2px rgb(16 18 24 / 3%);
+        box-shadow: var(--control-inset-shadow);
         caret-color: var(--accent);
         font-size: var(--detail-support-type);
         line-height: 1.5;
     }
 
-    .profile-form :is(input, select):hover:not(:focus, :disabled) {
+    .profile-form input:hover:not(:focus, :disabled) {
         border-color: var(--line);
     }
 
-    .profile-form :is(input, select):focus {
+    .profile-form input:focus {
         border-color: var(--accent);
         outline: none;
     }
 
-    .profile-form :is(input, select):disabled {
+    .profile-form input:disabled {
         cursor: not-allowed;
-        opacity: 0.55;
+        opacity: var(--disabled-opacity);
     }
 </style>

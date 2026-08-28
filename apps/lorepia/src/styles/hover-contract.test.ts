@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import appSource from '../app/App.svelte?raw';
+import choiceFieldSource from '../components/ChoiceField.svelte?raw';
 import choicePopoverSource from '../components/ChoicePopover.svelte?raw';
+import segmentedControlSource from '../components/SegmentedControl.svelte?raw';
+import toggleSwitchSource from '../components/ToggleSwitch.svelte?raw';
 import detailActionBarSource from '../components/detail/DetailActionBar.svelte?raw';
 import detailPageSource from '../components/detail/DetailPage.svelte?raw';
 import chatPaneSource from '../features/chat/ChatPane.svelte?raw';
@@ -10,7 +13,11 @@ import libraryPaneSource from '../features/library/LibraryPane.svelte?raw';
 import orchestrationQuickDrawerSource from '../features/orchestration/OrchestrationQuickDrawer.svelte?raw';
 import orchestrationStudioSource from '../features/orchestration/OrchestrationStudio.svelte?raw';
 import personaPanelSource from '../features/personas/PersonaPanel.svelte?raw';
+import capabilityPanelSource from '../features/providers/CapabilityPanel.svelte?raw';
 import discoveryPanelSource from '../features/providers/DiscoveryPanel.svelte?raw';
+import modelSyncPanelSource from '../features/providers/ModelSyncPanel.svelte?raw';
+import providerCrudPanelSource from '../features/providers/ProviderCrudPanel.svelte?raw';
+import desktopSettingsSidebarSource from '../features/providers/DesktopSettingsSidebar.svelte?raw';
 import providerSettingsSource from '../features/providers/ProviderSettings.svelte?raw';
 import themeSource from '../lib/theme.ts?raw';
 import appCss from './app.css?raw';
@@ -51,6 +58,55 @@ function hoverIndexes(source: string): number[] {
 }
 
 describe('pointer interaction styling', () => {
+    it('keeps settings choices inside the LorePia popover layer', () => {
+        const settingsSurfaces = [
+            providerSettingsSource,
+            providerCrudPanelSource,
+            capabilityPanelSource,
+            discoveryPanelSource,
+            modelSyncPanelSource,
+        ];
+
+        for (const source of settingsSurfaces) {
+            expect(source).not.toMatch(/<select\b/u);
+            expect(source).not.toContain('datetime-local');
+        }
+
+        expect(choiceFieldSource).toContain('variant="field"');
+        expect(choicePopoverSource).toContain("variant?: 'row' | 'field'");
+        expect(choicePopoverSource).toContain('popover="manual"');
+        expect(choicePopoverSource).toMatch(
+            /\.choice-menu\.field-menu\s*\{[^}]*border:\s*1px solid var\(--line\);[^}]*background:\s*var\(--surface-raised\);/s,
+        );
+        expect(choicePopoverSource).toContain("getAttribute('data-layout') === 'desktop'");
+        expect(choicePopoverSource).toContain(
+            '? Math.min(triggerRect.width, viewportWidth - edge * 2)',
+        );
+        expect(choicePopoverSource).toContain(
+            "variant === 'field' ? triggerRect.left : triggerRect.right - desiredWidth",
+        );
+        expect(choicePopoverSource).toContain(
+            'const calculatedContentHeight = options.length * optionHeight + menuPadding + 2;',
+        );
+        expect(choicePopoverSource).toContain("variant === 'field'");
+        expect(choicePopoverSource).toContain('style:height={`${String(menuHeight)}px`}');
+        expect(choicePopoverSource).toMatch(
+            /\.choice-menu\s*\{[^}]*box-sizing:\s*border-box;[^}]*align-content:\s*start;[^}]*grid-auto-rows:\s*max-content;/s,
+        );
+        expect(choicePopoverSource).toMatch(
+            /\.choice-menu\.field-menu\.desktop-field-menu\s*\{[^}]*border-radius:\s*12px;[^}]*background:\s*var\(--surface-raised\);[^}]*transform-origin:\s*top left;/s,
+        );
+        expect(choicePopoverSource).toMatch(
+            /\.field-menu\.desktop-field-menu \.choice-option\s*\{[^}]*height:\s*40px;[^}]*min-height:\s*40px;/s,
+        );
+        expect(choicePopoverSource).toMatch(
+            /\.choice-option:focus-visible\s*\{[^}]*outline:\s*none;[^}]*background:\s*var\(--surface-hover\);/s,
+        );
+        expect(choicePopoverSource).not.toMatch(
+            /\.field-menu\.desktop-field-menu :global\(\.choice-check\)\s*\{[^}]*display:\s*none;/s,
+        );
+    });
+
     it('uses one inverse Paper and Ink palette across light and dark modes', () => {
         const palette = {
             paper: '#f2f0ea',
@@ -71,8 +127,22 @@ describe('pointer interaction styling', () => {
         expect(appCss).toContain('--brand-logo-ink: var(--brand-ink);');
         expect(appCss).toContain('--bg: #fbfcfa;');
         expect(appCss).toContain('--surface-sunken: #fafaf8;');
-        expect(appCss.match(/--surface-sunken:\s*#121212;/g)).toHaveLength(2);
-        expect(appCss.match(/--surface-raised:\s*#1d1d1d;/g)).toHaveLength(2);
+        expect(appCss).toContain('--desktop-sidebar-bg: #f5f5f5;');
+        expect(appCss).toContain('--desktop-workspace-bg: #ffffff;');
+        expect(appCss).toContain('--desktop-panel-bg: #f3f3f3;');
+        expect(appCss).toContain('--desktop-selection-bg: #e8e8e8;');
+        expect(appCss).toContain('--desktop-hover-bg: #eeeeee;');
+        expect(appCss).toContain('--desktop-divider: #e3e3e3;');
+        expect(appCss).toContain('--desktop-user-bubble-bg: #f1f1f1;');
+        expect(appCss).toContain('--desktop-composer-bg: #f7f7f7;');
+        expect(appCss).toContain('--desktop-composer-line: #e3e3e3;');
+        expect(appCss).toContain('--desktop-ink: #242424;');
+        expect(appCss.match(/--desktop-sidebar-bg:\s*#1b1b1b;/g)).toHaveLength(2);
+        expect(appCss.match(/--desktop-workspace-bg:\s*#1f1f1f;/g)).toHaveLength(2);
+        expect(appCss.match(/--desktop-panel-bg:\s*#282828;/g)).toHaveLength(2);
+        expect(appCss.match(/--desktop-composer-bg:\s*#282828;/g)).toHaveLength(2);
+        expect(appCss.match(/--surface-sunken:\s*#181818;/g)).toHaveLength(2);
+        expect(appCss.match(/--surface-raised:\s*#262626;/g)).toHaveLength(2);
         expect(appCss.match(/--primary-bg:\s*var\(--brand-summer-gradient\);/g)).toHaveLength(1);
         expect(appCss.match(/--primary-bg:\s*var\(--brand-night-action-gradient\);/g)).toHaveLength(
             2,
@@ -86,8 +156,8 @@ describe('pointer interaction styling', () => {
         expect(appCss).not.toContain('#0e9384');
         expect(providerSettingsSource).toContain('lorepia-logo-mark.png');
         expect(providerSettingsSource).toContain('class="settings-avatar brand-logo-mark"');
-        expect(appSource).toContain('lorepia-logo-mark.png');
-        expect(appSource).toContain('class="brand-logo-mark"');
+        expect(appSource).not.toContain('lorepia-logo-mark.png');
+        expect(appSource).not.toContain('class="sidebar-logo"');
         expect(appSource).not.toContain('lorepia-logo-light.png');
         expect(appSource).not.toContain('lorepia-logo-dark.png');
         expect(appCss).toContain('-webkit-mask-image: var(--logo-mask);');
@@ -107,8 +177,79 @@ describe('pointer interaction styling', () => {
         expect(appCss).toMatch(
             /\.setting-icon\s*\{[^}]*color:\s*var\(--ink\);[^}]*place-items:\s*center;/s,
         );
+        expect(segmentedControlSource).toMatch(
+            /\.segmented-control-thumb\s*\{[^}]*position:\s*absolute;[^}]*transform:\s*translate3d\(calc\(var\(--segment-index\) \* 100%\), 0, 0\);[^}]*transition:\s*transform 220ms cubic-bezier\(0\.22, 1, 0\.36, 1\);/s,
+        );
+        expect(segmentedControlSource).not.toContain('font-weight: 400');
+    });
+
+    it('keeps warm daylight surfaces while separating neutral dark chat and settings layers', () => {
+        expect(appCss).toContain('--desktop-chat-workspace-bg: #fdfcfb;');
+        expect(
+            appCss.match(/--desktop-chat-sidebar-bg:\s*var\(--desktop-chat-workspace-bg\);/g),
+        ).toHaveLength(1);
+        expect(appCss).toContain('--desktop-chat-panel-bg: #f5f3ef;');
+        expect(appCss).toContain('--desktop-chat-selection-bg: #ebe9e5;');
+        expect(appCss).toContain('--desktop-chat-bubble-bg: #f2f1f0;');
+        expect(appCss).toContain('--desktop-chat-composer-bg: #ffffff;');
+        expect(appCss).toContain('--desktop-chat-composer-line: #d8d6d2;');
+        expect(appCss).toContain('--desktop-chat-composer-shadow: 0 5px 18px rgb(61 61 58 / 8%);');
+        expect(appCss).toContain('--desktop-chat-ink: #3d3d3a;');
+        expect(appCss).toContain('--desktop-chat-action-ink: #a7a6a2;');
+        expect(appCss.match(/--desktop-chat-workspace-bg:\s*#151515;/g)).toHaveLength(2);
+        expect(appCss.match(/--desktop-chat-sidebar-bg:\s*#111111;/g)).toHaveLength(2);
+        expect(appCss.match(/--desktop-chat-panel-bg:\s*#202020;/g)).toHaveLength(2);
+        expect(appCss.match(/--desktop-chat-selection-bg:\s*#2c2c2c;/g)).toHaveLength(2);
+        expect(appCss.match(/--desktop-chat-bubble-bg:\s*#262626;/g)).toHaveLength(2);
+        expect(appCss.match(/--desktop-chat-composer-bg:\s*#202020;/g)).toHaveLength(2);
+        expect(appCss.match(/--desktop-chat-composer-line:\s*#353535;/g)).toHaveLength(2);
+        expect(appCss.match(/--desktop-settings-sidebar-bg:\s*#1b1b1b;/g)).toHaveLength(2);
+        expect(appCss.match(/--desktop-settings-workspace-bg:\s*#1f1f1f;/g)).toHaveLength(2);
+        expect(appCss.match(/--desktop-settings-panel-bg:\s*#282828;/g)).toHaveLength(2);
+        expect(appCss.match(/--desktop-settings-selection-bg:\s*#3a3a3a;/g)).toHaveLength(2);
+        expect(appCss.match(/--desktop-settings-divider:\s*#333333;/g)).toHaveLength(2);
+        expect(appCss.match(/--desktop-settings-control-line:\s*#414141;/g)).toHaveLength(2);
+        for (const staleWarmDark of [
+            '#20201e',
+            '#302f2c',
+            '#262624',
+            '#343431',
+            '#292927',
+            '#dededb',
+            '#aaa9a4',
+        ]) {
+            expect(appCss).not.toContain(staleWarmDark);
+        }
         expect(appCss).toMatch(
-            /\.segmented button\.active\s*\{[^}]*background:\s*var\(--accent-soft\);[^}]*color:\s*var\(--accent\);/s,
+            /\.app-shell\[data-layout='desktop'\]\[data-view='chat'\]\s*\{[^}]*--desktop-sidebar-bg:\s*var\(--desktop-chat-sidebar-bg\);[^}]*--desktop-workspace-bg:\s*var\(--desktop-chat-workspace-bg\);[^}]*--desktop-panel-bg:\s*var\(--desktop-chat-panel-bg\);[^}]*--desktop-selection-bg:\s*var\(--desktop-chat-selection-bg\);[^}]*--desktop-user-bubble-bg:\s*var\(--desktop-chat-bubble-bg\);[^}]*--desktop-composer-line:\s*var\(--desktop-chat-composer-line\);[^}]*--desktop-composer-shadow:\s*var\(--desktop-chat-composer-shadow\);[^}]*--desktop-ink:\s*var\(--desktop-chat-ink\);[^}]*--surface-sunken:\s*var\(--desktop-chat-workspace-bg\);[^}]*--surface-active:\s*var\(--desktop-chat-selection-bg\);/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='desktop'\]\[data-view='settings'\]\s*\{[^}]*--desktop-sidebar-bg:\s*var\(--desktop-settings-sidebar-bg\);[^}]*--desktop-workspace-bg:\s*var\(--desktop-settings-workspace-bg\);[^}]*--desktop-panel-bg:\s*var\(--desktop-settings-panel-bg\);[^}]*--desktop-selection-bg:\s*var\(--desktop-settings-selection-bg\);[^}]*--desktop-composer-line:\s*var\(--desktop-settings-control-line\);[^}]*--desktop-ink:\s*var\(--desktop-settings-ink\);[^}]*--surface-sunken:\s*var\(--desktop-settings-sidebar-bg\);[^}]*--surface-raised:\s*var\(--desktop-settings-panel-bg\);[^}]*--surface-active:\s*var\(--desktop-settings-selection-bg\);/s,
+        );
+        expect(appCss).not.toContain(".app-shell[data-layout='desktop'][data-view='chat'] > .main");
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='desktop'\]\[data-view='chat'\] \.composer-field\s*\{[^}]*box-shadow:\s*0 0 0 0\.5px var\(--desktop-composer-line\),\s*var\(--desktop-composer-shadow\);/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='desktop'\] \.message-actions button\s*\{[^}]*color:\s*var\(--desktop-chat-action-ink\);/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='desktop'\] \.message-actions button:hover:not\(:disabled\)\s*\{[^}]*background:\s*transparent;[^}]*color:\s*var\(--desktop-chat-action-hover-ink\);/s,
+        );
+        expect(providerSettingsSource).toMatch(
+            /\.desktop-settings-card\s*\{[^}]*background:\s*var\(--desktop-workspace-bg\);/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='desktop'\]\[data-view='settings'\] \.setting-list\s*\{[^}]*background:\s*var\(--desktop-workspace-bg\);/s,
+        );
+        expect(providerSettingsSource).toMatch(
+            /\.theme-preview-dark \.theme-preview-canvas\s*\{[^}]*border-color:\s*#464646;[^}]*background:\s*#1f1f1f;/s,
+        );
+        expect(providerSettingsSource).toMatch(
+            /\.theme-preview-dark \.theme-preview-sidebar\s*\{[^}]*background:\s*#1b1b1b;/s,
+        );
+        expect(providerSettingsSource).toMatch(
+            /\.theme-preview-dark \.theme-preview-composer\s*\{[^}]*border-color:\s*#414141;[^}]*background:\s*#282828;/s,
         );
     });
 
@@ -180,7 +321,31 @@ describe('pointer interaction styling', () => {
             /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.chat-pane \.chat-identity\s*\{[^}]*border-radius:\s*var\(--radius-pill\);[^}]*background:\s*color-mix\(in srgb,\s*var\(--surface-raised\) 94%,\s*transparent\);[^}]*box-shadow:\s*var\(--shadow-1\);/s,
         );
         expect(appCss).toMatch(
-            /\.app-shell\[data-layout='desktop'\] \.sub-header\s*\{[^}]*position:\s*relative;[^}]*border-bottom:\s*1px solid color-mix\(in srgb,\s*var\(--line\) 72%,\s*transparent\);[^}]*background:\s*var\(--bg\);/s,
+            /\.app-shell\[data-layout='desktop'\] \.sub-header\s*\{[^}]*position:\s*relative;[^}]*height:\s*112px;[^}]*align-items:\s*flex-end;[^}]*padding:\s*0 var\(--settings-gutter\) 24px;[^}]*border-bottom:\s*0;[^}]*background:\s*var\(--desktop-workspace-bg\);/s,
+        );
+    });
+
+    it('keeps the interactive-back dimmer off the desktop workspace', () => {
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='mobile'\] > \.back-swipe-underlay::after\s*\{[^}]*opacity:\s*var\(--back-swipe-underlay-dim\);/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='desktop'\] > \.back-swipe-underlay\s*\{[^}]*display:\s*none;/s,
+        );
+        expect(appCss).not.toMatch(/(?:^|\n)\.back-swipe-underlay::after\s*\{/);
+    });
+
+    it('measures desktop scrollbars for aligned fixed actions and chat fields', () => {
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='desktop'\] :is\(\.view-scroll, \.provider-scroll\)\s*\{[^}]*scrollbar-gutter:\s*auto;/s,
+        );
+        expect(appSource).toContain('use:syncDetailActionViewport');
+        expect(appSource).toContain("'--detail-action-center'");
+        expect(appSource).toContain("'--detail-action-workspace-width'");
+        expect(chatPaneSource).toContain('use:syncMessageScrollbarInset');
+        expect(chatPaneSource).toContain("'--message-scrollbar-width'");
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='desktop'\]\[data-view='chat'\] \.composer\s*\{[^}]*padding-right:\s*var\(--chat-side-inset\);/s,
         );
     });
 
@@ -216,6 +381,18 @@ describe('pointer interaction styling', () => {
         expect(appCss).toMatch(
             /\.message-actions button svg\s*\{[^}]*width:\s*15px;[^}]*height:\s*15px;[^}]*stroke-width:\s*1\.8;/s,
         );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='desktop'\] \.message-actions\s*\{[^}]*position:\s*static;[^}]*min-height:\s*30px;[^}]*padding:\s*0;[^}]*border:\s*0;[^}]*border-radius:\s*0;[^}]*background:\s*transparent;[^}]*box-shadow:\s*none;/s,
+        );
+        expect(chatPaneSource).toContain(
+            'class:actions-hovered={hoveredMessageActionId === message.id}',
+        );
+        expect(chatPaneSource).toContain('onmouseenter={() => hoverMessageActions(message.id)}');
+        expect(chatPaneSource).toContain('onmouseleave={() => unhoverMessageActions(message.id)}');
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='desktop'\] \.message-item\.actions-hovered \.message-actions\s*\{[^}]*opacity:\s*1;[^}]*pointer-events:\s*auto;/s,
+        );
+        expect(appCss).not.toMatch(/(?:^|\n)\.message-item:focus-within \.message-actions\s*\{/);
         expect(appCss).toMatch(
             /\.message-date-chip\s*\{[^}]*font-size:\s*0\.75rem;[^}]*font-weight:\s*650;/s,
         );
@@ -303,9 +480,9 @@ describe('pointer interaction styling', () => {
         expect(appCss).toMatch(/\.tab-bar\s*\{[^}]*margin:\s*0;/s);
     });
 
-    it('hides the mobile tab bar for every pushed settings screen', () => {
+    it('hides the mobile tab bar only for the active pushed screen', () => {
         expect(appSource).toMatch(
-            /\{#if\s+!isDesktop\s+&&\s+studioSection === null\s+&&\s+!\(view === 'chat' && chatThreadOpen\)\s+&&\s+!\(view === 'settings' && settingsSection !== null\)\s*\}\s*<nav class="tab-bar"/s,
+            /\{#if\s+!isDesktop\s+&&\s+!\(view === 'create' && studioSection !== null\)\s+&&\s+!\(view === 'chat' && chatThreadOpen\)\s+&&\s+!\(view === 'settings' && settingsSection !== null\)\s*\}\s*<nav class="tab-bar"/s,
         );
         expect(appSource).not.toMatch(
             /\{#if[^}]*settingsSection === 'persona'[^}]*\}\s*<nav class="tab-bar"/s,
@@ -324,7 +501,7 @@ describe('pointer interaction styling', () => {
             /\.detail-page\s*\{[^}]*position:\s*relative;[^}]*display:\s*flex;[^}]*height:\s*100%;[^}]*min-height:\s*0;[^}]*flex-direction:\s*column;/s,
         );
         expect(detailPageSource).toMatch(
-            /\.detail-page-scroll\s*\{[^}]*display:\s*grid;[^}]*height:\s*0;[^}]*min-height:\s*0;[^}]*flex:\s*1 1 0;[^}]*align-content:\s*start;[^}]*padding:\s*16px var\(--settings-gutter\)\s*calc\(24px \+ env\(safe-area-inset-bottom\)\);[^}]*overflow-y:\s*scroll;/s,
+            /\.detail-page-scroll\s*\{[^}]*display:\s*grid;[^}]*height:\s*0;[^}]*min-height:\s*0;[^}]*flex:\s*1 1 0;[^}]*align-content:\s*start;[^}]*padding:\s*16px var\(--settings-gutter\)\s*calc\(24px \+ env\(safe-area-inset-bottom\)\);[^}]*overflow-y:\s*auto;/s,
         );
         expect(detailPageSource).toMatch(
             /\.detail-page-scroll\.detail-page-has-actions\s*\{[^}]*padding-bottom:\s*calc\(var\(--mobile-nav\) \+ 36px \+ env\(safe-area-inset-bottom\)\);/s,
@@ -365,7 +542,7 @@ describe('pointer interaction styling', () => {
             /\.detail-action-bar :global\(\.detail-action--wide\)\s*\{[^}]*flex:\s*1;/s,
         );
         expect(detailActionBarSource).toMatch(
-            /\.detail-action-bar :global\(\.detail-action--destructive\)\s*\{[^}]*color:\s*#ff0000;/s,
+            /\.detail-action-bar :global\(\.detail-action--destructive\)\s*\{[^}]*color:\s*var\(--status-error-fg\);/s,
         );
         expect(detailActionBarSource).toMatch(
             /\.detail-action-bar :global\(\.detail-action--borderless\)\s*\{[^}]*border:\s*0;/s,
@@ -384,11 +561,11 @@ describe('pointer interaction styling', () => {
         expect(personaPanelSource).toMatch(
             /\.persona-form :is\(input, textarea\):focus\s*\{[^}]*border-color:\s*var\(--accent\);[^}]*outline:\s*none;/s,
         );
-        expect(providerSettingsSource).toMatch(
-            /\.detail-form :is\(input, select\):hover:not\(:focus, :disabled\)\s*\{[^}]*border-color:\s*var\(--line\);/s,
+        expect(choicePopoverSource).toMatch(
+            /\.choice-trigger\.field\s*\{[^}]*border:\s*1\.5px solid var\(--line\);/s,
         );
-        expect(providerSettingsSource).toMatch(
-            /\.detail-form :is\(input, select\):focus\s*\{[^}]*border-color:\s*var\(--accent\);[^}]*outline:\s*0;/s,
+        expect(choicePopoverSource).toMatch(
+            /\.choice-trigger\.field:focus-visible\s*\{[^}]*border-color:\s*var\(--accent\);/s,
         );
     });
 
@@ -405,6 +582,51 @@ describe('pointer interaction styling', () => {
         expect(appCss).toMatch(
             /\.sidebar-rail\s*\{[^}]*width:\s*0;[^}]*flex:\s*0 0 0;[^}]*overflow:\s*hidden;[^}]*transition:\s*width 240ms[^;]*,\s*flex-basis 240ms/s,
         );
+        expect(appCss).toMatch(
+            /\.sidebar-view-switcher\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/s,
+        );
+        expect(appCss).toMatch(
+            /\.sidebar-view-thumb\s*\{[^}]*position:\s*absolute;[^}]*width:\s*calc\(\(100% - 4px\) \/ 2\);[^}]*background:\s*var\(--surface-raised\);[^}]*transform:\s*translate3d\(0,\s*0,\s*0\);[^}]*transition:\s*transform 260ms cubic-bezier\(0\.22,\s*1,\s*0\.36,\s*1\);/s,
+        );
+        expect(appCss).toMatch(
+            /\.sidebar-view-switcher\[data-section='conversations'\] \.sidebar-view-thumb\s*\{[^}]*transform:\s*translate3d\(100%,\s*0,\s*0\);/s,
+        );
+        expect(appCss).not.toMatch(/\.sidebar-view-switcher::before\s*\{/);
+        expect(appCss).toMatch(
+            /\.sidebar-view-panels\s*\{[^}]*display:\s*grid;[^}]*min-height:\s*0;[^}]*flex:\s*1;[^}]*overflow:\s*hidden;/s,
+        );
+        expect(appCss).toMatch(
+            /\.sidebar-view-panel\s*\{[^}]*grid-area:\s*1 \/ 1;[^}]*opacity:\s*0;[^}]*visibility:\s*hidden;[^}]*pointer-events:\s*none;[^}]*transition:\s*opacity 160ms ease,[^;]*transform 240ms cubic-bezier\(0\.22,\s*1,\s*0\.36,\s*1\),[^;]*visibility 0s linear 240ms;/s,
+        );
+        expect(appCss).toMatch(
+            /\.sidebar-view-panel\[aria-hidden='false'\]\s*\{[^}]*opacity:\s*1;[^}]*visibility:\s*visible;[^}]*pointer-events:\s*auto;[^}]*transform:\s*translate3d\(0,\s*0,\s*0\);/s,
+        );
+        expect(appCss).toMatch(
+            /\.sidebar-view-option\[aria-pressed='true'\]\s*\{[^}]*background:\s*transparent;[^}]*color:\s*var\(--ink\);/s,
+        );
+        expect(appCss).toMatch(
+            /@media \(min-width:\s*900px\)\s*\{\s*:root\s*\{[^}]*font-size:\s*13px;/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='desktop'\]\s*\{[^}]*--sidebar:\s*280px;[^}]*--touch:\s*32px;[^}]*--detail-ui-type:\s*13px;[^}]*--detail-support-type:\s*12px;/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='desktop'\]\s*\{[^}]*--reading:\s*736px;[^}]*--settings:\s*768px;[^}]*--gutter:\s*max\(16px,\s*calc\(\(100% - var\(--reading\)\) \/ 2\)\);/s,
+        );
+        expect(appCss).toMatch(/\.sidebar-head\s*\{[^}]*justify-content:\s*flex-start;/s);
+        expect(libraryPaneSource).toMatch(
+            /:global\(\.app-shell\[data-layout='desktop'\]\) \.library-search\s*\{[^}]*min-height:\s*30px;[^}]*box-shadow:\s*none;/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='desktop'\] \.setting-row\s*\{[^}]*position:\s*relative;[^}]*min-height:\s*52px;[^}]*padding:\s*9px 16px;[^}]*border-bottom:\s*0;[^}]*gap:\s*14px;/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='desktop'\] \.setting-list > li \+ li > \.setting-row::before,[\s\S]*?\.app-shell\[data-layout='desktop'\] \.setting-list > \.setting-row \+ li > \.setting-row::before\s*\{[^}]*right:\s*16px;[^}]*left:\s*16px;[^}]*height:\s*1px;[^}]*background:\s*var\(--desktop-divider\);/s,
+        );
+        expect(appSource).toContain("aria-label={$tr('app.sidebar.switcher')}");
+        expect(appSource).toContain('data-section={homeSection}');
+        expect(appSource).toContain('id="sidebar-character-list"');
+        expect(appSource).toContain('id="sidebar-chat-list"');
         expect(appCss).toMatch(/\.main\s*\{[^}]*display:\s*flex;[^}]*width:\s*0;[^}]*flex:\s*1;/s);
         expect(appSource).toContain("const DESKTOP_LAYOUT = '(min-width: 900px)'");
         expect(appSource).toContain("data-layout={isDesktop ? 'desktop' : 'mobile'}");
@@ -441,10 +663,10 @@ describe('pointer interaction styling', () => {
 
     it('hides mobile scrollbars without disabling native wheel or touch scrolling', () => {
         expect(providerSettingsSource).toMatch(
-            /\.provider-scroll\s*\{[^}]*height:\s*0;[^}]*min-height:\s*0;[^}]*flex:\s*1 1 0;[^}]*overflow-y:\s*scroll;/s,
+            /\.provider-scroll\s*\{[^}]*height:\s*0;[^}]*min-height:\s*0;[^}]*flex:\s*1 1 0;[^}]*overflow-y:\s*auto;/s,
         );
         expect(detailPageSource).toMatch(
-            /\.detail-page-scroll\s*\{[^}]*height:\s*0;[^}]*min-height:\s*0;[^}]*flex:\s*1 1 0;[^}]*overflow-y:\s*scroll;/s,
+            /\.detail-page-scroll\s*\{[^}]*height:\s*0;[^}]*min-height:\s*0;[^}]*flex:\s*1 1 0;[^}]*overflow-y:\s*auto;/s,
         );
         expect(appCss).toMatch(
             /\.app-shell\[data-layout='mobile'\],\s*\.app-shell\[data-layout='mobile'\] \*\s*\{[^}]*scrollbar-width:\s*none;/s,
@@ -455,8 +677,12 @@ describe('pointer interaction styling', () => {
         expect(appCss).toMatch(
             /\.app-shell\[data-layout='mobile'\][^{}]*:where\(\.navigator,\s*\.view-scroll,\s*\.provider-scroll,\s*\.entity-list,\s*\.message-scroll,\s*\.modal-card\)\s*\{[^}]*-webkit-overflow-scrolling:\s*touch;[^}]*touch-action:\s*pan-y;/s,
         );
-        expect(appCss).not.toContain('scrollbar-width: thin');
-        expect(appCss).not.toContain('::-webkit-scrollbar-thumb');
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='desktop'\][^{}]*:is\(\.message-scroll, \.quick-drawer\.desktop \.drawer-body\)\s*\{[^}]*scrollbar-gutter:\s*stable;[^}]*scrollbar-width:\s*thin;/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='desktop'\][^{}]*:is\(\.message-scroll, \.quick-drawer\.desktop \.drawer-body\)::-webkit-scrollbar-thumb\s*\{[^}]*background-clip:\s*padding-box;/s,
+        );
     });
 
     it('keeps symmetric page gutters after scrollbar chrome is hidden', () => {
@@ -469,6 +695,9 @@ describe('pointer interaction styling', () => {
         expect(appCss).toMatch(
             /\.view-scroll\s*\{[^}]*padding:\s*16px var\(--settings-gutter\) 24px;/s,
         );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='desktop'\]\[data-view='create'\]\s*\.view-scroll:not\(\.studio-detail-scroll\)\s*\{[^}]*padding-top:\s*clamp\(52px,\s*7\.4vh,\s*68px\);/s,
+        );
         expect(libraryPaneSource).toMatch(
             /\.library-pane\.root-view \.entity-list\s*\{[^}]*padding:\s*0 8px calc\(/s,
         );
@@ -479,10 +708,63 @@ describe('pointer interaction styling', () => {
             /\.message-scroll\s*\{[^}]*padding:\s*0 var\(--chat-side-inset\)\s*calc\(var\(--composer-overlay-height\) \+ var\(--chat-side-inset\)\);/s,
         );
         expect(providerSettingsSource).toMatch(
-            /:global\(\.app-shell\[data-layout='mobile'\]\) \.provider-scroll\.settings-home-scroll\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;[^}]*padding-bottom:/s,
+            /\.provider-scroll\.settings-home-scroll\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;[^}]*padding-inline:\s*var\(--settings-gutter\);/s,
         );
         expect(providerSettingsSource).toMatch(
-            /:global\(\.app-shell\[data-layout='mobile'\]\) \.settings-home-scroll \.setting-list\s*\{[^}]*flex:\s*none;[^}]*margin-bottom:/s,
+            /\.settings-home-scroll \.setting-list\s*\{[^}]*flex:\s*none;[^}]*justify-content:\s*flex-start;/s,
+        );
+        expect(providerSettingsSource).toMatch(
+            /:global\(\.app-shell\[data-layout='mobile'\]\) \.provider-scroll\.settings-home-scroll\s*\{[^}]*padding-bottom:/s,
+        );
+        expect(providerSettingsSource).toMatch(
+            /:global\(\.app-shell\[data-layout='mobile'\]\) \.settings-home-scroll \.setting-list\s*\{[^}]*margin-bottom:/s,
+        );
+    });
+
+    it('keeps the desktop settings title at the top-left without the profile mark', () => {
+        expect(providerSettingsSource).toMatch(
+            /:global\(\.app-shell\[data-layout='desktop'\]\) \.provider-scroll\.settings-home-scroll\s*\{[^}]*padding-top:\s*clamp\(52px,\s*7\.4vh,\s*68px\);/s,
+        );
+        expect(providerSettingsSource).toMatch(
+            /:global\(\.app-shell\[data-layout='desktop'\]\) \.settings-identity\s*\{[^}]*min-height:\s*0;[^}]*justify-items:\s*start;[^}]*text-align:\s*left;/s,
+        );
+        expect(providerSettingsSource).toMatch(
+            /:global\(\.app-shell\[data-layout='desktop'\]\) \.settings-avatar-wrap\s*\{[^}]*display:\s*none;/s,
+        );
+        expect(providerSettingsSource).toMatch(
+            /:global\(\.app-shell\[data-layout='desktop'\]\) \.settings-identity-copy\s*\{[^}]*justify-items:\s*start;/s,
+        );
+        expect(providerSettingsSource).toMatch(
+            /:global\(\.app-shell\[data-layout='desktop'\]\) \.settings-identity-copy h2\s*\{[^}]*font-size:\s*28px;[^}]*font-weight:\s*600;/s,
+        );
+    });
+
+    it('uses a quiet desktop settings selection and inset separators', () => {
+        expect(desktopSettingsSidebarSource).toMatch(
+            /\.settings-destination-row\[aria-current='page'\]\s*\{[^}]*background:\s*var\(--surface-active\);[^}]*color:\s*var\(--ink\);/s,
+        );
+        expect(desktopSettingsSidebarSource).not.toMatch(
+            /\.settings-destination-row\[aria-current='page'\]\s*\{[^}]*box-shadow:/s,
+        );
+        expect(desktopSettingsSidebarSource).not.toContain(
+            ".settings-destination-row[aria-current='page']::before",
+        );
+        expect(desktopSettingsSidebarSource).toMatch(
+            /\.settings-destination-row:focus-visible\s*\{[^}]*outline:\s*none;/s,
+        );
+        expect(desktopSettingsSidebarSource).not.toContain('.settings-destination-row:hover');
+        expect(providerSettingsSource).not.toContain('.desktop-settings-summary-row:hover');
+        expect(appCss).toContain(
+            ".app-shell:not([data-layout='desktop'][data-view='settings']) button:hover:not(:disabled)",
+        );
+        expect(choicePopoverSource).toContain(
+            ":global(.app-shell:not([data-layout='desktop'][data-view='settings']))",
+        );
+        expect(providerSettingsSource).toMatch(
+            /\.desktop-settings-summary-row \+ \.desktop-settings-summary-row,[\s\S]*?\.desktop-settings-static-row \+ \.desktop-settings-summary-row\s*\{[^}]*border-top:\s*0;/s,
+        );
+        expect(providerSettingsSource).toMatch(
+            /\.desktop-settings-summary-row \+ \.desktop-settings-summary-row::before,[\s\S]*?\.desktop-settings-static-row \+ \.desktop-settings-summary-row::before\s*\{[^}]*right:\s*14px;[^}]*left:\s*14px;[^}]*height:\s*1px;[^}]*background:\s*var\(--line\);/s,
         );
     });
 
@@ -773,10 +1055,10 @@ describe('pointer interaction styling', () => {
             /\.chat-pane\s*\{[^}]*--chat-side-inset:\s*var\(--gutter\);[^}]*--composer-overlay-height:\s*78px;[^}]*--composer-field-height:\s*54px;[^}]*--composer-field-bottom-inset:\s*8px;[^}]*--composer-fullscreen-open-duration:\s*var\(--panel-open-duration\);[^}]*--composer-fullscreen-close-duration:\s*var\(--panel-close-duration\);[^}]*--composer-fullscreen-open-easing:\s*var\(--panel-open-easing\);[^}]*--composer-fullscreen-close-easing:\s*var\(--panel-close-easing\);/s,
         );
         expect(orchestrationQuickDrawerSource).toMatch(
-            /\.quick-drawer\s*\{[^}]*transition:[^}]*bottom var\(--panel-close-duration\) var\(--panel-close-easing\),[^}]*visibility 0s linear var\(--panel-close-duration\);/s,
+            /\.quick-drawer\s*\{[^}]*transition:[^}]*transform var\(--panel-close-duration\) var\(--panel-close-easing\),[^}]*visibility 0s linear var\(--panel-close-duration\);/s,
         );
         expect(orchestrationQuickDrawerSource).toMatch(
-            /\.quick-drawer\.open\s*\{[^}]*transition:[^}]*bottom var\(--panel-open-duration\) var\(--panel-open-easing\),[^}]*visibility 0s;/s,
+            /\.quick-drawer\.open\s*\{[^}]*transition:[^}]*transform var\(--panel-open-duration\) var\(--panel-open-easing\),[^}]*visibility 0s;/s,
         );
         expect(appCss).toMatch(
             /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.chat-pane\s*\{[^}]*--chat-side-inset:\s*max\([^}]*var\(--reading\)[^}]*\);/s,
@@ -826,32 +1108,44 @@ describe('pointer interaction styling', () => {
         expect(chatPaneSource).toMatch(/<OrchestrationQuickDrawer[\s\S]*\{roomControls\}/);
         expect(appSource.match(/<ArrowLeft aria-hidden="true" \/>/g)).toHaveLength(2);
         expect(chatPaneSource).toContain('<ArrowLeft class="chat-back-icon" aria-hidden="true" />');
-        expect(orchestrationQuickDrawerSource).toContain(
-            "import { Menu, X } from '@lucide/svelte';",
-        );
+        for (const icon of [
+            'ArrowLeft',
+            'ChevronRight',
+            'Menu',
+            'PanelRightClose',
+            'PanelRightOpen',
+            'X',
+        ]) {
+            expect(orchestrationQuickDrawerSource).toContain(`${icon},`);
+        }
         expect(orchestrationQuickDrawerSource).toContain(
             '<Menu class="orchestration-toggle-icon" aria-hidden="true" />',
         );
-        expect(orchestrationQuickDrawerSource).not.toMatch(/SlidersHorizontal|EllipsisVertical/);
+        expect(orchestrationQuickDrawerSource).toContain('SlidersHorizontal,');
+        expect(orchestrationQuickDrawerSource).not.toContain('EllipsisVertical');
         expect(chatPaneSource).not.toContain('class="chat-toolbar"');
         expect(appCss).not.toContain('.chat-toolbar-new-operation');
         expect(appCss).not.toContain('.chat-pane .chat-toolbar');
         expect(appCss).toMatch(
             /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.chat-pane \.chat-header\s*\{[^}]*margin:\s*0 auto;[^}]*inset:\s*0 0 auto;/s,
         );
-        expect(orchestrationQuickDrawerSource).toContain('class="quick-drawer-backdrop"');
+        expect(orchestrationQuickDrawerSource).not.toContain('quick-drawer-backdrop');
         expect(orchestrationQuickDrawerSource).toContain('aria-hidden={!open}');
         expect(orchestrationQuickDrawerSource).toContain('inert={!open}');
+        expect(orchestrationQuickDrawerSource).toContain('data-view={view}');
+        expect(chatPaneSource).toContain('bind:view={utilityView}');
+        expect(chatPaneSource).toContain("utilityView = 'tools';");
         expect(orchestrationQuickDrawerSource).not.toContain('in:fly');
         expect(orchestrationQuickDrawerSource).not.toContain('out:fly');
-        expect(orchestrationQuickDrawerSource).toMatch(
-            /\.quick-drawer-backdrop\s*\{[^}]*opacity:\s*0;[^}]*visibility:\s*hidden;/s,
+        expect(orchestrationQuickDrawerSource).toContain(
+            '<PanelRightOpen class="orchestration-toggle-icon" aria-hidden="true" />',
         );
-        expect(orchestrationQuickDrawerSource).toMatch(
-            /\.quick-drawer-backdrop\.open\s*\{[^}]*opacity:\s*1;[^}]*visibility:\s*visible;/s,
+        expect(orchestrationQuickDrawerSource).toContain(
+            '<PanelRightClose class="orchestration-toggle-icon" aria-hidden="true" />',
         );
-        expect(choicePopoverSource).toContain('role="menu"');
-        expect(choicePopoverSource).toContain('role="menuitemradio"');
+        expect(choicePopoverSource).toContain('role="combobox"');
+        expect(choicePopoverSource).toContain('role="listbox"');
+        expect(choicePopoverSource).toContain('role="option"');
         expect(choicePopoverSource).toContain('class="choice-check"');
         expect(choicePopoverSource).toContain('popover="manual"');
         expect(choicePopoverSource).toMatch(
@@ -862,32 +1156,84 @@ describe('pointer interaction styling', () => {
         );
         expect(orchestrationQuickDrawerSource).not.toContain('<footer>');
         expect(orchestrationQuickDrawerSource).not.toContain('type="checkbox"');
-        expect(orchestrationQuickDrawerSource).toContain('class="switch-button"');
-        expect(orchestrationQuickDrawerSource).toContain('role="switch"');
+        expect(orchestrationQuickDrawerSource).toContain('<ToggleSwitch');
+        expect(orchestrationQuickDrawerSource).toContain('checked={roomConfig.memory_enabled}');
+        expect(toggleSwitchSource).toContain('role="switch"');
+        expect(toggleSwitchSource).toMatch(
+            /\.toggle-switch\[aria-checked='true'\] \.toggle-switch-thumb\s*\{[^}]*transform:\s*translate3d\(16px, 0, 0\);/s,
+        );
+        expect(orchestrationQuickDrawerSource).toContain('onpointerdown={handlePanelPointerDown}');
+        expect(orchestrationQuickDrawerSource).toMatch(
+            /\.quick-drawer\s*\{[^}]*position:\s*fixed;[^}]*top:\s*0;[^}]*right:\s*0;[^}]*bottom:\s*0;[^}]*grid-template-rows:\s*auto minmax\(0, 1fr\);[^}]*width:\s*min\(100%, 390px\);[^}]*height:\s*100dvh;/s,
+        );
+        expect(orchestrationQuickDrawerSource).toMatch(
+            /\.quick-drawer\.open\s*\{[^}]*transform:\s*translate3d\(0, 0, 0\);[^}]*visibility:\s*visible;/s,
+        );
         expect(orchestrationQuickDrawerSource).toContain(
-            'aria-checked={roomConfig.memory_enabled}',
+            'transform: translate3d(var(--utility-drag-x, 0px), 0, 0);',
         );
-        expect(orchestrationQuickDrawerSource).toContain(
-            'background-color: rgba(0, 0, 0, 0.14) !important;',
-        );
-        expect(orchestrationQuickDrawerSource).toContain('backdrop-filter: none !important;');
-        expect(orchestrationQuickDrawerSource).toContain('onpointerdown={handleSheetPointerDown}');
+        expect(orchestrationQuickDrawerSource).toContain('will-change: transform;');
         expect(orchestrationQuickDrawerSource).toMatch(
-            /\.quick-drawer\s*\{[^}]*position:\s*fixed;[^}]*bottom:\s*calc\(max\(-680px, -70dvh\) - 24px\);[^}]*grid-template-rows:\s*auto auto minmax\(0, 1fr\);[^}]*height:\s*min\(70dvh, 680px\);/s,
+            /\.quick-drawer\.desktop\s*\{[^}]*top:\s*58px;[^}]*right:\s*var\(--chat-utility-edge-inset,\s*12px\);[^}]*width:\s*var\(--chat-utility-width,[^}]*border-radius:\s*18px;[^}]*background:\s*var\(--desktop-panel-bg,\s*var\(--desktop-sidebar-bg\)\);/s,
         );
         expect(orchestrationQuickDrawerSource).toMatch(
-            /\.quick-drawer\.open\s*\{[^}]*bottom:\s*calc\(12px - var\(--sheet-drag-y, 0px\)\);[^}]*visibility:\s*visible;/s,
-        );
-        expect(orchestrationQuickDrawerSource).not.toContain('translate3d');
-        expect(orchestrationQuickDrawerSource).not.toContain('will-change');
-        expect(orchestrationQuickDrawerSource).toMatch(
-            /@container view \(max-width:\s*640px\)[\s\S]*?\.quick-drawer\s*\{[^}]*bottom:\s*calc\(-70dvh - 24px\);[^}]*width:\s*100%;[^}]*height:\s*70dvh;[^}]*border-radius:\s*24px 24px 0 0;/s,
+            /@container view \(max-width:\s*640px\)[\s\S]*?\.quick-drawer\s*\{[^}]*width:\s*100%;[^}]*height:\s*100dvh;[^}]*max-height:\s*100dvh;/s,
         );
         expect(orchestrationQuickDrawerSource).toMatch(
             /\.drawer-body\s*\{[^}]*overflow-y:\s*auto;/s,
         );
         expect(appCss).toMatch(
             /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.chat-pane::before\s*\{[^}]*position:\s*absolute;[^}]*z-index:\s*10;[^}]*background:\s*linear-gradient\(/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='desktop'\] \.sidebar-rail::after\s*\{[^}]*position:\s*absolute;[^}]*right:\s*0;[^}]*width:\s*1px;[^}]*background:\s*var\(--desktop-divider\);/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='desktop'\] \.sidebar-head\s*\{[^}]*height:\s*46px;[^}]*min-height:\s*46px;[^}]*justify-content:\s*flex-start;[^}]*padding:\s*6px 12px;/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='desktop'\] \.sidebar-view-switcher\s*\{[^}]*width:\s*100%;[^}]*height:\s*28px;[^}]*flex:\s*0 0 28px;/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='desktop'\] \.chat-header\s*\{[^}]*height:\s*46px;[^}]*min-height:\s*46px;[^}]*padding:\s*6px 14px 6px 18px;[^}]*border-bottom:\s*1px solid var\(--desktop-divider\);/s,
+        );
+        expect(chatPaneSource).toContain(
+            "data-conversation-mode={appState.conversation_state?.selected_mode ?? 'chat'}",
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='desktop'\][\s\S]*?\.chat-pane\[data-conversation-mode='chat'\][\s\S]*?\.message-item:not\(\.from-user\)\s+\.message-body\s*\{[^}]*width:\s*fit-content;[^}]*max-width:\s*76%;[^}]*padding:\s*9px 13px;[^}]*border-radius:\s*14px;[^}]*background:\s*var\(--desktop-user-bubble-bg\);/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='desktop'\][\s\S]*?\.chat-pane\[data-conversation-mode='story'\][\s\S]*?\.message-item:not\(\.from-user\)\s+\.message-body\s*\{[^}]*width:\s*100%;[^}]*padding:\s*0;[^}]*background:\s*transparent;[^}]*color:\s*var\(--desktop-ink\);[^}]*font-size:\s*13px;/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='desktop'\]\[data-view='chat'\] \.composer-field\s*\{[^}]*--composer-control-size:\s*28px;[^}]*--composer-collapsed-size:\s*96px;[^}]*--composer-corner:\s*16px;[^}]*--composer-action-gap:\s*6px;[^}]*--composer-expanded-min:\s*96px;[^}]*border:\s*0;[^}]*border-radius:\s*var\(--composer-corner\);[^}]*background:\s*var\(--desktop-composer-bg\);[^}]*backdrop-filter:\s*blur\(12px\);/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='desktop'\]\[data-view='chat'\] \.send-button\s*\{[^}]*width:\s*var\(--composer-button-size\);[^}]*height:\s*var\(--composer-button-size\);[^}]*border-radius:\s*50%;[^}]*margin-right:\s*0;[^}]*transform:\s*none;/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='desktop'\]\[data-view='chat'\] \.composer-text-region textarea\s*\{[^}]*font-family:\s*-apple-system,[^}]*font-size:\s*14px;/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='desktop'\]\[data-view='chat'\] \.composer\s*\{[^}]*padding-right:\s*var\(--chat-side-inset\);[^}]*padding-bottom:\s*18px;/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='desktop'\] \.message-scroll\s*\{[^}]*padding-bottom:\s*calc\(var\(--composer-overlay-height\) \+ 16px\);[^}]*padding-right:\s*max\([^}]*calc\(var\(--chat-side-inset\) - var\(--message-scrollbar-width, 0px\)\)[^}]*scrollbar-gutter:\s*auto;/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='desktop'\]\[data-view='chat'\] \.chat-live-status\s*\{[^}]*position:\s*absolute;[^}]*bottom:\s*calc\(18px \+ var\(--composer-field-height\) \+ 8px\);[^}]*justify-content:\s*center;/s,
+        );
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='desktop'\] \.chat-pane\.utility-open\s*\{[^}]*padding-right:\s*var\(--chat-utility-reserved-width\);/s,
+        );
+        expect(appCss).toContain('--chat-utility-edge-inset: 12px;');
+        expect(appCss).toContain('--chat-utility-gap: 12px;');
+        expect(chatPaneSource).not.toContain('chat-disclaimer');
+        expect(chatPaneSource).not.toMatch(/<label[^>]*for="chat-draft"/);
+        expect(chatPaneSource).toMatch(/id="chat-draft"\s+aria-label=/);
+        expect(appCss).toMatch(
+            /\.app-shell\[data-layout='desktop'\]\[data-view='chat'\] \.chat-pane\.utility-open > \.composer\s*\{[^}]*padding-left:\s*var\(--chat-utility-side-inset\);[^}]*padding-right:\s*var\(--chat-utility-side-inset\);/s,
         );
         expect(appCss).toMatch(
             /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.chat-pane \.message-scroll\s*\{[^}]*padding-top:\s*calc\([^}]*var\(--mobile-top-action\)[^}]*clamp\(10px,/s,
@@ -905,7 +1251,7 @@ describe('pointer interaction styling', () => {
             /\.detail-action-bar :global\(\.detail-action\)\s*\{[^}]*font-size:\s*var\(--detail-support-type\);/s,
         );
         expect(detailActionBarSource).toMatch(
-            /\.detail-action-bar :global\(\.detail-action--destructive\)\s*\{[^}]*color:\s*#ff0000;/s,
+            /\.detail-action-bar :global\(\.detail-action--destructive\)\s*\{[^}]*color:\s*var\(--status-error-fg\);/s,
         );
         expect(detailActionBarSource).toMatch(
             /\.detail-action-bar :global\(\.detail-action--borderless\)\s*\{[^}]*border:\s*0;/s,
@@ -937,8 +1283,40 @@ describe('pointer interaction styling', () => {
         );
         expect(appCss).toMatch(/\.tab:first-child::before\s*\{[^}]*left:\s*0;/s);
         expect(appCss).toMatch(/\.tab:last-child::before\s*\{[^}]*right:\s*0;/s);
+        expect(appCss).toMatch(/\.tab\[aria-current='page'\]\s*\{[^}]*color:\s*var\(--accent\);/s);
         expect(appCss).toMatch(
             /\.tab\[aria-current='page'\]::before\s*\{[^}]*background:\s*var\(--accent-soft\);/s,
+        );
+        expect(appSource).toContain('<House class="nav-icon-home-fill-layer" />');
+        expect(appSource).toContain('<House class="nav-icon-home-stroke-layer" />');
+        expect(appSource).toContain('class="nav-icon nav-icon-chat"');
+        expect(appSource).toContain('class="nav-icon nav-icon-create"');
+        expect(appSource).toContain('class="nav-icon nav-icon-settings"');
+        expect(appSource).toContain(
+            '<CirclePlus class="nav-icon nav-icon-create" aria-hidden="true" />',
+        );
+        expect(appSource).not.toContain('<svg');
+        expect(appCss).toMatch(/\.nav-icon-home-fill-layer\s*\{[^}]*stroke:\s*none;/s);
+        expect(appCss).toMatch(/\.nav-icon-home-stroke-layer\s*\{[^}]*fill:\s*none;/s);
+        expect(appCss).toMatch(
+            /\.nav-icon-home-fill-layer > path:last-child\s*\{[^}]*fill:\s*currentcolor;/s,
+        );
+        expect(appCss).toMatch(
+            /\.nav-icon-home::after\s*\{[^}]*bottom:\s*12\.5%;[^}]*left:\s*37\.5%;[^}]*background:\s*var\(--accent-soft\);/s,
+        );
+        expect(appCss).toMatch(
+            /\.nav-icon-chat > path:first-child\s*\{[^}]*fill:\s*currentcolor;/s,
+        );
+        expect(appCss).toMatch(
+            /\.nav-icon-chat > path:not\(:first-child\)\s*\{[^}]*stroke:\s*var\(--accent-soft\);/s,
+        );
+        expect(appCss).toMatch(/\.nav-icon-create > circle\s*\{[^}]*fill:\s*currentcolor;/s);
+        expect(appCss).toMatch(
+            /\.nav-icon-create > path\s*\{[^}]*stroke:\s*var\(--accent-soft\);/s,
+        );
+        expect(appCss).toMatch(/\.nav-icon-settings > path\s*\{[^}]*fill:\s*currentcolor;/s);
+        expect(appCss).toMatch(
+            /\.nav-icon-settings > circle\s*\{[^}]*fill:\s*var\(--accent-soft\);/s,
         );
         expect(appCss).toMatch(
             /\.tab:hover:not\(:disabled\)::before\s*\{[^}]*background:\s*var\(--surface-hover\);/s,

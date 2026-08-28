@@ -19,8 +19,10 @@ pub use capability::{
 };
 pub use character::{
     CHARACTER_CONTENT_SCHEMA_VERSION, Character, CharacterContentV1, CharacterKnowledgeBookRef,
-    ExtensionQuarantine, ExtensionQuarantineKind, MAX_UNKNOWN_EXTENSION_ENTRIES,
-    MAX_UNKNOWN_EXTENSION_TOTAL_BYTES, UnknownExtensionEntry, UnknownExtensionIndex,
+    CharacterRuntimeProfile, ExtensionQuarantine, ExtensionQuarantineKind,
+    MAX_UNKNOWN_EXTENSION_ENTRIES, MAX_UNKNOWN_EXTENSION_TOTAL_BYTES, PortableKnowledgeBook,
+    PortableKnowledgeEntry, PortableKnowledgePlacement, PortableRuntimeScript,
+    PortableTextTransform, PortableTransformPhase, UnknownExtensionEntry, UnknownExtensionIndex,
 };
 pub use content::{
     AssetDescriptor, AssetRole, AssetSource, AssetSourceKind, ContentKind, ImportImagePreview,

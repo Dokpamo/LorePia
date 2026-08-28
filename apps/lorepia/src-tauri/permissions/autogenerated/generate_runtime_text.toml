@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-generate-runtime-text"
+description = "Enables the generate_runtime_text command without any pre-configured scope."
+commands.allow = ["generate_runtime_text"]
+
+[[permission]]
+identifier = "deny-generate-runtime-text"
+description = "Denies the generate_runtime_text command without any pre-configured scope."
+commands.deny = ["generate_runtime_text"]

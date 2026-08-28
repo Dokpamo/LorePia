@@ -2,6 +2,7 @@
     import { onMount, untrack } from 'svelte';
 
     import DetailActionBar from '../../components/detail/DetailActionBar.svelte';
+    import ChoiceField from '../../components/ChoiceField.svelte';
 
     import type {
         OrchestrationModuleScope,
@@ -413,23 +414,18 @@
                 </div>
             </div>
             <div class="draft-grid">
-                <label>
-                    <span>적용 범위</span>
-                    <select
-                        value={activation.request.binding.scope}
-                        disabled={busy}
-                        onchange={(event) =>
-                            controller.setActivationScope(
-                                event.currentTarget.value as OrchestrationModuleScope,
-                            )}
-                    >
-                        {#each lifecycleState.scope_targets as target (target.scope)}
-                            <option value={target.scope}>
-                                {scopeLabel(target.scope)} · {target.label}
-                            </option>
-                        {/each}
-                    </select>
-                </label>
+                <ChoiceField
+                    id="module-activation-scope"
+                    label="적용 범위"
+                    value={activation.request.binding.scope}
+                    options={lifecycleState.scope_targets.map((target) => ({
+                        value: target.scope,
+                        label: `${scopeLabel(target.scope)} · ${target.label}`,
+                    }))}
+                    disabled={busy}
+                    onSelect={(value) =>
+                        controller.setActivationScope(value as OrchestrationModuleScope)}
+                />
                 <label>
                     <span>우선순위</span>
                     <input
@@ -443,41 +439,35 @@
                             controller.setActivationPriority(event.currentTarget.valueAsNumber)}
                     />
                 </label>
-                <label>
-                    <span>리비전 해석</span>
-                    <select
-                        value={activation.request.binding.resolution_mode}
-                        disabled={busy}
-                        onchange={(event) =>
-                            controller.setActivationResolutionMode(
-                                event.currentTarget.value as 'active' | 'pinned',
-                            )}
-                    >
-                        <option value="pinned">이 불변 리비전에 고정</option>
-                        <option value="active">활성 리비전 (검토 시 다시 검증)</option>
-                    </select>
-                </label>
+                <ChoiceField
+                    id="module-activation-resolution"
+                    label="리비전 해석"
+                    value={activation.request.binding.resolution_mode}
+                    options={[
+                        { value: 'pinned', label: '이 불변 리비전에 고정' },
+                        { value: 'active', label: '활성 리비전 (검토 시 다시 검증)' },
+                    ]}
+                    disabled={busy}
+                    onSelect={(value) =>
+                        controller.setActivationResolutionMode(value as 'active' | 'pinned')}
+                />
                 {#if activation.candidate.source_kind === 'imported_package'}
-                    <label>
-                        <span>완료된 패키지 승인</span>
-                        <select
-                            aria-label="완료된 패키지 승인"
-                            value={activation.request.binding.package_import_approval_id ?? ''}
-                            disabled={busy}
-                            onchange={(event) =>
-                                controller.selectCompletedPackageApproval(
-                                    event.currentTarget.value || null,
-                                )}
-                        >
-                            <option value="">명시적으로 선택하세요</option>
-                            {#each activation.candidate.completed_package_approvals as approval (approval.approval_id)}
-                                <option value={approval.approval_id}>
-                                    {approval.package_id} · {approval.approval_id} ·
-                                    {shortHash(approval.approval_sha256)}
-                                </option>
-                            {/each}
-                        </select>
-                    </label>
+                    <ChoiceField
+                        id="module-activation-package-approval"
+                        label="완료된 패키지 승인"
+                        value={activation.request.binding.package_import_approval_id ?? ''}
+                        options={[
+                            { value: '', label: '명시적으로 선택하세요' },
+                            ...activation.candidate.completed_package_approvals.map((approval) => ({
+                                value: approval.approval_id,
+                                label: `${approval.package_id} · ${approval.approval_id} · ${shortHash(approval.approval_sha256)}`,
+                            })),
+                        ]}
+                        disabled={busy}
+                        required
+                        onSelect={(value: string) =>
+                            controller.selectCompletedPackageApproval(value === '' ? null : value)}
+                    />
                 {/if}
             </div>
             <p>
@@ -595,32 +585,28 @@
                     {:else}
                         <div class="conflict-list">
                             {#each review.review.conflicts as conflict (contentModuleComponentKey(conflict.component))}
-                                <label>
-                                    <span>
-                                        {componentLabel(conflict.component)} · {conflict.reason}
-                                    </span>
-                                    <select
-                                        aria-label={`${componentLabel(conflict.component)} 충돌 해결`}
-                                        value={activation.conflict_choices[
-                                            contentModuleComponentKey(conflict.component)
-                                        ] ?? ''}
-                                        disabled={busy}
-                                        onchange={(event) =>
-                                            controller.chooseActivationConflict(
-                                                conflict.component,
-                                                event.currentTarget.value,
-                                            )}
-                                    >
-                                        <option value="">선택하세요</option>
-                                        {#each conflict.candidates as candidate (contentModuleCandidateKey(candidate))}
-                                            <option value={contentModuleCandidateKey(candidate)}>
-                                                {candidate.module_id} · {candidate.revision_id} ·
-                                                {shortHash(candidate.component_hash)}
-                                            </option>
-                                        {/each}
-                                        <option value="omit">모든 후보 명시적 제외</option>
-                                    </select>
-                                </label>
+                                <ChoiceField
+                                    id={`module-activation-conflict-${contentModuleComponentKey(conflict.component)}`}
+                                    label={`${componentLabel(conflict.component)} · ${conflict.reason}`}
+                                    value={activation.conflict_choices[
+                                        contentModuleComponentKey(conflict.component)
+                                    ] ?? ''}
+                                    options={[
+                                        { value: '', label: '선택하세요' },
+                                        ...conflict.candidates.map((candidate) => ({
+                                            value: contentModuleCandidateKey(candidate),
+                                            label: `${candidate.module_id} · ${candidate.revision_id} · ${shortHash(candidate.component_hash)}`,
+                                        })),
+                                        { value: 'omit', label: '모든 후보 명시적 제외' },
+                                    ]}
+                                    disabled={busy}
+                                    required
+                                    onSelect={(value: string) =>
+                                        controller.chooseActivationConflict(
+                                            conflict.component,
+                                            value,
+                                        )}
+                                />
                             {/each}
                         </div>
                     {/if}
@@ -885,35 +871,32 @@
                                         {/if}
                                         {#if revision.revision_id !== item.approved_revision_id}
                                             {#if importedTarget}
-                                                <label>
-                                                    <span>대상 리비전 패키지 승인</span>
-                                                    <select
-                                                        aria-label={`${item.module_name} ${revision.revision_id} 대상 리비전 패키지 승인`}
-                                                        value={rollbackPackageApprovalChoices[
+                                                <ChoiceField
+                                                    id={`module-rollback-approval-${approvalKey}`}
+                                                    label="대상 리비전 패키지 승인"
+                                                    value={rollbackPackageApprovalChoices[
+                                                        approvalKey
+                                                    ] ?? ''}
+                                                    options={[
+                                                        {
+                                                            value: '',
+                                                            label: '명시적으로 선택하세요',
+                                                        },
+                                                        ...revision.completed_package_approvals.map(
+                                                            (approval) => ({
+                                                                value: approval.approval_id,
+                                                                label: `${approval.package_id} · ${approval.approval_id} · ${shortHash(approval.approval_sha256)}`,
+                                                            }),
+                                                        ),
+                                                    ]}
+                                                    disabled={busy || !revision.rollback_allowed}
+                                                    required
+                                                    onSelect={(value: string) => {
+                                                        rollbackPackageApprovalChoices[
                                                             approvalKey
-                                                        ] ?? ''}
-                                                        disabled={busy ||
-                                                            !revision.rollback_allowed}
-                                                        onchange={(event) => {
-                                                            rollbackPackageApprovalChoices[
-                                                                approvalKey
-                                                            ] = event.currentTarget.value;
-                                                        }}
-                                                    >
-                                                        <option value=""
-                                                            >명시적으로 선택하세요</option
-                                                        >
-                                                        {#each revision.completed_package_approvals as approval (approval.approval_id)}
-                                                            <option value={approval.approval_id}>
-                                                                {approval.package_id} ·
-                                                                {approval.approval_id} ·
-                                                                {shortHash(
-                                                                    approval.approval_sha256,
-                                                                )}
-                                                            </option>
-                                                        {/each}
-                                                    </select>
-                                                </label>
+                                                        ] = value;
+                                                    }}
+                                                />
                                             {/if}
                                             <button
                                                 type="button"
@@ -1082,30 +1065,25 @@
             {#if rollbackReview.review.activation.conflicts.length > 0}
                 <div class="conflict-list">
                     {#each rollbackReview.review.activation.conflicts as conflict (contentModuleComponentKey(conflict.component))}
-                        <label>
-                            <span>{componentLabel(conflict.component)} · {conflict.reason}</span>
-                            <select
-                                aria-label={`${componentLabel(conflict.component)} 롤백 충돌 해결`}
-                                value={rollback.conflict_choices[
-                                    contentModuleComponentKey(conflict.component)
-                                ] ?? ''}
-                                disabled={busy}
-                                onchange={(event) =>
-                                    controller.chooseRollbackConflict(
-                                        conflict.component,
-                                        event.currentTarget.value,
-                                    )}
-                            >
-                                <option value="">선택하세요</option>
-                                {#each conflict.candidates as candidate (contentModuleCandidateKey(candidate))}
-                                    <option value={contentModuleCandidateKey(candidate)}>
-                                        {candidate.module_id} · {candidate.revision_id} ·
-                                        {shortHash(candidate.component_hash)}
-                                    </option>
-                                {/each}
-                                <option value="omit">모든 후보 명시적 제외</option>
-                            </select>
-                        </label>
+                        <ChoiceField
+                            id={`module-rollback-conflict-${contentModuleComponentKey(conflict.component)}`}
+                            label={`${componentLabel(conflict.component)} · ${conflict.reason}`}
+                            value={rollback.conflict_choices[
+                                contentModuleComponentKey(conflict.component)
+                            ] ?? ''}
+                            options={[
+                                { value: '', label: '선택하세요' },
+                                ...conflict.candidates.map((candidate) => ({
+                                    value: contentModuleCandidateKey(candidate),
+                                    label: `${candidate.module_id} · ${candidate.revision_id} · ${shortHash(candidate.component_hash)}`,
+                                })),
+                                { value: 'omit', label: '모든 후보 명시적 제외' },
+                            ]}
+                            disabled={busy}
+                            required
+                            onSelect={(value: string) =>
+                                controller.chooseRollbackConflict(conflict.component, value)}
+                        />
                     {/each}
                 </div>
             {/if}
@@ -1455,7 +1433,6 @@
         font-weight: 700;
     }
 
-    select,
     input {
         width: 100%;
         min-width: 0;
@@ -1467,7 +1444,7 @@
         -webkit-appearance: none;
         appearance: none;
         background: color-mix(in srgb, var(--surface-sunken) 26%, var(--surface-raised));
-        box-shadow: inset 0 1px 2px rgb(16 18 24 / 3%);
+        box-shadow: var(--control-inset-shadow);
         caret-color: var(--accent);
         color: var(--ink);
         font-size: var(--detail-support-type);
@@ -1477,18 +1454,18 @@
             box-shadow 140ms ease;
     }
 
-    :is(select, input):hover:not(:focus, :disabled) {
+    input:hover:not(:focus, :disabled) {
         border-color: var(--line);
     }
 
-    :is(select, input):focus {
+    input:focus {
         border-color: var(--accent);
         outline: none;
     }
 
-    :is(select, input):disabled {
+    input:disabled {
         cursor: not-allowed;
-        opacity: 0.55;
+        opacity: var(--disabled-opacity);
     }
 
     .revision-list {
@@ -1539,7 +1516,11 @@
 
     .lifecycle-error,
     .blocker-list {
-        color: var(--danger);
+        padding: 10px 12px;
+        border: 1px solid var(--status-error-border);
+        border-radius: var(--radius-sm);
+        color: var(--status-error-fg);
+        background: var(--status-error-bg);
     }
 
     .receipt {

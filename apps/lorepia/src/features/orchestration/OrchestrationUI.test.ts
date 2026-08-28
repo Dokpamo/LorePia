@@ -945,7 +945,7 @@ describe('OrchestrationQuickDrawer', () => {
         expect(drawer).toHaveAttribute('aria-hidden', 'false');
         expect(drawer).toHaveProperty('inert', false);
 
-        const promptChoice = within(drawer).getByRole('button', {
+        const promptChoice = within(drawer).getByRole('combobox', {
             name: /^프롬프트 프리셋:/,
         });
         const promptRect = vi
@@ -953,27 +953,27 @@ describe('OrchestrationQuickDrawer', () => {
             .mockReturnValue(new DOMRect(90, 700, 320, 40));
         const viewportHeight = vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(768);
         await fireEvent.click(promptChoice);
-        expect(within(drawer).getByRole('menu', { name: '프롬프트 프리셋 선택' })).toHaveClass(
+        expect(within(drawer).getByRole('listbox', { name: '프롬프트 프리셋 선택' })).toHaveClass(
             'above',
         );
         await fireEvent.keyDown(window, { key: 'Escape' });
         promptRect.mockRestore();
         viewportHeight.mockRestore();
         expect(screen.getByRole('dialog', { name: '대화 설정' })).toBeInTheDocument();
-        expect(within(drawer).queryByRole('menu')).not.toBeInTheDocument();
+        expect(within(drawer).queryByRole('listbox')).not.toBeInTheDocument();
 
-        const modelChoice = within(drawer).getByRole('button', { name: /^모델:/ });
+        const modelChoice = within(drawer).getByRole('combobox', { name: /^모델:/ });
         expect(modelChoice).toHaveAttribute('aria-expanded', 'false');
         await fireEvent.click(modelChoice);
-        await fireEvent.click(within(drawer).getByRole('menuitemradio', { name: /합성 모델 2/ }));
-        await fireEvent.click(within(drawer).getByRole('button', { name: /^생성 프리셋:/ }));
-        await fireEvent.click(within(drawer).getByRole('menuitemradio', { name: '균형 생성' }));
-        await fireEvent.click(within(drawer).getByLabelText('길게'));
+        await fireEvent.click(within(drawer).getByRole('option', { name: /합성 모델 2/ }));
+        await fireEvent.click(within(drawer).getByRole('combobox', { name: /^생성 프리셋:/ }));
+        await fireEvent.click(within(drawer).getByRole('option', { name: '균형 생성' }));
+        await fireEvent.click(within(drawer).getByRole('radio', { name: '길게' }));
         await fireEvent.input(within(drawer).getByRole('slider', { name: /창의성/ }), {
             target: { value: '73' },
         });
-        await fireEvent.click(within(drawer).getByRole('button', { name: /^추론 강도:/ }));
-        await fireEvent.click(within(drawer).getByRole('menuitemradio', { name: '매우 높음' }));
+        await fireEvent.click(within(drawer).getByRole('combobox', { name: /^추론 강도:/ }));
+        await fireEvent.click(within(drawer).getByRole('option', { name: '매우 높음' }));
         const memoryToggle = within(drawer).getByRole('switch', { name: '장기기억 사용' });
         const knowledgeToggle = within(drawer).getByRole('switch', {
             name: '세계관 지식 사용',
@@ -995,17 +995,78 @@ describe('OrchestrationQuickDrawer', () => {
         expect(within(drawer).queryByRole('button', { name: '고급 설정' })).not.toBeInTheDocument();
         expect(within(drawer).queryByRole('button', { name: '저장' })).not.toBeInTheDocument();
 
-        const dragHandle = within(drawer).getByRole('button', {
-            name: '아래로 끌어 대화 설정 닫기',
+        vi.spyOn(drawer, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 393, 852));
+        await fireEvent.pointerDown(drawer, {
+            button: 0,
+            clientX: 80,
+            clientY: 240,
+            isPrimary: true,
+            pointerId: 1,
         });
-        await fireEvent.pointerDown(dragHandle, { button: 0, clientY: 100, pointerId: 1 });
-        await fireEvent.pointerMove(dragHandle, { button: 0, clientY: 190, pointerId: 1 });
-        await fireEvent.pointerUp(dragHandle, { button: 0, clientY: 190, pointerId: 1 });
+        await fireEvent.pointerMove(drawer, {
+            buttons: 1,
+            clientX: 250,
+            clientY: 244,
+            isPrimary: true,
+            pointerId: 1,
+        });
+        await fireEvent.pointerUp(drawer, {
+            button: 0,
+            clientX: 250,
+            clientY: 244,
+            isPrimary: true,
+            pointerId: 1,
+        });
+        expect(drawer).toHaveClass('utility-settling');
         await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
         expect(rendered.container.querySelector('.quick-drawer')).toBe(persistentDrawer);
         expect(persistentDrawer).toHaveAttribute('aria-hidden', 'true');
         expect(persistentDrawer).toHaveProperty('inert', true);
         expect(save).toHaveBeenCalledOnce();
+    });
+
+    it('separates conversation settings from the persistent desktop tool dock', async () => {
+        const rendered = render(OrchestrationQuickDrawer, {
+            appState: appState(),
+            orchestrationState: orchestrationState(),
+            controller: controller(),
+            desktop: true,
+        });
+
+        const settingsToggle = screen.getByRole('button', { name: '대화 설정' });
+        const panelToggle = screen.getByRole('button', { name: '오른쪽 도구 패널 열기' });
+        expect(settingsToggle.querySelector('.lucide-menu')).not.toBeNull();
+        expect(panelToggle.querySelector('.lucide-panel-right-open')).not.toBeNull();
+        await fireEvent.click(panelToggle);
+
+        const dock = screen.getByRole('complementary', { name: '도구 패널' });
+        expect(dock).toHaveClass('desktop', 'open');
+        expect(dock).toHaveAttribute('data-view', 'tools');
+        expect(dock).toHaveAttribute('aria-hidden', 'false');
+        expect(within(dock).getByRole('button', { name: '대화 설정 열기' })).toBeVisible();
+        expect(
+            within(dock).queryByRole('button', { name: /^프롬프트 프리셋:/ }),
+        ).not.toBeInTheDocument();
+        expect(rendered.container.querySelector('.quick-drawer-backdrop')).not.toBeInTheDocument();
+        expect(
+            screen
+                .getByRole('button', { name: '오른쪽 도구 패널 닫기' })
+                .querySelector('.lucide-panel-right-close'),
+        ).not.toBeNull();
+
+        await fireEvent.click(settingsToggle);
+        const settings = screen.getByRole('complementary', { name: '대화 설정' });
+        expect(settings).toBe(dock);
+        expect(settings).toHaveAttribute('data-view', 'settings');
+        expect(within(settings).getByRole('button', { name: '도구 목록으로' })).toBeVisible();
+        expect(within(settings).getByRole('combobox', { name: /^프롬프트 프리셋:/ })).toBeVisible();
+
+        await fireEvent.click(screen.getByRole('button', { name: '오른쪽 도구 패널 닫기' }));
+        await waitFor(() =>
+            expect(
+                screen.queryByRole('complementary', { name: '대화 설정' }),
+            ).not.toBeInTheDocument(),
+        );
     });
 
     it('filters large block sets and navigates their zone minimap', async () => {
@@ -1034,15 +1095,15 @@ describe('OrchestrationQuickDrawer', () => {
         await fireEvent.click(
             within(minimap).getByRole('button', { name: 'G. 최근 대화 구역으로 이동' }),
         );
-        expect(blockUi.getByRole('combobox', { name: '블록 구역 필터' })).toHaveValue(
+        expect(blockUi.getByRole('combobox', { name: /블록 구역 필터/ })).toHaveAttribute(
+            'data-value',
             'G. 최근 대화',
         );
         expect(blockUi.getByText('최근 대화')).toBeInTheDocument();
         expect(blockUi.queryByText('안전 정책')).not.toBeInTheDocument();
 
-        await fireEvent.change(blockUi.getByRole('combobox', { name: '블록 활성 상태 필터' }), {
-            target: { value: 'enabled' },
-        });
+        await fireEvent.click(blockUi.getByLabelText('블록 활성 상태 필터'));
+        await fireEvent.click(screen.getByRole('option', { name: '사용 중' }));
         expect(blockUi.getByText('표시할 프롬프트 블록이 없습니다.')).toBeInTheDocument();
         await fireEvent.click(blockUi.getByRole('button', { name: '블록 필터 초기화' }));
         await fireEvent.click(
@@ -2079,9 +2140,8 @@ describe('OrchestrationStudio', () => {
         expect(screen.getByText('temperature')).toBeInTheDocument();
         expect(screen.getByText(/developer → system → system · message/)).toBeInTheDocument();
 
-        await fireEvent.change(screen.getByRole('combobox', { name: '표시 필터' }), {
-            target: { value: 'parameters' },
-        });
+        await fireEvent.click(screen.getByLabelText('표시 필터'));
+        await fireEvent.click(screen.getByRole('option', { name: '적용 파라미터' }));
         expect(screen.queryByText('최종 메시지 구조 (2개)')).not.toBeInTheDocument();
         expect(document.body.textContent.toLocaleLowerCase()).not.toContain('authorization');
         expect(document.body.textContent.toLocaleLowerCase()).not.toContain('api_key');

@@ -20,7 +20,8 @@
   "dependencies": {
     "@lucide/svelte": "1.33.0",
     "@tauri-apps/api": "2.11.1",
-    "svelte": "5.56.8"
+    "svelte": "5.56.8",
+    "wasmoon": "1.16.0"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

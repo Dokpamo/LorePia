@@ -4,8 +4,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use lorepia_content::inspect_character_file;
-use lorepia_domain::{ExtensionQuarantineKind, ImportLimits};
+use lorepia_content::{inspect_character_file, prepare_import};
+use lorepia_domain::{ContentKind, ExtensionQuarantineKind, ImportLimits};
 use tempfile::{TempDir, tempdir};
 use zip::{CompressionMethod, ZipWriter, write::SimpleFileOptions};
 
@@ -92,7 +92,7 @@ fn normalizes_all_public_character_fields_and_indexes_unknown_extensions() {
     );
     assert_eq!(
         first.inspection.unsupported_optional_fields,
-        ["creator", "extensions", "z_unknown"]
+        ["creator", "z_unknown"]
     );
 
     let quarantines = content
@@ -183,7 +183,7 @@ fn charx_streams_two_thousand_assets_into_bounded_descriptors() {
 }
 
 #[test]
-fn charx_preserves_code_html_and_url_entries_as_inactive_quarantine() {
+fn charx_omits_nonportable_archive_entries_from_normalized_content() {
     let directory = tempdir().expect("temp directory");
     let path = directory.path().join("quarantine.charx");
     let file = File::create(&path).expect("create archive");
@@ -215,23 +215,245 @@ fn charx_preserves_code_html_and_url_entries_as_inactive_quarantine() {
 
     let plan = inspect_character_file(fixture.path(), ImportLimits::default()).expect("inspection");
     let entries = &plan.character_content.unknown_extensions.entries;
-    assert_eq!(entries.len(), 4);
-    assert!(
-        entries
-            .iter()
-            .all(|entry| entry.source_path.starts_with("/archive/"))
-    );
-    assert!(
-        entries
-            .iter()
-            .filter_map(|entry| entry.quarantine.as_ref())
-            .all(|quarantine| !quarantine.active)
-    );
-    assert!(entries.iter().any(|entry| entry.quarantine.is_none()));
+    assert!(entries.is_empty());
     assert!(
         plan.inspection
             .warnings
             .iter()
-            .any(|warning| warning.code == "quarantined_active_content")
+            .any(|warning| warning.code == "nonportable_content_omitted")
+    );
+    let normalized = serde_json::to_string(&plan).expect("serialize normalized plan");
+    assert!(!normalized.contains("extensions/run.js"));
+    assert!(!normalized.contains("extensions/panel.html"));
+    assert!(!normalized.contains("invalid.example"));
+}
+
+const WRAPPED_ASSET_COUNT: u32 = 1_411;
+const WRAPPED_AUXILIARY_ENTRY_COUNT: u32 = 1_411;
+const PRIVATE_MARKER: &str = "nonportable-private-marker";
+
+fn large_card_fixture(wrap_in_image: bool) -> Fixture {
+    let directory = tempdir().expect("temp directory");
+    let archive_path = directory.path().join("payload.zip");
+    let file = File::create(&archive_path).expect("create archive");
+    let mut archive = ZipWriter::new(file);
+    let options = SimpleFileOptions::default()
+        .compression_method(CompressionMethod::Stored)
+        .unix_permissions(0o644);
+
+    let mut declared_assets = Vec::with_capacity(WRAPPED_ASSET_COUNT as usize);
+    declared_assets.push(serde_json::json!({
+        "type": "icon",
+        "name": "main",
+        "uri": "embeded://assets/icon/main.png"
+    }));
+    for index in 0..WRAPPED_ASSET_COUNT - 1 {
+        declared_assets.push(serde_json::json!({
+            "type": "expression",
+            "name": format!("expression-{index}"),
+            "uri": format!("embeded://assets/expressions/{index:04}.png")
+        }));
+    }
+    let card = serde_json::to_vec(&serde_json::json!({
+        "spec": "chara_card_v3",
+        "data": {
+            "name": "Wrapped synthetic",
+            "description": "Portable card fields",
+            "first_mes": "Hello",
+            "assets": declared_assets,
+            "extensions": {
+                "private_runtime": {
+                    "marker": PRIVATE_MARKER,
+                    "html": "<script>never()</script>"
+                }
+            }
+        }
+    }))
+    .expect("serialize card");
+    archive
+        .start_file("card.json", options)
+        .expect("start card");
+    archive.write_all(&card).expect("write card");
+
+    // Put another image before the declared main icon to prove that the card
+    // descriptor, rather than archive order, selects the representative image.
+    for index in 0..WRAPPED_ASSET_COUNT - 1 {
+        archive
+            .start_file(format!("assets/expressions/{index:04}.png"), options)
+            .expect("start asset");
+        archive
+            .write_all(b"\x89PNG\r\n\x1a\n")
+            .expect("write asset signature");
+        archive
+            .write_all(&index.to_le_bytes())
+            .expect("write unique asset bytes");
+    }
+    archive
+        .start_file("assets/icon/main.png", options)
+        .expect("start main icon");
+    archive
+        .write_all(b"RIFF\x04\0\0\0WEBP")
+        .expect("write main icon");
+
+    for index in 0..WRAPPED_AUXILIARY_ENTRY_COUNT {
+        archive
+            .start_file(format!("metadata/{index:04}.json"), options)
+            .expect("start auxiliary entry");
+        archive
+            .write_all(br#"{"ignored":true}"#)
+            .expect("write auxiliary entry");
+    }
+    archive
+        .start_file("private-runtime.bundle", options)
+        .expect("start private runtime");
+    archive
+        .write_all(PRIVATE_MARKER.as_bytes())
+        .expect("write private runtime");
+    archive.finish().expect("finish archive");
+
+    let final_path = if wrap_in_image {
+        // Native pickers copy unknown/image extensions to an app-owned
+        // `.pending` path, so detection must rely on bytes rather than suffix.
+        let wrapped_path = directory.path().join("selected.pending");
+        let archive_bytes = std::fs::read(&archive_path).expect("read archive");
+        let mut wrapped = b"\xff\xd8\xff\xe0preview\xff\xd9".to_vec();
+        wrapped.extend_from_slice(&archive_bytes);
+        std::fs::write(&wrapped_path, wrapped).expect("write wrapped card");
+        wrapped_path
+    } else {
+        archive_path
+    };
+    Fixture {
+        _directory: directory,
+        path: final_path,
+    }
+}
+
+#[test]
+fn image_wrapped_card_is_detected_and_only_portable_content_is_kept() {
+    let fixture = large_card_fixture(true);
+
+    let plan = inspect_character_file(fixture.path(), ImportLimits::default())
+        .expect("wrapped card inspection");
+
+    assert_eq!(plan.inspection.kind, ContentKind::CharxPackage);
+    assert_eq!(plan.inspection.asset_count, WRAPPED_ASSET_COUNT);
+    assert_eq!(
+        plan.character_content.assets.len(),
+        WRAPPED_ASSET_COUNT as usize
+    );
+    assert_eq!(
+        plan.inspection
+            .representative_image
+            .as_ref()
+            .map(|image| image.logical_asset_id.as_str()),
+        Some("assets/icon/main.png")
+    );
+    assert_eq!(
+        plan.inspection
+            .representative_image
+            .as_ref()
+            .map(|image| image.media_type.as_str()),
+        Some("image/webp")
+    );
+    assert!(plan.character_content.unknown_extensions.is_empty());
+    assert!(
+        plan.inspection
+            .warnings
+            .iter()
+            .any(|warning| warning.code == "embedded_character_card")
+    );
+    assert!(
+        plan.inspection
+            .warnings
+            .iter()
+            .any(|warning| warning.code == "media_type_reclassified")
+    );
+
+    let normalized = serde_json::to_string(&plan).expect("serialize normalized plan");
+    assert!(!normalized.contains(PRIVATE_MARKER));
+    assert!(!normalized.contains("private_runtime"));
+    assert!(!normalized.contains("private-runtime.bundle"));
+    assert!(!normalized.contains("metadata/0000.json"));
+}
+
+#[test]
+fn zip_card_uses_the_same_portable_import_policy() {
+    let fixture = large_card_fixture(false);
+    let plan = inspect_character_file(fixture.path(), ImportLimits::default())
+        .expect("ZIP card inspection");
+
+    assert_eq!(plan.inspection.kind, ContentKind::CharxPackage);
+    assert_eq!(plan.inspection.asset_count, WRAPPED_ASSET_COUNT);
+    assert!(plan.inspection.is_allowed());
+    assert!(plan.character_content.unknown_extensions.is_empty());
+    let normalized = serde_json::to_string(&plan).expect("serialize normalized plan");
+    assert!(!normalized.contains(PRIVATE_MARKER));
+    assert!(!normalized.contains("private-runtime.bundle"));
+}
+
+#[test]
+fn image_wrapped_card_stages_only_verified_media() {
+    let fixture = large_card_fixture(true);
+    let staging = tempdir().expect("asset staging");
+    let prepared = prepare_import(fixture.path(), ImportLimits::default(), staging.path())
+        .expect("wrapped card preparation");
+
+    assert!(prepared.inspection.is_allowed());
+    assert_eq!(prepared.staged_assets.len(), WRAPPED_ASSET_COUNT as usize);
+    assert!(
+        prepared
+            .staged_assets
+            .iter()
+            .all(|asset| asset.signature_valid)
+    );
+    assert!(prepared.staged_assets.iter().any(|asset| {
+        asset.original_path == "assets/icon/main.png" && asset.media_type == "image/webp"
+    }));
+    assert!(
+        prepared
+            .staged_assets
+            .iter()
+            .all(|asset| !asset.original_path.starts_with("metadata/"))
+    );
+}
+
+#[test]
+fn external_full_runtime_card_is_normalized_when_fixture_is_available() {
+    let Ok(path) = std::env::var("LOREPIA_FULL_CARD_FIXTURE") else {
+        return;
+    };
+    let plan = inspect_character_file(Path::new(&path), ImportLimits::default())
+        .expect("full runtime card inspection");
+    let book = plan
+        .character_content
+        .knowledge_book
+        .as_ref()
+        .and_then(|reference| reference.embedded.as_ref())
+        .expect("embedded knowledge book");
+    assert_eq!(book.entries.len(), 76);
+    assert_eq!(book.scan_depth, 5);
+    assert_eq!(book.token_budget, 80_000);
+    assert_eq!(plan.character_content.assets.len(), 1_411);
+    assert_eq!(plan.character_content.runtime.transforms.len(), 34);
+    assert_eq!(plan.character_content.runtime.scripts.len(), 1);
+    assert!(plan.character_content.runtime.scripts[0].source.len() > 90_000);
+    assert!(plan.character_content.runtime.background_markup.len() > 30_000);
+    assert!(plan.character_content.runtime.transform_set_id.is_some());
+    assert_eq!(
+        plan.character_content
+            .runtime
+            .initial_variables
+            .get("seoulzombie.optionmode")
+            .map(String::as_str),
+        Some("0")
+    );
+    assert_eq!(
+        plan.character_content
+            .runtime
+            .initial_variables
+            .get("seoulzombie.assetmax")
+            .map(String::as_str),
+        Some("")
     );
 }

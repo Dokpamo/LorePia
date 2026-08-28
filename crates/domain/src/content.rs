@@ -206,8 +206,8 @@ pub struct ImportLimits {
 impl Default for ImportLimits {
     fn default() -> Self {
         Self {
-            max_source_bytes: 128 * 1024 * 1024,
-            max_entries: 2_048,
+            max_source_bytes: 256 * 1024 * 1024,
+            max_entries: 8_192,
             max_entry_bytes: 64 * 1024 * 1024,
             max_total_uncompressed_bytes: 512 * 1024 * 1024,
             max_compression_ratio: 100,

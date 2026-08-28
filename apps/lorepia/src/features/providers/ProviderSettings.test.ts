@@ -169,11 +169,11 @@ describe('ProviderSettings mobile settings language', () => {
             'aria-pressed',
             'true',
         );
-        expect(within(choices).getByRole('button', { name: '라이트' })).toHaveAttribute(
+        expect(within(choices).getByRole('button', { name: '라이트 모드' })).toHaveAttribute(
             'aria-pressed',
             'false',
         );
-        expect(within(choices).getByRole('button', { name: '다크' })).toHaveAttribute(
+        expect(within(choices).getByRole('button', { name: '다크 모드' })).toHaveAttribute(
             'aria-pressed',
             'false',
         );
@@ -182,7 +182,7 @@ describe('ProviderSettings mobile settings language', () => {
             within(screenRegion).queryByText(/시스템을 고르면 운영체제 설정을 따라갑니다/),
         ).not.toBeInTheDocument();
 
-        await fireEvent.click(within(screenRegion).getByRole('button', { name: '다크' }));
+        await fireEvent.click(within(screenRegion).getByRole('button', { name: '다크 모드' }));
         await rendered.rerender({ appState, controller, section: null, onOpenSection });
 
         expect(screen.getByRole('button', { name: /화면 모드 다크/ })).toBeInTheDocument();
@@ -268,8 +268,8 @@ describe('ProviderSettings mobile settings language', () => {
             name: '취소·오류 시 생성된 일부 응답을 보존',
         });
         expect(toggle).toBeChecked();
-        expect(toggle).toHaveClass('settings-switch');
-        expect(toggle.closest('label')).toHaveClass('settings-control-row');
+        expect(toggle).toHaveClass('toggle-switch');
+        expect(toggle.closest('.settings-control-row')).toBeInTheDocument();
         const scroller = rendered.container.querySelector<HTMLElement>('.settings-detail-scroll');
         if (scroller === null) throw new Error('target settings scroller is missing');
         expect(scroller).toHaveClass('detail-scroll-has-actions');
@@ -668,7 +668,7 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
 }
 
 describe('ProviderSettings retained legacy profiles', () => {
-    it('does not expose retained legacy alias routes as ordinary generation targets', () => {
+    it('does not expose retained legacy alias routes as ordinary generation targets', async () => {
         const appState = legacyProviderState();
         appState.providers.workspace.routes = [
             {
@@ -716,11 +716,12 @@ describe('ProviderSettings retained legacy profiles', () => {
 
         const targetSection = screen.getByRole('region', { name: '기본 생성 대상 편집' });
         const routeSelect = within(targetSection).getByLabelText('모델 라우트');
+        await fireEvent.click(routeSelect);
         expect(
-            within(routeSelect).queryByRole('option', { name: 'Legacy alias model' }),
+            within(targetSection).queryByRole('option', { name: 'Legacy alias model' }),
         ).not.toBeInTheDocument();
         expect(
-            within(routeSelect).getByRole('option', { name: 'Ordinary model' }),
+            within(targetSection).getByRole('option', { name: 'Ordinary model' }),
         ).toBeInTheDocument();
         controller.destroy();
     });
@@ -819,7 +820,10 @@ describe('ProviderSettings retained legacy profiles', () => {
         render(ProviderSettings, { appState, controller, section: 'target' });
 
         const targetSection = screen.getByRole('region', { name: '기본 생성 대상 편집' });
-        expect(within(targetSection).getByLabelText('모델 라우트')).toHaveValue('');
+        expect(within(targetSection).getByLabelText('모델 라우트')).toHaveAttribute(
+            'data-value',
+            '',
+        );
         expect(screen.getByRole('button', { name: '저장' })).toBeDisabled();
         await fireEvent.click(
             screen.getByRole('switch', {

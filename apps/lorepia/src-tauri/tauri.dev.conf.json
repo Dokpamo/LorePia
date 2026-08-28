@@ -17,6 +17,12 @@
         "minimizable": true,
         "closable": true,
         "decorations": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": {
+          "x": 15,
+          "y": 25
+        },
         "transparent": false,
         "fullscreen": false,
         "visible": true,
@@ -26,7 +32,7 @@
     "security": {
       "capabilities": ["main-development"],
       "csp": {
-        "connect-src": "ipc: http://ipc.localhost http://localhost:5173 ws://localhost:5173"
+        "connect-src": "'self' ipc: http://ipc.localhost http://localhost:5173 ws://localhost:5173"
       }
     }
   }

@@ -382,6 +382,7 @@ class LorepiaPlatformPlugin(private val activity: Activity) : Plugin(activity) {
                         "application/json",
                         "application/zip",
                         "application/octet-stream",
+                        "image/*",
                     ),
                 )
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)

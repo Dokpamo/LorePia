@@ -21,6 +21,11 @@ afterEach(() => {
     vi.restoreAllMocks();
 });
 
+async function chooseSetting(label: string, option: string): Promise<void> {
+    await fireEvent.click(screen.getByLabelText(label));
+    await fireEvent.click(await screen.findByRole('option', { name: option }));
+}
+
 const TEMPLATE: ProviderTemplateDto = {
     id: 'template-1',
     display_name: 'Synthetic API',
@@ -132,9 +137,7 @@ describe('direct provider configuration', () => {
         expect(screen.getByRole('toolbar', { name: '프로바이더 연결 작업' })).toBeInTheDocument();
         await fireEvent.click(screen.getByRole('button', { name: '연결 추가하기' }));
         const createForm = screen.getByRole('form', { name: '프로바이더 연결 만들기' });
-        await fireEvent.change(within(createForm).getByLabelText('템플릿'), {
-            target: { value: TEMPLATE.id },
-        });
+        await chooseSetting('템플릿', 'Synthetic API · v2');
         await fireEvent.input(within(createForm).getByLabelText('연결 ID'), {
             target: { value: 'connection-new' },
         });
@@ -192,9 +195,7 @@ describe('direct provider configuration', () => {
         expect(screen.getByRole('toolbar', { name: '생성 프리셋 작업' })).toBeInTheDocument();
         await fireEvent.click(screen.getByRole('button', { name: '프리셋 추가하기' }));
         const form = screen.getByRole('form', { name: '생성 프리셋 만들기 또는 수정' });
-        await fireEvent.change(within(form).getByLabelText('모델 라우트'), {
-            target: { value: ROUTE.id },
-        });
+        await chooseSetting('모델 라우트', 'Synthetic model');
         await fireEvent.input(within(form).getByLabelText('프리셋 ID'), {
             target: { value: 'preset-new' },
         });
@@ -323,11 +324,11 @@ describe('capability overrides', () => {
 
         render(CapabilityPanel, { appState, controller });
         const routeSelect = screen.getByLabelText('모델 라우트');
-        expect(routeSelect).toHaveValue(ROUTE.id);
-        await fireEvent.change(routeSelect, { target: { value: secondRoute.id } });
+        expect(routeSelect).toHaveAttribute('data-value', ROUTE.id);
+        await chooseSetting('모델 라우트', 'Second model');
 
         expect(load).toHaveBeenCalledWith(secondRoute.id);
-        await waitFor(() => expect(routeSelect).toHaveValue(ROUTE.id));
+        await waitFor(() => expect(routeSelect).toHaveAttribute('data-value', ROUTE.id));
         controller.destroy();
     });
 
@@ -368,10 +369,9 @@ describe('capability overrides', () => {
         expect(
             screen.queryByRole('button', { name: 'capability 새로고침' }),
         ).not.toBeInTheDocument();
-        const routeSelect = screen.getByLabelText('모델 라우트');
-        await fireEvent.change(routeSelect, { target: { value: '' } });
+        await chooseSetting('모델 라우트', '선택');
         expect(load).not.toHaveBeenCalled();
-        await fireEvent.change(routeSelect, { target: { value: ROUTE.id } });
+        await chooseSetting('모델 라우트', 'Synthetic model');
         expect(load).toHaveBeenCalledWith(ROUTE.id);
         await fireEvent.click(screen.getByRole('button', { name: /유효 capability 스트리밍/ }));
         expect(screen.getByRole('toolbar', { name: '유효 capability 작업' })).toBeInTheDocument();

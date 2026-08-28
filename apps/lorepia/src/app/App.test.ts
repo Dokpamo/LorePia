@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
     BootstrapDto,
     CharacterDto,
+    ConversationDto,
     LorepiaClient,
     ProviderTemplateDto,
 } from '../lib/ipc/contracts';
@@ -290,13 +291,60 @@ describe('App responsive shell', () => {
         });
         expect(rendered.container.querySelector('.sidebar')).toBeVisible();
         expect(rendered.container.querySelector('.tab-bar')).not.toBeInTheDocument();
-        const logo = rendered.container.querySelector<HTMLElement>(
-            '.sidebar-logo .brand-logo-mark',
-        );
-        expect(logo).toBeInTheDocument();
-        expect(logo?.style.getPropertyValue('--logo-mask')).toContain('lorepia-logo-mark');
+        expect(rendered.container.querySelector('.sidebar-logo')).not.toBeInTheDocument();
         expect(screen.getByRole('heading', { name: 'LorePia' })).toBeVisible();
         expect(screen.queryByText('로컬 Core')).not.toBeInTheDocument();
+    });
+
+    it('switches the desktop sidebar between character and chat lists', async () => {
+        setViewportWidth(1180);
+        const rendered = render(App, {
+            client: appClient(vi.fn().mockResolvedValue(BOOTSTRAP)),
+        });
+
+        await waitFor(() => {
+            expect(rendered.container.querySelector('.app-shell')).toHaveAttribute(
+                'data-layout',
+                'desktop',
+            );
+        });
+
+        const switcher = screen.getByRole('group', { name: '왼쪽 목록 전환' });
+        const characters = within(switcher).getByRole('button', { name: '캐릭터' });
+        const chats = within(switcher).getByRole('button', { name: '채팅' });
+        const thumb = switcher.querySelector('.sidebar-view-thumb');
+        const panelStage = rendered.container.querySelector('.sidebar-view-panels');
+        const characterPanel = rendered.container.querySelector('#sidebar-character-list');
+        const chatPanel = rendered.container.querySelector('#sidebar-chat-list');
+
+        expect(switcher.closest('.sidebar-head')).toBeNull();
+        expect(switcher.parentElement).toHaveClass('navigator');
+        expect(
+            screen.getByRole('button', { name: '생성 설정' }).closest('.sidebar-primary-actions'),
+        ).not.toBeNull();
+        expect(rendered.container.querySelector('.sidebar-foot')?.children).toHaveLength(1);
+        expect(panelStage).toHaveAttribute('data-section', 'characters');
+        expect(switcher).toHaveAttribute('data-section', 'characters');
+        expect(thumb).toHaveAttribute('aria-hidden', 'true');
+        expect(characters).toHaveAttribute('aria-pressed', 'true');
+        expect(chats).toHaveAttribute('aria-pressed', 'false');
+        expect(characterPanel).toHaveAttribute('aria-hidden', 'false');
+        expect((characterPanel as HTMLElement).inert).toBe(false);
+        expect(chatPanel).toHaveAttribute('aria-hidden', 'true');
+        expect((chatPanel as HTMLElement).inert).toBe(true);
+        expect(characterPanel).not.toHaveAttribute('hidden');
+        expect(chatPanel).not.toHaveAttribute('hidden');
+
+        await fireEvent.click(chats);
+
+        expect(panelStage).toHaveAttribute('data-section', 'conversations');
+        expect(switcher).toHaveAttribute('data-section', 'conversations');
+        expect(characters).toHaveAttribute('aria-pressed', 'false');
+        expect(chats).toHaveAttribute('aria-pressed', 'true');
+        expect(characterPanel).toHaveAttribute('aria-hidden', 'true');
+        expect((characterPanel as HTMLElement).inert).toBe(true);
+        expect(chatPanel).toHaveAttribute('aria-hidden', 'false');
+        expect((chatPanel as HTMLElement).inert).toBe(false);
     });
 
     it('switches between phone and desktop structures when the Tauri window resizes', async () => {
@@ -325,6 +373,140 @@ describe('App responsive shell', () => {
         });
         await waitFor(() => {
             expect(rendered.container.querySelector('.sidebar')).not.toBeInTheDocument();
+        });
+        expect(rendered.container.querySelector('.tab-bar')).toBeVisible();
+    });
+
+    it('auto-collapses a cramped desktop utility dock and restores it when space returns', async () => {
+        const resizeTo = setViewportWidth(1440);
+        const character: CharacterDto = {
+            id: 'character-1',
+            name: '라온',
+            description: '',
+            source_hash: 'synthetic',
+            avatar_asset_id: null,
+            created_at: '2026-08-02T00:00:00Z',
+        };
+        const conversation: ConversationDto = {
+            id: 'conversation-1',
+            character_id: character.id,
+            title: '첫 대화',
+            created_at: '2026-08-02T00:00:00Z',
+            updated_at: '2026-08-02T00:00:00Z',
+        };
+        const client = appClient(
+            vi.fn().mockResolvedValue(BOOTSTRAP),
+            undefined,
+            undefined,
+            vi.fn().mockResolvedValue([character]),
+        );
+        client.listConversations = vi.fn().mockResolvedValue([conversation]);
+        client.getCharacterGreetingCatalog = vi.fn().mockResolvedValue({
+            character_id: character.id,
+            character_content_revision_id: null,
+            greetings: [],
+        });
+        client.openExistingConversation = vi.fn().mockResolvedValue(conversation);
+        client.getConversationState = vi.fn().mockResolvedValue({
+            conversation_id: conversation.id,
+            active_branch_id: 'branch-1',
+            selected_mode: 'chat',
+            updated_at: '2026-08-02T00:00:00Z',
+        });
+        client.listBranches = vi.fn().mockResolvedValue([
+            {
+                id: 'branch-1',
+                conversation_id: conversation.id,
+                title: null,
+                fork_message_id: null,
+                head_message_id: null,
+                created_at: '2026-08-02T00:00:00Z',
+                updated_at: '2026-08-02T00:00:00Z',
+            },
+        ]);
+        client.listBranchMessages = vi.fn().mockResolvedValue([]);
+        const rendered = render(App, {
+            client,
+            initialSelection: {
+                characterId: character.id,
+                conversationId: conversation.id,
+            },
+        });
+
+        await waitFor(() => {
+            expect(rendered.container.querySelector('.app-shell')).toHaveAttribute(
+                'data-layout',
+                'desktop',
+            );
+        });
+        await screen.findByRole('heading', { name: conversation.title });
+        await fireEvent.click(screen.getByRole('button', { name: '오른쪽 도구 패널 열기' }));
+        expect(screen.getByRole('complementary', { name: '도구 패널' })).toBeVisible();
+
+        resizeTo(1280);
+        expect(rendered.container.querySelector('.chat-pane')).toHaveClass('utility-open');
+
+        resizeTo(1279);
+        await waitFor(() => {
+            expect(rendered.container.querySelector('.app-shell')).toHaveAttribute(
+                'data-layout',
+                'desktop',
+            );
+            expect(rendered.container.querySelector('.chat-pane')).not.toHaveClass('utility-open');
+            expect(rendered.container.querySelector('#orchestration-quick-drawer')).toHaveAttribute(
+                'aria-hidden',
+                'true',
+            );
+        });
+
+        resizeTo(1280);
+        await waitFor(() => {
+            expect(rendered.container.querySelector('.chat-pane')).toHaveClass('utility-open');
+            expect(rendered.container.querySelector('#orchestration-quick-drawer')).toHaveAttribute(
+                'aria-hidden',
+                'false',
+            );
+        });
+
+        resizeTo(393);
+        await waitFor(() => {
+            expect(rendered.container.querySelector('.app-shell')).toHaveAttribute(
+                'data-layout',
+                'mobile',
+            );
+        });
+        expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
+        expect(screen.queryByRole('dialog', { name: '대화 설정' })).not.toBeInTheDocument();
+    });
+
+    it('restores the mobile tabs after leaving an inactive desktop Studio detail', async () => {
+        const resizeTo = setViewportWidth(1180);
+        const rendered = render(App, {
+            client: appClient(vi.fn().mockResolvedValue(BOOTSTRAP)),
+        });
+
+        await waitFor(() => {
+            expect(rendered.container.querySelector('.app-shell')).toHaveAttribute(
+                'data-layout',
+                'desktop',
+            );
+        });
+        await fireEvent.click(screen.getByRole('button', { name: '생성 설정' }));
+        await fireEvent.click(await screen.findByRole('button', { name: /프롬프트 블록/ }));
+        expect(screen.getByRole('heading', { name: '프롬프트 블록' })).toBeVisible();
+
+        await fireEvent.click(screen.getByRole('button', { name: '설정' }));
+        expect(rendered.container.querySelector('.app-shell')).toHaveAttribute(
+            'data-view',
+            'settings',
+        );
+
+        resizeTo(393);
+        await waitFor(() => {
+            expect(rendered.container.querySelector('.app-shell')).toHaveAttribute(
+                'data-layout',
+                'mobile',
+            );
         });
         expect(rendered.container.querySelector('.tab-bar')).toBeVisible();
     });

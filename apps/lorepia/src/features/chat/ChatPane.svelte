@@ -3,26 +3,33 @@
         ArrowLeft,
         ArrowUp,
         Check,
+        ChevronDown,
         Copy,
         GitBranch,
         Maximize2,
+        MessagesSquare,
         Minimize2,
         Pencil,
         Plus,
         RefreshCw,
+        Share2,
         Sparkles,
         Trash2,
         X,
     } from '@lucide/svelte';
-    import MarkdownText from './MarkdownText.svelte';
+    import PortableMessage from './PortableMessage.svelte';
     import { onMount, tick } from 'svelte';
     import type { KeyboardEventHandler } from 'svelte/elements';
     import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
     import type { LorepiaAppController, LorepiaAppState } from '../../app/app-controller';
     import ChoicePopover from '../../components/ChoicePopover.svelte';
+    import SegmentedControl from '../../components/SegmentedControl.svelte';
+    import ToggleSwitch from '../../components/ToggleSwitch.svelte';
     import type {
+        CharacterRenderProfileDto,
         ConversationMode,
+        GenerationSelectionInput,
         MemoryRecordSourceNavigationDto,
         MessageDto,
     } from '../../lib/ipc/contracts';
@@ -33,8 +40,10 @@
         OrchestrationController,
         OrchestrationState,
     } from '../orchestration/orchestration-controller';
+    import type { PersonaClientApi } from '../personas/persona-contracts';
     import { shouldSubmitComposer } from './composer';
     import GenerationAttemptApprovals from './GenerationAttemptApprovals.svelte';
+    import { PortableCharacterRuntime } from './portable-runtime';
     import {
         INITIAL_INTERACTION_ROOM_STATE,
         InteractionRoomController,
@@ -58,6 +67,9 @@
     interface Props {
         appState: LorepiaAppState;
         controller: LorepiaAppController;
+        desktop?: boolean;
+        titlebarOverlay?: boolean;
+        utilityOpen?: boolean;
         orchestrationState?: OrchestrationState;
         orchestrationController?: OrchestrationController;
         client?: InteractionRoomCapableClient;
@@ -89,6 +101,9 @@
     let {
         appState,
         controller,
+        desktop = false,
+        titlebarOverlay = false,
+        utilityOpen = $bindable(false),
         orchestrationState,
         orchestrationController,
         client,
@@ -112,6 +127,14 @@
     let copyNotice = $state('');
     let handledMessageFocusRequestId = 0;
     let interactionController = $state<InteractionRoomController | null>(null);
+    let characterRenderProfile = $state<CharacterRenderProfileDto | null>(null);
+    let portableRuntime = $state<PortableCharacterRuntime | null>(null);
+    let portableRuntimePhase = $state<'idle' | 'loading' | 'ready' | 'busy' | 'error'>('idle');
+    let portableRuntimeError = $state<string | null>(null);
+    let portableRuntimeRevision = $state(0);
+    let portableRuntimeCreationEpoch = 0;
+    let portableRuntimeLastOutputKey = '';
+    let portableRuntimeActionCount = 0;
     let interactionState = $state<InteractionRoomState>(
         structuredClone(INITIAL_INTERACTION_ROOM_STATE),
     );
@@ -145,11 +168,13 @@
     let observedLiveAssistantMessageId: string | null = null;
     const drafts = new SvelteMap<string, string>();
     let activeMessageActionId = $state<string | null>(null);
+    let hoveredMessageActionId = $state<string | null>(null);
     let stableMessageActionLayoutId: string | null = null;
     let composerExpanded = $state(false);
     let composerCanFullscreen = $state(false);
     let composerOverflows = $state(false);
     let composerFullscreen = $state(false);
+    let utilityView = $state<'tools' | 'settings'>('tools');
     let composerField = $state<HTMLDivElement | null>(null);
     let composerLeadingAction = $state<HTMLButtonElement | null>(null);
     let composerSendButton = $state<HTMLButtonElement | null>(null);
@@ -158,6 +183,149 @@
     let fullscreenSendButton = $state<HTMLButtonElement | null>(null);
     let fullscreenTextRegion = $state<HTMLDivElement | null>(null);
     let fullscreenComposerTextarea = $state<HTMLTextAreaElement | null>(null);
+    let utilityOpenPointer: {
+        pointerId: number;
+        startX: number;
+        startY: number;
+        lastX: number;
+        lastTime: number;
+        velocityX: number;
+        viewportWidth: number;
+    } | null = null;
+    let utilityOpenGesture = $state<'idle' | 'tracking' | 'dragging'>('idle');
+    let suppressUtilityOpenClickUntil = 0;
+
+    const UTILITY_SWIPE_AXIS_LOCK_PX = 8;
+    const UTILITY_SWIPE_COMMIT_MIN_PX = 64;
+    const UTILITY_SWIPE_COMMIT_MAX_PX = 120;
+    const UTILITY_SWIPE_COMMIT_RATIO = 0.22;
+    const UTILITY_SWIPE_FLING_MIN_PX = 32;
+    const UTILITY_SWIPE_FLING_VELOCITY = 0.55;
+
+    function resetUtilityOpenGesture(): void {
+        utilityOpenPointer = null;
+        utilityOpenGesture = 'idle';
+    }
+
+    function utilitySwipeCommitDistance(viewportWidth: number): number {
+        return Math.min(
+            UTILITY_SWIPE_COMMIT_MAX_PX,
+            Math.max(UTILITY_SWIPE_COMMIT_MIN_PX, viewportWidth * UTILITY_SWIPE_COMMIT_RATIO),
+        );
+    }
+
+    function handleUtilityOpenPointerDown(event: PointerEvent): void {
+        if (desktop || utilityOpen || composerFullscreen) return;
+        if (!event.isPrimary || event.button !== 0) return;
+        const target = event.currentTarget as HTMLElement;
+        const boundsWidth = target.getBoundingClientRect().width;
+        const viewportWidth = Math.max(1, boundsWidth || target.clientWidth || window.innerWidth);
+        utilityOpenPointer = {
+            pointerId: Number.isFinite(event.pointerId) ? event.pointerId : 1,
+            startX: event.clientX,
+            startY: event.clientY,
+            lastX: event.clientX,
+            lastTime: event.timeStamp,
+            velocityX: 0,
+            viewportWidth,
+        };
+        utilityOpenGesture = 'tracking';
+    }
+
+    function handleUtilityOpenPointerMove(event: PointerEvent): void {
+        const pointer = utilityOpenPointer;
+        if (event.pointerId !== pointer?.pointerId) return;
+        const deltaX = event.clientX - pointer.startX;
+        const deltaY = event.clientY - pointer.startY;
+        const absoluteX = Math.abs(deltaX);
+        const absoluteY = Math.abs(deltaY);
+        if (utilityOpenGesture === 'tracking') {
+            if (absoluteX < UTILITY_SWIPE_AXIS_LOCK_PX && absoluteY < UTILITY_SWIPE_AXIS_LOCK_PX) {
+                return;
+            }
+            if (deltaX >= 0 || absoluteY >= absoluteX) {
+                resetUtilityOpenGesture();
+                return;
+            }
+            if (absoluteX < absoluteY * 1.2) return;
+            utilityOpenGesture = 'dragging';
+            const target = event.currentTarget as HTMLElement;
+            if (typeof target.setPointerCapture === 'function') {
+                target.setPointerCapture(pointer.pointerId);
+            }
+        }
+        if (utilityOpenGesture !== 'dragging') return;
+        event.preventDefault();
+        const elapsed = event.timeStamp - pointer.lastTime;
+        if (elapsed > 0) {
+            pointer.velocityX = Math.min(0, (event.clientX - pointer.lastX) / elapsed);
+        }
+        pointer.lastX = event.clientX;
+        pointer.lastTime = event.timeStamp;
+    }
+
+    function releaseUtilityOpenPointer(event: PointerEvent): void {
+        const target = event.currentTarget as HTMLElement;
+        if (
+            typeof target.hasPointerCapture === 'function' &&
+            typeof target.releasePointerCapture === 'function' &&
+            target.hasPointerCapture(event.pointerId)
+        ) {
+            target.releasePointerCapture(event.pointerId);
+        }
+    }
+
+    function handleUtilityOpenPointerUp(event: PointerEvent): void {
+        const pointer = utilityOpenPointer;
+        if (event.pointerId !== pointer?.pointerId) return;
+        releaseUtilityOpenPointer(event);
+        if (utilityOpenGesture !== 'dragging') {
+            resetUtilityOpenGesture();
+            return;
+        }
+        event.preventDefault();
+        const distance = Math.max(0, pointer.startX - event.clientX);
+        const commits =
+            distance >= utilitySwipeCommitDistance(pointer.viewportWidth) ||
+            (distance >= UTILITY_SWIPE_FLING_MIN_PX &&
+                -pointer.velocityX >= UTILITY_SWIPE_FLING_VELOCITY);
+        if (commits) {
+            utilityView = 'tools';
+            utilityOpen = true;
+            suppressUtilityOpenClickUntil = Date.now() + 120;
+        }
+        resetUtilityOpenGesture();
+    }
+
+    function handleUtilityOpenPointerCancel(event: PointerEvent): void {
+        if (event.pointerId !== utilityOpenPointer?.pointerId) return;
+        releaseUtilityOpenPointer(event);
+        resetUtilityOpenGesture();
+    }
+
+    function handleUtilityOpenClickCapture(event: MouseEvent): void {
+        if (Date.now() > suppressUtilityOpenClickUntil) return;
+        suppressUtilityOpenClickUntil = 0;
+        event.preventDefault();
+        event.stopPropagation();
+    }
+
+    function syncMessageScrollbarInset(node: HTMLDivElement): { destroy: () => void } {
+        const chatPane = node.closest<HTMLElement>('.chat-pane');
+        const update = (): void => {
+            const scrollbarWidth = Math.max(0, node.offsetWidth - node.clientWidth);
+            chatPane?.style.setProperty('--message-scrollbar-width', `${String(scrollbarWidth)}px`);
+        };
+        window.addEventListener('resize', update);
+        update();
+
+        return {
+            destroy(): void {
+                window.removeEventListener('resize', update);
+                chatPane?.style.removeProperty('--message-scrollbar-width');
+            },
+        };
+    }
 
     function measureComposer(node: HTMLTextAreaElement, draftValue: string) {
         let observer: ResizeObserver | null = null;
@@ -262,6 +430,7 @@
         const handleFocusOut = (event: FocusEvent): void => {
             if (event.relatedTarget instanceof Node && field?.contains(event.relatedTarget)) return;
             if (!composerExpanded) return;
+            if (desktop) return;
             if (node.value.trim().length > 0) return;
             composerExpanded = false;
             scheduleUpdate(false);
@@ -422,9 +591,104 @@
             ? `${appState.selected_conversation.id}:${appState.conversation_state.active_branch_id}`
             : '',
     );
+    const chatStatusText = $derived(
+        appState.chat.reconcile_notice ?? appState.chat.usage_label ?? copyNotice,
+    );
+    const selectedModelLabel = $derived.by(() => {
+        const roomPresetId = orchestrationState?.workspace.room_config.generation_preset_id;
+        const roomPreset = appState.providers.workspace.presets.find(
+            (candidate) => candidate.id === roomPresetId,
+        );
+        const routeId =
+            roomPreset?.model_route_id ??
+            appState.providers.workspace.settings.selected_model_route_id;
+        if (routeId === null) return '';
+        const route = appState.providers.workspace.routes.find(
+            (candidate) => candidate.id === routeId,
+        );
+        return route?.display_name ?? route?.model_id ?? '';
+    });
+    const reasoningEffortLabel = $derived.by(() => {
+        const effort = orchestrationState?.workspace.room_config.reasoning_effort;
+        switch (effort) {
+            case 'minimal':
+                return '최소';
+            case 'low':
+                return '낮음';
+            case 'medium':
+                return '중간';
+            case 'high':
+                return '높음';
+            case 'extra_high':
+                return '매우 높음';
+            case 'maximum':
+                return '최대';
+            default:
+                return '';
+        }
+    });
+    const composerConfigurationLabel = $derived(
+        [selectedModelLabel, reasoningEffortLabel].filter((value) => value !== '').join(' · '),
+    );
     const displayMessageItems = $derived(
         projectDisplayMessages(appState.messages.items, appState.chat.live_assistant_message_id),
     );
+    const portableRuntimeVariables = $derived.by(() => {
+        void portableRuntimeRevision;
+        return portableRuntime?.variables ?? characterRenderProfile?.initial_variables ?? {};
+    });
+    const portableRuntimeBackground = $derived.by(() => {
+        void portableRuntimeRevision;
+        return portableRuntime?.backgroundMarkup ?? characterRenderProfile?.background_markup ?? '';
+    });
+    const portableRuntimeLastCharacterMessage = $derived.by(() => {
+        void portableRuntimeRevision;
+        const message = [...displayMessageItems]
+            .reverse()
+            .find((candidate) => candidate.role === 'assistant');
+        return message === undefined
+            ? ''
+            : (portableRuntime?.effectiveText(message) ?? message.content);
+    });
+    const auxiliaryRuntimeModelOptions = $derived.by(() => {
+        const options: {
+            value: string;
+            label: string;
+            selection: GenerationSelectionInput | null;
+        }[] = [{ value: '', label: '현재 기본 생성 모델', selection: null }];
+        for (const preset of appState.providers.workspace.presets) {
+            const route = appState.providers.workspace.routes.find(
+                (candidate) => candidate.id === preset.model_route_id,
+            );
+            options.push({
+                value: `target:${preset.id}`,
+                label: `${route?.display_name ?? route?.model_id ?? preset.model_route_id} · ${preset.display_name}`,
+                selection: {
+                    kind: 'target',
+                    target: {
+                        model_route_id: preset.model_route_id,
+                        generation_preset_id: preset.id,
+                    },
+                },
+            });
+        }
+        for (const profile of appState.providers.workspace.legacy_profiles) {
+            options.push({
+                value: `legacy:${profile.id}`,
+                label: `${profile.display_name} · ${profile.model}`,
+                selection: { kind: 'legacy_profile', provider_profile_id: profile.id },
+            });
+        }
+        return options;
+    });
+    const selectedAuxiliaryRuntimeModel = $derived.by(() => {
+        void portableRuntimeRevision;
+        const selection = portableRuntime?.auxiliarySelection;
+        if (selection === null || selection === undefined) return '';
+        return selection.kind === 'target'
+            ? `target:${selection.target.generation_preset_id}`
+            : `legacy:${selection.provider_profile_id}`;
+    });
     const messageCollection = $derived(snapshotMessageCollection(displayMessageItems));
     const virtualLayoutSnapshot = $derived({
         layout: virtualLayout,
@@ -545,11 +809,23 @@
             if (activeDraftKey !== '') drafts.set(activeDraftKey, draft);
             draft = drafts.get(nextKey) ?? '';
             activeDraftKey = nextKey;
-            composerExpanded = false;
+            composerExpanded = desktop;
+            utilityView = 'tools';
             composerFullscreen = false;
             composerCanFullscreen = false;
             composerOverflows = false;
         }
+    });
+
+    $effect(() => {
+        if (desktop) {
+            composerExpanded = true;
+            return;
+        }
+        const composerOwnsFocus =
+            typeof document !== 'undefined' &&
+            composerField?.contains(document.activeElement) === true;
+        if (!composerOwnsFocus && draft.trim().length === 0) composerExpanded = false;
     });
 
     $effect(() => {
@@ -692,6 +968,147 @@
         if (request === null || request.request_id === handledMessageFocusRequestId) return;
         handledMessageFocusRequestId = request.request_id;
         void focusMemorySource(request);
+    });
+
+    $effect(() => {
+        const characterId = appState.selected_character?.id ?? null;
+        const activeClient = client;
+        const getCharacterRenderProfile =
+            activeClient?.getCharacterRenderProfile?.bind(activeClient);
+        let cancelled = false;
+        characterRenderProfile = null;
+        if (characterId !== null && getCharacterRenderProfile !== undefined) {
+            void getCharacterRenderProfile(characterId)
+                .then((profile) => {
+                    if (!cancelled && profile.character_id === characterId) {
+                        characterRenderProfile = profile;
+                    }
+                })
+                .catch(() => {
+                    // Legacy characters have no companion render profile and
+                    // continue through the ordinary Markdown renderer.
+                });
+        }
+        return () => {
+            cancelled = true;
+        };
+    });
+
+    $effect(() => {
+        const profile = characterRenderProfile;
+        const activeClient = client;
+        const conversationId = appState.selected_conversation?.id ?? null;
+        const branchId = appState.conversation_state?.active_branch_id ?? null;
+        const character = appState.selected_character;
+        const hasLuaRuntime =
+            profile?.runtime_scripts.some(
+                (script) => script.language.trim().toLowerCase() === 'lua',
+            ) ?? false;
+        const creationEpoch = ++portableRuntimeCreationEpoch;
+        let createdRuntime: PortableCharacterRuntime | null = null;
+        portableRuntime = null;
+        portableRuntimeError = null;
+        portableRuntimeLastOutputKey = '';
+        portableRuntimeActionCount = 0;
+        portableRuntimePhase = hasLuaRuntime ? 'loading' : 'idle';
+        if (
+            !hasLuaRuntime ||
+            profile === null ||
+            activeClient === undefined ||
+            conversationId === null ||
+            branchId === null ||
+            character === null
+        ) {
+            return;
+        }
+        void loadPortableRuntimePersona(activeClient, conversationId)
+            .then((persona) =>
+                PortableCharacterRuntime.create({
+                    profile,
+                    conversationId,
+                    branchId,
+                    characterName: character.name,
+                    characterDescription: character.description,
+                    personaName: persona.name,
+                    personaDescription: persona.description,
+                    client: activeClient,
+                    primarySelection: () => controller.runtimeGenerationSelection(),
+                    onChanged: () => {
+                        portableRuntimeRevision += 1;
+                    },
+                    onNotice: (message, error) => {
+                        copyNotice = message;
+                        if (error) portableRuntimeError = message;
+                    },
+                }),
+            )
+            .then(async (runtime) => {
+                if (creationEpoch !== portableRuntimeCreationEpoch) {
+                    runtime.close();
+                    return;
+                }
+                createdRuntime = runtime;
+                runtime.setMessages(appState.messages.items);
+                await runtime.refreshDisplay();
+                portableRuntimeLastOutputKey = runtimeOutputKey(appState.messages.items);
+                portableRuntime = runtime;
+                portableRuntimePhase = 'ready';
+                portableRuntimeRevision += 1;
+            })
+            .catch((error: unknown) => {
+                if (creationEpoch !== portableRuntimeCreationEpoch) return;
+                portableRuntimePhase = 'error';
+                portableRuntimeError =
+                    error instanceof Error ? error.message : '캐릭터 런타임을 시작하지 못했습니다.';
+            });
+        return () => {
+            createdRuntime?.close();
+            if (creationEpoch === portableRuntimeCreationEpoch) {
+                portableRuntimeCreationEpoch += 1;
+            }
+        };
+    });
+
+    $effect(() => {
+        const runtime = portableRuntime;
+        const messages = appState.messages.items;
+        const activeGenerationId = appState.chat.active_generation_id;
+        const hasStreamingPresentation =
+            appState.chat.live_assistant_message_id !== null ||
+            appState.chat.streaming_text !== '' ||
+            appState.chat.reasoning_text !== '';
+        if (runtime === null) return;
+        runtime.setMessages(messages);
+        const outputKey = runtimeOutputKey(messages);
+        if (
+            outputKey !== '' &&
+            outputKey !== portableRuntimeLastOutputKey &&
+            activeGenerationId === null &&
+            !hasStreamingPresentation
+        ) {
+            portableRuntimeLastOutputKey = outputKey;
+            portableRuntimePhase = 'busy';
+            portableRuntimeError = null;
+            void runtime
+                .afterOutput(messages)
+                .then(() => {
+                    if (runtime !== portableRuntime) return;
+                    portableRuntimePhase = 'ready';
+                    portableRuntimeRevision += 1;
+                })
+                .catch((error: unknown) => {
+                    if (runtime !== portableRuntime) return;
+                    portableRuntimePhase = 'error';
+                    portableRuntimeError =
+                        error instanceof Error
+                            ? error.message
+                            : '응답 후 캐릭터 기능을 실행하지 못했습니다.';
+                });
+            return;
+        }
+        void runtime.refreshDisplay().then(() => {
+            if (runtime === portableRuntime) portableRuntimeRevision += 1;
+        });
     });
 
     $effect(() => {
@@ -1088,23 +1505,199 @@
         activeMessageActionId = messageId;
     }
 
+    function hoverMessageActions(messageId: string): void {
+        if (!desktop) return;
+        hoveredMessageActionId = messageId;
+    }
+
+    function unhoverMessageActions(messageId: string): void {
+        if (hoveredMessageActionId === messageId) hoveredMessageActionId = null;
+    }
+
     async function captureStableAnchorAfterRender(captureEpoch: number): Promise<void> {
         await tick();
         if (captureEpoch !== stableAnchorCaptureEpoch || nearBottom) return;
         stableMeasurementAnchor = captureScrollAnchor();
     }
 
+    function runtimeOutputKey(messages: MessageDto[]): string {
+        const assistant = [...messages]
+            .reverse()
+            .find((message) => message.role === 'assistant' && message.status === 'complete');
+        return assistant === undefined
+            ? ''
+            : `${assistant.id}:${assistant.generation_id ?? 'greeting'}`;
+    }
+
+    async function loadPortableRuntimePersona(
+        activeClient: InteractionRoomCapableClient,
+        conversationId: string,
+    ): Promise<{ name: string; description: string }> {
+        const personaClient = activeClient as InteractionRoomCapableClient &
+            Partial<PersonaClientApi>;
+        if (personaClient.getConversationPersonaSelection === undefined) {
+            return { name: '사용자', description: '' };
+        }
+        try {
+            const selection = await personaClient.getConversationPersonaSelection({
+                conversation_id: conversationId,
+            });
+            const selectedName = selection.selected_persona?.value.name.trim();
+            return {
+                name:
+                    selectedName === undefined
+                        ? '사용자'
+                        : selectedName === ''
+                          ? '사용자'
+                          : selectedName,
+                description: selection.selected_persona?.value.description ?? '',
+            };
+        } catch {
+            return { name: '사용자', description: '' };
+        }
+    }
+
+    function portableMessageText(message: MessageDto): string {
+        void portableRuntimeRevision;
+        return portableRuntime?.displayText(message) ?? message.content;
+    }
+
+    function portableOptionValue(key: string): string {
+        void portableRuntimeRevision;
+        return portableRuntime?.optionValue(key) ?? '';
+    }
+
+    async function setPortableRuntimeOption(key: string, value: string): Promise<void> {
+        const runtime = portableRuntime;
+        if (runtime === null) return;
+        portableRuntimePhase = 'busy';
+        portableRuntimeError = null;
+        try {
+            await runtime.setOption(key, value);
+            portableRuntimePhase = 'ready';
+            portableRuntimeRevision += 1;
+        } catch (error) {
+            portableRuntimePhase = 'error';
+            portableRuntimeError =
+                error instanceof Error ? error.message : '카드 옵션을 변경하지 못했습니다.';
+        }
+    }
+
+    function setAuxiliaryRuntimeModel(value: string): void {
+        const runtime = portableRuntime;
+        if (runtime === null) return;
+        const option = auxiliaryRuntimeModelOptions.find((candidate) => candidate.value === value);
+        runtime.setAuxiliarySelection(option?.selection ?? null);
+        portableRuntimeRevision += 1;
+    }
+
+    async function syncPortableRuntimeVariables(): Promise<void> {
+        const runtime = portableRuntime;
+        if (runtime === null) return;
+        const orchestration = orchestrationController;
+        const state = orchestrationState;
+        const customized = runtime.toggles.some(
+            (toggle) =>
+                runtime.optionValue(toggle.key) !==
+                (characterRenderProfile?.initial_variables[toggle.key] ?? ''),
+        );
+        if (
+            orchestration === undefined ||
+            state?.phase !== 'ready' ||
+            !state.workspace.room_config.supported_fields.variable_overrides
+        ) {
+            if (customized) {
+                throw new Error(
+                    '카드 옵션을 대화 생성 설정에 반영할 준비가 아직 끝나지 않았습니다.',
+                );
+            }
+            return;
+        }
+        const variables = runtime.generationVariables;
+        const runtimeKeys = new Set(Object.keys(variables));
+        const retained = state.workspace.room_config.variable_overrides.values.filter((entry) => {
+            if (entry.variable.scope !== 'character' || entry.variable.namespace !== null) {
+                return true;
+            }
+            const id = entry.variable.id.replace(/^toggle_/, '');
+            return !runtimeKeys.has(id);
+        });
+        const additions = Object.entries(variables)
+            .sort(([left], [right]) => left.localeCompare(right))
+            .map(([id, value]) => ({
+                variable: { scope: 'character' as const, namespace: null, id },
+                value: { type: 'text' as const, value },
+            }));
+        const next = { values: [...retained, ...additions] };
+        if (
+            JSON.stringify(next) === JSON.stringify(state.workspace.room_config.variable_overrides)
+        ) {
+            return;
+        }
+        orchestration.stageRoomConfig({ variable_overrides: next });
+        if (!(await orchestration.saveRoomConfig())) {
+            throw new Error('카드 옵션을 대화 생성 설정에 저장하지 못했습니다.');
+        }
+    }
+
+    async function handlePortableRuntimeAction(action: string): Promise<void> {
+        const runtime = portableRuntime;
+        if (runtime === null) return;
+        if (portableRuntimeActionCount === 0) portableRuntimeError = null;
+        portableRuntimeActionCount += 1;
+        portableRuntimePhase = 'busy';
+        try {
+            await runtime.handleAction(action);
+            portableRuntimeRevision += 1;
+        } catch (error) {
+            portableRuntimeError =
+                error instanceof Error ? error.message : '카드 버튼 동작을 실행하지 못했습니다.';
+        } finally {
+            portableRuntimeActionCount = Math.max(0, portableRuntimeActionCount - 1);
+            if (runtime === portableRuntime && portableRuntimeActionCount === 0) {
+                portableRuntimePhase = portableRuntimeError === null ? 'ready' : 'error';
+            }
+        }
+    }
+
     async function submit(): Promise<void> {
         if (sending || draft.trim().length === 0) return;
         sending = true;
         try {
-            const accepted = await controller.sendMessage(draft);
+            let content = draft;
+            let handledByRuntime = false;
+            const runtime = portableRuntime;
+            const requiresRuntime =
+                characterRenderProfile?.runtime_scripts.some(
+                    (script) => script.language.trim().toLowerCase() === 'lua',
+                ) ?? false;
+            if (requiresRuntime && runtime === null) {
+                copyNotice =
+                    portableRuntimeError ??
+                    '캐릭터 기능을 준비하는 중입니다. 잠시 뒤 다시 보내세요.';
+                return;
+            }
+            if (runtime !== null) {
+                portableRuntimePhase = 'busy';
+                portableRuntimeError = null;
+                await syncPortableRuntimeVariables();
+                const prepared = await runtime.prepareInput(content);
+                content = prepared.text;
+                handledByRuntime = !prepared.shouldSend;
+                portableRuntimePhase = 'ready';
+            }
+            const accepted = handledByRuntime || (await controller.sendMessage(content));
             if (accepted) {
                 draft = '';
                 composerFullscreen = false;
                 if (activeDraftKey !== '') drafts.delete(activeDraftKey);
             }
             attemptApprovalRefreshEpoch += 1;
+        } catch (error) {
+            portableRuntimePhase = 'error';
+            portableRuntimeError =
+                error instanceof Error ? error.message : '캐릭터 기능을 실행하지 못했습니다.';
+            copyNotice = portableRuntimeError;
         } finally {
             sending = false;
         }
@@ -1272,10 +1865,47 @@
 
     async function copyMessage(message: MessageDto): Promise<void> {
         try {
-            await navigator.clipboard.writeText(message.content);
+            await navigator.clipboard.writeText(
+                portableRuntime?.effectiveText(message) ?? message.content,
+            );
             copyNotice = '메시지를 복사했습니다.';
         } catch {
             copyNotice = '메시지를 복사하지 못했습니다.';
+        }
+    }
+
+    function openConversationTools(): void {
+        utilityView = 'tools';
+        utilityOpen = true;
+    }
+
+    function openConversationSettings(): void {
+        utilityView = 'settings';
+        utilityOpen = true;
+    }
+
+    async function shareConversation(): Promise<void> {
+        const title = appState.selected_conversation?.title ?? 'LorePia 대화';
+        const text = displayMessageItems
+            .map((message) => {
+                const speaker =
+                    message.role === 'user'
+                        ? '나'
+                        : (appState.selected_character?.name ?? '캐릭터');
+                return `${speaker}: ${portableRuntime?.effectiveText(message) ?? message.content}`;
+            })
+            .join('\n\n');
+        try {
+            if (typeof navigator.share === 'function') {
+                await navigator.share({ title, text });
+                copyNotice = '대화 공유 창을 열었습니다.';
+            } else {
+                await navigator.clipboard.writeText(`${title}\n\n${text}`);
+                copyNotice = '공유할 대화 내용을 복사했습니다.';
+            }
+        } catch (error) {
+            if (error instanceof DOMException && error.name === 'AbortError') return;
+            copyNotice = '대화를 공유하지 못했습니다.';
         }
     }
 </script>
@@ -1284,25 +1914,91 @@
     <div class="chat-room-controls">
         <div class="chat-room-control-block">
             <span class="chat-room-control-label">대화 모드</span>
-            <div class="segmented chat-room-mode" role="group" aria-label="대화 모드">
-                <button
-                    type="button"
-                    class:active={appState.conversation_state?.selected_mode === 'chat'}
-                    aria-pressed={appState.conversation_state?.selected_mode === 'chat'}
-                    onclick={() => setMode('chat')}
-                >
-                    채팅
-                </button>
-                <button
-                    type="button"
-                    class:active={appState.conversation_state?.selected_mode === 'story'}
-                    aria-pressed={appState.conversation_state?.selected_mode === 'story'}
-                    onclick={() => setMode('story')}
-                >
-                    스토리
-                </button>
-            </div>
+            <SegmentedControl
+                id="conversation-mode"
+                label="대화 모드"
+                value={appState.conversation_state?.selected_mode ?? 'chat'}
+                options={[
+                    { value: 'chat', label: '채팅' },
+                    { value: 'story', label: '스토리' },
+                ]}
+                onSelect={(value: string) => setMode(value as ConversationMode)}
+            />
         </div>
+
+        {#if (characterRenderProfile?.runtime_scripts.length ?? 0) > 0}
+            <section class="portable-runtime-controls" aria-label="캐릭터 기능 설정">
+                <header>
+                    <span class="chat-room-control-label">캐릭터 기능</span>
+                    <small
+                        >{portableRuntimePhase === 'loading'
+                            ? '준비 중'
+                            : portableRuntimePhase === 'busy'
+                              ? '실행 중'
+                              : portableRuntimePhase === 'error'
+                                ? '오류'
+                                : '사용 가능'}</small
+                    >
+                </header>
+
+                {#if portableRuntime !== null}
+                    <div class="portable-runtime-choice">
+                        <ChoicePopover
+                            id="portable-runtime-auxiliary-model"
+                            label="보조 생성 모델"
+                            value={selectedAuxiliaryRuntimeModel}
+                            options={auxiliaryRuntimeModelOptions}
+                            disabled={portableRuntimePhase === 'busy'}
+                            onSelect={setAuxiliaryRuntimeModel}
+                        />
+                    </div>
+
+                    {#each portableRuntime.toggles as toggle (toggle.key)}
+                        {#if toggle.kind === 'select'}
+                            <div class="portable-runtime-choice">
+                                <ChoicePopover
+                                    id={`portable-runtime-${toggle.key}`}
+                                    label={toggle.label}
+                                    value={portableOptionValue(toggle.key)}
+                                    options={toggle.choices.map((choice, index) => ({
+                                        value: String(index),
+                                        label: choice,
+                                    }))}
+                                    disabled={portableRuntimePhase === 'busy'}
+                                    onSelect={(value: string) =>
+                                        void setPortableRuntimeOption(toggle.key, value)}
+                                />
+                            </div>
+                        {:else if toggle.kind === 'toggle'}
+                            <ToggleSwitch
+                                label={toggle.label}
+                                checked={portableOptionValue(toggle.key) === '1'}
+                                disabled={portableRuntimePhase === 'busy'}
+                                showLabel
+                                onChange={(checked: boolean) =>
+                                    void setPortableRuntimeOption(toggle.key, checked ? '1' : '0')}
+                            />
+                        {:else}
+                            <label class="portable-runtime-field">
+                                <span>{toggle.label}</span>
+                                <input
+                                    type="text"
+                                    value={portableOptionValue(toggle.key)}
+                                    disabled={portableRuntimePhase === 'busy'}
+                                    onchange={(event) =>
+                                        void setPortableRuntimeOption(
+                                            toggle.key,
+                                            event.currentTarget.value,
+                                        )}
+                                />
+                            </label>
+                        {/if}
+                    {/each}
+                {:else if portableRuntimeError !== null}
+                    <p class="portable-runtime-error" role="alert">{portableRuntimeError}</p>
+                {/if}
+            </section>
+        {/if}
 
         {#if appState.branches.length > 1}
             <div class="branch-picker chat-room-branch">
@@ -1346,11 +2042,28 @@
     </div>
 {/snippet}
 
-<section class="pane chat-pane" aria-labelledby="chat-title">
+<section
+    class="pane chat-pane"
+    class:desktop-composer={desktop}
+    class:utility-open={utilityOpen}
+    data-conversation-mode={appState.conversation_state?.selected_mode ?? 'chat'}
+    data-utility-open-gesture={utilityOpenGesture}
+    aria-labelledby="chat-title"
+    onpointerdown={handleUtilityOpenPointerDown}
+    onpointermove={handleUtilityOpenPointerMove}
+    onpointerup={handleUtilityOpenPointerUp}
+    onpointercancel={handleUtilityOpenPointerCancel}
+    onclickcapture={handleUtilityOpenClickCapture}
+>
     {#if appState.selected_conversation === null}
-        <header class="mobile-top-frame chat-header empty-chat-header">
-            <div class="chat-identity">
-                <h2 id="chat-title">채팅</h2>
+        <header
+            class="mobile-top-frame chat-header empty-chat-header"
+            data-tauri-drag-region={titlebarOverlay ? '' : undefined}
+        >
+            <div class="chat-identity" data-tauri-drag-region={titlebarOverlay ? '' : undefined}>
+                <h2 id="chat-title" data-tauri-drag-region={titlebarOverlay ? '' : undefined}>
+                    채팅
+                </h2>
             </div>
         </header>
         <div class="chat-placeholder state-panel empty">
@@ -1361,7 +2074,10 @@
             <button class="primary" type="button" onclick={onOpenHome}> 대화 목록 열기 </button>
         </div>
     {:else}
-        <header class="mobile-top-frame mobile-top-frame-leading chat-header">
+        <header
+            class="mobile-top-frame mobile-top-frame-leading chat-header"
+            data-tauri-drag-region={titlebarOverlay ? '' : undefined}
+        >
             <button
                 class="icon-button ghost mobile-top-action mobile-top-action-left back-button"
                 type="button"
@@ -1370,23 +2086,62 @@
             >
                 <ArrowLeft class="chat-back-icon" aria-hidden="true" />
             </button>
-            <div class="chat-identity">
-                <span class="avatar" aria-hidden="true"
-                    >{(appState.selected_character?.name ?? '?').slice(0, 1)}</span
-                >
-                <div>
-                    <h2 id="chat-title">{appState.selected_conversation.title}</h2>
-                    <p class="chat-subtitle">
-                        {appState.selected_character?.name ?? 'Character'}
-                    </p>
-                </div>
+            <div class="chat-identity" data-tauri-drag-region={titlebarOverlay ? '' : undefined}>
+                {#if desktop}
+                    <button
+                        class="chat-title-context"
+                        type="button"
+                        aria-label={`${appState.selected_conversation.title} 대화 도구 열기`}
+                        aria-expanded={utilityOpen && utilityView === 'tools'}
+                        onclick={openConversationTools}
+                    >
+                        <MessagesSquare aria-hidden="true" />
+                        <h2 id="chat-title">{appState.selected_conversation.title}</h2>
+                        <ChevronDown aria-hidden="true" />
+                    </button>
+                {:else}
+                    <span
+                        class="avatar"
+                        aria-hidden="true"
+                        data-tauri-drag-region={titlebarOverlay ? '' : undefined}
+                        >{(appState.selected_character?.name ?? '?').slice(0, 1)}</span
+                    >
+                    <div data-tauri-drag-region={titlebarOverlay ? '' : undefined}>
+                        <h2
+                            id="chat-title"
+                            data-tauri-drag-region={titlebarOverlay ? '' : undefined}
+                        >
+                            {appState.selected_conversation.title}
+                        </h2>
+                        <p
+                            class="chat-subtitle"
+                            data-tauri-drag-region={titlebarOverlay ? '' : undefined}
+                        >
+                            {appState.selected_character?.name ?? 'Character'}
+                        </p>
+                    </div>
+                {/if}
             </div>
             <div class="chat-controls">
+                {#if desktop}
+                    <button
+                        class="chat-header-action"
+                        type="button"
+                        aria-label="대화 공유"
+                        title="대화 공유"
+                        onclick={() => void shareConversation()}
+                    >
+                        <Share2 aria-hidden="true" />
+                    </button>
+                {/if}
                 {#if orchestrationState && orchestrationController}
                     <OrchestrationQuickDrawer
                         {appState}
                         {orchestrationState}
                         controller={orchestrationController}
+                        {desktop}
+                        bind:open={utilityOpen}
+                        bind:view={utilityView}
                         onOpen={() => {
                             if (appState.providers.phase === 'idle') {
                                 void controller.loadProviders();
@@ -1397,6 +2152,21 @@
                 {/if}
             </div>
         </header>
+
+        {#if client !== undefined && characterRenderProfile !== null && portableRuntimeBackground !== ''}
+            <div class="portable-runtime-background" aria-hidden="true">
+                <PortableMessage
+                    text={portableRuntimeBackground}
+                    {client}
+                    profile={characterRenderProfile}
+                    variables={portableRuntimeVariables}
+                    backgroundMarkup={portableRuntimeBackground}
+                    lastCharacterMessage={portableRuntimeLastCharacterMessage}
+                    messageIndex={messageCollection.items.length}
+                    lastMessageId={Math.max(0, messageCollection.items.length - 1)}
+                />
+            </div>
+        {/if}
 
         {#if client !== undefined && interactionController !== null && interactionState.phase !== 'unavailable'}
             {#if interactionState.phase === 'loading'}
@@ -1608,6 +2378,7 @@
 
         <div
             class="message-scroll"
+            use:syncMessageScrollbarInset
             role="region"
             aria-label="메시지 기록"
             tabindex="-1"
@@ -1663,6 +2434,7 @@
                             class:from-user={message.role === 'user'}
                             class:has-date-divider={showsDay}
                             class:actions-open={activeMessageActionId === message.id}
+                            class:actions-hovered={hoveredMessageActionId === message.id}
                             class:memory-source-boundary={messageFocusRequest !== null &&
                                 (message.id === messageFocusRequest.start_message_id ||
                                     message.id === messageFocusRequest.end_message_id)}
@@ -1676,6 +2448,8 @@
                             tabindex="-1"
                             aria-setsize={messageCollection.items.length}
                             aria-posinset={virtualWindow.start + localIndex + 1}
+                            onmouseenter={() => hoverMessageActions(message.id)}
+                            onmouseleave={() => unhoverMessageActions(message.id)}
                         >
                             <span class="message-avatar" aria-hidden="true"
                                 >{message.role === 'user'
@@ -1738,7 +2512,19 @@
                                     tabindex="0"
                                     onfocus={() => activateMessageActions(message.id)}
                                 >
-                                    <MarkdownText text={message.content} />
+                                    <PortableMessage
+                                        text={portableMessageText(message)}
+                                        {client}
+                                        profile={characterRenderProfile}
+                                        enabled={message.role === 'assistant'}
+                                        variables={portableRuntimeVariables}
+                                        backgroundMarkup={portableRuntimeBackground}
+                                        lastCharacterMessage={portableRuntimeLastCharacterMessage}
+                                        messageIndex={globalIndex}
+                                        lastMessageId={messageCollection.items.length - 1}
+                                        onAction={(action: string) =>
+                                            void handlePortableRuntimeAction(action)}
+                                    />
                                     {#if message.status !== 'complete'}
                                         <span class="message-status">{message.status}</span>
                                     {/if}
@@ -1846,7 +2632,16 @@
                                 {/if}
                                 {#if appState.chat.streaming_text !== ''}
                                     <section class="stream-answer" aria-label="생성 중인 답변">
-                                        <MarkdownText text={appState.chat.streaming_text} />
+                                        <PortableMessage
+                                            text={appState.chat.streaming_text}
+                                            {client}
+                                            profile={characterRenderProfile}
+                                            variables={portableRuntimeVariables}
+                                            backgroundMarkup={portableRuntimeBackground}
+                                            lastCharacterMessage={portableRuntimeLastCharacterMessage}
+                                            messageIndex={messageCollection.items.length}
+                                            lastMessageId={messageCollection.items.length}
+                                        />
                                     </section>
                                 {/if}
                                 <span class="stream-caret" aria-hidden="true"></span>
@@ -1859,6 +2654,11 @@
 
         {#if appState.chat.error !== null}
             <div class="state-panel error" role="alert">{appState.chat.error}</div>
+        {/if}
+        {#if portableRuntimeError !== null}
+            <div class="state-panel error portable-runtime-status" role="alert">
+                {portableRuntimeError}
+            </div>
         {/if}
 
         {#if client !== undefined}
@@ -1886,9 +2686,11 @@
             {liveResponseAnnouncement}
         </div>
 
-        <div class="chat-live-status" aria-live="polite" aria-atomic="true">
-            {appState.chat.reconcile_notice ?? appState.chat.usage_label ?? copyNotice}
-        </div>
+        {#if chatStatusText !== ''}
+            <div class="chat-live-status" aria-live="polite" aria-atomic="true">
+                {chatStatusText}
+            </div>
+        {/if}
 
         <form
             class="composer"
@@ -1900,7 +2702,6 @@
                 void submit();
             }}
         >
-            <label class="sr-only" for="chat-draft">메시지</label>
             <div
                 class="composer-field"
                 bind:this={composerField}
@@ -1912,11 +2713,13 @@
                 <div class="composer-text-region">
                     <textarea
                         id="chat-draft"
+                        aria-label="메시지"
                         bind:this={composerTextarea}
                         bind:value={draft}
                         use:measureComposer={draft}
                         rows="1"
                         maxlength="131072"
+                        placeholder={desktop ? '무엇이든 요청하세요' : undefined}
                         disabled={appState.chat.phase === 'loading' ||
                             appState.chat.active_generation_id !== null ||
                             appState.conversation_state === null}
@@ -1935,6 +2738,18 @@
                         <Plus aria-hidden="true" />
                     </button>
                     <span class="composer-action-spacer" aria-hidden="true"></span>
+                    {#if desktop && composerConfigurationLabel !== ''}
+                        <button
+                            class="composer-desktop-model"
+                            type="button"
+                            title={composerConfigurationLabel}
+                            aria-label={`생성 설정: ${composerConfigurationLabel}`}
+                            onclick={openConversationSettings}
+                        >
+                            <span>{composerConfigurationLabel}</span>
+                            <ChevronDown aria-hidden="true" />
+                        </button>
+                    {/if}
                     <button
                         class="composer-expand-action"
                         class:available={composerCanFullscreen}
@@ -1956,12 +2771,12 @@
                         >
                             중지
                         </button>
-                    {:else if draft.trim().length > 0}
+                    {:else if draft.trim().length > 0 || desktop}
                         <button
                             class="primary send-button composer-trailing-action"
                             bind:this={composerSendButton}
                             type="submit"
-                            disabled={sending}
+                            disabled={sending || draft.trim().length === 0}
                             aria-label="메시지 보내기"
                         >
                             <ArrowUp class="chat-send-icon" aria-hidden="true" />
@@ -2038,22 +2853,6 @@
         font-weight: 650;
     }
 
-    .chat-room-mode {
-        display: grid;
-        width: 100%;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .chat-room-mode button {
-        width: 100%;
-    }
-
-    .chat-room-mode button.active {
-        background: var(--ink);
-        box-shadow: none;
-        color: var(--bg);
-    }
-
     .chat-room-branch {
         min-height: 42px;
         justify-content: space-between;
@@ -2062,6 +2861,73 @@
 
     .chat-room-branch :global(.choice-popover) {
         width: min(68%, 240px);
+    }
+
+    .portable-runtime-controls {
+        display: grid;
+        gap: 10px;
+        padding: 10px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-md);
+        background: var(--surface-sunken);
+    }
+
+    .portable-runtime-controls > header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+    }
+
+    .portable-runtime-controls > header small,
+    .portable-runtime-field > span {
+        color: var(--ink-muted);
+        font-size: 0.72rem;
+    }
+
+    .portable-runtime-choice {
+        min-width: 0;
+        border-radius: var(--radius-md);
+        background: var(--surface-sunken);
+    }
+
+    .portable-runtime-field {
+        display: grid;
+        gap: 5px;
+    }
+
+    .portable-runtime-field input {
+        width: 100%;
+        min-height: 36px;
+        padding: 6px 9px;
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        background: var(--surface);
+        color: var(--ink);
+        font: inherit;
+    }
+
+    .portable-runtime-error {
+        padding: 8px 10px;
+        border: 1px solid var(--status-error-border);
+        border-radius: var(--radius-sm);
+        margin: 0;
+        color: var(--status-error-fg);
+        background: var(--status-error-bg);
+        font-size: 0.75rem;
+    }
+
+    .portable-runtime-background {
+        position: absolute;
+        z-index: 20;
+        inset: 0;
+        overflow: visible;
+        pointer-events: none;
+    }
+
+    .portable-runtime-status {
+        position: relative;
+        z-index: 21;
     }
 
     .chat-room-new-operation {
@@ -2118,7 +2984,11 @@
     }
 
     .interaction-status.error {
-        color: var(--danger);
+        padding: 8px 10px;
+        border: 1px solid var(--status-error-border);
+        border-radius: var(--radius-sm);
+        color: var(--status-error-fg);
+        background: var(--status-error-bg);
     }
 
     .interaction-surface {

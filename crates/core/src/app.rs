@@ -117,6 +117,8 @@ pub enum GenerationOperationContext<'a> {
 }
 const MAX_TASK_PROMPT_BYTES: usize = 512 * 1024;
 const MAX_TASK_PROMPT_CHARS: usize = 128 * 1024;
+const MAX_RUNTIME_PROMPT_MESSAGES: usize = 128;
+const RUNTIME_GENERATION_TIMEOUT_MS: u64 = 180_000;
 const MAX_TASK_OUTPUT_BYTES: usize = 2 * 1024 * 1024;
 const MAX_TASK_OUTPUT_CHARS: usize = 512 * 1024;
 const MAX_PROVIDER_ID_BYTES: usize = 256;
@@ -723,6 +725,7 @@ struct GenerationTransformContext {
     variables: VariableMap,
     supported_capabilities: Vec<CapabilityKey>,
     approved_import_source_ids: std::collections::BTreeSet<String>,
+    display_context: Option<lorepia_domain::PromptResolutionContext>,
 }
 
 impl From<crate::orchestration::PreparedGenerationPlan> for GenerationTransformContext {
@@ -732,6 +735,7 @@ impl From<crate::orchestration::PreparedGenerationPlan> for GenerationTransformC
             variables: prepared.variables,
             supported_capabilities: prepared.supported_capabilities,
             approved_import_source_ids: prepared.approved_import_source_ids,
+            display_context: Some(prepared.display_context),
         }
     }
 }
@@ -743,6 +747,18 @@ pub(crate) struct ResolvedGenerationTarget {
     pub(crate) connection_id: ProviderConnectionId,
     pub(crate) preserve_opaque_reasoning_state: bool,
     pub(crate) prompt_wire_contract: PromptRouteWireContract,
+}
+
+/// One provider-neutral message supplied by an imported character runtime.
+///
+/// Runtime scripts can ask the native host for a secondary generation, but
+/// they cannot supply provider request JSON, credentials, URLs, or headers.
+/// Core rebuilds the request through the same provider adapters used by the
+/// ordinary chat path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimePromptMessage {
+    pub role: MessageRole,
+    pub content: String,
 }
 
 /// Bounded, Core-owned input for an auxiliary provider task.
@@ -1627,11 +1643,8 @@ impl Core {
             &pending.inspection.description,
             &pending.inspection.source_sha256,
         );
-        character.avatar_asset_hash = pending
-            .staged_assets
-            .iter()
-            .find(|asset| asset.signature_valid && asset.media_type.starts_with("image/"))
-            .map(|asset| asset.sha256.clone());
+        character.avatar_asset_hash =
+            reviewed_avatar_asset_hash(&pending.inspection, &pending.staged_assets);
         let staged_assets = pending
             .staged_assets
             .iter()
@@ -6023,6 +6036,7 @@ impl Core {
             variables: prepared.variables,
             supported_capabilities: prepared.supported_capabilities,
             approved_import_source_ids: prepared.approved_import_source_ids,
+            display_context: Some(prepared.display_context),
         };
         self.start_generation_task(
             launch,
@@ -7398,6 +7412,82 @@ impl Core {
         .await
     }
 
+    /// Runs a one-shot generation requested by an imported character runtime
+    /// against an exact catalog target.
+    ///
+    /// The runtime supplies only role/content messages. Provider selection,
+    /// credential ownership, request compilation, output bounds, and timeout
+    /// enforcement stay inside the native Core boundary.
+    pub async fn generate_runtime_text_with_connection_credential(
+        &self,
+        target: &GenerationTarget,
+        messages: &[RuntimePromptMessage],
+        credential: ConnectionBoundCredential,
+    ) -> CoreResult<String> {
+        preflight_generation_target_connection_credential(self, target, &credential)?;
+        let resolved = resolve_generation_target(self, target)?;
+        let request = runtime_generation_request(
+            resolved.model.clone(),
+            validate_runtime_prompt_messages(messages)?,
+            resolved.prompt_wire_contract.configured_max_output_tokens,
+            Some(GenerationProviderProvenance {
+                api_family: resolved.api_family,
+                model_route_id: target.model_route_id.clone(),
+                generation_preset_id: target.generation_preset_id.clone(),
+            }),
+        );
+        resolved.provider.snapshot_request(&request)?;
+        let (_cancel_sender, cancelled) = watch::channel(false);
+        runtime_generation_result(
+            dispatch_auxiliary_task_provider(
+                resolved.provider,
+                request,
+                credential,
+                RUNTIME_GENERATION_TIMEOUT_MS,
+                cancelled,
+            )
+            .await,
+        )
+    }
+
+    /// Runs a one-shot imported-runtime generation through a legacy provider
+    /// profile retained for workspace migration compatibility.
+    pub async fn generate_runtime_text_with_provider_profile(
+        &self,
+        provider_profile_id: &str,
+        messages: &[RuntimePromptMessage],
+        credential: Option<String>,
+    ) -> CoreResult<String> {
+        let profile = self
+            .inner
+            .storage
+            .get_provider_profile(provider_profile_id)?;
+        let timeout = Duration::from_secs(u64::from(profile.timeout_seconds.max(1)));
+        let provider: Arc<dyn Provider> =
+            Arc::new(OpenAiCompatibleProvider::new(&profile.base_url, timeout)?);
+        let request = runtime_generation_request(
+            profile.model,
+            validate_runtime_prompt_messages(messages)?,
+            Some(CORE_MAX_OUTPUT_TOKENS),
+            None,
+        );
+        provider.snapshot_request(&request)?;
+        let (_cancel_sender, cancelled) = watch::channel(false);
+        runtime_generation_result(
+            dispatch_auxiliary_task_provider(
+                provider,
+                request,
+                ConnectionBoundCredential::new(
+                    ProviderConnectionId::from(provider_profile_id.to_owned()),
+                    credential,
+                ),
+                u64::from(profile.timeout_seconds.max(1)).saturating_mul(1_000),
+                cancelled,
+            )
+            .await,
+        )
+    }
+
     fn validate_task_profile_dispatch(
         &self,
         task_profile: &StoredRevision<TaskProfile>,
@@ -7682,6 +7772,86 @@ fn auxiliary_task_generation_request(
         }),
         preserve_opaque_reasoning_state: false,
         opaque_reasoning_context: Vec::new(),
+    }
+}
+
+fn validate_runtime_prompt_messages(
+    messages: &[RuntimePromptMessage],
+) -> CoreResult<Vec<RuntimePromptMessage>> {
+    if messages.is_empty() || messages.len() > MAX_RUNTIME_PROMPT_MESSAGES {
+        return Err(CoreError::invalid(
+            "runtime generation prompt must contain between 1 and 128 messages",
+        ));
+    }
+    let mut total_bytes = 0_usize;
+    let mut total_chars = 0_usize;
+    for message in messages {
+        if message.content.trim().is_empty() || message.content.contains('\0') {
+            return Err(CoreError::invalid(
+                "runtime generation messages must contain non-empty text",
+            ));
+        }
+        total_bytes = total_bytes
+            .checked_add(message.content.len())
+            .ok_or_else(|| CoreError::invalid("runtime generation prompt size overflowed"))?;
+        total_chars = total_chars
+            .checked_add(message.content.chars().count())
+            .ok_or_else(|| CoreError::invalid("runtime generation prompt size overflowed"))?;
+    }
+    if total_bytes > MAX_TASK_PROMPT_BYTES || total_chars > MAX_TASK_PROMPT_CHARS {
+        return Err(CoreError::invalid(
+            "runtime generation prompt exceeds its size limit",
+        ));
+    }
+    Ok(messages.to_vec())
+}
+
+fn runtime_generation_request(
+    model: String,
+    messages: Vec<RuntimePromptMessage>,
+    max_output_tokens: Option<u32>,
+    provider_provenance: Option<GenerationProviderProvenance>,
+) -> GenerationRequest {
+    let conversation_id = ConversationId::new();
+    let created_at = Utc::now();
+    let mut parent_id = None;
+    let messages = messages
+        .into_iter()
+        .map(|runtime_message| {
+            let id = MessageId::new();
+            let message = Message {
+                id: id.clone(),
+                conversation_id: conversation_id.clone(),
+                parent_id: parent_id.clone(),
+                role: runtime_message.role,
+                content: runtime_message.content,
+                status: MessageStatus::Complete,
+                generation_id: None,
+                created_at,
+            };
+            parent_id = Some(id);
+            message
+        })
+        .collect();
+    GenerationRequest {
+        generation_id: GenerationId::new(),
+        conversation_id,
+        model,
+        messages,
+        resolved_prompt_plan: None,
+        provider_execution_plan_hash: None,
+        temperature: None,
+        max_output_tokens,
+        provider_provenance,
+        preserve_opaque_reasoning_state: false,
+        opaque_reasoning_context: Vec::new(),
+    }
+}
+
+fn runtime_generation_result(outcome: TaskExecutionOutcome) -> CoreResult<String> {
+    match outcome {
+        TaskExecutionOutcome::Completed { canonical_text, .. } => Ok(canonical_text),
+        TaskExecutionOutcome::Failed { error, .. } => Err(error),
     }
 }
 
@@ -8420,7 +8590,22 @@ fn apply_generation_output_transforms(
         MessageTransformStage::DisplayOnly,
     );
     let canonical = canonical_phase.output;
-    let display = display_phase.output;
+    let display = context.display_context.as_ref().map_or_else(
+        || display_phase.output.clone(),
+        |base_context| {
+            let mut display_context = base_context.clone();
+            display_context
+                .messages
+                .push(lorepia_domain::PromptConversationMessage {
+                    id: MessageId("portable-display-output".to_owned()),
+                    branch_id: display_context.branch_id.clone(),
+                    role: lorepia_domain::PromptMessageRole::Assistant,
+                    content: canonical.clone(),
+                    turn_index: u32::try_from(display_context.messages.len()).unwrap_or(u32::MAX),
+                });
+            lorepia_orchestration::render_portable_text(&display_phase.output, &display_context)
+        },
+    );
     match &mut result {
         Ok(outcome) => outcome.text.clone_from(&canonical),
         Err(failure) => failure.partial_text.clone_from(&canonical),
@@ -10572,6 +10757,26 @@ fn remove_snapshot(snapshot: &Path, staging_dir: &Path) -> CoreResult<()> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(import_io_error(error)),
     }
+}
+
+fn reviewed_avatar_asset_hash(
+    inspection: &ImportInspection,
+    staged_assets: &[StagedAsset],
+) -> Option<String> {
+    let reviewed_representative = inspection.representative_image.as_ref().and_then(|image| {
+        staged_assets.iter().find(|asset| {
+            asset.original_path == image.logical_asset_id
+                && asset.signature_valid
+                && asset.media_type.starts_with("image/")
+        })
+    });
+    reviewed_representative
+        .or_else(|| {
+            staged_assets
+                .iter()
+                .find(|asset| asset.signature_valid && asset.media_type.starts_with("image/"))
+        })
+        .map(|asset| asset.sha256.clone())
 }
 
 fn cleanup_pending_import(pending: &PendingImport, staging_dir: &Path) -> CoreResult<()> {
@@ -20290,6 +20495,7 @@ mod tests {
             variables: VariableMap::default(),
             supported_capabilities: Vec::new(),
             approved_import_source_ids: std::collections::BTreeSet::new(),
+            display_context: None,
         };
         let (_, projection) = apply_generation_output_transforms(
             Ok(GenerationOutcome {

@@ -467,9 +467,8 @@ describe('ContentModuleLifecyclePanel', () => {
         });
         expect(reviewButton).toBeDisabled();
 
-        await fireEvent.change(screen.getByLabelText('완료된 패키지 승인'), {
-            target: { value: 'package-approval-1' },
-        });
+        await fireEvent.click(screen.getByLabelText('완료된 패키지 승인'));
+        await fireEvent.click(screen.getByRole('option', { name: /package-approval-1/ }));
         expect(reviewButton).toBeEnabled();
         await fireEvent.click(reviewButton);
         await waitFor(() => {
@@ -508,9 +507,10 @@ describe('ContentModuleLifecyclePanel', () => {
         await fireEvent.click(
             await screen.findByRole('button', { name: '이 불변 리비전 활성화 검토' }),
         );
-        await fireEvent.change(screen.getByLabelText('완료된 패키지 승인'), {
-            target: { value: PACKAGE_APPROVAL_ID },
-        });
+        await fireEvent.click(screen.getByLabelText('완료된 패키지 승인'));
+        await fireEvent.click(
+            screen.getByRole('option', { name: new RegExp(PACKAGE_APPROVAL_ID) }),
+        );
         await fireEvent.click(
             screen.getByRole('button', { name: '불변 리비전·라이선스·충돌 검토' }),
         );
@@ -558,9 +558,9 @@ describe('ContentModuleLifecyclePanel', () => {
             name: '가져온 합성 모듈 revision-1 롤백 검토',
         });
         expect(rollbackButton).toBeDisabled();
-        await fireEvent.change(
-            screen.getByLabelText('가져온 합성 모듈 revision-1 대상 리비전 패키지 승인'),
-            { target: { value: TARGET_PACKAGE_APPROVAL_ID } },
+        await fireEvent.click(screen.getByLabelText('대상 리비전 패키지 승인'));
+        await fireEvent.click(
+            screen.getByRole('option', { name: new RegExp(TARGET_PACKAGE_APPROVAL_ID) }),
         );
         expect(rollbackButton).toBeEnabled();
         await fireEvent.click(rollbackButton);

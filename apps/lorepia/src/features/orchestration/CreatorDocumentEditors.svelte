@@ -595,8 +595,9 @@
     }
 
     .creator-error {
-        color: var(--danger);
-        background: var(--danger-soft);
+        border: 1px solid var(--status-error-border);
+        color: var(--status-error-fg);
+        background: var(--status-error-bg);
     }
 
     .creator-form {
@@ -622,7 +623,7 @@
         -webkit-appearance: none;
         appearance: none;
         background: color-mix(in srgb, var(--surface-sunken) 26%, var(--surface-raised));
-        box-shadow: inset 0 1px 2px rgb(16 18 24 / 3%);
+        box-shadow: var(--control-inset-shadow);
         caret-color: var(--accent);
         color: var(--ink);
         font: inherit;
@@ -658,7 +659,7 @@
 
     .creator-form :is(input, textarea):disabled {
         cursor: not-allowed;
-        opacity: 0.55;
+        opacity: var(--disabled-opacity);
     }
 
     .creator-form small,
