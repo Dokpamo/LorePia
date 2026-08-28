@@ -29,9 +29,6 @@ use crate::{
 };
 
 #[cfg(any(target_os = "macos", windows))]
-use crate::NativeCredentialEffect;
-
-#[cfg(any(target_os = "macos", windows))]
 use crate::validation::{
     validate_content_export_destination, validate_export_receipt_display_name,
     validate_sensitive_capture, verify_content_source_for_export,
@@ -2557,19 +2554,19 @@ impl<R: Runtime> DesktopPlatform<R> {
 #[cfg(any(target_os = "macos", windows))]
 fn credential_confirmation_copy(context: &NativeCredentialEffectContext) -> (String, String) {
     let (title, effect) = match context.effect() {
-        NativeCredentialEffect::CaptureOrReplace => (
+        crate::NativeCredentialEffect::CaptureOrReplace => (
             "Allow credential capture?",
             "read one credential from the clipboard and store it. If an older credential exists, it will be deleted only after the replacement is stored",
         ),
-        NativeCredentialEffect::Delete => (
+        crate::NativeCredentialEffect::Delete => (
             "Delete stored credential?",
             "permanently delete the stored credential",
         ),
-        NativeCredentialEffect::Archive => (
+        crate::NativeCredentialEffect::Archive => (
             "Archive connection and delete credential?",
             "archive this provider connection and permanently delete its stored credential",
         ),
-        NativeCredentialEffect::DiscoveryCompensation => (
+        crate::NativeCredentialEffect::DiscoveryCompensation => (
             "Remove uncommitted credential?",
             "permanently delete the credential created by the cancelled or failed discovery",
         ),

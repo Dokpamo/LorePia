@@ -1,3 +1,5 @@
+mod private_path;
+
 use std::{
     collections::BTreeSet,
     fs::{self, File, OpenOptions},
@@ -8,7 +10,7 @@ use std::{
 };
 
 #[cfg(unix)]
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::OpenOptionsExt;
 
 use chrono::{DateTime, Utc};
 use lorepia_domain::discovery::DiscoveryPreviousSelection;
@@ -36,6 +38,8 @@ use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use sha2::{Digest, Sha256};
 use url::Url;
 use uuid::Uuid;
+
+use private_path::{harden_owned_tree_permissions, harden_private_path};
 
 use crate::interaction_repository::{
     InteractionStateKey, clone_interaction_checkpoint_for_branch_transaction,
@@ -10822,65 +10826,6 @@ fn copy_and_hash(source: &Path, destination: &Path) -> CoreResult<(String, u64)>
     writer.flush().map_err(storage_io_error)?;
     writer.sync_all().map_err(storage_io_error)?;
     Ok((hex::encode(digest.finalize()), size))
-}
-
-#[cfg(unix)]
-fn harden_private_path(path: &Path, directory: bool) -> CoreResult<()> {
-    let mode = if directory { 0o700 } else { 0o600 };
-    fs::set_permissions(path, fs::Permissions::from_mode(mode)).map_err(storage_io_error)
-}
-
-#[cfg(not(unix))]
-// Keep one fallible cross-platform contract so callers cannot accidentally skip
-// a future Windows hardening failure when native ACL enforcement is added.
-#[allow(clippy::unnecessary_wraps)]
-fn harden_private_path(_path: &Path, _directory: bool) -> CoreResult<()> {
-    Ok(())
-}
-
-#[cfg(unix)]
-fn harden_owned_tree_permissions(root: &Path) -> CoreResult<()> {
-    const MAXIMUM_OWNED_PATHS: usize = 1_000_000;
-
-    let mut pending = vec![root.to_path_buf()];
-    let mut visited = 0_usize;
-    while let Some(path) = pending.pop() {
-        visited = visited
-            .checked_add(1)
-            .ok_or_else(|| storage_corrupted("owned storage tree is too large"))?;
-        if visited > MAXIMUM_OWNED_PATHS {
-            return Err(storage_corrupted("owned storage tree is too large"));
-        }
-        let metadata = fs::symlink_metadata(&path).map_err(storage_io_error)?;
-        if metadata.file_type().is_symlink() {
-            return Err(storage_corrupted(format!(
-                "owned storage tree contains a symbolic link: {}",
-                path.display()
-            )));
-        }
-        if metadata.file_type().is_dir() {
-            harden_private_path(&path, true)?;
-            for entry in fs::read_dir(&path).map_err(storage_io_error)? {
-                pending.push(entry.map_err(storage_io_error)?.path());
-            }
-        } else if metadata.file_type().is_file() {
-            harden_private_path(&path, false)?;
-        } else {
-            return Err(storage_corrupted(format!(
-                "owned storage tree contains a special file: {}",
-                path.display()
-            )));
-        }
-    }
-    Ok(())
-}
-
-#[cfg(not(unix))]
-// This mirrors the Unix implementation's fallible contract at the shared call
-// site; Windows ACL hardening is intentionally tracked as follow-up work.
-#[allow(clippy::unnecessary_wraps)]
-fn harden_owned_tree_permissions(_root: &Path) -> CoreResult<()> {
-    Ok(())
 }
 
 fn verify_file(path: &Path, expected_sha256: &str, expected_size: u64) -> CoreResult<()> {
