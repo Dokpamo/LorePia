@@ -553,7 +553,14 @@ pub(crate) fn pin_export_directory(
         .ok_or_else(|| PlatformError::new(PlatformErrorCode::SelectionFailed))?;
     let (data_root_guards, _) =
         pin_canonical_directory_chain(&canonical_data_root, PlatformErrorCode::StorageUnavailable)?;
-    guards.extend(data_root_guards);
+    for guard in data_root_guards {
+        // The export parent can be an ancestor of the data root. Keep only its
+        // dedicated parent handle so promotion can change that one handle's
+        // share mode; every distinct data-root ancestor remains pinned.
+        if windows_file_identity(&guard, PlatformErrorCode::StorageUnavailable)? != identity {
+            guards.push(guard);
+        }
+    }
 
     let stable_parent = std::fs::canonicalize(parent)
         .map_err(|_| PlatformError::new(PlatformErrorCode::SelectionFailed))?;
