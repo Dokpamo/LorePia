@@ -628,7 +628,7 @@ impl PinnedExportDirectory {
     ) -> PlatformResult<()> {
         self.verify_identity()
             .map_err(|error| windows_export_test_error("verify parent before rename", error))?;
-        rename_open_file_at(source, &self.parent, destination_name)
+        rename_open_file_in_pinned_directory(source, &self.path, destination_name)
             .map_err(|error| windows_export_test_error("rename open file", error))?;
         source
             .sync_all()
@@ -900,7 +900,7 @@ struct RawFileRenameInfo {
 }
 
 const fn file_rename_info_buffer_bytes(file_name_bytes: usize) -> Option<usize> {
-    std::mem::size_of::<RawFileRenameInfo>().checked_add(file_name_bytes)
+    std::mem::offset_of!(RawFileRenameInfo, file_name).checked_add(file_name_bytes)
 }
 
 #[cfg(test)]
@@ -909,11 +909,12 @@ const _: () = {
     let Some(actual) = file_rename_info_buffer_bytes(file_name_bytes) else {
         panic!("one UTF-16 code unit must fit in a FILE_RENAME_INFO buffer");
     };
-    let Some(required) = std::mem::size_of::<RawFileRenameInfo>().checked_add(file_name_bytes)
+    let Some(required) =
+        std::mem::offset_of!(RawFileRenameInfo, file_name).checked_add(file_name_bytes)
     else {
         panic!("one UTF-16 code unit must fit in a FILE_RENAME_INFO buffer");
     };
-    assert!(actual >= required);
+    assert!(actual == required);
 };
 
 const _: () = {
@@ -931,9 +932,9 @@ const _: () = {
 };
 
 #[allow(unsafe_code)]
-fn rename_open_file_at(
+fn rename_open_file_in_pinned_directory(
     source: &File,
-    parent: &File,
+    parent: &Path,
     destination_name: &OsStr,
 ) -> PlatformResult<()> {
     const REPLACE_IF_EXISTS: u32 = 0x0000_0001;
@@ -946,7 +947,14 @@ fn rename_open_file_at(
     {
         return Err(PlatformError::new(PlatformErrorCode::InvalidInput));
     }
-    let destination = destination_name.encode_wide().collect::<Vec<_>>();
+    if !parent.is_absolute() {
+        return Err(PlatformError::new(PlatformErrorCode::InvalidInput));
+    }
+    let destination = parent
+        .join(destination_name)
+        .as_os_str()
+        .encode_wide()
+        .collect::<Vec<_>>();
     if destination.is_empty() || destination.contains(&0) {
         return Err(PlatformError::new(PlatformErrorCode::InvalidInput));
     }
@@ -966,13 +974,15 @@ fn rename_open_file_at(
     let info = buffer.as_mut_ptr().cast::<RawFileRenameInfo>();
 
     // SAFETY: `buffer` is pointer-aligned and large enough for the fixed
-    // FILE_RENAME_INFO header plus the exact UTF-16 basename. Both file handles
-    // remain live for the synchronous call; source was opened with DELETE
-    // authority and parent is the retained, non-reparse directory handle.
+    // FILE_RENAME_INFO header plus the exact canonical destination. The source
+    // was opened with DELETE authority, while the retained directory handle
+    // chain keeps every resolved ancestor non-reparse and prevents replacement.
+    // A null RootDirectory uses the broadly supported full-path form of
+    // FileRenameInfo without weakening that pinned path contract.
     unsafe {
         info.write(RawFileRenameInfo {
             replace_if_exists_or_flags: REPLACE_IF_EXISTS,
-            root_directory: ::windows::Win32::Foundation::HANDLE(parent.as_raw_handle()),
+            root_directory: ::windows::Win32::Foundation::HANDLE::default(),
             file_name_length,
             file_name: [0],
         });
@@ -1538,7 +1548,7 @@ mod tests {
         let file_name_bytes = "export.charx".encode_utf16().count() * std::mem::size_of::<u16>();
         assert_eq!(
             file_rename_info_buffer_bytes(file_name_bytes),
-            std::mem::size_of::<RawFileRenameInfo>().checked_add(file_name_bytes),
+            std::mem::offset_of!(RawFileRenameInfo, file_name).checked_add(file_name_bytes),
         );
         assert_eq!(file_rename_info_buffer_bytes(usize::MAX), None);
     }
