@@ -271,8 +271,14 @@ export const ko = {
     'chat.portable.audio.background': '배경음악',
     'chat.portable.audio.clip': '오디오',
     'chat.runtime.generation.model_missing': '사용할 생성 모델이 선택되지 않았습니다.',
+    'chat.runtime.generation.budget_exhausted':
+        '이 카드가 이번 세션의 별도 생성 호출 한도를 초과했습니다.',
     'chat.runtime.generation.unsupported':
         '이 앱 빌드는 카드의 별도 생성 호출을 지원하지 않습니다.',
+    'chat.runtime.approval_required':
+        '이 정확한 카드 리비전과 스크립트 권한에 대한 실행 승인이 필요합니다.',
+    'chat.runtime.approval_unavailable': '안전한 카드 런타임 승인 지문을 계산할 수 없습니다.',
+    'chat.runtime.event_timeout': '캐릭터 기능 실행 시간이 초과되어 안전하게 중지했습니다.',
     'chat.runtime.not_ready': '캐릭터 런타임이 준비되지 않았습니다.',
     'chat.runtime.persona.default': '사용자',
     'chat.runtime.prompt.empty': '카드가 빈 생성 프롬프트를 요청했습니다.',

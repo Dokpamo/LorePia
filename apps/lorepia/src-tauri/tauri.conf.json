@@ -54,7 +54,7 @@
         "form-action": "'none'",
         "frame-src": "'none'",
         "frame-ancestors": "'none'",
-        "worker-src": "'none'"
+        "worker-src": "'self'"
       },
       "dangerousDisableAssetCspModification": false,
       "freezePrototype": true,

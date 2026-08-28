@@ -122,6 +122,82 @@ describe('PortableMessage', () => {
         });
     });
 
+    it('contains fixed overlays and strips alternate network-loading surfaces', async () => {
+        const client = { resolveAssetDelivery: vi.fn() } as unknown as LorepiaClient;
+        const view = render(PortableMessage, {
+            text: [
+                '<style>@import "https://evil.test/a.css"; .overlay { position: fixed; inset: 0; z-index: 999999; background: url(https://evil.test/pixel); }</style>',
+                '<svg><foreignObject><div>spoof</div></foreignObject></svg>',
+                '<picture><source srcset="https://evil.test/a.png"><img srcset="https://evil.test/b.png" poster="https://evil.test/p.png"></picture>',
+                '<button data-portable-action="spoof">bad</button>',
+            ].join(''),
+            client,
+            profile,
+        });
+
+        await waitFor(() => {
+            const shadow = view.container.querySelector('.portable-host')?.shadowRoot;
+            expect(shadow).not.toBeNull();
+            expect(shadow?.querySelector('svg, foreignObject, picture, source')).toBeNull();
+            expect(shadow?.querySelector('[srcset], [poster]')).toBeNull();
+            expect(shadow?.querySelector('[data-portable-action]')).toBeNull();
+            expect(shadow?.textContent).not.toMatch(/@import|position\s*:\s*fixed|url\s*\(/i);
+            expect(shadow?.textContent).toContain('contain: layout paint style');
+        });
+    });
+
+    it('strips browser top-layer primitives from imported markup', async () => {
+        const client = { resolveAssetDelivery: vi.fn() } as unknown as LorepiaClient;
+        const view = render(PortableMessage, {
+            text: [
+                '<style>select { appearance: base-select; } select::picker(select) { position: fixed; }</style>',
+                '<button popovertarget="spoof" popovertargetaction="show" command="show-popover" commandfor="spoof">Open</button>',
+                '<div id="spoof" popover>spoof</div>',
+                '<dialog open>trusted-looking dialog</dialog>',
+                '<select><option>trusted-looking picker</option></select>',
+            ].join(''),
+            client,
+            profile,
+        });
+
+        await waitFor(() => {
+            const shadow = view.container.querySelector('.portable-host')?.shadowRoot;
+            expect(shadow).not.toBeNull();
+            expect(shadow?.querySelector('dialog, select, option')).toBeNull();
+            expect(
+                shadow?.querySelector(
+                    '[popover], [popovertarget], [popovertargetaction], [command], [commandfor]',
+                ),
+            ).toBeNull();
+            expect(shadow?.textContent).not.toMatch(/base-select|::picker/i);
+        });
+    });
+
+    it('keeps escaped host selectors inside a trusted non-styleable paint boundary', async () => {
+        const client = { resolveAssetDelivery: vi.fn() } as unknown as LorepiaClient;
+        const view = render(PortableMessage, {
+            text: String.raw`<style>
+                :host { contain: none !important; overflow: visible !important; }
+                .overlay { position: f\69xed; z\2d index: 999999; inset: 0; }
+            </style><div class="overlay">spoof</div>`,
+            client,
+            profile,
+        });
+
+        await waitFor(() => {
+            const boundary = view.container.querySelector('.portable-boundary');
+            const shadow = view.container.querySelector('.portable-host')?.shadowRoot;
+            expect(boundary).not.toBeNull();
+            expect(shadow).not.toBeNull();
+            if (boundary === null) throw new Error('portable boundary is missing');
+            expect(shadow?.querySelector('.portable-message style')?.textContent).not.toMatch(
+                /:host|\\|contain\s*:\s*none/i,
+            );
+            expect(getComputedStyle(boundary).contain).toContain('paint');
+            expect(getComputedStyle(boundary).overflow).not.toBe('visible');
+        });
+    });
+
     it('uses the ordinary markdown renderer when no portable markup is present', () => {
         const client = { resolveAssetDelivery: vi.fn() } as unknown as LorepiaClient;
         const view = render(PortableMessage, {
@@ -134,7 +210,7 @@ describe('PortableMessage', () => {
         expect(view.container.querySelector('strong')).toHaveTextContent('ordinary');
     });
 
-    it('normalizes plain assistant output without rewriting disabled user messages', () => {
+    it('normalizes plain assistant output without rewriting disabled user messages', async () => {
         const client = { resolveAssetDelivery: vi.fn() } as unknown as LorepiaClient;
         const activeProfile = {
             ...profile,
@@ -152,7 +228,7 @@ describe('PortableMessage', () => {
             enabled: false,
         });
 
-        expect(assistant.container).toHaveTextContent('Ari_smile');
+        await waitFor(() => expect(assistant.container).toHaveTextContent('Ari_smile'));
         expect(user.container).toHaveTextContent('A-ri_smile');
     });
 

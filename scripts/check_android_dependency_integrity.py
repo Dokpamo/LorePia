@@ -167,8 +167,14 @@ def main() -> int:
 
     workflow = ".github/workflows/ci.yml"
     for expected in (
+        "android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699",
+        "cmdline-tools-version: 14742923",
+        "command -v sdkmanager",
+        "sdkmanager --version",
         "npm run tauri -- android init --ci --skip-targets-install",
         "python3 scripts/prepare_tauri_android_gradle.py",
+        '"platforms;android-36"',
+        '"build-tools;36.0.0"',
         '"ndk;27.2.12479018"',
         "buildEnvironment",
         ":app:dependencies",
@@ -180,6 +186,7 @@ def main() -> int:
         require_text(workflow, expected, failures)
     forbid_text(workflow, "node-version-file: apps/lorepia/.node-version", failures)
     require_occurrences(workflow, "node-version-file: .node-version", 2, failures)
+    require_occurrences(workflow, "persist-credentials: false", 3, failures)
     require_occurrences(workflow, "--dependency-verification strict", 6, failures)
 
     if failures:

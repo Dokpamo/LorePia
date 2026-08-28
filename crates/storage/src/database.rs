@@ -7,6 +7,9 @@ use std::{
     sync::{Mutex, MutexGuard},
 };
 
+#[cfg(unix)]
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
 use chrono::{DateTime, Utc};
 use lorepia_domain::discovery::DiscoveryPreviousSelection;
 use lorepia_domain::{
@@ -316,6 +319,7 @@ impl Storage {
         if recover_provider_discovery {
             storage.recover_unfinished_discovery_operations(Utc::now())?;
         }
+        harden_owned_tree_permissions(&storage.root)?;
         Ok(storage)
     }
 
@@ -10339,6 +10343,7 @@ fn prepare_owned_data_root(root: &Path) -> CoreResult<PathBuf> {
             "data root must be a real directory, not a file or symbolic link",
         ));
     }
+    harden_private_path(root, true)?;
     fs::canonicalize(root).map_err(storage_io_error)
 }
 
@@ -10478,6 +10483,7 @@ fn create_owned_directory_tree(root: &Path, relative: &Path) -> CoreResult<()> {
             }
             Err(error) => return Err(storage_io_error(error)),
         }
+        harden_private_path(&current, true)?;
     }
     sync_directory(&current)
 }
@@ -10785,9 +10791,11 @@ fn sync_directory(_path: &Path) -> CoreResult<()> {
 
 fn copy_and_hash(source: &Path, destination: &Path) -> CoreResult<(String, u64)> {
     let source = File::open(source).map_err(storage_io_error)?;
-    let destination = OpenOptions::new()
-        .create_new(true)
-        .write(true)
+    let mut destination_options = OpenOptions::new();
+    destination_options.create_new(true).write(true);
+    #[cfg(unix)]
+    destination_options.mode(0o600);
+    let destination = destination_options
         .open(destination)
         .map_err(storage_io_error)?;
     let mut reader = BufReader::new(source);
@@ -10814,6 +10822,59 @@ fn copy_and_hash(source: &Path, destination: &Path) -> CoreResult<(String, u64)>
     writer.flush().map_err(storage_io_error)?;
     writer.sync_all().map_err(storage_io_error)?;
     Ok((hex::encode(digest.finalize()), size))
+}
+
+#[cfg(unix)]
+fn harden_private_path(path: &Path, directory: bool) -> CoreResult<()> {
+    let mode = if directory { 0o700 } else { 0o600 };
+    fs::set_permissions(path, fs::Permissions::from_mode(mode)).map_err(storage_io_error)
+}
+
+#[cfg(not(unix))]
+fn harden_private_path(_path: &Path, _directory: bool) -> CoreResult<()> {
+    Ok(())
+}
+
+#[cfg(unix)]
+fn harden_owned_tree_permissions(root: &Path) -> CoreResult<()> {
+    const MAXIMUM_OWNED_PATHS: usize = 1_000_000;
+
+    let mut pending = vec![root.to_path_buf()];
+    let mut visited = 0_usize;
+    while let Some(path) = pending.pop() {
+        visited = visited
+            .checked_add(1)
+            .ok_or_else(|| storage_corrupted("owned storage tree is too large"))?;
+        if visited > MAXIMUM_OWNED_PATHS {
+            return Err(storage_corrupted("owned storage tree is too large"));
+        }
+        let metadata = fs::symlink_metadata(&path).map_err(storage_io_error)?;
+        if metadata.file_type().is_symlink() {
+            return Err(storage_corrupted(format!(
+                "owned storage tree contains a symbolic link: {}",
+                path.display()
+            )));
+        }
+        if metadata.file_type().is_dir() {
+            harden_private_path(&path, true)?;
+            for entry in fs::read_dir(&path).map_err(storage_io_error)? {
+                pending.push(entry.map_err(storage_io_error)?.path());
+            }
+        } else if metadata.file_type().is_file() {
+            harden_private_path(&path, false)?;
+        } else {
+            return Err(storage_corrupted(format!(
+                "owned storage tree contains a special file: {}",
+                path.display()
+            )));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn harden_owned_tree_permissions(_root: &Path) -> CoreResult<()> {
+    Ok(())
 }
 
 fn verify_file(path: &Path, expected_sha256: &str, expected_size: u64) -> CoreResult<()> {

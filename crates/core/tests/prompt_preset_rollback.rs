@@ -1,3 +1,8 @@
+use std::{
+    thread,
+    time::{Duration as StdDuration, Instant},
+};
+
 use chrono::{Duration, TimeZone, Utc};
 use lorepia_core::{
     Core, CoreConfig, CoreErrorCode, InstructionAuthority, ModuleScope, PlacementZone,
@@ -10,6 +15,23 @@ use lorepia_storage::{PromptResponseLength, Storage, built_in_prompt_presets};
 use tempfile::tempdir;
 
 const HOSTILE_POLICY_CANARY: &str = "ROLLBACK_MUST_NOT_RESTORE_OLD_APPLICATION_POLICY";
+
+fn open_storage_after_core_drop(data_root: &std::path::Path) -> Storage {
+    let deadline = Instant::now() + StdDuration::from_secs(2);
+    loop {
+        match Storage::open(data_root) {
+            Ok(storage) => return storage,
+            Err(error)
+                if error.code == CoreErrorCode::StorageUnavailable
+                    && error.message == "data root is already owned by another LorePia process"
+                    && Instant::now() < deadline =>
+            {
+                thread::sleep(StdDuration::from_millis(10));
+            }
+            Err(error) => panic!("open direct storage fixture after Core drop: {error:?}"),
+        }
+    }
+}
 
 fn timestamp() -> chrono::DateTime<Utc> {
     Utc.with_ymd_and_hms(2026, 8, 3, 12, 0, 0)
@@ -326,7 +348,7 @@ fn rollback_rejects_legacy_targets_that_claim_application_provenance() {
         .expect("seed valid creator revision");
     drop(core);
 
-    let storage = Storage::open(root.path()).expect("open direct storage fixture");
+    let storage = open_storage_after_core_drop(root.path());
     let mut legacy_target = first.value.clone();
     let creator_block = legacy_target
         .blocks

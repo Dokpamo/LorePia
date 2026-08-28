@@ -11,7 +11,13 @@ import type {
     MessageDto,
     RuntimeTextGenerationDto,
 } from '../../lib/ipc/contracts';
-import { PortableCharacterRuntime, parsePortableRuntimeToggles } from './portable-runtime';
+import {
+    PortableCharacterRuntime,
+    createPortableRuntimeGrant,
+    parsePortableRuntimeToggles,
+    requiredPortableRuntimeCapabilities,
+    validatePortableRuntimeGrant,
+} from './portable-runtime';
 
 const PRIMARY_SELECTION: GenerationSelectionInput = {
     kind: 'legacy_profile',
@@ -173,8 +179,10 @@ describe('portable runtime', () => {
         const client = { generateRuntimeText } as unknown as LorepiaClient;
         const notices = vi.fn();
         const changed = vi.fn();
+        const activeProfile = profile();
         const runtime = await PortableCharacterRuntime.create({
-            profile: profile(),
+            profile: activeProfile,
+            grant: await createPortableRuntimeGrant(activeProfile),
             conversationId: 'conversation',
             branchId: 'branch',
             characterName: 'Character',
@@ -223,9 +231,279 @@ describe('portable runtime', () => {
             selection: AUXILIARY_SELECTION,
             messages: [{ role: 'user', content: 'aux prompt' }],
         });
+        for (let index = 0; index < 10; index += 1) {
+            await runtime.handleAction(`budget-${String(index)}`);
+        }
+        expect(generateRuntimeText).toHaveBeenCalledTimes(8);
         expect(notices).not.toHaveBeenCalled();
         expect(changed).toHaveBeenCalled();
 
+        runtime.close();
+    });
+
+    it('fails closed before Wasmoon starts without an exact script and revision grant', async () => {
+        const approvedProfile = profile();
+        const grant = await createPortableRuntimeGrant(approvedProfile);
+        const changedProfile = {
+            ...approvedProfile,
+            character_content_revision_id: 'revision-2',
+            runtime_scripts: approvedProfile.runtime_scripts.map((script) => ({
+                ...script,
+                source: `${script.source}\n-- changed`,
+            })),
+        };
+        const createEngine = vi.fn();
+        const options = {
+            profile: changedProfile,
+            grant,
+            conversationId: 'conversation',
+            branchId: 'branch',
+            characterName: 'Character',
+            characterDescription: 'Description',
+            client: {} as LorepiaClient,
+            primarySelection: () => PRIMARY_SELECTION,
+            onChanged: vi.fn(),
+            onNotice: vi.fn(),
+            storage: memoryStorage(),
+            luaFactory: { createEngine } as unknown as LuaFactory,
+        };
+
+        await expect(validatePortableRuntimeGrant(changedProfile, grant)).resolves.toBe(false);
+        await expect(
+            validatePortableRuntimeGrant(
+                {
+                    ...approvedProfile,
+                    runtime_knowledge: approvedProfile.runtime_knowledge.map((entry) => ({
+                        ...entry,
+                        content: `${entry.content} changed`,
+                    })),
+                },
+                grant,
+            ),
+        ).resolves.toBe(false);
+        await expect(PortableCharacterRuntime.create(options)).rejects.toThrow(/승인/);
+        expect(createEngine).not.toHaveBeenCalled();
+    });
+
+    it('binds grants to the reviewed capability set and omits ungranted host globals', async () => {
+        const baseProfile = profile();
+        const baseScript = baseProfile.runtime_scripts[0];
+        if (baseScript === undefined) throw new Error('runtime fixture script is missing');
+        const restrictedProfile = {
+            ...baseProfile,
+            runtime_scripts: [
+                {
+                    ...baseScript,
+                    source: 'assert(getFullChat == nil)\nassert(setChat == nil)\nassert(LLM == nil)',
+                },
+            ],
+        };
+        const capabilities = ['runtime:callbacks'] as const;
+        const grant = await createPortableRuntimeGrant(restrictedProfile, capabilities);
+        const runtime = await PortableCharacterRuntime.create({
+            profile: restrictedProfile,
+            grant,
+            conversationId: 'conversation',
+            branchId: 'branch',
+            characterName: 'Character',
+            characterDescription: 'Description',
+            client: {} as LorepiaClient,
+            primarySelection: () => PRIMARY_SELECTION,
+            onChanged: vi.fn(),
+            onNotice: vi.fn(),
+            storage: memoryStorage(),
+            luaFactory: new LuaFactory(
+                decodeURIComponent(
+                    new URL('../../../node_modules/wasmoon/dist/glue.wasm', import.meta.url)
+                        .pathname,
+                ),
+            ),
+        });
+
+        expect(requiredPortableRuntimeCapabilities(restrictedProfile)).toContain('model:generate');
+        await expect(
+            validatePortableRuntimeGrant(restrictedProfile, {
+                ...grant,
+                capabilities: [...grant.capabilities, 'chat:read'],
+            }),
+        ).resolves.toBe(false);
+        runtime.close();
+    });
+
+    it('removes Lua timeout-bypass and dynamic-loader globals before imported code', async () => {
+        const hardenedProfile = profile();
+        const script = hardenedProfile.runtime_scripts[0];
+        if (script === undefined) throw new Error('runtime fixture script is missing');
+        hardenedProfile.runtime_scripts = [
+            {
+                ...script,
+                source: String.raw`
+if debug ~= nil then debug.sethook() end
+assert(debug == nil)
+assert(package == nil)
+assert(io == nil)
+assert(os == nil)
+assert(load == nil)
+assert(loadfile == nil)
+assert(dofile == nil)
+assert(require == nil)
+assert(loadstring == nil)
+`,
+            },
+        ];
+
+        const runtime = await PortableCharacterRuntime.create({
+            profile: hardenedProfile,
+            grant: await createPortableRuntimeGrant(hardenedProfile),
+            conversationId: 'conversation',
+            branchId: 'branch',
+            characterName: 'Character',
+            characterDescription: 'Description',
+            client: {} as LorepiaClient,
+            primarySelection: () => PRIMARY_SELECTION,
+            onChanged: vi.fn(),
+            onNotice: vi.fn(),
+            storage: memoryStorage(),
+            luaFactory: new LuaFactory(
+                decodeURIComponent(
+                    new URL('../../../node_modules/wasmoon/dist/glue.wasm', import.meta.url)
+                        .pathname,
+                ),
+            ),
+        });
+
+        runtime.close();
+    });
+
+    it('interrupts non-yielding startup code within the runtime deadline', async () => {
+        const loopingProfile = profile();
+        const script = loopingProfile.runtime_scripts[0];
+        if (script === undefined) throw new Error('runtime fixture script is missing');
+        loopingProfile.runtime_scripts = [{ ...script, source: 'while true do end' }];
+        const startedAt = Date.now();
+
+        await expect(
+            PortableCharacterRuntime.create({
+                profile: loopingProfile,
+                grant: await createPortableRuntimeGrant(loopingProfile),
+                conversationId: 'conversation',
+                branchId: 'branch',
+                characterName: 'Character',
+                characterDescription: 'Description',
+                client: {} as LorepiaClient,
+                primarySelection: () => PRIMARY_SELECTION,
+                onChanged: vi.fn(),
+                onNotice: vi.fn(),
+                storage: memoryStorage(),
+                luaFactory: new LuaFactory(
+                    decodeURIComponent(
+                        new URL('../../../node_modules/wasmoon/dist/glue.wasm', import.meta.url)
+                            .pathname,
+                    ),
+                ),
+            }),
+        ).rejects.toThrow(/timeout/i);
+        expect(Date.now() - startedAt).toBeLessThan(2_000);
+    });
+
+    it('closes a runtime when yielding callbacks exceed the aggregate event deadline', async () => {
+        const yieldingProfile = profile();
+        const script = yieldingProfile.runtime_scripts[0];
+        if (script === undefined) throw new Error('runtime fixture script is missing');
+        yieldingProfile.runtime_scripts = [
+            {
+                ...script,
+                source: String.raw`
+onStart = async(function(triggerId)
+    for index = 1, 30 do
+        sleep(10):await()
+    end
+    return true
+end)
+`,
+            },
+        ];
+        const runtime = await PortableCharacterRuntime.create({
+            profile: yieldingProfile,
+            grant: await createPortableRuntimeGrant(yieldingProfile),
+            conversationId: 'conversation',
+            branchId: 'branch',
+            characterName: 'Character',
+            characterDescription: 'Description',
+            client: {} as LorepiaClient,
+            primarySelection: () => PRIMARY_SELECTION,
+            onChanged: vi.fn(),
+            onNotice: vi.fn(),
+            storage: memoryStorage(),
+            eventTimeoutMs: 100,
+            luaFactory: new LuaFactory(
+                decodeURIComponent(
+                    new URL('../../../node_modules/wasmoon/dist/glue.wasm', import.meta.url)
+                        .pathname,
+                ),
+            ),
+        });
+
+        await expect(runtime.prepareInput('hello')).rejects.toThrow(/시간|timeout/i);
+        await expect(runtime.prepareInput('again')).rejects.toThrow(/준비|ready/i);
+    });
+
+    it('rejects oversized and cumulatively excessive host state atomically', async () => {
+        const boundedProfile = profile();
+        const script = boundedProfile.runtime_scripts[0];
+        if (script === undefined) throw new Error('runtime fixture script is missing');
+        boundedProfile.runtime_scripts = [
+            {
+                ...script,
+                source: String.raw`
+nextStateIndex = 1
+onStart = async(function(triggerId)
+    assert(setState(triggerId, "oversized", string.rep("x", 70000)) == false)
+    assert(setChat(triggerId, -1, string.rep("x", 300000)) == false)
+    local allAccepted = true
+    for offset = 1, 5 do
+        if not setState(triggerId, "state-" .. tostring(nextStateIndex), string.rep("x", 60000)) then
+            allAccepted = false
+        end
+        nextStateIndex = nextStateIndex + 1
+    end
+    return allAccepted
+end)
+`,
+            },
+        ];
+        const storage = memoryStorage();
+        const runtime = await PortableCharacterRuntime.create({
+            profile: boundedProfile,
+            grant: await createPortableRuntimeGrant(boundedProfile),
+            conversationId: 'conversation',
+            branchId: 'branch',
+            characterName: 'Character',
+            characterDescription: 'Description',
+            client: {} as LorepiaClient,
+            primarySelection: () => PRIMARY_SELECTION,
+            onChanged: vi.fn(),
+            onNotice: vi.fn(),
+            storage,
+            luaFactory: new LuaFactory(
+                decodeURIComponent(
+                    new URL('../../../node_modules/wasmoon/dist/glue.wasm', import.meta.url)
+                        .pathname,
+                ),
+            ),
+        });
+        runtime.setMessages([message('assistant', 'assistant', 'hello')]);
+
+        const outcomes = [];
+        for (let index = 0; index < 20; index += 1) {
+            outcomes.push(await runtime.prepareInput('next'));
+        }
+        expect(outcomes.some((outcome) => !outcome.shouldSend)).toBe(true);
+        const persisted = storage.getItem(
+            'lorepia.character-runtime.v1:character:revision:conversation:branch',
+        );
+        expect(persisted).not.toBeNull();
+        expect(persisted?.length ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(4 * 1024 * 1024);
         runtime.close();
     });
 });

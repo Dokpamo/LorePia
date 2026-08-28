@@ -1,5 +1,6 @@
 import type { CharacterDisplayTransformDto } from '../../lib/ipc/contracts';
 import { t } from '../../lib/i18n';
+import { runPortableRegex } from './portable-regex';
 
 const MAX_PASSES = 256;
 const MAX_OUTPUT_CHARS = 262_144;
@@ -14,46 +15,43 @@ export interface PortableDisplayContext {
 }
 
 export function hasPortableDisplayTransform(
-    source: string,
+    _source: string,
     transforms: readonly CharacterDisplayTransformDto[],
 ): boolean {
-    return transforms.some((transform) => {
-        if (isAssetTransform(transform)) return false;
-        try {
-            return new RegExp(transform.pattern, safeFlags(transform.flags, false)).test(source);
-        } catch {
-            return false;
-        }
-    });
+    return transforms.some((transform) => !isAssetTransform(transform));
 }
 
-export function renderPortableDisplay(
+export async function renderPortableDisplay(
     source: string,
     transforms: readonly CharacterDisplayTransformDto[],
     context: PortableDisplayContext,
-): string {
-    return renderMacros(applyPortableTransforms(source, transforms, true), context, source);
+): Promise<string> {
+    return renderPortableMacros(
+        await applyPortableTransforms(source, transforms, true),
+        context,
+        source,
+    );
 }
 
-export function applyPortableTransforms(
+export async function applyPortableTransforms(
     source: string,
     transforms: readonly CharacterDisplayTransformDto[],
     skipAssetTransforms = false,
-): string {
+): Promise<string> {
     let output = source;
     for (const transform of transforms.slice(0, 128)) {
         if ((skipAssetTransforms && isAssetTransform(transform)) || transform.pattern.length > 4096)
             continue;
-        try {
-            const next = output.replace(
-                new RegExp(transform.pattern, safeFlags(transform.flags, true)),
-                transform.replacement,
-            );
-            if (Array.from(next).length > MAX_OUTPUT_CHARS) return source;
-            output = next;
-        } catch {
-            // Unsupported expressions remain available to later compatible rules.
-        }
+        const result = await runPortableRegex({
+            operation: 'replace',
+            source: output,
+            pattern: transform.pattern,
+            flags: safeFlags(transform.flags, true),
+            replacement: transform.replacement,
+        });
+        if (!result.ok || typeof result.value !== 'string') continue;
+        if (Array.from(result.value).length > MAX_OUTPUT_CHARS) return source;
+        output = result.value;
     }
     return output;
 }
@@ -69,7 +67,7 @@ function safeFlags(flags: string, retainGlobal: boolean): string {
     return result;
 }
 
-function renderMacros(
+export function renderPortableMacros(
     value: string,
     context: PortableDisplayContext,
     originalSource: string,

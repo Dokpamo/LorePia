@@ -41,11 +41,22 @@
         onAction,
     }: Props = $props();
     let host = $state<HTMLDivElement | null>(null);
-    const normalizedText = $derived(
-        profile === null || !enabled
-            ? text
-            : applyPortableTransforms(text, profile.output_transforms),
-    );
+    let normalizedText = $state('');
+    $effect(() => {
+        const source = text;
+        const activeProfile = profile;
+        const active = enabled;
+        let cancelled = false;
+        normalizedText = source;
+        if (activeProfile !== null && active) {
+            void applyPortableTransforms(source, activeProfile.output_transforms).then((result) => {
+                if (!cancelled) normalizedText = result;
+            });
+        }
+        return () => {
+            cancelled = true;
+        };
+    });
     const usesPortableMarkup = $derived(
         enabled &&
             profile !== null &&
@@ -70,6 +81,7 @@
             return;
         }
         let cancelled = false;
+        const wasCancelled = (): boolean => cancelled;
         let activeShadow: ShadowRoot | null = null;
         const deferredMedia = new SvelteSet<HTMLMediaElement>();
         const resumeDeferredMedia = (): void => {
@@ -104,21 +116,22 @@
             activeMessageIndex,
             activeLastMessageId,
             activeVariables,
-        ).then((rendered) => {
-            if (cancelled) return;
+        ).then(async (rendered) => {
+            if (wasCancelled()) return;
             const shadow = target.shadowRoot ?? target.attachShadow({ mode: 'open' });
             const baseStyle = document.createElement('style');
             baseStyle.textContent = BASE_STYLE;
             const importedStyle = document.createElement('style');
             importedStyle.textContent = extractStyleText(
-                renderPortableDisplay(activeBackgroundMarkup, [], {
+                await renderPortableDisplay(activeBackgroundMarkup, [], {
                     variables: activeVariables,
                     chatIndex: activeMessageIndex,
                     lastMessageId: activeLastMessageId,
                     lastCharacterMessage,
                 }),
             );
-            shadow.replaceChildren(baseStyle, importedStyle, rendered);
+            if (wasCancelled()) return;
+            shadow.replaceChildren(importedStyle, baseStyle, rendered);
             activeShadow = shadow;
             shadow.addEventListener('click', handleClick);
             for (const media of shadow.querySelectorAll<HTMLMediaElement>(
@@ -136,8 +149,10 @@
     });
 
     const BASE_STYLE = `
-        :host { display: block; min-width: 0; color: inherit; }
-        .portable-message { white-space: pre-wrap; overflow-wrap: anywhere; }
+        :host { display: block; min-width: 0; max-width: 100%; color: inherit;
+            position: relative; contain: layout paint style; isolation: isolate; overflow: hidden; }
+        .portable-message { max-width: 100%; white-space: pre-wrap; overflow: hidden;
+            overflow-wrap: anywhere; }
         .portable-asset-frame { display: block; width: min(400px, 100%); margin: 12px auto; }
         .portable-asset-frame img { display: block; width: 100%; height: auto; border-radius: 10px; }
         .portable-audio { display: block; width: min(420px, 100%); margin: 10px auto; }
@@ -155,12 +170,16 @@
         activeLastMessageId: number,
         activeVariables: Record<string, string>,
     ): Promise<HTMLElement> {
-        const displaySource = renderPortableDisplay(source, activeProfile.display_transforms, {
-            variables: activeVariables,
-            chatIndex: activeMessageIndex,
-            lastMessageId: activeLastMessageId,
-            lastCharacterMessage,
-        });
+        const displaySource = await renderPortableDisplay(
+            source,
+            activeProfile.display_transforms,
+            {
+                variables: activeVariables,
+                chatIndex: activeMessageIndex,
+                lastMessageId: activeLastMessageId,
+                lastCharacterMessage,
+            },
+        );
         const references = collectAssetReferences(displaySource);
         const resolved = new SvelteMap<string, string | null>();
         await Promise.all(
@@ -215,11 +234,9 @@
             },
         );
 
-        const parsed = new DOMParser().parseFromString(
-            `<div class="portable-message">${html}</div>`,
-            'text/html',
-        );
-        const root = parsed.body.firstElementChild;
+        const template = document.createElement('template');
+        template.innerHTML = `<div class="portable-message">${html}</div>`;
+        const root = template.content.firstElementChild;
         if (!(root instanceof HTMLElement)) {
             const fallback = document.createElement('div');
             fallback.className = 'portable-message';
@@ -326,12 +343,30 @@
 
     function extractStyleText(markup: string): string {
         if (markup === '') return '';
-        const parsed = new DOMParser().parseFromString(markup, 'text/html');
-        return [...parsed.querySelectorAll('style')]
-            .map((style) => style.textContent)
-            .join('\n')
-            .replace(/@import[^;]+;/gi, '')
-            .replace(/url\(\s*(['"]?)https?:[^)]+\)/gi, 'none');
+        const template = document.createElement('template');
+        template.innerHTML = markup;
+        return sanitizePortableCss(
+            [...template.content.querySelectorAll('style')]
+                .map((style) => style.textContent)
+                .join('\n'),
+        );
+    }
+
+    function sanitizePortableCss(value: string): string {
+        const withoutComments = value.replace(/\/\*[\s\S]*?\*\//g, '');
+        const withoutImports = withoutComments.replace(/@import\s+[^;]+;?/gi, '');
+        if (
+            withoutImports.includes('\\') ||
+            withoutImports.includes('@') ||
+            /:host(?:-context)?\b|::picker\b|appearance\s*:\s*base-select\b/i.test(withoutImports)
+        ) {
+            return '';
+        }
+        return withoutImports
+            .replace(/url\s*\([^)]*\)/gi, 'none')
+            .replace(/position\s*:\s*(?:fixed|sticky)\s*;?/gi, 'position: static;')
+            .replace(/(?:^|[;{])\s*(?:inset|z-index)\s*:[^;}]*;?/gi, ';')
+            .slice(0, 262_144);
     }
 
     function sanitizePortableTree(root: HTMLElement, mediaUrls: ReadonlySet<string>): void {
@@ -344,21 +379,63 @@
             'META',
             'BASE',
             'FORM',
+            'SVG',
+            'MATH',
+            'FOREIGNOBJECT',
+            'PICTURE',
+            'SOURCE',
+            'TRACK',
+            'DIALOG',
+            'SELECT',
+            'OPTION',
+            'OPTGROUP',
         ]);
         const elements = [root, ...root.querySelectorAll('*')];
         for (const element of elements) {
-            if (forbidden.has(element.tagName)) {
+            if (forbidden.has(element.tagName.toUpperCase())) {
                 element.remove();
                 continue;
             }
+            if (element instanceof HTMLStyleElement) {
+                element.textContent = sanitizePortableCss(element.textContent);
+            }
             for (const attribute of [...element.attributes]) {
                 const name = attribute.name.toLowerCase();
-                if (name.startsWith('on') || name === 'srcdoc') {
+                if (
+                    name.startsWith('on') ||
+                    name === 'srcdoc' ||
+                    name === 'srcset' ||
+                    name === 'poster' ||
+                    name === 'href' ||
+                    name === 'xlink:href' ||
+                    name === 'formaction' ||
+                    name === 'action' ||
+                    name === 'background' ||
+                    name === 'cite' ||
+                    name === 'data' ||
+                    name === 'longdesc' ||
+                    name === 'ping' ||
+                    name === 'usemap' ||
+                    name === 'popover' ||
+                    name === 'popovertarget' ||
+                    name === 'popovertargetaction' ||
+                    name === 'command' ||
+                    name === 'commandfor' ||
+                    name === 'data-portable-action'
+                ) {
                     element.removeAttribute(attribute.name);
                 } else if (name.endsWith('-btn')) {
                     element.setAttribute('data-portable-action', attribute.value.slice(0, 512));
                     element.removeAttribute(attribute.name);
-                } else if (name === 'style' && /url\s*\(/i.test(attribute.value)) {
+                } else if (name === 'style') {
+                    const style = sanitizePortableCss(attribute.value);
+                    if (style.trim() === '') element.removeAttribute(attribute.name);
+                    else element.setAttribute('style', style);
+                } else if (
+                    name === 'src' &&
+                    !(element instanceof HTMLImageElement) &&
+                    !(element instanceof HTMLMediaElement)
+                ) {
                     element.removeAttribute(attribute.name);
                 }
             }
@@ -367,10 +444,14 @@
                 if (source === null || !mediaUrls.has(source)) element.removeAttribute('src');
             }
             if (element instanceof HTMLAnchorElement) {
-                const href = element.getAttribute('href') ?? '';
-                if (!/^https?:\/\//i.test(href)) element.removeAttribute('href');
                 element.rel = 'noreferrer noopener';
-                element.target = '_blank';
+                element.removeAttribute('target');
+            }
+            if (element instanceof HTMLInputElement) {
+                const type = element.type.toLowerCase();
+                if (!['button', 'checkbox', 'radio'].includes(type)) element.type = 'button';
+                element.removeAttribute('form');
+                element.removeAttribute('name');
             }
         }
     }
@@ -390,14 +471,28 @@
 </script>
 
 {#if usesPortableMarkup && client !== undefined}
-    <div class="portable-host" bind:this={host}></div>
+    <div class="portable-boundary">
+        <div class="portable-host" bind:this={host}></div>
+    </div>
 {:else}
     <MarkdownText text={normalizedText} />
 {/if}
 
 <style>
+    .portable-boundary {
+        position: relative;
+        display: block;
+        contain: layout paint style;
+        isolation: isolate;
+        max-width: 100%;
+        max-height: min(70vh, 720px);
+        overflow: auto;
+    }
+
     .portable-host {
         display: block;
         min-width: 0;
+        max-width: 100%;
+        overflow: hidden;
     }
 </style>

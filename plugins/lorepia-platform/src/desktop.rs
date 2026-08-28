@@ -2552,7 +2552,7 @@ impl<R: Runtime> DesktopPlatform<R> {
     }
 }
 
-#[cfg(any(target_os = "macos", windows, test))]
+#[cfg(any(target_os = "macos", windows))]
 fn credential_confirmation_copy(context: &NativeCredentialEffectContext) -> (String, String) {
     let (title, effect) = match context.effect() {
         NativeCredentialEffect::CaptureOrReplace => (

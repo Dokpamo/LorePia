@@ -44,7 +44,13 @@
     import type { PersonaClientApi } from '../personas/persona-contracts';
     import { shouldSubmitComposer } from './composer';
     import GenerationAttemptApprovals from './GenerationAttemptApprovals.svelte';
-    import { PortableCharacterRuntime } from './portable-runtime';
+    import {
+        PortableCharacterRuntime,
+        createPortableRuntimeGrant,
+        requiredPortableRuntimeCapabilities,
+        type PortableRuntimeCapability,
+        type PortableRuntimeGrant,
+    } from './portable-runtime';
     import {
         INITIAL_INTERACTION_ROOM_STATE,
         InteractionRoomController,
@@ -130,7 +136,10 @@
     let interactionController = $state<InteractionRoomController | null>(null);
     let characterRenderProfile = $state<CharacterRenderProfileDto | null>(null);
     let portableRuntime = $state<PortableCharacterRuntime | null>(null);
-    let portableRuntimePhase = $state<'idle' | 'loading' | 'ready' | 'busy' | 'error'>('idle');
+    let portableRuntimeGrant = $state<PortableRuntimeGrant | null>(null);
+    let portableRuntimePhase = $state<'idle' | 'blocked' | 'loading' | 'ready' | 'busy' | 'error'>(
+        'idle',
+    );
     let portableRuntimeError = $state<string | null>(null);
     let dismissedChatError = $state<string | null>(null);
     let dismissedInteractionError = $state<string | null>(null);
@@ -671,8 +680,13 @@
     });
     const portableRuntimeBackground = $derived.by(() => {
         void portableRuntimeRevision;
-        return portableRuntime?.backgroundMarkup ?? characterRenderProfile?.background_markup ?? '';
+        return portableRuntime?.backgroundMarkup ?? '';
     });
+    const portableRuntimeCapabilities = $derived(
+        characterRenderProfile === null
+            ? []
+            : requiredPortableRuntimeCapabilities(characterRenderProfile),
+    );
     const portableRuntimeLastCharacterMessage = $derived.by(() => {
         void portableRuntimeRevision;
         const message = [...displayMessageItems]
@@ -1014,6 +1028,7 @@
             activeClient?.getCharacterRenderProfile?.bind(activeClient);
         let cancelled = false;
         characterRenderProfile = null;
+        portableRuntimeGrant = null;
         if (characterId !== null && getCharacterRenderProfile !== undefined) {
             void getCharacterRenderProfile(characterId)
                 .then((profile) => {
@@ -1037,6 +1052,7 @@
         const conversationId = appState.selected_conversation?.id ?? null;
         const branchId = appState.conversation_state?.active_branch_id ?? null;
         const character = appState.selected_character;
+        const grant = portableRuntimeGrant;
         const hasLuaRuntime =
             profile?.runtime_scripts.some(
                 (script) => script.language.trim().toLowerCase() === 'lua',
@@ -1047,9 +1063,10 @@
         portableRuntimeError = null;
         portableRuntimeLastOutputKey = '';
         portableRuntimeActionCount = 0;
-        portableRuntimePhase = hasLuaRuntime ? 'loading' : 'idle';
+        portableRuntimePhase = hasLuaRuntime ? (grant === null ? 'blocked' : 'loading') : 'idle';
         if (
             !hasLuaRuntime ||
+            grant === null ||
             profile === null ||
             activeClient === undefined ||
             conversationId === null ||
@@ -1062,6 +1079,7 @@
             .then((persona) =>
                 PortableCharacterRuntime.create({
                     profile,
+                    grant,
                     conversationId,
                     branchId,
                     characterName: character.name,
@@ -1604,6 +1622,47 @@
         return portableRuntime?.optionValue(key) ?? '';
     }
 
+    async function approvePortableRuntime(): Promise<void> {
+        const profile = characterRenderProfile;
+        if (profile === null) return;
+        portableRuntimePhase = 'loading';
+        portableRuntimeError = null;
+        try {
+            portableRuntimeGrant = await createPortableRuntimeGrant(
+                profile,
+                portableRuntimeCapabilities,
+            );
+        } catch (error) {
+            portableRuntimePhase = 'error';
+            portableRuntimeError =
+                error instanceof Error ? error.message : '카드 기능 승인을 만들지 못했습니다.';
+        }
+    }
+
+    function revokePortableRuntime(): void {
+        portableRuntimeGrant = null;
+        portableRuntime?.close();
+        portableRuntime = null;
+        portableRuntimePhase = 'blocked';
+        portableRuntimeError = null;
+        portableRuntimeRevision += 1;
+    }
+
+    function portableRuntimeCapabilityLabel(capability: PortableRuntimeCapability): string {
+        const labels: Record<PortableRuntimeCapability, string> = {
+            'runtime:callbacks': '카드 콜백 실행',
+            'chat:read': '현재 대화 읽기',
+            'chat:write': '표시 메시지와 전송 흐름 변경',
+            'state:readwrite': '카드별 상태 저장',
+            'profile:read': '캐릭터·페르소나 정보 읽기',
+            'lore:read': '활성 로어북 읽기',
+            'ui:write': '카드 UI·배경·알림 표시',
+            'model:generate': '선택한 모델로 별도 생성 요청',
+            elevated: '고급 카드 권한',
+        };
+        return labels[capability];
+    }
+
     async function setPortableRuntimeOption(key: string, value: string): Promise<void> {
         const runtime = portableRuntime;
         if (runtime === null) return;
@@ -1677,7 +1736,7 @@
                 characterRenderProfile?.runtime_scripts.some(
                     (script) => script.language.trim().toLowerCase() === 'lua',
                 ) ?? false;
-            if (requiresRuntime && runtime === null) {
+            if (requiresRuntime && portableRuntimeGrant !== null && runtime === null) {
                 copyNotice =
                     portableRuntimeError ??
                     '캐릭터 기능을 준비하는 중입니다. 잠시 뒤 다시 보내세요.';
@@ -1945,15 +2004,39 @@
                     <small
                         >{portableRuntimePhase === 'loading'
                             ? '준비 중'
-                            : portableRuntimePhase === 'busy'
-                              ? '실행 중'
-                              : portableRuntimePhase === 'error'
-                                ? '오류'
-                                : '사용 가능'}</small
+                            : portableRuntimePhase === 'blocked'
+                              ? '승인 필요'
+                              : portableRuntimePhase === 'busy'
+                                ? '실행 중'
+                                : portableRuntimePhase === 'error'
+                                  ? '오류'
+                                  : '사용 가능'}</small
                     >
                 </header>
 
-                {#if portableRuntime !== null}
+                {#if portableRuntimeGrant === null}
+                    <div class="portable-runtime-approval">
+                        <p>
+                            아래 권한은 현재 카드 리비전·스크립트 해시에만 이번 세션 동안
+                            허용됩니다.
+                        </p>
+                        <ul aria-label="요청한 캐릭터 기능 권한">
+                            {#each portableRuntimeCapabilities as capability (capability)}
+                                <li>{portableRuntimeCapabilityLabel(capability)}</li>
+                            {/each}
+                        </ul>
+                        <button type="button" onclick={() => void approvePortableRuntime()}>
+                            이번 세션에서 캐릭터 기능 실행 허용
+                        </button>
+                    </div>
+                {:else if portableRuntime !== null}
+                    <button
+                        class="portable-runtime-revoke"
+                        type="button"
+                        onclick={revokePortableRuntime}
+                    >
+                        캐릭터 기능 권한 해제
+                    </button>
                     <div class="portable-runtime-choice">
                         <ChoicePopover
                             id="portable-runtime-auxiliary-model"
@@ -2569,7 +2652,8 @@
                                         text={portableMessageText(message)}
                                         {client}
                                         profile={characterRenderProfile}
-                                        enabled={message.role === 'assistant'}
+                                        enabled={portableRuntime !== null &&
+                                            message.role === 'assistant'}
                                         variables={portableRuntimeVariables}
                                         backgroundMarkup={portableRuntimeBackground}
                                         lastCharacterMessage={portableRuntimeLastCharacterMessage}
@@ -2689,6 +2773,7 @@
                                             text={appState.chat.streaming_text}
                                             {client}
                                             profile={characterRenderProfile}
+                                            enabled={portableRuntime !== null}
                                             variables={portableRuntimeVariables}
                                             backgroundMarkup={portableRuntimeBackground}
                                             lastCharacterMessage={portableRuntimeLastCharacterMessage}
@@ -2933,6 +3018,41 @@
         min-width: 0;
         border-radius: var(--radius-md);
         background: var(--surface-sunken);
+    }
+
+    .portable-runtime-approval {
+        display: grid;
+        gap: 8px;
+        padding: 10px;
+        border: 1px solid var(--status-warning-border);
+        border-radius: var(--radius-md);
+        background: var(--status-warning-bg);
+        color: var(--ink);
+        font-size: 0.78rem;
+        line-height: 1.45;
+    }
+
+    .portable-runtime-approval p,
+    .portable-runtime-approval ul {
+        margin: 0;
+    }
+
+    .portable-runtime-approval ul {
+        display: grid;
+        gap: 2px;
+        padding-left: 18px;
+        color: var(--ink-muted);
+    }
+
+    .portable-runtime-approval button,
+    .portable-runtime-revoke {
+        min-height: 36px;
+        border: 1px solid var(--line-strong);
+        border-radius: 9px;
+        background: var(--surface);
+        color: var(--ink);
+        font: inherit;
+        cursor: pointer;
     }
 
     .portable-runtime-field {

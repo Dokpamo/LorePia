@@ -186,7 +186,7 @@ pub(crate) fn atomic_export_to_destination(
     result
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, any(target_os = "macos", test)))]
 fn create_export_partial(
     destination: &ValidatedExportDestination,
     partial: &std::ffi::OsStr,
@@ -211,7 +211,7 @@ fn create_export_partial(
     destination.windows_parent().create_partial(partial)
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, any(target_os = "macos", test)))]
 fn atomic_replace(
     destination: &ValidatedExportDestination,
     _temporary: &std::fs::File,
@@ -237,7 +237,7 @@ fn atomic_replace(
         .atomic_replace(temporary, destination.file_name())
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, any(target_os = "macos", test)))]
 fn sync_export_parent(destination: &ValidatedExportDestination) -> PlatformResult<()> {
     rustix::fs::fsync(destination.unix_parent())
         .map_err(|_| PlatformError::new(PlatformErrorCode::StorageUnavailable))
@@ -248,7 +248,7 @@ fn sync_export_parent(destination: &ValidatedExportDestination) -> PlatformResul
     destination.windows_parent().verify_identity()
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, any(target_os = "macos", test)))]
 fn remove_export_partial(destination: &ValidatedExportDestination, partial: &std::ffi::OsStr) {
     let _ = rustix::fs::unlinkat(
         destination.unix_parent(),

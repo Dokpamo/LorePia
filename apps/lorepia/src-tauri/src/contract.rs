@@ -712,6 +712,7 @@ mod prompt_platform_contract_tests {
                 "kind": "legacy_profile",
                 "provider_profile_id": "profile-contract"
             },
+            "variable_overrides": { "values": [] },
             "operation_nonce": "nonce-send-contract",
             "generation_attempt_id": null
         });

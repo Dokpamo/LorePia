@@ -1,5 +1,37 @@
 import '@testing-library/jest-dom/vitest';
 
+import { performPortableRegexOperation } from '../features/chat/portable-regex-operation';
+import { setPortableRegexWorkerFactoryForTests } from '../features/chat/portable-regex';
+
+setPortableRegexWorkerFactoryForTests(() => {
+    let messageListener: EventListenerOrEventListenerObject | null = null;
+    return {
+        addEventListener: (type: string, listener: EventListenerOrEventListenerObject) => {
+            if (type === 'message') messageListener = listener;
+        },
+        removeEventListener: (type: string, listener: EventListenerOrEventListenerObject) => {
+            if (type === 'message' && messageListener === listener) messageListener = null;
+        },
+        postMessage: (value: unknown) => {
+            const request = value as {
+                id: string;
+                request: Parameters<typeof performPortableRegexOperation>[0];
+            };
+            queueMicrotask(() => {
+                const event = {
+                    data: {
+                        id: request.id,
+                        result: performPortableRegexOperation(request.request),
+                    },
+                } as MessageEvent;
+                if (typeof messageListener === 'function') messageListener(event);
+                else messageListener?.handleEvent(event);
+            });
+        },
+        terminate: () => undefined,
+    } as unknown as Worker;
+});
+
 /*
  * jsdom ships no `matchMedia`, and the shell picks its layout from one. Tests
  * get a stub that reports the phone layout and never announces a change, so a

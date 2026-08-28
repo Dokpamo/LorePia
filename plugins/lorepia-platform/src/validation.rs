@@ -23,7 +23,6 @@ pub(crate) const MAXIMUM_REFERENCE_BYTES: usize = 256;
 #[cfg(any(mobile, target_os = "macos", windows, test))]
 pub(crate) const MAXIMUM_CREDENTIAL_READ_BYTES: usize = 32 * 1024;
 pub(crate) const MAXIMUM_CREDENTIAL_WRITE_BYTES: usize = 16 * 1024;
-#[cfg(any(mobile, target_os = "macos", windows, test))]
 pub(crate) const MAXIMUM_SENSITIVE_CAPTURE_BYTES: usize = 1024 * 1024;
 #[cfg(any(mobile, target_os = "macos", windows, test))]
 pub(crate) const MAXIMUM_EXPORT_NAME_BYTES: usize = 128;
@@ -74,7 +73,6 @@ pub(crate) fn validate_credential_read(value: &str) -> PlatformResult<()> {
     Ok(())
 }
 
-#[cfg(any(mobile, target_os = "macos", windows, test))]
 pub(crate) fn validate_credential_write(value: &str) -> PlatformResult<()> {
     if value.trim().is_empty() || value.len() > MAXIMUM_CREDENTIAL_WRITE_BYTES {
         return Err(PlatformError::new(PlatformErrorCode::InvalidInput));
@@ -82,7 +80,6 @@ pub(crate) fn validate_credential_write(value: &str) -> PlatformResult<()> {
     Ok(())
 }
 
-#[cfg(any(mobile, target_os = "macos", windows, test))]
 pub(crate) fn validate_sensitive_capture(value: &str, maximum_bytes: usize) -> PlatformResult<()> {
     if maximum_bytes == 0
         || maximum_bytes > MAXIMUM_SENSITIVE_CAPTURE_BYTES
@@ -284,14 +281,18 @@ fn pin_unix_export_parent(parent: &Path, data_root: &Path) -> PlatformResult<Own
         fstat(&parent_fd).map_err(|_| PlatformError::new(PlatformErrorCode::SelectionFailed))?;
     let data_root_stat = fstat(&data_root_fd)
         .map_err(|_| PlatformError::new(PlatformErrorCode::StorageUnavailable))?;
-    let parent_device = u64::try_from(parent_stat.st_dev)
+    let parent_device = platform_stat_id(parent_stat.st_dev)
         .map_err(|_| PlatformError::new(PlatformErrorCode::SelectionFailed))?;
-    let data_root_device = u64::try_from(data_root_stat.st_dev)
+    let data_root_device = platform_stat_id(data_root_stat.st_dev)
+        .map_err(|_| PlatformError::new(PlatformErrorCode::StorageUnavailable))?;
+    let parent_inode = platform_stat_id(parent_stat.st_ino)
+        .map_err(|_| PlatformError::new(PlatformErrorCode::SelectionFailed))?;
+    let data_root_inode = platform_stat_id(data_root_stat.st_ino)
         .map_err(|_| PlatformError::new(PlatformErrorCode::StorageUnavailable))?;
     if parent_metadata.dev() != parent_device
-        || parent_metadata.ino() != parent_stat.st_ino as u64
+        || parent_metadata.ino() != parent_inode
         || data_root_metadata.dev() != data_root_device
-        || data_root_metadata.ino() != data_root_stat.st_ino as u64
+        || data_root_metadata.ino() != data_root_inode
     {
         return Err(PlatformError::new(PlatformErrorCode::SelectionFailed));
     }
@@ -318,6 +319,14 @@ fn pin_unix_export_parent(parent: &Path, data_root: &Path) -> PlatformResult<Own
         current = ancestor;
     }
     Err(PlatformError::new(PlatformErrorCode::SelectionFailed))
+}
+
+#[cfg(all(unix, any(target_os = "macos", test)))]
+fn platform_stat_id<T>(value: T) -> Result<u64, <u64 as TryFrom<T>>::Error>
+where
+    u64: TryFrom<T>,
+{
+    u64::try_from(value)
 }
 
 #[cfg(any(mobile, target_os = "macos", windows, test))]

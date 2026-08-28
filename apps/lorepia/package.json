@@ -14,6 +14,7 @@
     "typecheck": "svelte-check --tsconfig ./tsconfig.json",
     "check": "npm run format:check && npm run lint && npm run typecheck",
     "test": "vitest run",
+    "posttest": "node ../../scripts/test_portable_lua_sandbox.mjs",
     "test:component": "vitest run src/features",
     "test:watch": "vitest"
   },

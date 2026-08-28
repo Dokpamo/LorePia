@@ -9,7 +9,7 @@ describe('portable display transforms', () => {
         lastMessageId: 5,
     };
 
-    it('renders tagged blocks and evaluates nested portable conditions', () => {
+    it('renders tagged blocks and evaluates nested portable conditions', async () => {
         const transforms = [
             {
                 pattern: '\\[Status\\]([\\s\\S]*?)\\[/Status\\]',
@@ -21,23 +21,27 @@ describe('portable display transforms', () => {
         const source = '[Status]\nHealth: 10/10\n[/Status]';
 
         expect(hasPortableDisplayTransform(source, transforms)).toBe(true);
-        expect(renderPortableDisplay(source, transforms, context)).toContain('<b>default</b>');
-        expect(renderPortableDisplay(source, transforms, context)).not.toContain('{{');
+        await expect(renderPortableDisplay(source, transforms, context)).resolves.toContain(
+            '<b>default</b>',
+        );
+        await expect(renderPortableDisplay(source, transforms, context)).resolves.not.toContain(
+            '{{',
+        );
     });
 
-    it('leaves image-command transforms to the verified asset resolver', () => {
+    it('leaves image-command transforms to the verified asset resolver', async () => {
         const source = '<img="Guide_smile">';
-        expect(
+        await expect(
             renderPortableDisplay(
                 source,
                 [{ pattern: '<img="([^"]+)">', replacement: '<img src="$1">', flags: 'g' }],
                 context,
             ),
-        ).toBe(source);
+        ).resolves.toBe(source);
     });
 
-    it('ignores malformed expressions while applying later compatible rules', () => {
-        expect(
+    it('ignores malformed expressions while applying later compatible rules', async () => {
+        await expect(
             renderPortableDisplay(
                 '[Radio]hello[/Radio]',
                 [
@@ -50,11 +54,11 @@ describe('portable display transforms', () => {
                 ],
                 context,
             ),
-        ).toBe('<pre>hello</pre>');
+        ).resolves.toBe('<pre>hello</pre>');
     });
 
-    it('evaluates compound conditions and else branches', () => {
-        expect(
+    it('evaluates compound conditions and else branches', async () => {
+        await expect(
             renderPortableDisplay(
                 'value',
                 [
@@ -67,6 +71,6 @@ describe('portable display transforms', () => {
                 ],
                 context,
             ),
-        ).toBe('yes / good');
+        ).resolves.toBe('yes / good');
     });
 });

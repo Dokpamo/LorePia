@@ -317,7 +317,6 @@ fn package_export_vertical_omits_credentials_and_origin_paths_and_reimports_exac
     for forbidden in [EXPORT_CREDENTIAL_CANARY.as_bytes(), origin_path.as_bytes()] {
         assert!(!contains_bytes(&authority_json, forbidden));
         assert!(!contains_bytes(authority_debug.as_bytes(), forbidden));
-        assert_tree_omits(first_data_root.path(), forbidden);
     }
 
     let prepared = first_core
@@ -368,7 +367,6 @@ fn package_export_vertical_omits_credentials_and_origin_paths_and_reimports_exac
         serde_json::to_vec(&second_authority).expect("encode reimported safe authority");
     for forbidden in [EXPORT_CREDENTIAL_CANARY.as_bytes(), origin_path.as_bytes()] {
         assert!(!contains_bytes(&second_authority_json, forbidden));
-        assert_tree_omits(second_data_root.path(), forbidden);
     }
 
     fs::write(
@@ -385,4 +383,17 @@ fn package_export_vertical_omits_credentials_and_origin_paths_and_reimports_exac
     let rendered_error = format!("{error:?}");
     assert!(!rendered_error.contains(EXPORT_CREDENTIAL_CANARY));
     assert!(!rendered_error.contains(&origin_path));
+
+    // Windows holds SQLite files with sharing modes that correctly reject a
+    // concurrent byte scan. Close every Core before inspecting durable files;
+    // the in-memory DTO/export assertions above remain the functional half of
+    // this regression test.
+    drop(second_prepared);
+    drop(second_core);
+    drop(prepared);
+    drop(first_core);
+    for forbidden in [EXPORT_CREDENTIAL_CANARY.as_bytes(), origin_path.as_bytes()] {
+        assert_tree_omits(first_data_root.path(), forbidden);
+        assert_tree_omits(second_data_root.path(), forbidden);
+    }
 }

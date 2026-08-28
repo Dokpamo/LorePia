@@ -1209,6 +1209,52 @@ describe('ChatPane live response', () => {
 });
 
 describe('ChatPane composer', () => {
+    it('keeps ordinary chat available while imported runtime code remains unapproved', async () => {
+        const profile: CharacterRenderProfileDto = {
+            character_id: 'character-1',
+            character_content_revision_id: 'revision-1',
+            assets: [],
+            background_markup: '',
+            toggle_schema: '',
+            initial_variables: {},
+            output_transforms: [],
+            display_transforms: [],
+            runtime_scripts: [
+                {
+                    id: 'script-1',
+                    name: 'Runtime',
+                    event: 'load',
+                    language: 'lua',
+                    source: '-- must remain inert',
+                    elevated_access: false,
+                },
+            ],
+            runtime_knowledge: [],
+            runtime_script_count: 1,
+        };
+        const createRuntime = vi.spyOn(PortableCharacterRuntime, 'create');
+        const client = {
+            getCharacterRenderProfile: vi.fn().mockResolvedValue(profile),
+        } as unknown as LorepiaClient;
+        const { controller, sendMessage, orchestrationController } = renderChatWithSettings(
+            chatReadyState(),
+            client,
+        );
+
+        await fireEvent.click(screen.getByRole('button', { name: '대화 설정' }));
+        await screen.findByRole('button', {
+            name: '이번 세션에서 캐릭터 기능 실행 허용',
+        });
+        const composer = screen.getByRole('textbox', { name: '메시지' });
+        await fireEvent.input(composer, { target: { value: '안전 모드 대화' } });
+        await fireEvent.click(screen.getByRole('button', { name: '메시지 보내기' }));
+
+        await waitFor(() => expect(sendMessage).toHaveBeenCalledWith('안전 모드 대화'));
+        expect(createRuntime).not.toHaveBeenCalled();
+        controller.destroy();
+        orchestrationController.destroy();
+    });
+
     it('sends customized character runtime values without persisting them as room settings', async () => {
         const profile: CharacterRenderProfileDto = {
             character_id: 'character-1',
@@ -1259,7 +1305,9 @@ describe('ChatPane composer', () => {
             effectiveText: (message: MessageDto) => message.content,
             close: vi.fn(),
         } as unknown as PortableCharacterRuntime;
-        vi.spyOn(PortableCharacterRuntime, 'create').mockResolvedValue(runtime);
+        const createRuntime = vi
+            .spyOn(PortableCharacterRuntime, 'create')
+            .mockResolvedValue(runtime);
         const client = {
             getCharacterRenderProfile: vi.fn().mockResolvedValue(profile),
         } as unknown as LorepiaClient;
@@ -1269,6 +1317,11 @@ describe('ChatPane composer', () => {
         );
 
         await fireEvent.click(screen.getByRole('button', { name: '대화 설정' }));
+        expect(createRuntime).not.toHaveBeenCalled();
+        expect(screen.queryByRole('switch', { name: '배경음악' })).not.toBeInTheDocument();
+        await fireEvent.click(
+            await screen.findByRole('button', { name: '이번 세션에서 캐릭터 기능 실행 허용' }),
+        );
         const musicToggle = await screen.findByRole('switch', { name: '배경음악' });
         await fireEvent.click(musicToggle);
         await waitFor(() => expect(setOption).toHaveBeenCalledWith('music', '1'));
