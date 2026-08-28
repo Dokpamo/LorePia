@@ -4,6 +4,7 @@ import choicePopoverSource from '../components/ChoicePopover.svelte?raw';
 import segmentedControlSource from '../components/SegmentedControl.svelte?raw';
 import toggleSwitchSource from '../components/ToggleSwitch.svelte?raw';
 import trustedAssetSource from '../features/assets/TrustedAsset.svelte?raw';
+import chatPaneSource from '../features/chat/ChatPane.svelte?raw';
 import orchestrationStudioSource from '../features/orchestration/OrchestrationStudio.svelte?raw';
 import capabilityPanelSource from '../features/providers/CapabilityPanel.svelte?raw';
 import personaPanelSource from '../features/personas/PersonaPanel.svelte?raw';
@@ -100,6 +101,21 @@ describe('semantic state styling', () => {
             /memory_supervisor\.error[^]*class="bounded-note error" role="alert"/u,
         );
         expect(orchestrationStudioSource).toMatch(/\.bounded-note\.error,/u);
+    });
+
+    it('keeps chat errors above the transcript instead of stretching them along the bottom edge', () => {
+        expect(chatPaneSource).toMatch(
+            /\.chat-error-region\s*\{[^}]*position:\s*absolute;[^}]*z-index:\s*24;/s,
+        );
+        expect(chatPaneSource).toMatch(
+            /app-shell\[data-layout='desktop'\][^{}]*\.chat-error-region\s*\{[^}]*top:\s*72px;/s,
+        );
+        expect(chatPaneSource).toMatch(
+            /\.chat-error-notice\s*\{[^}]*width:\s*min\(100%, 680px\);[^}]*var\(--status-error-bg\);[^}]*var\(--popover-shadow\);/s,
+        );
+        expect(chatPaneSource.match(/class="chat-error-dismiss"/g)).toHaveLength(3);
+        expect(chatPaneSource).not.toContain('class="state-panel error portable-runtime-status"');
+        expect(chatPaneSource).toContain('copyNotice !== portableRuntimeError');
     });
 
     it('uses the same disabled contract and moving control thumbs', () => {

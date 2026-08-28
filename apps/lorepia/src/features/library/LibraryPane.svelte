@@ -7,12 +7,21 @@
         CharacterDto,
         ContentPackageClientApi,
         ContentSourceExportReceiptDto,
+        AssetDeliverySelector,
         LorepiaClient,
     } from '../../lib/ipc/contracts';
     import { normalizeClientError } from '../../lib/ipc/errors';
     import TrustedAsset from '../assets/TrustedAsset.svelte';
 
     type ExportCapableClient = LorepiaClient & Partial<ContentPackageClientApi>;
+
+    const SHA256_PATTERN = /^[0-9a-f]{64}$/;
+
+    function avatarSelector(assetReference: string): AssetDeliverySelector {
+        return SHA256_PATTERN.test(assetReference)
+            ? { kind: 'sha256', sha256: assetReference }
+            : { kind: 'asset_id', asset_id: assetReference };
+    }
 
     interface Props {
         state: LorepiaAppState;
@@ -369,10 +378,7 @@
                                 {:else}
                                     <TrustedAsset
                                         {client}
-                                        selector={{
-                                            kind: 'asset_id',
-                                            asset_id: character.avatar_asset_id,
-                                        }}
+                                        selector={avatarSelector(character.avatar_asset_id)}
                                         expectedKind="image"
                                         alt={$tr('library.character.image', {
                                             name: character.name.slice(0, 256),

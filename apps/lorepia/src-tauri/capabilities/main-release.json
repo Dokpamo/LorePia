@@ -6,6 +6,8 @@
   "permissions": [
     "core:window:allow-start-dragging",
     "core:window:allow-internal-toggle-maximize",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
     "allow-bootstrap",
     "allow-get-memory-supervisor-status",
     "allow-list-characters",

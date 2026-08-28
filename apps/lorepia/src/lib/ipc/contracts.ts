@@ -629,6 +629,8 @@ export interface SendMessageInput {
     mode: ConversationMode;
     text: string;
     selection: GenerationSelectionInput;
+    /** Per-generation character/runtime values merged after stored prompt state. */
+    variable_overrides?: OrchestrationVariableMapDto;
     /** New and resume identities are mutually exclusive; supply exactly one. */
     operation_nonce?: string | null;
     generation_attempt_id?: string | null;

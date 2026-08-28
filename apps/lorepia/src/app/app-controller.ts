@@ -38,6 +38,7 @@ import {
     type ModelRouteDto,
     type ModelSyncJobDto,
     type NativeCaptureStatusDto,
+    type OrchestrationVariableMapDto,
     type ProviderCatalogRollbackPlanDto,
     type ProviderConnectionDto,
     type ProviderDiscoverySessionDto,
@@ -1110,7 +1111,10 @@ export class LorepiaAppController {
         return selection === null ? null : structuredClone(selection);
     }
 
-    async sendMessage(content: string): Promise<boolean> {
+    async sendMessage(
+        content: string,
+        variableOverrides: OrchestrationVariableMapDto = { values: [] },
+    ): Promise<boolean> {
         const state = get(this.mutable);
         if (state.chat.active_generation_id !== null) {
             this.announce(t('chat.notice.cancel_before_send'));
@@ -1141,6 +1145,7 @@ export class LorepiaAppController {
             expectedHead,
             text,
             ...generationSelectionOperationIdentity(selection),
+            JSON.stringify(variableOverrides),
         ]);
         const operationContext = this.generationOperationContext(operationIdentity);
         this.clearMemoryQueryRetryNotice();
@@ -1159,6 +1164,9 @@ export class LorepiaAppController {
                     mode: conversationState.selected_mode,
                     text,
                     selection,
+                    ...(variableOverrides.values.length === 0
+                        ? {}
+                        : { variable_overrides: structuredClone(variableOverrides) }),
                     ...this.generationOperationContextInput(operationContext),
                 },
                 streamId,

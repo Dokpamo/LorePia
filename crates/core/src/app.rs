@@ -1947,6 +1947,7 @@ impl Core {
             state.selected_mode,
             text,
             operation_context,
+            &VariableMap::default(),
             &profile,
             credential,
         )
@@ -2000,6 +2001,7 @@ impl Core {
             resolved.preserve_opaque_reasoning_state,
             None,
             None,
+            &variable_overrides,
             credential,
             None,
             false,
@@ -2657,6 +2659,32 @@ impl Core {
         provider_profile_id: &str,
         credential: Option<String>,
     ) -> CoreResult<GenerationId> {
+        self.send_message_to_branch_with_variables(
+            conversation_id,
+            branch_id,
+            expected_head,
+            mode,
+            text,
+            operation_context,
+            &VariableMap::default(),
+            provider_profile_id,
+            credential,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn send_message_to_branch_with_variables(
+        &self,
+        conversation_id: &ConversationId,
+        branch_id: &ConversationBranchId,
+        expected_head: Option<&MessageId>,
+        mode: ConversationMode,
+        text: &str,
+        operation_context: GenerationOperationContext<'_>,
+        variable_overrides: &VariableMap,
+        provider_profile_id: &str,
+        credential: Option<String>,
+    ) -> CoreResult<GenerationId> {
         let profile = self
             .inner
             .storage
@@ -2668,6 +2696,7 @@ impl Core {
             mode,
             text,
             operation_context,
+            variable_overrides,
             &profile,
             credential,
         )
@@ -2720,6 +2749,7 @@ impl Core {
             resolved.preserve_opaque_reasoning_state,
             None,
             None,
+            &variable_overrides,
             credential,
             None,
             false,
@@ -2741,7 +2771,32 @@ impl Core {
         target: &GenerationTarget,
         credential: ConnectionBoundCredential,
     ) -> CoreResult<GenerationId> {
-        let variable_overrides = VariableMap::default();
+        self.send_message_to_branch_with_connection_credential_and_variables(
+            conversation_id,
+            branch_id,
+            expected_head,
+            mode,
+            text,
+            operation_context,
+            &VariableMap::default(),
+            target,
+            credential,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn send_message_to_branch_with_connection_credential_and_variables(
+        &self,
+        conversation_id: &ConversationId,
+        branch_id: &ConversationBranchId,
+        expected_head: Option<&MessageId>,
+        mode: ConversationMode,
+        text: &str,
+        operation_context: GenerationOperationContext<'_>,
+        variable_overrides: &VariableMap,
+        target: &GenerationTarget,
+        credential: ConnectionBoundCredential,
+    ) -> CoreResult<GenerationId> {
         let prepared_target =
             self.prepare_same_branch_generation_target(SameBranchGenerationTargetInput {
                 conversation_id,
@@ -2752,7 +2807,7 @@ impl Core {
                 operation_context,
                 target,
                 prompt_preset_id: None,
-                variable_overrides: &variable_overrides,
+                variable_overrides,
             })?;
         let provider_temporal_context = GenerationProviderTemporalContext {
             operation_target: GenerationActionTargetIdentity::GenerationTarget {
@@ -2778,6 +2833,7 @@ impl Core {
             resolved.preserve_opaque_reasoning_state,
             None,
             None,
+            variable_overrides,
             credential,
             credential_authority,
             true,
@@ -2801,6 +2857,37 @@ impl Core {
         task_credential_broker: &dyn crate::TaskCredentialBroker,
         cancelled: watch::Receiver<bool>,
     ) -> CoreResult<GenerationId> {
+        self.send_message_to_branch_async_with_variables(
+            conversation_id,
+            branch_id,
+            expected_head,
+            mode,
+            text,
+            operation_context,
+            &VariableMap::default(),
+            provider_profile_id,
+            credential,
+            task_credential_broker,
+            cancelled,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn send_message_to_branch_async_with_variables(
+        &self,
+        conversation_id: &ConversationId,
+        branch_id: &ConversationBranchId,
+        expected_head: Option<&MessageId>,
+        mode: ConversationMode,
+        text: &str,
+        operation_context: GenerationOperationContext<'_>,
+        variable_overrides: &VariableMap,
+        provider_profile_id: &str,
+        credential: Option<String>,
+        task_credential_broker: &dyn crate::TaskCredentialBroker,
+        cancelled: watch::Receiver<bool>,
+    ) -> CoreResult<GenerationId> {
         self.send_message_to_branch_async_inner(
             conversation_id,
             branch_id,
@@ -2808,6 +2895,7 @@ impl Core {
             mode,
             text,
             operation_context,
+            variable_overrides,
             provider_profile_id,
             credential,
             None,
@@ -2832,6 +2920,39 @@ impl Core {
         task_credential_broker: &dyn crate::TaskCredentialBroker,
         cancelled: watch::Receiver<bool>,
     ) -> CoreResult<GenerationId> {
+        self.send_message_to_branch_async_with_credential_admission_lease_and_variables(
+            conversation_id,
+            branch_id,
+            expected_head,
+            mode,
+            text,
+            operation_context,
+            &VariableMap::default(),
+            provider_profile_id,
+            credential,
+            admission_lease,
+            task_credential_broker,
+            cancelled,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn send_message_to_branch_async_with_credential_admission_lease_and_variables(
+        &self,
+        conversation_id: &ConversationId,
+        branch_id: &ConversationBranchId,
+        expected_head: Option<&MessageId>,
+        mode: ConversationMode,
+        text: &str,
+        operation_context: GenerationOperationContext<'_>,
+        variable_overrides: &VariableMap,
+        provider_profile_id: &str,
+        credential: Option<String>,
+        admission_lease: GenerationCredentialAdmissionLease,
+        task_credential_broker: &dyn crate::TaskCredentialBroker,
+        cancelled: watch::Receiver<bool>,
+    ) -> CoreResult<GenerationId> {
         self.send_message_to_branch_async_inner(
             conversation_id,
             branch_id,
@@ -2839,6 +2960,7 @@ impl Core {
             mode,
             text,
             operation_context,
+            variable_overrides,
             provider_profile_id,
             credential,
             Some(admission_lease),
@@ -2857,6 +2979,7 @@ impl Core {
         mode: ConversationMode,
         text: &str,
         operation_context: GenerationOperationContext<'_>,
+        variable_overrides: &VariableMap,
         provider_profile_id: &str,
         credential: Option<String>,
         admission_lease: Option<GenerationCredentialAdmissionLease>,
@@ -2879,7 +3002,7 @@ impl Core {
                 temperature: Some(1.0),
                 max_output_tokens: Some(CORE_MAX_OUTPUT_TOKENS),
                 prompt_preset_id: None,
-                variable_overrides: &VariableMap::default(),
+                variable_overrides,
             },
             &provider_temporal_context.authority,
         )?;
@@ -2900,6 +3023,7 @@ impl Core {
             false,
             Some(1.0),
             Some(CORE_MAX_OUTPUT_TOKENS),
+            variable_overrides,
             credential,
             None,
             false,
@@ -2962,6 +3086,7 @@ impl Core {
             resolved.preserve_opaque_reasoning_state,
             None,
             None,
+            &variable_overrides,
             credential,
             None,
             false,
@@ -2989,7 +3114,37 @@ impl Core {
         task_credential_broker: &dyn crate::TaskCredentialBroker,
         cancelled: watch::Receiver<bool>,
     ) -> CoreResult<GenerationId> {
-        let variable_overrides = VariableMap::default();
+        self.send_message_to_branch_with_connection_credential_and_variables_async(
+            conversation_id,
+            branch_id,
+            expected_head,
+            mode,
+            text,
+            operation_context,
+            &VariableMap::default(),
+            target,
+            credential,
+            task_credential_broker,
+            cancelled,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn send_message_to_branch_with_connection_credential_and_variables_async(
+        &self,
+        conversation_id: &ConversationId,
+        branch_id: &ConversationBranchId,
+        expected_head: Option<&MessageId>,
+        mode: ConversationMode,
+        text: &str,
+        operation_context: GenerationOperationContext<'_>,
+        variable_overrides: &VariableMap,
+        target: &GenerationTarget,
+        credential: ConnectionBoundCredential,
+        task_credential_broker: &dyn crate::TaskCredentialBroker,
+        cancelled: watch::Receiver<bool>,
+    ) -> CoreResult<GenerationId> {
         let prepared_target =
             self.prepare_same_branch_generation_target(SameBranchGenerationTargetInput {
                 conversation_id,
@@ -3000,7 +3155,7 @@ impl Core {
                 operation_context,
                 target,
                 prompt_preset_id: None,
-                variable_overrides: &variable_overrides,
+                variable_overrides,
             })?;
         let provider_temporal_context = GenerationProviderTemporalContext {
             operation_target: GenerationActionTargetIdentity::GenerationTarget {
@@ -3026,6 +3181,7 @@ impl Core {
             resolved.preserve_opaque_reasoning_state,
             None,
             None,
+            variable_overrides,
             credential,
             credential_authority,
             true,
@@ -5477,6 +5633,7 @@ impl Core {
         mode: ConversationMode,
         text: &str,
         operation_context: GenerationOperationContext<'_>,
+        variable_overrides: &VariableMap,
         profile: &ProviderProfile,
         credential: Option<String>,
     ) -> CoreResult<GenerationId> {
@@ -5492,7 +5649,7 @@ impl Core {
                 temperature: Some(1.0),
                 max_output_tokens: Some(CORE_MAX_OUTPUT_TOKENS),
                 prompt_preset_id: None,
-                variable_overrides: &VariableMap::default(),
+                variable_overrides,
             },
             &provider_temporal_context.authority,
         )?;
@@ -5513,6 +5670,7 @@ impl Core {
             false,
             Some(1.0),
             Some(CORE_MAX_OUTPUT_TOKENS),
+            variable_overrides,
             credential,
             None,
             false,
@@ -5597,6 +5755,7 @@ impl Core {
             preserve_opaque_reasoning_state,
             temperature,
             max_output_tokens,
+            &VariableMap::default(),
             credential,
             credential_authority,
             require_exact_credential_authority,
@@ -5621,6 +5780,7 @@ impl Core {
         preserve_opaque_reasoning_state: bool,
         temperature: Option<f64>,
         max_output_tokens: Option<u32>,
+        variable_overrides: &VariableMap,
         credential: impl Into<GenerationCredential>,
         credential_authority: Option<ProviderCredentialAccessAuthority>,
         require_exact_credential_authority: bool,
@@ -5664,7 +5824,7 @@ impl Core {
             temperature,
             max_output_tokens,
             None,
-            &VariableMap::default(),
+            variable_overrides,
             prompt_wire_contract,
             &provider_temporal_context.operation_target,
             &provider_temporal_context.authority,
@@ -5702,7 +5862,7 @@ impl Core {
             prompt_preset_id: None,
             prompt_selection_authority: attempt.attempt.input.prompt_selection_authority.as_ref(),
             generation_attempt_id: Some(&attempt.attempt.generation_id),
-            variable_overrides: &lorepia_domain::VariableMap::default(),
+            variable_overrides,
             expected_plan_hash: None,
             prompt_wire_contract,
             resolution_time: attempt.attempt.created_at,
@@ -5851,6 +6011,7 @@ impl Core {
         preserve_opaque_reasoning_state: bool,
         temperature: Option<f64>,
         max_output_tokens: Option<u32>,
+        variable_overrides: &VariableMap,
         credential: impl Into<GenerationCredential> + Send,
         credential_authority: Option<ProviderCredentialAccessAuthority>,
         require_exact_credential_authority: bool,
@@ -5897,7 +6058,7 @@ impl Core {
             temperature,
             max_output_tokens,
             None,
-            &VariableMap::default(),
+            variable_overrides,
             prompt_wire_contract,
             &provider_temporal_context.operation_target,
             &provider_temporal_context.authority,
@@ -5946,7 +6107,7 @@ impl Core {
                         .prompt_selection_authority
                         .as_ref(),
                     generation_attempt_id: Some(&attempt.attempt.generation_id),
-                    variable_overrides: &VariableMap::default(),
+                    variable_overrides,
                     expected_plan_hash: None,
                     prompt_wire_contract,
                     resolution_time: attempt.attempt.created_at,
@@ -18176,6 +18337,7 @@ mod tests {
                 false,
                 Some(1.0),
                 Some(CORE_MAX_OUTPUT_TOKENS),
+                &VariableMap::default(),
                 None,
                 None,
                 false,

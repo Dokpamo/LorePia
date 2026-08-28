@@ -1229,6 +1229,51 @@ describe('LorepiaAppController ordinary generation operation nonce', () => {
         controller.destroy();
     });
 
+    it('sends character runtime variables and treats a changed value as request drift', async () => {
+        const inputs: SendMessageInput[] = [];
+        const controller = await readyController({
+            sendMessage: (input) => {
+                inputs.push(structuredClone(input));
+                return Promise.reject(permissionDenied());
+            },
+        });
+        const enabled = {
+            values: [
+                {
+                    variable: {
+                        scope: 'character' as const,
+                        namespace: null,
+                        id: 'background_music',
+                    },
+                    value: { type: 'text' as const, value: '1' },
+                },
+            ],
+        };
+        const disabled = {
+            values: [
+                {
+                    variable: {
+                        scope: 'character' as const,
+                        namespace: null,
+                        id: 'background_music',
+                    },
+                    value: { type: 'text' as const, value: '0' },
+                },
+            ],
+        };
+
+        await expect(controller.sendMessage('같은 요청', enabled)).resolves.toBe(false);
+        await expect(controller.sendMessage('같은 요청', enabled)).resolves.toBe(false);
+        await expect(controller.sendMessage('같은 요청', disabled)).resolves.toBe(false);
+
+        expect(inputs[0]?.variable_overrides).toEqual(enabled);
+        expect(inputs[1]?.variable_overrides).toEqual(enabled);
+        expect(nonceOf(itemAt(inputs, 1))).toBe(nonceOf(itemAt(inputs, 0)));
+        expect(inputs[2]?.variable_overrides).toEqual(disabled);
+        expect(nonceOf(itemAt(inputs, 2))).not.toBe(nonceOf(itemAt(inputs, 1)));
+        controller.destroy();
+    });
+
     it('uses an approved attempt id as the exclusive retry authority and rejects identity drift', async () => {
         const inputs: SendMessageInput[] = [];
         const controller = await readyController({

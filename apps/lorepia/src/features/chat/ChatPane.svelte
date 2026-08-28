@@ -32,6 +32,7 @@
         GenerationSelectionInput,
         MemoryRecordSourceNavigationDto,
         MessageDto,
+        OrchestrationVariableMapDto,
     } from '../../lib/ipc/contracts';
     import TrustedAsset from '../assets/TrustedAsset.svelte';
     import MemoryQueryRetryPanel from '../orchestration/MemoryQueryRetryPanel.svelte';
@@ -131,6 +132,8 @@
     let portableRuntime = $state<PortableCharacterRuntime | null>(null);
     let portableRuntimePhase = $state<'idle' | 'loading' | 'ready' | 'busy' | 'error'>('idle');
     let portableRuntimeError = $state<string | null>(null);
+    let dismissedChatError = $state<string | null>(null);
+    let dismissedInteractionError = $state<string | null>(null);
     let portableRuntimeRevision = $state(0);
     let portableRuntimeCreationEpoch = 0;
     let portableRuntimeLastOutputKey = '';
@@ -591,8 +594,37 @@
             ? `${appState.selected_conversation.id}:${appState.conversation_state.active_branch_id}`
             : '',
     );
+    const visibleChatError = $derived(
+        appState.chat.error !== dismissedChatError ? appState.chat.error : null,
+    );
+    const visibleInteractionError = $derived(
+        client !== undefined &&
+            interactionController !== null &&
+            interactionState.phase !== 'unavailable' &&
+            interactionState.error !== dismissedInteractionError
+            ? interactionState.error
+            : null,
+    );
+    const visiblePortableRuntimeError = $derived(
+        portableRuntimeError !== visibleChatError &&
+            portableRuntimeError !== visibleInteractionError
+            ? portableRuntimeError
+            : null,
+    );
+    const hasChatErrorNotices = $derived(
+        visibleChatError !== null ||
+            visiblePortableRuntimeError !== null ||
+            visibleInteractionError !== null,
+    );
+    const visibleCopyNotice = $derived(
+        copyNotice !== appState.chat.error &&
+            copyNotice !== portableRuntimeError &&
+            copyNotice !== interactionState.error
+            ? copyNotice
+            : '',
+    );
     const chatStatusText = $derived(
-        appState.chat.reconcile_notice ?? appState.chat.usage_label ?? copyNotice,
+        appState.chat.reconcile_notice ?? appState.chat.usage_label ?? visibleCopyNotice,
     );
     const selectedModelLabel = $derived.by(() => {
         const roomPresetId = orchestrationState?.workspace.room_config.generation_preset_id;
@@ -968,6 +1000,11 @@
         if (request === null || request.request_id === handledMessageFocusRequestId) return;
         handledMessageFocusRequestId = request.request_id;
         void focusMemorySource(request);
+    });
+
+    $effect(() => {
+        if (appState.chat.error === null) dismissedChatError = null;
+        if (interactionState.error === null) dismissedInteractionError = null;
     });
 
     $effect(() => {
@@ -1591,53 +1628,16 @@
         portableRuntimeRevision += 1;
     }
 
-    async function syncPortableRuntimeVariables(): Promise<void> {
-        const runtime = portableRuntime;
-        if (runtime === null) return;
-        const orchestration = orchestrationController;
-        const state = orchestrationState;
-        const customized = runtime.toggles.some(
-            (toggle) =>
-                runtime.optionValue(toggle.key) !==
-                (characterRenderProfile?.initial_variables[toggle.key] ?? ''),
-        );
-        if (
-            orchestration === undefined ||
-            state?.phase !== 'ready' ||
-            !state.workspace.room_config.supported_fields.variable_overrides
-        ) {
-            if (customized) {
-                throw new Error(
-                    '카드 옵션을 대화 생성 설정에 반영할 준비가 아직 끝나지 않았습니다.',
-                );
-            }
-            return;
-        }
-        const variables = runtime.generationVariables;
-        const runtimeKeys = new Set(Object.keys(variables));
-        const retained = state.workspace.room_config.variable_overrides.values.filter((entry) => {
-            if (entry.variable.scope !== 'character' || entry.variable.namespace !== null) {
-                return true;
-            }
-            const id = entry.variable.id.replace(/^toggle_/, '');
-            return !runtimeKeys.has(id);
-        });
-        const additions = Object.entries(variables)
+    function portableRuntimeVariableOverrides(
+        runtime: PortableCharacterRuntime,
+    ): OrchestrationVariableMapDto {
+        const additions = Object.entries(runtime.generationVariables)
             .sort(([left], [right]) => left.localeCompare(right))
             .map(([id, value]) => ({
                 variable: { scope: 'character' as const, namespace: null, id },
                 value: { type: 'text' as const, value },
             }));
-        const next = { values: [...retained, ...additions] };
-        if (
-            JSON.stringify(next) === JSON.stringify(state.workspace.room_config.variable_overrides)
-        ) {
-            return;
-        }
-        orchestration.stageRoomConfig({ variable_overrides: next });
-        if (!(await orchestration.saveRoomConfig())) {
-            throw new Error('카드 옵션을 대화 생성 설정에 저장하지 못했습니다.');
-        }
+        return { values: additions };
     }
 
     async function handlePortableRuntimeAction(action: string): Promise<void> {
@@ -1660,6 +1660,12 @@
         }
     }
 
+    function dismissPortableRuntimeError(): void {
+        const dismissedError = portableRuntimeError;
+        portableRuntimeError = null;
+        if (copyNotice === dismissedError) copyNotice = '';
+    }
+
     async function submit(): Promise<void> {
         if (sending || draft.trim().length === 0) return;
         sending = true;
@@ -1680,13 +1686,19 @@
             if (runtime !== null) {
                 portableRuntimePhase = 'busy';
                 portableRuntimeError = null;
-                await syncPortableRuntimeVariables();
                 const prepared = await runtime.prepareInput(content);
                 content = prepared.text;
                 handledByRuntime = !prepared.shouldSend;
                 portableRuntimePhase = 'ready';
             }
-            const accepted = handledByRuntime || (await controller.sendMessage(content));
+            const accepted =
+                handledByRuntime ||
+                (runtime === null
+                    ? await controller.sendMessage(content)
+                    : await controller.sendMessage(
+                          content,
+                          portableRuntimeVariableOverrides(runtime),
+                      ));
             if (accepted) {
                 draft = '';
                 composerFullscreen = false;
@@ -1994,8 +2006,6 @@
                             </label>
                         {/if}
                     {/each}
-                {:else if portableRuntimeError !== null}
-                    <p class="portable-runtime-error" role="alert">{portableRuntimeError}</p>
                 {/if}
             </section>
         {/if}
@@ -2153,6 +2163,53 @@
             </div>
         </header>
 
+        {#if hasChatErrorNotices}
+            <div class="chat-error-region" role="region" aria-label="채팅 오류 알림">
+                {#if visibleChatError !== null}
+                    <div class="chat-error-notice" role="alert">
+                        <p>{visibleChatError}</p>
+                        <button
+                            class="chat-error-dismiss"
+                            type="button"
+                            aria-label="채팅 오류 닫기"
+                            title="닫기"
+                            onclick={() => (dismissedChatError = visibleChatError)}
+                        >
+                            <X aria-hidden="true" />
+                        </button>
+                    </div>
+                {/if}
+                {#if visiblePortableRuntimeError !== null}
+                    <div class="chat-error-notice" role="alert">
+                        <p>{visiblePortableRuntimeError}</p>
+                        <button
+                            class="chat-error-dismiss"
+                            type="button"
+                            aria-label="캐릭터 기능 오류 닫기"
+                            title="닫기"
+                            onclick={dismissPortableRuntimeError}
+                        >
+                            <X aria-hidden="true" />
+                        </button>
+                    </div>
+                {/if}
+                {#if visibleInteractionError !== null}
+                    <div class="chat-error-notice" role="alert">
+                        <p>{visibleInteractionError}</p>
+                        <button
+                            class="chat-error-dismiss"
+                            type="button"
+                            aria-label="대화 상호작용 오류 닫기"
+                            title="닫기"
+                            onclick={() => (dismissedInteractionError = visibleInteractionError)}
+                        >
+                            <X aria-hidden="true" />
+                        </button>
+                    </div>
+                {/if}
+            </div>
+        {/if}
+
         {#if client !== undefined && characterRenderProfile !== null && portableRuntimeBackground !== ''}
             <div class="portable-runtime-background" aria-hidden="true">
                 <PortableMessage
@@ -2173,11 +2230,7 @@
                 <div class="interaction-status" role="status">
                     대화 상호작용을 복원하는 중입니다.
                 </div>
-            {:else if interactionState.error !== null}
-                <div class="interaction-status error" role="alert">
-                    {interactionState.error}
-                </div>
-            {:else if interactionState.announcement !== ''}
+            {:else if interactionState.error === null && interactionState.announcement !== ''}
                 <div class="interaction-status" role="status" aria-live="polite">
                     {interactionState.announcement}
                 </div>
@@ -2652,15 +2705,6 @@
             {/if}
         </div>
 
-        {#if appState.chat.error !== null}
-            <div class="state-panel error" role="alert">{appState.chat.error}</div>
-        {/if}
-        {#if portableRuntimeError !== null}
-            <div class="state-panel error portable-runtime-status" role="alert">
-                {portableRuntimeError}
-            </div>
-        {/if}
-
         {#if client !== undefined}
             <GenerationAttemptApprovals
                 {client}
@@ -2907,16 +2951,6 @@
         font: inherit;
     }
 
-    .portable-runtime-error {
-        padding: 8px 10px;
-        border: 1px solid var(--status-error-border);
-        border-radius: var(--radius-sm);
-        margin: 0;
-        color: var(--status-error-fg);
-        background: var(--status-error-bg);
-        font-size: 0.75rem;
-    }
-
     .portable-runtime-background {
         position: absolute;
         z-index: 20;
@@ -2925,9 +2959,91 @@
         pointer-events: none;
     }
 
-    .portable-runtime-status {
-        position: relative;
-        z-index: 21;
+    .chat-error-region {
+        display: grid;
+        position: absolute;
+        z-index: 24;
+        top: calc(
+            env(safe-area-inset-top) + var(--mobile-top-offset) + var(--mobile-top-action) + 10px
+        );
+        right: 0;
+        left: 0;
+        justify-items: center;
+        padding: 0 var(--chat-side-inset);
+        gap: 8px;
+        pointer-events: none;
+    }
+
+    .chat-error-notice {
+        display: grid;
+        width: min(100%, 680px);
+        min-height: 38px;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        padding: 7px 7px 7px 12px;
+        border: 1px solid var(--status-error-border);
+        border-radius: 11px;
+        background: var(--status-error-bg);
+        box-shadow: var(--popover-shadow);
+        color: var(--status-error-fg);
+        font-size: 0.75rem;
+        line-height: 1.45;
+        animation: chat-error-notice-enter 180ms var(--panel-open-easing) both;
+        gap: 10px;
+        pointer-events: auto;
+    }
+
+    .chat-error-notice p {
+        overflow-wrap: anywhere;
+        margin: 0;
+    }
+
+    .chat-error-dismiss {
+        display: grid;
+        width: 28px;
+        height: 28px;
+        min-width: 28px;
+        min-height: 28px;
+        padding: 0;
+        border: 0;
+        border-radius: var(--radius-sm);
+        background: transparent;
+        color: currentcolor;
+        place-items: center;
+    }
+
+    .chat-error-dismiss :global(svg) {
+        width: 15px;
+        height: 15px;
+        stroke-width: 1.9;
+    }
+
+    :global(.app-shell[data-layout='desktop']) .chat-error-region {
+        top: 72px;
+        padding-inline: var(--chat-side-inset);
+        transition:
+            right var(--panel-close-duration) var(--panel-close-easing),
+            padding-inline var(--panel-close-duration) var(--panel-close-easing);
+    }
+
+    :global(.app-shell[data-layout='desktop']) .chat-pane.utility-open > .chat-error-region {
+        right: var(--chat-utility-reserved-width);
+        padding-inline: var(--chat-utility-side-inset);
+        transition:
+            right var(--panel-open-duration) var(--panel-open-easing),
+            padding-inline var(--panel-open-duration) var(--panel-open-easing);
+    }
+
+    @keyframes chat-error-notice-enter {
+        from {
+            opacity: 0;
+            transform: translate3d(0, -6px, 0) scale(0.99);
+        }
+
+        to {
+            opacity: 1;
+            transform: translate3d(0, 0, 0) scale(1);
+        }
     }
 
     .chat-room-new-operation {
@@ -2981,14 +3097,6 @@
     .interaction-status {
         color: var(--ink-muted);
         font-size: 0.75rem;
-    }
-
-    .interaction-status.error {
-        padding: 8px 10px;
-        border: 1px solid var(--status-error-border);
-        border-radius: var(--radius-sm);
-        color: var(--status-error-fg);
-        background: var(--status-error-bg);
     }
 
     .interaction-surface {

@@ -4,6 +4,7 @@ import { get } from 'svelte/store';
 import { afterEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 
 import type {
+    CharacterRenderProfileDto,
     ChatEventKindDto,
     ChatStreamItemDto,
     LorepiaClient,
@@ -20,6 +21,7 @@ import {
     OrchestrationController,
 } from '../orchestration/orchestration-controller';
 import ChatPane from './ChatPane.svelte';
+import { PortableCharacterRuntime } from './portable-runtime';
 
 class ControlledResizeObserver implements ResizeObserver {
     static instances: ControlledResizeObserver[] = [];
@@ -200,6 +202,30 @@ describe('ChatPane empty state', () => {
         ).not.toBeInTheDocument();
         expect(getComputedStyle(placeholder).borderStyle).toBe('none');
         expect(getComputedStyle(placeholder).borderWidth).toBe('0px');
+        controller.destroy();
+    });
+});
+
+describe('ChatPane error notices', () => {
+    it('floats persistent chat errors inside the canvas and lets the user dismiss them', async () => {
+        const appState = chatReadyState();
+        appState.chat = {
+            ...appState.chat,
+            phase: 'error',
+            error: '생성 설정을 적용하지 못했습니다.',
+        };
+        const controller = new LorepiaAppController({} as LorepiaClient);
+        const rendered = render(ChatPane, { appState, controller, desktop: true });
+
+        const region = screen.getByRole('region', { name: '채팅 오류 알림' });
+        expect(region.closest('.chat-pane')).toBeInTheDocument();
+        expect(within(region).getByRole('alert')).toHaveTextContent(
+            '생성 설정을 적용하지 못했습니다.',
+        );
+        expect(rendered.container.querySelector('.chat-pane > .state-panel.error')).toBeNull();
+
+        await fireEvent.click(screen.getByRole('button', { name: '채팅 오류 닫기' }));
+        expect(screen.queryByRole('region', { name: '채팅 오류 알림' })).not.toBeInTheDocument();
         controller.destroy();
     });
 });
@@ -1183,6 +1209,88 @@ describe('ChatPane live response', () => {
 });
 
 describe('ChatPane composer', () => {
+    it('sends customized character runtime values without persisting them as room settings', async () => {
+        const profile: CharacterRenderProfileDto = {
+            character_id: 'character-1',
+            character_content_revision_id: 'revision-1',
+            assets: [],
+            background_markup: '',
+            toggle_schema: 'music=배경음악=toggle',
+            initial_variables: { music: '0' },
+            output_transforms: [],
+            display_transforms: [],
+            runtime_scripts: [
+                {
+                    id: 'script-1',
+                    name: 'Runtime',
+                    event: 'load',
+                    language: 'lua',
+                    source: '-- no-op',
+                    elevated_access: false,
+                },
+            ],
+            runtime_knowledge: [],
+            runtime_script_count: 1,
+        };
+        let music = '0';
+        const setOption = vi.fn((_key: string, value: string) => {
+            music = value;
+            return Promise.resolve();
+        });
+        const runtime = {
+            toggles: [{ key: 'music', label: '배경음악', kind: 'toggle', choices: [] }],
+            get generationVariables() {
+                return { music };
+            },
+            get variables() {
+                return { music };
+            },
+            backgroundMarkup: '',
+            auxiliarySelection: null,
+            optionValue: (key: string) => (key === 'music' ? music : ''),
+            setOption,
+            setAuxiliarySelection: vi.fn(),
+            setMessages: vi.fn(),
+            refreshDisplay: vi.fn().mockResolvedValue(undefined),
+            prepareInput: vi.fn((text: string) => Promise.resolve({ text, shouldSend: true })),
+            afterOutput: vi.fn().mockResolvedValue(undefined),
+            handleAction: vi.fn().mockResolvedValue(undefined),
+            displayText: (message: MessageDto) => message.content,
+            effectiveText: (message: MessageDto) => message.content,
+            close: vi.fn(),
+        } as unknown as PortableCharacterRuntime;
+        vi.spyOn(PortableCharacterRuntime, 'create').mockResolvedValue(runtime);
+        const client = {
+            getCharacterRenderProfile: vi.fn().mockResolvedValue(profile),
+        } as unknown as LorepiaClient;
+        const { controller, sendMessage, orchestrationController } = renderChatWithSettings(
+            chatReadyState(),
+            client,
+        );
+
+        await fireEvent.click(screen.getByRole('button', { name: '대화 설정' }));
+        const musicToggle = await screen.findByRole('switch', { name: '배경음악' });
+        await fireEvent.click(musicToggle);
+        await waitFor(() => expect(setOption).toHaveBeenCalledWith('music', '1'));
+
+        const composer = screen.getByRole('textbox', { name: '메시지' });
+        await fireEvent.input(composer, { target: { value: '카드 옵션 테스트' } });
+        await fireEvent.click(screen.getByRole('button', { name: '메시지 보내기' }));
+
+        await waitFor(() =>
+            expect(sendMessage).toHaveBeenCalledWith('카드 옵션 테스트', {
+                values: [
+                    {
+                        variable: { scope: 'character', namespace: null, id: 'music' },
+                        value: { type: 'text', value: '1' },
+                    },
+                ],
+            }),
+        );
+        controller.destroy();
+        orchestrationController.destroy();
+    });
+
     it.each(['안녕', 'こんにちは', '你好'])(
         'does not submit %s when Enter confirms an IME composition',
         async (draft) => {

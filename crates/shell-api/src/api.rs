@@ -4,7 +4,7 @@ use lorepia_core::{
     CORE_API_VERSION, ConnectionBoundCredential, ConversationBranchId, ConversationId,
     ConversationMode, Core, CoreConfig, CoreError, DiscoveryRecoveryOwner, GenerationId,
     GenerationOperationContext, GenerationTarget, InspectionId, MessageId, MessageRole,
-    ProviderConnectionId, ProviderCredentialAccessAuthority, RuntimePromptMessage,
+    ProviderConnectionId, ProviderCredentialAccessAuthority, RuntimePromptMessage, VariableMap,
 };
 use serde::{Deserialize, Serialize};
 
@@ -94,7 +94,7 @@ pub struct RuntimeTextGenerationDto {
     pub result: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SendMessageInput {
     pub conversation_id: String,
@@ -103,6 +103,9 @@ pub struct SendMessageInput {
     pub mode: ConversationModeDto,
     pub text: String,
     pub selection: GenerationSelectionInput,
+    /// Per-generation character/runtime values merged after stored prompt state.
+    #[serde(default)]
+    pub variable_overrides: VariableMap,
     /// Caller-owned idempotency identity. Missing fields still deserialize so
     /// older clients receive a bounded validation error instead of a schema
     /// decoding failure.
@@ -602,13 +605,14 @@ impl ShellApi {
                     credential,
                     admission_lease: _admission_lease,
                 },
-            ) => self.core.send_message_to_branch(
+            ) => self.core.send_message_to_branch_with_variables(
                 &ConversationId(input.conversation_id.clone()),
                 &ConversationBranchId(input.branch_id.clone()),
                 expected_head.as_ref(),
                 input.mode.into(),
                 &input.text,
                 operation_context.as_core(),
+                &input.variable_overrides,
                 &provider_profile_id,
                 credential.map(crate::SecretCredential::into_core_value),
             ),
@@ -623,21 +627,23 @@ impl ShellApi {
             ) => {
                 validate_identifier("connection_id", &connection_id)?;
                 let target = GenerationTarget::from(target);
-                self.core.send_message_to_branch_with_connection_credential(
-                    &ConversationId(input.conversation_id.clone()),
-                    &ConversationBranchId(input.branch_id.clone()),
-                    expected_head.as_ref(),
-                    input.mode.into(),
-                    &input.text,
-                    operation_context.as_core(),
-                    &target,
-                    connection_bound_credential(
-                        connection_id,
-                        credential,
-                        access_authority,
-                        dispatch_lease,
-                    ),
-                )
+                self.core
+                    .send_message_to_branch_with_connection_credential_and_variables(
+                        &ConversationId(input.conversation_id.clone()),
+                        &ConversationBranchId(input.branch_id.clone()),
+                        expected_head.as_ref(),
+                        input.mode.into(),
+                        &input.text,
+                        operation_context.as_core(),
+                        &input.variable_overrides,
+                        &target,
+                        connection_bound_credential(
+                            connection_id,
+                            credential,
+                            access_authority,
+                            dispatch_lease,
+                        ),
+                    )
             }
             _ => {
                 return Err(ShellError::from(CoreError::invalid(
@@ -656,6 +662,10 @@ impl ShellApi {
 
     /// Starts a same-branch generation after resolving every prompt-time task
     /// dependency, including durable semantic embedding work.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the complete credential and runtime-variable routing matrix stays visible"
+    )]
     pub async fn send_message_to_branch_async(
         &self,
         input: SendMessageInput,
@@ -675,6 +685,8 @@ impl ShellApi {
         )?;
         let receiver = self.core.subscribe_events();
         let expected_head = input.expected_head.map(MessageId);
+        let conversation_id = ConversationId(input.conversation_id.clone());
+        let branch_id = ConversationBranchId(input.branch_id.clone());
         let broker = ShellTaskCredentialBroker { credential_reader };
         let generation_id = match (input.selection, credential.into_kind()) {
             (
@@ -689,13 +701,14 @@ impl ShellApi {
                 let credential = credential.map(crate::SecretCredential::into_core_value);
                 if let Some(admission_lease) = admission_lease {
                     self.core
-                        .send_message_to_branch_async_with_credential_admission_lease(
-                            &ConversationId(input.conversation_id.clone()),
-                            &ConversationBranchId(input.branch_id.clone()),
+                        .send_message_to_branch_async_with_credential_admission_lease_and_variables(
+                            &conversation_id,
+                            &branch_id,
                             expected_head.as_ref(),
                             input.mode.into(),
                             &input.text,
                             operation_context.as_core(),
+                            &input.variable_overrides,
                             &provider_profile_id,
                             credential,
                             admission_lease,
@@ -705,13 +718,14 @@ impl ShellApi {
                         .await
                 } else {
                     self.core
-                        .send_message_to_branch_async(
-                            &ConversationId(input.conversation_id.clone()),
-                            &ConversationBranchId(input.branch_id.clone()),
+                        .send_message_to_branch_async_with_variables(
+                            &conversation_id,
+                            &branch_id,
                             expected_head.as_ref(),
                             input.mode.into(),
                             &input.text,
                             operation_context.as_core(),
+                            &input.variable_overrides,
                             &provider_profile_id,
                             credential,
                             &broker,
@@ -731,13 +745,14 @@ impl ShellApi {
             ) => {
                 validate_identifier("connection_id", &connection_id)?;
                 self.core
-                    .send_message_to_branch_with_connection_credential_async(
-                        &ConversationId(input.conversation_id.clone()),
-                        &ConversationBranchId(input.branch_id.clone()),
+                    .send_message_to_branch_with_connection_credential_and_variables_async(
+                        &conversation_id,
+                        &branch_id,
                         expected_head.as_ref(),
                         input.mode.into(),
                         &input.text,
                         operation_context.as_core(),
+                        &input.variable_overrides,
                         &GenerationTarget::from(target),
                         connection_bound_credential(
                             connection_id,
@@ -1381,7 +1396,10 @@ mod tests {
         time::Duration,
     };
 
-    use lorepia_core::{Core, CoreConfig, ProviderProfile};
+    use lorepia_core::{
+        Core, CoreConfig, ProviderProfile, VariableId, VariableMap, VariableRef, VariableScope,
+        VariableValue,
+    };
     use tempfile::{NamedTempFile, tempdir};
 
     use crate::{
@@ -1430,6 +1448,7 @@ mod tests {
         .expect("older send payloads must still decode");
         assert_eq!(legacy.operation_nonce, None);
         assert_eq!(legacy.generation_attempt_id, None);
+        assert_eq!(legacy.variable_overrides, VariableMap::default());
 
         let valid_ascii = "n".repeat(64);
         let valid_unicode = "가".repeat(42);
@@ -1634,6 +1653,7 @@ mod tests {
                             generation_preset_id: "synthetic-preset".to_owned(),
                         },
                     },
+                    variable_overrides: VariableMap::default(),
                     operation_nonce: Some("shell-target-unbound-credential".to_owned()),
                     generation_attempt_id: None,
                 },
@@ -1690,6 +1710,15 @@ mod tests {
             .expect("state");
         let (_task_cancel, task_cancelled) = tokio::sync::watch::channel(false);
         let admission_drops = Arc::new(AtomicUsize::new(0));
+        let mut runtime_variables = VariableMap::default();
+        runtime_variables.insert(
+            VariableRef {
+                scope: VariableScope::Character,
+                namespace: None,
+                id: VariableId::from("background_music"),
+            },
+            VariableValue::Text("1".to_owned()),
+        );
 
         let started = shell
             .send_message_to_branch_async(
@@ -1700,6 +1729,7 @@ mod tests {
                     mode: ConversationModeDto::Chat,
                     text: "first".into(),
                     selection: synthetic_profile_selection(),
+                    variable_overrides: runtime_variables,
                     operation_nonce: Some("shell-send-first".to_owned()),
                     generation_attempt_id: None,
                 },

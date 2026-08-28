@@ -280,6 +280,52 @@ describe('LibraryPane safe local sources', () => {
         controller.destroy();
     });
 
+    it('resolves a content-addressed character avatar by sha256', async () => {
+        const sha256 = 'ab'.repeat(32);
+        const state: LorepiaAppState = structuredClone(INITIAL_APP_STATE);
+        state.library = {
+            phase: 'ready',
+            error: null,
+            characters: [
+                {
+                    id: 'character-1',
+                    name: '라온',
+                    description: '합성 캐릭터',
+                    source_hash: 'synthetic',
+                    avatar_asset_id: sha256,
+                    created_at: '2026-08-03T00:00:00Z',
+                },
+            ],
+        };
+        const resolveAssetDelivery = vi.fn().mockResolvedValue({
+            asset_id: 'avatar-1',
+            sha256,
+            media_type: 'image/png',
+            kind: 'image',
+            size_bytes: 1024,
+            width: 64,
+            height: 64,
+            duration_ms: null,
+            url: `lorepia-asset://sha256/${sha256}`,
+        });
+        const client = { resolveAssetDelivery } as unknown as LorepiaClient;
+        const controller = new LorepiaAppController(client);
+
+        render(LibraryPane, {
+            state,
+            controller,
+            client,
+            onOpenConversations: () => undefined,
+        });
+
+        await screen.findByRole('img', { name: '라온 캐릭터 이미지' });
+        expect(resolveAssetDelivery).toHaveBeenCalledWith({
+            selector: { kind: 'sha256', sha256 },
+        });
+
+        controller.destroy();
+    });
+
     it('exports a committed character by durable ID and shows only safe receipt evidence', async () => {
         const exportContentSource = vi.fn().mockResolvedValue({
             kind: 'character_card_v3',
