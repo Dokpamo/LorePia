@@ -1346,15 +1346,14 @@ impl Drop for CoreInner {
     }
 }
 
-fn interaction_derived_supervisor_delay(
-    now: DateTime<Utc>,
-    pending_count: u64,
-    next_available_at: Option<DateTime<Utc>>,
-) -> Duration {
-    if pending_count == 0 {
+fn interaction_derived_supervisor_delay(storage: &Storage, now: DateTime<Utc>) -> Duration {
+    let Ok(status) = storage.interaction_derived_event_supervisor_status() else {
+        return INTERACTION_DERIVED_SUPERVISOR_ERROR_POLL;
+    };
+    if status.pending_count == 0 {
         return INTERACTION_DERIVED_SUPERVISOR_IDLE_POLL;
     }
-    let Some(next_available_at) = next_available_at else {
+    let Some(next_available_at) = status.next_available_at else {
         return INTERACTION_DERIVED_SUPERVISOR_ERROR_POLL;
     };
     next_available_at
@@ -1465,23 +1464,16 @@ impl Core {
 
     fn start_interaction_derived_supervisor(&self) {
         let weak_inner = Arc::downgrade(&self.inner);
+        let mut delay = interaction_derived_supervisor_delay(&self.inner.storage, Utc::now());
         self.inner.runtime.spawn(async move {
             loop {
+                time::sleep(delay).await;
                 let Some(inner) = weak_inner.upgrade() else {
                     break;
                 };
                 let core = Core { inner };
                 let _ = core.drain_interaction_derived_events();
-                let delay = match core.storage().interaction_derived_event_supervisor_status() {
-                    Ok(status) => interaction_derived_supervisor_delay(
-                        Utc::now(),
-                        status.pending_count,
-                        status.next_available_at,
-                    ),
-                    Err(_) => INTERACTION_DERIVED_SUPERVISOR_ERROR_POLL,
-                };
-                drop(core);
-                time::sleep(delay).await;
+                delay = interaction_derived_supervisor_delay(core.storage(), Utc::now());
             }
         });
     }
