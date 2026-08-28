@@ -628,7 +628,7 @@ impl PinnedExportDirectory {
     ) -> PlatformResult<()> {
         self.verify_identity()
             .map_err(|error| windows_export_test_error("verify parent before rename", error))?;
-        rename_open_file_at(source, &self.parent, destination_name)
+        rename_open_file_in_place(source, destination_name)
             .map_err(|error| windows_export_test_error("rename open file", error))?;
         source
             .sync_all()
@@ -932,11 +932,7 @@ const _: () = {
 };
 
 #[allow(unsafe_code)]
-fn rename_open_file_at(
-    source: &File,
-    parent: &File,
-    destination_name: &OsStr,
-) -> PlatformResult<()> {
+fn rename_open_file_in_place(source: &File, destination_name: &OsStr) -> PlatformResult<()> {
     const REPLACE_IF_EXISTS: u32 = 0x0000_0001;
 
     let mut components = Path::new(destination_name).components();
@@ -967,13 +963,13 @@ fn rename_open_file_at(
     let info = buffer.as_mut_ptr().cast::<RawFileRenameInfo>();
 
     // SAFETY: `buffer` is pointer-aligned and large enough for the fixed
-    // FILE_RENAME_INFO header plus the exact UTF-16 basename. Both file handles
-    // remain live for the synchronous call; source was opened with DELETE
-    // authority and parent is the retained, non-reparse directory handle.
+    // FILE_RENAME_INFO header plus the exact UTF-16 basename. A null root with
+    // a simple name renames within the source handle's current directory. The
+    // source was opened with DELETE authority and its pinned parent stays live.
     unsafe {
         info.write(RawFileRenameInfo {
             replace_if_exists_or_flags: REPLACE_IF_EXISTS,
-            root_directory: ::windows::Win32::Foundation::HANDLE(parent.as_raw_handle()),
+            root_directory: ::windows::Win32::Foundation::HANDLE::default(),
             file_name_length,
             file_name: [0],
         });
