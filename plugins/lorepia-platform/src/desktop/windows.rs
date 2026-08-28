@@ -271,11 +271,22 @@ pub(super) fn unprotect_current_user_data(
 }
 
 /// Marks an already-opened and verified file handle for deletion on close.
-#[allow(unsafe_code)]
 pub(super) fn delete_verified_file(file: &std::fs::File) -> PlatformResult<()> {
+    delete_file_with_error(file, PlatformErrorCode::CredentialRecoveryRequired)
+}
+
+fn delete_export_file(file: &std::fs::File) -> PlatformResult<()> {
+    delete_file_with_error(file, PlatformErrorCode::StorageUnavailable)
+}
+
+#[allow(unsafe_code)]
+fn delete_file_with_error(
+    file: &std::fs::File,
+    error_code: PlatformErrorCode,
+) -> PlatformResult<()> {
     let disposition = FILE_DISPOSITION_INFO { DeleteFile: true };
     let length = u32::try_from(std::mem::size_of_val(&disposition))
-        .map_err(|_| PlatformError::new(PlatformErrorCode::CredentialRecoveryRequired))?;
+        .map_err(|_| PlatformError::new(error_code))?;
     let handle = ::windows::Win32::Foundation::HANDLE(file.as_raw_handle());
     // SAFETY: `file` remains open through this synchronous call and the input
     // pointer references a correctly sized FILE_DISPOSITION_INFO. The caller
@@ -288,7 +299,7 @@ pub(super) fn delete_verified_file(file: &std::fs::File) -> PlatformResult<()> {
             length,
         )
     }
-    .map_err(|_| PlatformError::new(PlatformErrorCode::CredentialRecoveryRequired))
+    .map_err(|_| PlatformError::new(error_code))
 }
 
 pub(super) fn open_verified_staging_file_for_delete(path: &Path) -> PlatformResult<std::fs::File> {
@@ -515,7 +526,7 @@ struct WindowsFileIdentity {
 pub(crate) struct PinnedExportDirectory {
     path: PathBuf,
     identity: WindowsFileIdentity,
-    parent: File,
+    parent: RefCell<File>,
     _guards: Vec<File>,
 }
 
@@ -556,7 +567,7 @@ pub(crate) fn pin_export_directory(
     let pinned = PinnedExportDirectory {
         path: canonical_parent,
         identity,
-        parent: parent_handle,
+        parent: RefCell::new(parent_handle),
         _guards: guards,
     };
     pinned.verify_identity()?;
@@ -565,8 +576,8 @@ pub(crate) fn pin_export_directory(
 
 impl PinnedExportDirectory {
     pub(crate) fn verify_identity(&self) -> PlatformResult<()> {
-        let handle_metadata = self
-            .parent
+        let parent = self.parent.borrow();
+        let handle_metadata = parent
             .metadata()
             .map_err(|_| PlatformError::new(PlatformErrorCode::StorageUnavailable))?;
         let metadata = std::fs::symlink_metadata(&self.path)
@@ -576,7 +587,7 @@ impl PinnedExportDirectory {
             || metadata.file_attributes()
                 & ::windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT.0
                 != 0
-            || windows_file_identity(&self.parent, PlatformErrorCode::StorageUnavailable)?
+            || windows_file_identity(&parent, PlatformErrorCode::StorageUnavailable)?
                 != self.identity
             || windows_path_identity(&self.path, PlatformErrorCode::StorageUnavailable)?
                 != self.identity
@@ -624,12 +635,26 @@ impl PinnedExportDirectory {
     pub(crate) fn atomic_replace(
         &self,
         source: &File,
+        source_name: &OsStr,
         destination_name: &OsStr,
     ) -> PlatformResult<()> {
         self.verify_identity()
             .map_err(|error| windows_export_test_error("verify parent before rename", error))?;
-        rename_open_file_in_place(source, destination_name)
-            .map_err(|error| windows_export_test_error("rename open file", error))?;
+        self.verify_child(source, source_name)
+            .map_err(|error| windows_export_test_error("verify partial before rename", error))?;
+        self.replace_parent_share_mode(promotion_export_directory_share_mode())
+            .map_err(|error| windows_export_test_error("enter promotion share mode", error))?;
+        let rename_result =
+            rename_open_file_in_pinned_directory(source, &self.path, destination_name);
+        let restore_result = self.replace_parent_share_mode(pinned_export_directory_share_mode());
+        if let Err(error) = restore_result {
+            let _ = delete_export_file(source);
+            return Err(windows_export_test_error(
+                "restore pinned parent after rename",
+                error,
+            ));
+        }
+        rename_result.map_err(|error| windows_export_test_error("rename open file", error))?;
         source
             .sync_all()
             .map_err(|error| windows_export_test_error("flush renamed file", error))?;
@@ -662,6 +687,39 @@ impl PinnedExportDirectory {
         Ok(())
     }
 
+    fn verify_child(&self, source: &File, source_name: &OsStr) -> PlatformResult<()> {
+        validate_export_file_name(source_name)?;
+        let metadata = source
+            .metadata()
+            .map_err(|_| PlatformError::new(PlatformErrorCode::StorageUnavailable))?;
+        if !metadata.is_file()
+            || metadata.file_attributes()
+                & ::windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT.0
+                != 0
+            || windows_file_identity(source, PlatformErrorCode::StorageUnavailable)?
+                != windows_path_identity(
+                    &self.path.join(source_name),
+                    PlatformErrorCode::StorageUnavailable,
+                )?
+        {
+            return Err(PlatformError::new(PlatformErrorCode::StorageUnavailable));
+        }
+        Ok(())
+    }
+
+    fn replace_parent_share_mode(&self, share_mode: u32) -> PlatformResult<()> {
+        let (replacement, identity) = open_verified_export_directory(
+            &self.path,
+            PlatformErrorCode::StorageUnavailable,
+            share_mode,
+        )?;
+        if identity != self.identity {
+            return Err(PlatformError::new(PlatformErrorCode::StorageUnavailable));
+        }
+        drop(self.parent.replace(replacement));
+        Ok(())
+    }
+
     pub(crate) fn remove_partial(&self, name: &OsStr) {
         if self.verify_identity().is_ok() {
             let _ = std::fs::remove_file(self.path.join(name));
@@ -680,8 +738,6 @@ fn pin_canonical_directory_chain(
     path: &Path,
     error_code: PlatformErrorCode,
 ) -> PlatformResult<(Vec<File>, WindowsFileIdentity)> {
-    use std::os::windows::fs::OpenOptionsExt;
-
     let mut ancestors = path
         .ancestors()
         .filter(|ancestor| !ancestor.as_os_str().is_empty())
@@ -690,38 +746,53 @@ fn pin_canonical_directory_chain(
     let mut guards = Vec::with_capacity(ancestors.len());
     let mut leaf_identity = None;
     for ancestor in ancestors {
-        let file = std::fs::OpenOptions::new()
-            .read(true)
-            .share_mode(pinned_export_directory_share_mode())
-            .custom_flags(
-                (::windows::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS
-                    | ::windows::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT)
-                    .0,
-            )
-            .open(ancestor)
-            .map_err(|_| PlatformError::new(error_code))?;
-        let handle_metadata = file
-            .metadata()
-            .map_err(|_| PlatformError::new(error_code))?;
-        let path_metadata =
-            std::fs::symlink_metadata(ancestor).map_err(|_| PlatformError::new(error_code))?;
-        let reparse = ::windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT.0;
-        if !handle_metadata.is_dir()
-            || !path_metadata.is_dir()
-            || handle_metadata.file_attributes() & reparse != 0
-            || path_metadata.file_attributes() & reparse != 0
-        {
-            return Err(PlatformError::new(error_code));
-        }
-        let handle_identity = windows_file_identity(&file, error_code)?;
-        if handle_identity != windows_path_identity(ancestor, error_code)? {
-            return Err(PlatformError::new(error_code));
-        }
+        let (file, handle_identity) = open_verified_export_directory(
+            ancestor,
+            error_code,
+            pinned_export_directory_share_mode(),
+        )?;
         leaf_identity = Some(handle_identity);
         guards.push(file);
     }
     let identity = leaf_identity.ok_or_else(|| PlatformError::new(error_code))?;
     Ok((guards, identity))
+}
+
+fn open_verified_export_directory(
+    path: &Path,
+    error_code: PlatformErrorCode,
+    share_mode: u32,
+) -> PlatformResult<(File, WindowsFileIdentity)> {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(share_mode)
+        .custom_flags(
+            (::windows::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS
+                | ::windows::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT)
+                .0,
+        )
+        .open(path)
+        .map_err(|_| PlatformError::new(error_code))?;
+    let handle_metadata = file
+        .metadata()
+        .map_err(|_| PlatformError::new(error_code))?;
+    let path_metadata =
+        std::fs::symlink_metadata(path).map_err(|_| PlatformError::new(error_code))?;
+    let reparse = ::windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT.0;
+    if !handle_metadata.is_dir()
+        || !path_metadata.is_dir()
+        || handle_metadata.file_attributes() & reparse != 0
+        || path_metadata.file_attributes() & reparse != 0
+    {
+        return Err(PlatformError::new(error_code));
+    }
+    let identity = windows_file_identity(&file, error_code)?;
+    if identity != windows_path_identity(path, error_code)? {
+        return Err(PlatformError::new(error_code));
+    }
+    Ok((file, identity))
 }
 
 const fn pinned_export_directory_share_mode() -> u32 {
@@ -730,6 +801,12 @@ const fn pinned_export_directory_share_mode() -> u32 {
     // identity verification and the path-based child create. Denying DELETE
     // continues to prevent rename/replacement of every retained component.
     ::windows::Win32::Storage::FileSystem::FILE_SHARE_READ.0
+}
+
+const fn promotion_export_directory_share_mode() -> u32 {
+    use ::windows::Win32::Storage::FileSystem::{FILE_SHARE_READ, FILE_SHARE_WRITE};
+
+    FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0
 }
 
 fn reject_windows_network_export_path(path: &Path) -> PlatformResult<()> {
@@ -932,18 +1009,22 @@ const _: () = {
 };
 
 #[allow(unsafe_code)]
-fn rename_open_file_in_place(source: &File, destination_name: &OsStr) -> PlatformResult<()> {
+fn rename_open_file_in_pinned_directory(
+    source: &File,
+    parent: &Path,
+    destination_name: &OsStr,
+) -> PlatformResult<()> {
     const REPLACE_IF_EXISTS: u32 = 0x0000_0001;
 
-    let mut components = Path::new(destination_name).components();
-    if !matches!(
-        components.next(),
-        Some(std::path::Component::Normal(name)) if name == destination_name
-    ) || components.next().is_some()
-    {
+    validate_export_file_name(destination_name)?;
+    let destination_path = parent.join(destination_name);
+    if !destination_path.is_absolute() {
         return Err(PlatformError::new(PlatformErrorCode::InvalidInput));
     }
-    let destination = destination_name.encode_wide().collect::<Vec<_>>();
+    let destination = destination_path
+        .as_os_str()
+        .encode_wide()
+        .collect::<Vec<_>>();
     if destination.is_empty() || destination.contains(&0) {
         return Err(PlatformError::new(PlatformErrorCode::InvalidInput));
     }
@@ -963,9 +1044,9 @@ fn rename_open_file_in_place(source: &File, destination_name: &OsStr) -> Platfor
     let info = buffer.as_mut_ptr().cast::<RawFileRenameInfo>();
 
     // SAFETY: `buffer` is pointer-aligned and large enough for the fixed
-    // FILE_RENAME_INFO header plus the exact UTF-16 basename. A null root with
-    // a simple name renames within the source handle's current directory. The
-    // source was opened with DELETE authority and its pinned parent stays live.
+    // FILE_RENAME_INFO header plus the exact canonical destination. The source
+    // was opened with DELETE authority, while its exclusive handle and pinned
+    // ancestor chain keep the parent stable during the brief promotion mode.
     unsafe {
         info.write(RawFileRenameInfo {
             replace_if_exists_or_flags: REPLACE_IF_EXISTS,
@@ -986,6 +1067,18 @@ fn rename_open_file_in_place(source: &File, destination_name: &OsStr) -> Platfor
         )
     }
     .map_err(|error| windows_export_test_error("SetFileInformationByHandle rename", error))
+}
+
+fn validate_export_file_name(name: &OsStr) -> PlatformResult<()> {
+    let mut components = Path::new(name).components();
+    if !matches!(
+        components.next(),
+        Some(std::path::Component::Normal(component)) if component == name
+    ) || components.next().is_some()
+    {
+        return Err(PlatformError::new(PlatformErrorCode::InvalidInput));
+    }
+    Ok(())
 }
 
 fn null_terminated_wide(path: &Path) -> Vec<u16> {
@@ -1632,7 +1725,7 @@ mod tests {
             .expect("write partial");
         partial.sync_all().expect("sync partial");
         pinned
-            .atomic_replace(&partial, destination_name)
+            .atomic_replace(&partial, partial_name, destination_name)
             .expect("promote partial");
         drop(partial);
 

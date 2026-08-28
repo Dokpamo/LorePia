@@ -230,11 +230,11 @@ fn atomic_replace(
 fn atomic_replace(
     destination: &ValidatedExportDestination,
     temporary: &std::fs::File,
-    _partial: &std::ffi::OsStr,
+    partial: &std::ffi::OsStr,
 ) -> PlatformResult<()> {
     destination
         .windows_parent()
-        .atomic_replace(temporary, destination.file_name())
+        .atomic_replace(temporary, partial, destination.file_name())
 }
 
 #[cfg(all(unix, any(target_os = "macos", test)))]
