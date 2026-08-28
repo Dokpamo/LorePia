@@ -1,3 +1,5 @@
+mod support;
+
 use std::{
     fs,
     future::Future,
@@ -36,6 +38,7 @@ use lorepia_storage::{
     Storage,
 };
 use rusqlite::Connection;
+use support::is_live_owner_lock_sharing_violation;
 use tempfile::{NamedTempFile, TempDir, tempdir};
 use tokio::sync::watch;
 
@@ -819,7 +822,11 @@ fn assert_tree_excludes(root: &Path, canary: &str) {
                     .map(|entry| entry.expect("read Core data entry").path()),
             );
         } else if metadata.is_file() {
-            let bytes = fs::read(&path).expect("read Core data file");
+            let bytes = match fs::read(&path) {
+                Ok(bytes) => bytes,
+                Err(error) if is_live_owner_lock_sharing_violation(&path, &error) => continue,
+                Err(error) => panic!("read Core data file {}: {error}", path.display()),
+            };
             assert!(
                 !bytes
                     .windows(canary.len())

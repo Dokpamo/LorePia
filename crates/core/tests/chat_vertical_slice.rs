@@ -1,3 +1,5 @@
+mod support;
+
 use std::{
     fs,
     io::{Read, Write},
@@ -13,6 +15,7 @@ use lorepia_core::{
     GenerationStatus, MessageStatus, ProviderProfile,
 };
 use lorepia_storage::Storage;
+use support::is_live_owner_lock_sharing_violation;
 use tempfile::{NamedTempFile, tempdir};
 
 const REFLECTED_CREDENTIAL: &str = "sk-core-reflection-canary-7a91";
@@ -208,7 +211,11 @@ fn assert_tree_does_not_contain(root: &Path, needle: &[u8]) {
             continue;
         }
         if metadata.is_file() {
-            let bytes = fs::read(&path).expect("read data-root file");
+            let bytes = match fs::read(&path) {
+                Ok(bytes) => bytes,
+                Err(error) if is_live_owner_lock_sharing_violation(&path, &error) => continue,
+                Err(error) => panic!("read data-root file {}: {error}", path.display()),
+            };
             assert!(
                 !bytes.windows(needle.len()).any(|window| window == needle),
                 "protected credential was persisted in {}",

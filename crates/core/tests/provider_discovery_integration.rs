@@ -1,3 +1,5 @@
+mod support;
+
 use std::{
     collections::VecDeque,
     fs,
@@ -28,6 +30,7 @@ use lorepia_core::{
 };
 use lorepia_domain::{CanonicalOrigin, EndpointPath, ManifestSource, ManifestSourceKind};
 use serde_json::json;
+use support::is_live_owner_lock_sharing_violation;
 use tempfile::tempdir;
 
 const SECRET_CANARY: &str = "sk-proj-discovery-e2e-canary-7a91";
@@ -1062,23 +1065,6 @@ fn visit_files(root: &Path, visit: &mut impl FnMut(&Path, &[u8])) {
                 Err(error) => panic!("read {}: {error}", path.display()),
             }
         }
-    }
-}
-
-// Windows deliberately opens the live owner lock with no sharing. Keep that
-// product invariant while allowing this test-only data scan to inspect the rest.
-fn is_live_owner_lock_sharing_violation(path: &Path, error: &std::io::Error) -> bool {
-    #[cfg(windows)]
-    {
-        path.file_name()
-            .is_some_and(|name| name == std::ffi::OsStr::new(".lorepia-owner.lock"))
-            && matches!(error.raw_os_error(), Some(32 | 33))
-    }
-
-    #[cfg(not(windows))]
-    {
-        let _ = (path, error);
-        false
     }
 }
 

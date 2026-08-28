@@ -1,3 +1,5 @@
+mod support;
+
 use std::{
     collections::BTreeMap,
     fs,
@@ -49,6 +51,7 @@ use lorepia_storage::{
     GenerationPromptPlanRecord, KnowledgeActivationLog, PromptPresetBinding, PromptResponseLength,
     ProviderRequestSnapshotRecord, Storage,
 };
+use support::is_live_owner_lock_sharing_violation;
 use tempfile::{NamedTempFile, tempdir};
 
 const CREDENTIAL_CANARY: &str = "sk-synthetic-orchestration-canary-6f71";
@@ -925,7 +928,11 @@ fn assert_tree_excludes(root: &Path, needle: &[u8]) {
                     .map(|entry| entry.expect("read Core data-root entry").path()),
             );
         } else if metadata.is_file() {
-            let bytes = fs::read(&path).expect("read Core data-root file");
+            let bytes = match fs::read(&path) {
+                Ok(bytes) => bytes,
+                Err(error) if is_live_owner_lock_sharing_violation(&path, &error) => continue,
+                Err(error) => panic!("read Core data-root file {}: {error}", path.display()),
+            };
             assert!(
                 !bytes.windows(needle.len()).any(|window| window == needle),
                 "sensitive canary was persisted in {}",
