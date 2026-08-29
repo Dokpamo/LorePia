@@ -360,10 +360,7 @@ pub(crate) fn open_asset_file(root: &Path, sha256: &str) -> io::Result<File> {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        io::{Seek, SeekFrom, Write},
-        thread,
-    };
+    use std::{io::Write, thread};
 
     use lorepia_domain::{AssetId, AssetRole, AssetSource, AssetSourceKind, Sha256Digest};
     use tempfile::NamedTempFile;
@@ -454,9 +451,10 @@ mod tests {
         let snapshot =
             AssetFileSnapshot::capture(source.reopen().expect("reopen")).expect("snapshot");
 
-        source.as_file_mut().seek(SeekFrom::Start(0)).expect("seek");
-        source.write_all(b"76543210").expect("same-size overwrite");
-        source.flush().expect("flush overwrite");
+        source
+            .as_file_mut()
+            .set_len(4)
+            .expect("truncate after snapshot");
 
         let mut cache = VerifiedAssetCache::new(1, Duration::from_secs(30));
         assert!(cache.insert(descriptor, snapshot).is_err());
