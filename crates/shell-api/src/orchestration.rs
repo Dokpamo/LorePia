@@ -32,8 +32,8 @@ use lorepia_core::{
     PromptPresetRollbackReview as CorePromptPresetRollbackReview, PromptProviderMessagePreview,
     PromptResolutionTrace, PromptResponseLength, Provenance, ProviderCacheBoundaryCompilation,
     ProviderConnectionId, ProviderCredentialAccessAuthority, ProviderMessageRole,
-    ProviderPromptPlacement, ProviderWireRole, RoleHint, RoomOrchestrationConfig, SafeRegex,
-    SafeTemplate, SelectedKnowledgeEntry, SemanticKnowledgeScore, SourceKind, StoredRevision,
+    ProviderPromptPlacement, ProviderWireRole, Revisioned, RoleHint, RoomOrchestrationConfig,
+    SafeRegex, SafeTemplate, SelectedKnowledgeEntry, SemanticKnowledgeScore, SourceKind,
     SummarySchemaId, TaskCredentialBroker, TaskProfile, TaskProfileId, TemplateSlot, TokenBudget,
     TokenPolicy, TransformDiff, TransformFailure, TransformPhase, TransformPreviewRequest,
     TransformRule, TransformRuleId, TransformRuleReport, TransformSet, TransformSetId, VariableMap,
@@ -1477,8 +1477,8 @@ pub struct RevisionedDto<T> {
     pub deleted_at: Option<DateTime<Utc>>,
 }
 
-impl<T> From<StoredRevision<T>> for RevisionedDto<T> {
-    fn from(value: StoredRevision<T>) -> Self {
+impl<T> From<Revisioned<T>> for RevisionedDto<T> {
+    fn from(value: Revisioned<T>) -> Self {
         Self {
             value: value.value,
             revision: value.revision,
@@ -4284,7 +4284,7 @@ fn require_creator_revision(
 }
 
 fn project_creator_revisions<T, U>(
-    values: Vec<StoredRevision<T>>,
+    values: Vec<Revisioned<T>>,
     provenance: impl Fn(&T) -> &Provenance,
     project: impl Fn(T) -> ShellResult<U>,
 ) -> ShellResult<Vec<RevisionedDto<U>>>

@@ -8,6 +8,11 @@ import type {
     RuntimePromptMessageInput,
 } from '../../lib/ipc/contracts';
 import { normalizeClientError } from '../../lib/ipc/errors';
+import type {
+    PortableRuntimeStateRecordDto,
+    PortableRuntimeStateScopeInput,
+    PutPortableRuntimeStateResultDto,
+} from '../../lib/ipc/portable-runtime-state-contracts';
 import { t } from '../../lib/i18n';
 import {
     type PortableRuntimeCapability,
@@ -57,6 +62,7 @@ const MAX_RUNTIME_LORE_ENTRIES = 512;
 const MAX_RUNTIME_LORE_KEY_TESTS = 1_024;
 const MAX_RUNTIME_LORE_REGEX_TESTS = 64;
 const MAX_RUNTIME_LORE_SOURCE_CHARS = 262_144;
+const PORTABLE_RUNTIME_STATE_SCHEMA_VERSION = 1;
 
 const PORTABLE_RUNTIME_CAPABILITIES: readonly PortableRuntimeCapability[] = [
     'runtime:callbacks',
@@ -73,20 +79,42 @@ const PORTABLE_RUNTIME_CAPABILITIES: readonly PortableRuntimeCapability[] = [
 export function requiredPortableRuntimeCapabilities(
     profile: CharacterRenderProfileDto,
 ): PortableRuntimeCapability[] {
-    const capabilities = [...PORTABLE_RUNTIME_CAPABILITIES];
-    if (profile.runtime_scripts.some((script) => script.elevated_access)) {
-        capabilities.push('elevated');
+    if (profile.runtime_capabilities_declared) {
+        return canonicalCapabilities(profile.required_runtime_capabilities);
     }
-    return capabilities;
+    const capabilities: PortableRuntimeCapability[] = [];
+    if (profile.runtime_scripts.length > 0) {
+        capabilities.push('runtime:callbacks', 'ui:write');
+    }
+    if (
+        profile.background_markup.trim() !== '' ||
+        profile.output_transforms.length > 0 ||
+        profile.display_transforms.length > 0
+    ) {
+        capabilities.push('chat:read', 'profile:read', 'ui:write');
+    }
+    return canonicalCapabilities(capabilities);
+}
+
+export function defaultPortableRuntimeCapabilities(
+    profile: CharacterRenderProfileDto,
+): PortableRuntimeCapability[] {
+    return requiredPortableRuntimeCapabilities(profile).filter(
+        (capability) => capability === 'runtime:callbacks' || capability === 'ui:write',
+    );
 }
 
 export async function createPortableRuntimeGrant(
     profile: CharacterRenderProfileDto,
-    capabilities: readonly PortableRuntimeCapability[] = requiredPortableRuntimeCapabilities(
+    capabilities: readonly PortableRuntimeCapability[] = defaultPortableRuntimeCapabilities(
         profile,
     ),
 ): Promise<PortableRuntimeGrant> {
     const reviewedCapabilities = canonicalCapabilities(capabilities);
+    const requestedCapabilities = new Set(requiredPortableRuntimeCapabilities(profile));
+    if (reviewedCapabilities.some((capability) => !requestedCapabilities.has(capability))) {
+        throw new Error(t('chat.runtime.approval_required'));
+    }
     return {
         version: 1,
         manifestSha256: await portableRuntimeManifestSha256(profile, reviewedCapabilities),
@@ -106,6 +134,8 @@ export async function validatePortableRuntimeGrant(
     ) {
         return false;
     }
+    const requestedCapabilities = new Set(requiredPortableRuntimeCapabilities(profile));
+    if (capabilities.some((capability) => !requestedCapabilities.has(capability))) return false;
     return grant.manifestSha256 === (await portableRuntimeManifestSha256(profile, capabilities));
 }
 
@@ -152,11 +182,39 @@ export interface PortableRuntimeOptions {
     onChanged: () => void;
     onNotice: (message: string, error: boolean) => void;
     onModelCallStatus?: (status: PortableRuntimeModelCallStatus | null) => void;
+    onPersistenceStatus?: (status: PortableRuntimePersistenceStatus) => void;
     storage?: Storage;
     /** Worker constructor override used by bounded tests; imported content cannot set this. */
     workerFactory?: PortableRuntimeWorkerFactory;
     /** Host policy override used by bounded tests; imported content cannot set this. */
     eventTimeoutMs?: number;
+}
+
+export type PortableRuntimePersistenceStatus =
+    | { mode: 'persistent'; backend: 'local-storage' | 'sqlite' }
+    | {
+          mode: 'memory-only';
+          reason: 'unavailable' | 'read-failed' | 'write-failed' | 'conflict';
+      };
+
+export type PortableRuntimeMutationResult =
+    { applied: false; durable: false } | { applied: true; durable: boolean };
+
+type RuntimeStateCommit = PortableRuntimeMutationResult;
+
+type LegacyRuntimeStateRead =
+    | { status: 'missing' | 'unavailable' }
+    | {
+          status: 'loaded';
+          state: PortableRuntimePersistedState;
+          serialized: string;
+          storageKey: string;
+      }
+    | { status: 'failed' };
+
+interface PendingSqliteRuntimeState {
+    state: PortableRuntimePersistedState;
+    serialized: string;
 }
 
 export interface PortableRuntimeModelCallStatus {
@@ -185,8 +243,11 @@ export class PortableCharacterRuntime {
     private readonly onChanged: () => void;
     private readonly onNotice: (message: string, error: boolean) => void;
     private readonly onModelCallStatus: (status: PortableRuntimeModelCallStatus | null) => void;
+    private readonly onPersistenceStatus: (status: PortableRuntimePersistenceStatus) => void;
     private readonly storage: Storage | undefined;
     private readonly storageKey: string;
+    private readonly legacyStorageKey: string | null;
+    private readonly stateScope: PortableRuntimeStateScopeInput;
     private readonly characterName: string;
     private readonly characterDescription: string;
     private readonly personaName: string;
@@ -209,6 +270,20 @@ export class PortableCharacterRuntime {
     private closed = false;
     private changedQueued = false;
     private activeModelRequestId: string | null = null;
+    private activeModelCancellation: {
+        requestId: string;
+        result: Promise<boolean>;
+    } | null = null;
+    private persistenceStatus: PortableRuntimePersistenceStatus | null = null;
+    private sqlitePersistence = false;
+    private sqliteScopeEpoch = 0;
+    private sqliteRevision: number | null = null;
+    private sqliteWritesBlocked = false;
+    private legacyMigrationPending = false;
+    private legacyMigrationStorageKey: string | null = null;
+    private pendingSqliteState: PendingSqliteRuntimeState | null = null;
+    private sqliteWriteDrain: Promise<void> | null = null;
+    private durableSerializedState: string | null = null;
     private persisted: PortableRuntimePersistedState;
 
     private constructor(options: PortableRuntimeOptions) {
@@ -220,6 +295,7 @@ export class PortableCharacterRuntime {
         this.onChanged = options.onChanged;
         this.onNotice = options.onNotice;
         this.onModelCallStatus = options.onModelCallStatus ?? (() => undefined);
+        this.onPersistenceStatus = options.onPersistenceStatus ?? (() => undefined);
         this.storage = options.storage ?? browserStorage();
         this.characterName = options.characterName;
         this.characterDescription = options.characterDescription;
@@ -236,15 +312,34 @@ export class PortableCharacterRuntime {
         );
         this.regexRuleScope = `${options.profile.character_id}:${options.profile.character_content_revision_id ?? 'legacy'}`;
         this.modelBudgetScope = this.regexRuleScope;
-        this.storageKey = [
-            'lorepia.character-runtime.v1',
-            options.profile.character_id,
-            options.profile.character_content_revision_id ?? 'legacy',
-            options.conversationId,
-            options.branchId,
-        ].join(':');
+        this.stateScope = {
+            character_id: options.profile.character_id,
+            character_content_revision_id: options.profile.character_content_revision_id ?? null,
+            conversation_id: options.conversationId,
+            branch_id: options.branchId,
+        };
+        const storageScope = [
+            this.stateScope.character_id,
+            this.stateScope.character_content_revision_id,
+            this.stateScope.conversation_id,
+            this.stateScope.branch_id,
+        ];
+        this.storageKey = `lorepia.character-runtime.v2:${encodeURIComponent(
+            JSON.stringify(storageScope),
+        )}`;
+        const legacyScopeParts = [
+            this.stateScope.character_id,
+            this.stateScope.character_content_revision_id ?? 'legacy',
+            this.stateScope.conversation_id,
+            this.stateScope.branch_id,
+        ];
+        this.legacyStorageKey =
+            this.stateScope.character_content_revision_id === 'legacy' ||
+            legacyScopeParts.some((value) => value.includes(':'))
+                ? null
+                : ['lorepia.character-runtime.v1', ...legacyScopeParts].join(':');
         this.toggles = parsePortableRuntimeToggles(options.profile.toggle_schema);
-        this.persisted = this.loadState();
+        this.persisted = defaultPortableRuntimeState(this.profile.background_markup);
     }
 
     static async create(options: PortableRuntimeOptions): Promise<PortableCharacterRuntime> {
@@ -253,7 +348,9 @@ export class PortableCharacterRuntime {
         }
         const runtime = new PortableCharacterRuntime(options);
         try {
+            await runtime.loadInitialState();
             await runtime.initializeWithDeadline();
+            await runtime.flushSqliteWrites();
             return runtime;
         } catch (error) {
             runtime.close();
@@ -319,9 +416,11 @@ export class PortableCharacterRuntime {
         return this.lookupVariable(key) ?? '';
     }
 
-    async setOption(key: string, value: string): Promise<void> {
-        if (!this.toggles.some((toggle) => toggle.key === key)) return;
-        await this.runWithEventDeadline(async (workerVersion) => {
+    async setOption(key: string, value: string): Promise<PortableRuntimeMutationResult> {
+        if (!this.toggles.some((toggle) => toggle.key === key)) {
+            return { applied: false, durable: false };
+        }
+        const mutation = await this.runWithEventDeadline(async (workerVersion) => {
             const options = updatePortableStringRecord(
                 this.persisted.options,
                 key,
@@ -329,21 +428,27 @@ export class PortableCharacterRuntime {
                 MAX_RUNTIME_RECORD_KEYS,
                 16_384,
             );
-            if (options === null || !this.commitPersisted({ ...this.persisted, options })) return;
+            if (options === null) return { applied: false, durable: false } as const;
+            const commit = this.commitPersisted({ ...this.persisted, options });
+            if (!commit.applied) return commit;
             await this.refreshDisplayInWorker(workerVersion);
             this.notifyChanged();
+            return commit;
         });
+        return this.currentDurabilityFor(mutation);
     }
 
-    setAuxiliarySelection(selection: GenerationSelectionInput | null): void {
-        if (
-            this.commitPersisted({
-                ...this.persisted,
-                auxiliarySelection: cloneSelection(selection),
-            })
-        ) {
+    setAuxiliarySelection(
+        selection: GenerationSelectionInput | null,
+    ): PortableRuntimeMutationResult {
+        const mutation = this.commitPersisted({
+            ...this.persisted,
+            auxiliarySelection: cloneSelection(selection),
+        });
+        if (mutation.applied) {
             this.notifyChanged();
         }
+        return mutation;
     }
 
     async prepareInput(text: string): Promise<PreparedPortableInput> {
@@ -449,7 +554,12 @@ export class PortableCharacterRuntime {
     async cancelActiveModelCall(): Promise<boolean> {
         const requestId = this.activeModelRequestId;
         if (requestId === null || this.client.cancelRuntimeText === undefined) return false;
-        return await this.client.cancelRuntimeText(requestId).catch(() => false);
+        if (this.activeModelCancellation?.requestId === requestId) {
+            return await this.activeModelCancellation.result;
+        }
+        const result = this.client.cancelRuntimeText(requestId).catch(() => false);
+        this.activeModelCancellation = { requestId, result };
+        return await result;
     }
 
     private async initializeWithDeadline(): Promise<void> {
@@ -466,6 +576,11 @@ export class PortableCharacterRuntime {
         });
         try {
             await Promise.race([this.initializeWorker(), deadline]);
+        } catch (error) {
+            if (error instanceof PortableRuntimeWorkerError && error.code === 'execution-timeout') {
+                await this.cancelActiveModelCall();
+            }
+            throw error;
         } finally {
             if (timeout !== undefined) globalThis.clearTimeout(timeout);
         }
@@ -486,7 +601,7 @@ export class PortableCharacterRuntime {
             },
             onState: (persisted) => {
                 if (this.worker !== worker || this.workerVersion !== workerVersion) return;
-                if (!this.acceptWorkerState(persisted)) {
+                if (!this.acceptWorkerState(persisted).applied) {
                     this.detachWorker(
                         new PortableRuntimeWorkerError(
                             'protocol-error',
@@ -593,7 +708,10 @@ export class PortableCharacterRuntime {
         let callOutcome: 'completed' | 'known_failure' | 'unknown_outcome' = 'known_failure';
         try {
             if (selection === null) throw new Error(t('chat.runtime.generation.model_missing'));
-            if (this.client.generateRuntimeText === undefined) {
+            if (
+                this.client.generateRuntimeText === undefined ||
+                this.client.cancelRuntimeText === undefined
+            ) {
                 throw new Error(t('chat.runtime.generation.unsupported'));
             }
             const messages = runtimePromptMessages(rawMessages);
@@ -617,6 +735,7 @@ export class PortableCharacterRuntime {
             }
             lease = admission.lease;
             this.activeModelRequestId = lease.requestId;
+            this.activeModelCancellation = null;
             const generation = this.client.generateRuntimeText({
                 request_id: lease.requestId,
                 audit: {
@@ -659,6 +778,7 @@ export class PortableCharacterRuntime {
                 lease.finish(usage, callOutcome);
                 if (this.activeModelRequestId === lease.requestId) {
                     this.activeModelRequestId = null;
+                    this.activeModelCancellation = null;
                     this.onModelCallStatus(null);
                 }
             }
@@ -684,7 +804,7 @@ export class PortableCharacterRuntime {
     }
 
     private applySnapshot(snapshot: PortableRuntimeWorkerSnapshot): void {
-        if (!this.acceptWorkerState(snapshot.persisted)) {
+        if (!this.acceptWorkerState(snapshot.persisted).applied) {
             throw new PortableRuntimeWorkerError(
                 'protocol-error',
                 'portable runtime worker returned invalid state',
@@ -694,19 +814,25 @@ export class PortableCharacterRuntime {
         this.workerStopped = snapshot.stopped;
     }
 
-    private acceptWorkerState(value: unknown): boolean {
+    private acceptWorkerState(value: unknown): RuntimeStateCommit {
         const normalized = normalizePortableRuntimeState(value, this.profile.background_markup);
-        return (
-            normalized !== null &&
-            this.commitPersisted({
-                ...normalized,
-                auxiliarySelection: this.auxiliarySelection,
-            })
-        );
+        if (normalized === null) return { applied: false, durable: false };
+        // Worker setters are intentionally synchronous: their boolean means that the bounded
+        // state was applied in memory. Host durability is reported independently.
+        return this.commitPersisted({
+            ...normalized,
+            auxiliarySelection: this.auxiliarySelection,
+        });
     }
 
     private runWithEventDeadline<T>(operation: (workerVersion: number) => Promise<T>): Promise<T> {
-        const run = () => this.executeWithEventDeadline(operation);
+        const run = async () => {
+            try {
+                return await this.executeWithEventDeadline(operation);
+            } finally {
+                await this.flushSqliteWrites();
+            }
+        };
         const result = this.operationQueue.then(run, run);
         this.operationQueue = result.then(
             () => undefined,
@@ -741,6 +867,9 @@ export class PortableCharacterRuntime {
                 (error.code === 'execution-timeout' ||
                     error.code === 'protocol-error' ||
                     error.code === 'worker-terminated');
+            if (error instanceof PortableRuntimeWorkerError && error.code === 'execution-timeout') {
+                await this.cancelActiveModelCall();
+            }
             if (workerFailure) this.detachWorker(error, worker);
             if (workerFailure) {
                 try {
@@ -772,6 +901,7 @@ export class PortableCharacterRuntime {
     private detachWorker(error: Error, expected?: PortableRuntimeWorkerClient): void {
         const worker = this.worker;
         if (worker === null || (expected !== undefined && worker !== expected)) return;
+        void this.cancelActiveModelCall();
         this.worker = null;
         this.workerVersion += 1;
         worker.close(error);
@@ -817,35 +947,379 @@ export class PortableCharacterRuntime {
         );
     }
 
-    private loadState(): PortableRuntimePersistedState {
+    private async loadInitialState(): Promise<void> {
         const fallback = defaultPortableRuntimeState(this.profile.background_markup);
+        if (
+            this.client.getPortableRuntimeState === undefined ||
+            this.client.putPortableRuntimeState === undefined
+        ) {
+            this.loadLegacyStateAsPrimary(fallback);
+            return;
+        }
+
+        this.sqlitePersistence = true;
+        let loaded: Awaited<ReturnType<NonNullable<LorepiaClient['getPortableRuntimeState']>>>;
         try {
-            const serialized = this.storage?.getItem(this.storageKey);
-            if (serialized === null || serialized === undefined) return fallback;
-            if (new TextEncoder().encode(serialized).byteLength > MAX_PERSISTED_RUNTIME_BYTES) {
-                return fallback;
-            }
-            return (
-                normalizePortableRuntimeState(
-                    JSON.parse(serialized),
-                    this.profile.background_markup,
-                ) ?? fallback
-            );
+            loaded = await this.client.getPortableRuntimeState(this.stateScope);
         } catch {
-            return fallback;
+            const legacy = this.readLegacyState();
+            if (legacy.status === 'loaded') {
+                this.persisted = legacy.state;
+                this.legacyMigrationPending = true;
+                this.legacyMigrationStorageKey = legacy.storageKey;
+            }
+            this.updatePersistenceStatus({ mode: 'memory-only', reason: 'read-failed' });
+            return;
+        }
+
+        if (!isSafeNonNegativeInteger(loaded.scope_epoch)) {
+            const legacy = this.readLegacyState();
+            if (legacy.status === 'loaded') {
+                this.persisted = legacy.state;
+                this.legacyMigrationPending = true;
+                this.legacyMigrationStorageKey = legacy.storageKey;
+            }
+            this.updatePersistenceStatus({ mode: 'memory-only', reason: 'read-failed' });
+            return;
+        }
+        this.sqliteScopeEpoch = loaded.scope_epoch;
+
+        if (loaded.record !== null) {
+            const stored = this.decodeSqliteRecord(loaded.record);
+            if (stored === null || loaded.record.scope_epoch !== loaded.scope_epoch) {
+                this.updatePersistenceStatus({ mode: 'memory-only', reason: 'read-failed' });
+                return;
+            }
+            this.persisted = stored.state;
+            this.sqliteRevision = loaded.record.revision;
+            this.durableSerializedState = stored.serialized;
+            this.updatePersistenceStatus({ mode: 'persistent', backend: 'sqlite' });
+            return;
+        }
+
+        const legacy = this.readLegacyState();
+        if (legacy.status === 'failed') {
+            this.updatePersistenceStatus({ mode: 'memory-only', reason: 'read-failed' });
+            return;
+        }
+        if (legacy.status !== 'loaded') {
+            this.updatePersistenceStatus({ mode: 'persistent', backend: 'sqlite' });
+            return;
+        }
+
+        this.persisted = legacy.state;
+        this.legacyMigrationPending = true;
+        this.legacyMigrationStorageKey = legacy.storageKey;
+        await this.migrateLegacyStateToSqlite(legacy);
+    }
+
+    private loadLegacyStateAsPrimary(fallback: PortableRuntimePersistedState): void {
+        const legacy = this.readLegacyState();
+        if (legacy.status === 'loaded') {
+            this.persisted = legacy.state;
+            this.durableSerializedState = legacy.serialized;
+            this.updatePersistenceStatus({ mode: 'persistent', backend: 'local-storage' });
+            return;
+        }
+        this.persisted = fallback;
+        if (legacy.status === 'missing') {
+            this.updatePersistenceStatus({ mode: 'persistent', backend: 'local-storage' });
+        } else {
+            this.updatePersistenceStatus({
+                mode: 'memory-only',
+                reason: legacy.status === 'unavailable' ? 'unavailable' : 'read-failed',
+            });
         }
     }
 
-    private commitPersisted(candidate: PortableRuntimePersistedState): boolean {
-        const serialized = serializePortableRuntimeState(candidate);
-        if (serialized === null) return false;
-        this.persisted = candidate;
+    private readLegacyState(): LegacyRuntimeStateRead {
+        if (this.storage === undefined) return { status: 'unavailable' };
         try {
-            this.storage?.setItem(this.storageKey, serialized);
+            const keys = [this.storageKey];
+            if (this.legacyStorageKey !== null) keys.push(this.legacyStorageKey);
+            const storageKey = keys.find((key) => this.storage?.getItem(key) !== null);
+            if (storageKey === undefined) return { status: 'missing' };
+            const serialized = this.storage.getItem(storageKey);
+            if (serialized === null) return { status: 'missing' };
+            if (new TextEncoder().encode(serialized).byteLength > MAX_PERSISTED_RUNTIME_BYTES) {
+                return { status: 'failed' };
+            }
+            const normalized = normalizePortableRuntimeState(
+                JSON.parse(serialized),
+                this.profile.background_markup,
+            );
+            if (normalized === null) return { status: 'failed' };
+            const normalizedSerialized = serializePortableRuntimeState(normalized);
+            return normalizedSerialized === null
+                ? { status: 'failed' }
+                : {
+                      status: 'loaded',
+                      state: normalized,
+                      serialized: normalizedSerialized,
+                      storageKey,
+                  };
         } catch {
-            // A bounded in-memory state remains usable if browser storage is unavailable.
+            return { status: 'failed' };
         }
+    }
+
+    private async migrateLegacyStateToSqlite(
+        legacy: Extract<LegacyRuntimeStateRead, { status: 'loaded' }>,
+    ): Promise<void> {
+        let result: PutPortableRuntimeStateResultDto;
+        try {
+            if (this.client.putPortableRuntimeState === undefined) {
+                this.updatePersistenceStatus({ mode: 'memory-only', reason: 'unavailable' });
+                return;
+            }
+            result = await this.client.putPortableRuntimeState({
+                scope: this.stateScope,
+                expected_scope_epoch: this.sqliteScopeEpoch,
+                expected_revision: null,
+                payload: {
+                    schema_version: PORTABLE_RUNTIME_STATE_SCHEMA_VERSION,
+                    value: legacy.state,
+                },
+            });
+        } catch {
+            this.updatePersistenceStatus({ mode: 'memory-only', reason: 'write-failed' });
+            return;
+        }
+
+        const record = this.acceptSqliteWriteResult(result, legacy.serialized);
+        if (record === null) return;
+
+        if (
+            await this.verifySqliteWriteAndRemoveLegacy(
+                record,
+                legacy.serialized,
+                legacy.storageKey,
+            )
+        ) {
+            this.updatePersistenceStatus({ mode: 'persistent', backend: 'sqlite' });
+        }
+    }
+
+    private async verifySqliteWriteAndRemoveLegacy(
+        record: PortableRuntimeStateRecordDto,
+        serialized: string,
+        storageKey: string,
+    ): Promise<boolean> {
+        let readback: Awaited<ReturnType<NonNullable<LorepiaClient['getPortableRuntimeState']>>>;
+        try {
+            if (this.client.getPortableRuntimeState === undefined) {
+                this.updatePersistenceStatus({ mode: 'memory-only', reason: 'unavailable' });
+                return false;
+            }
+            readback = await this.client.getPortableRuntimeState(this.stateScope);
+        } catch {
+            this.updatePersistenceStatus({ mode: 'memory-only', reason: 'read-failed' });
+            return false;
+        }
+        const verified = readback.record === null ? null : this.decodeSqliteRecord(readback.record);
+        if (
+            verified === null ||
+            readback.scope_epoch !== record.scope_epoch ||
+            readback.record?.revision !== record.revision ||
+            verified.serialized !== serialized
+        ) {
+            this.updatePersistenceStatus({ mode: 'memory-only', reason: 'read-failed' });
+            return false;
+        }
+
+        this.sqliteScopeEpoch = record.scope_epoch;
+        this.sqliteRevision = record.revision;
+        this.durableSerializedState = serialized;
+        try {
+            this.storage?.removeItem(storageKey);
+        } catch {
+            // SQLite is already verified durable. A stale legacy copy is ignored on future reads.
+        }
+        this.legacyMigrationPending = false;
+        this.legacyMigrationStorageKey = null;
         return true;
+    }
+
+    private decodeSqliteRecord(
+        record: PortableRuntimeStateRecordDto,
+    ): PendingSqliteRuntimeState | null {
+        if (
+            !runtimeStateScopeEquals(record.scope, this.stateScope) ||
+            !isSafeNonNegativeInteger(record.scope_epoch) ||
+            !isSafeNonNegativeInteger(record.revision) ||
+            record.payload.schema_version !== PORTABLE_RUNTIME_STATE_SCHEMA_VERSION
+        ) {
+            return null;
+        }
+        const normalized = normalizePortableRuntimeState(
+            record.payload.value,
+            this.profile.background_markup,
+        );
+        if (normalized === null) return null;
+        const serialized = serializePortableRuntimeState(normalized);
+        return serialized === null ? null : { state: normalized, serialized };
+    }
+
+    private acceptSqliteWriteResult(
+        result: PutPortableRuntimeStateResultDto,
+        expectedSerialized: string,
+    ): PortableRuntimeStateRecordDto | null {
+        if (result.status === 'scope_invalidated') {
+            if (isSafeNonNegativeInteger(result.current_scope_epoch)) {
+                this.sqliteScopeEpoch = result.current_scope_epoch;
+            }
+            this.sqliteWritesBlocked = true;
+            this.pendingSqliteState = null;
+            this.updatePersistenceStatus({ mode: 'memory-only', reason: 'conflict' });
+            return null;
+        }
+
+        const record = result.status === 'saved' ? result.record : result.current;
+        const decoded = record === null ? null : this.decodeSqliteRecord(record);
+        if (
+            record === null ||
+            decoded?.serialized !== expectedSerialized ||
+            record.scope_epoch !== this.sqliteScopeEpoch
+        ) {
+            if (result.status === 'revision_conflict') {
+                this.sqliteWritesBlocked = true;
+                this.pendingSqliteState = null;
+                this.updatePersistenceStatus({ mode: 'memory-only', reason: 'conflict' });
+            } else {
+                this.updatePersistenceStatus({ mode: 'memory-only', reason: 'write-failed' });
+            }
+            return null;
+        }
+
+        this.sqliteScopeEpoch = record.scope_epoch;
+        this.sqliteRevision = record.revision;
+        this.durableSerializedState = expectedSerialized;
+        return record;
+    }
+
+    private startSqliteWriteDrain(): void {
+        if (
+            this.sqliteWriteDrain !== null ||
+            this.pendingSqliteState === null ||
+            this.sqliteWritesBlocked
+        ) {
+            return;
+        }
+        this.sqliteWriteDrain = this.drainSqliteWrites()
+            .catch(() => {
+                this.updatePersistenceStatus({ mode: 'memory-only', reason: 'write-failed' });
+            })
+            .finally(() => {
+                this.sqliteWriteDrain = null;
+                this.startSqliteWriteDrain();
+            });
+    }
+
+    private async drainSqliteWrites(): Promise<void> {
+        while (this.pendingSqliteState !== null && !this.sqliteWritesBlocked) {
+            const pending = this.pendingSqliteState;
+            this.pendingSqliteState = null;
+            let result: PutPortableRuntimeStateResultDto;
+            try {
+                if (this.client.putPortableRuntimeState === undefined) {
+                    this.updatePersistenceStatus({ mode: 'memory-only', reason: 'unavailable' });
+                    return;
+                }
+                result = await this.client.putPortableRuntimeState({
+                    scope: this.stateScope,
+                    expected_scope_epoch: this.sqliteScopeEpoch,
+                    expected_revision: this.sqliteRevision,
+                    payload: {
+                        schema_version: PORTABLE_RUNTIME_STATE_SCHEMA_VERSION,
+                        value: pending.state,
+                    },
+                });
+            } catch {
+                this.updatePersistenceStatus({ mode: 'memory-only', reason: 'write-failed' });
+                continue;
+            }
+
+            const record = this.acceptSqliteWriteResult(result, pending.serialized);
+            if (record === null) continue;
+            if (
+                this.legacyMigrationPending &&
+                !(await this.verifySqliteWriteAndRemoveLegacy(
+                    record,
+                    pending.serialized,
+                    this.legacyMigrationStorageKey ?? this.storageKey,
+                ))
+            ) {
+                continue;
+            }
+            if (serializePortableRuntimeState(this.persisted) === pending.serialized) {
+                this.updatePersistenceStatus({ mode: 'persistent', backend: 'sqlite' });
+            }
+        }
+    }
+
+    private async flushSqliteWrites(): Promise<void> {
+        while (this.sqliteWriteDrain !== null) {
+            await this.sqliteWriteDrain;
+        }
+    }
+
+    private commitPersisted(candidate: PortableRuntimePersistedState): RuntimeStateCommit {
+        const serialized = serializePortableRuntimeState(candidate);
+        if (serialized === null) return { applied: false, durable: false };
+        const currentSerialized = serializePortableRuntimeState(this.persisted);
+        this.persisted = candidate;
+        if (serialized === currentSerialized) {
+            return {
+                applied: true,
+                durable: this.durableSerializedState === serialized,
+            };
+        }
+        if (this.sqlitePersistence) {
+            if (this.sqliteWritesBlocked) {
+                this.updatePersistenceStatus({ mode: 'memory-only', reason: 'conflict' });
+                return { applied: true, durable: false };
+            }
+            this.pendingSqliteState = {
+                state: JSON.parse(serialized) as PortableRuntimePersistedState,
+                serialized,
+            };
+            this.startSqliteWriteDrain();
+            return { applied: true, durable: false };
+        }
+        if (this.storage === undefined) {
+            this.updatePersistenceStatus({ mode: 'memory-only', reason: 'unavailable' });
+            return { applied: true, durable: false };
+        }
+        try {
+            this.storage.setItem(this.storageKey, serialized);
+            this.durableSerializedState = serialized;
+            this.updatePersistenceStatus({ mode: 'persistent', backend: 'local-storage' });
+            return { applied: true, durable: true };
+        } catch {
+            this.updatePersistenceStatus({ mode: 'memory-only', reason: 'write-failed' });
+            return { applied: true, durable: false };
+        }
+    }
+
+    private currentDurabilityFor(
+        mutation: PortableRuntimeMutationResult,
+    ): PortableRuntimeMutationResult {
+        if (!mutation.applied) return mutation;
+        const serialized = serializePortableRuntimeState(this.persisted);
+        return {
+            applied: true,
+            durable: serialized !== null && this.durableSerializedState === serialized,
+        };
+    }
+
+    private updatePersistenceStatus(status: PortableRuntimePersistenceStatus): void {
+        if (
+            this.persistenceStatus?.mode === status.mode &&
+            JSON.stringify(this.persistenceStatus) === JSON.stringify(status)
+        )
+            return;
+        this.persistenceStatus = status;
+        this.onPersistenceStatus(status);
     }
 
     private notifyChanged(): void {
@@ -1038,6 +1512,22 @@ function browserStorage(): Storage | undefined {
     } catch {
         return undefined;
     }
+}
+
+function runtimeStateScopeEquals(
+    left: PortableRuntimeStateScopeInput,
+    right: PortableRuntimeStateScopeInput,
+): boolean {
+    return (
+        left.character_id === right.character_id &&
+        left.character_content_revision_id === right.character_content_revision_id &&
+        left.conversation_id === right.conversation_id &&
+        left.branch_id === right.branch_id
+    );
+}
+
+function isSafeNonNegativeInteger(value: number): boolean {
+    return Number.isSafeInteger(value) && value >= 0;
 }
 
 function protocolResultError(): PortableRuntimeWorkerError {

@@ -363,18 +363,21 @@ pub async fn generate_runtime_text(
     let dispatch_lease = generation_dispatch_lease(&state, &input.selection).await;
     let credential =
         credential_for_selection(&app, &state, &shell, &input.selection, dispatch_lease).await?;
-    shell
-        .generate_runtime_text(input, credential, registration.cancelled())
+    let cancelled = registration.cancelled();
+    let result: CommandResult<RuntimeTextGenerationDto> = shell
+        .generate_runtime_text(input, credential, cancelled)
         .await
-        .map_err(Into::into)
+        .map_err(Into::into);
+    drop(registration);
+    result
 }
 
 #[tauri::command]
-pub fn cancel_runtime_text(
+pub async fn cancel_runtime_text(
     state: State<'_, AppState>,
     request: RuntimeGenerationRequest,
 ) -> CommandResult<bool> {
-    state.cancel_runtime_generation(&request.request_id)
+    state.cancel_runtime_generation(&request.request_id).await
 }
 
 #[tauri::command]

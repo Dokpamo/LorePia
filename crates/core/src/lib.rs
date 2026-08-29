@@ -6,6 +6,8 @@ mod catalog;
 mod config;
 mod content_export;
 mod content_package;
+mod interaction_derived_drain;
+mod interaction_projection;
 mod message_display_projection;
 mod module_orchestration;
 mod orchestration;
@@ -14,13 +16,18 @@ mod persona;
 mod provider_credential;
 mod provider_discovery;
 mod provider_discovery_deterministic;
+mod provider_discovery_view;
+mod revision;
+mod transform_documents;
 
 pub use app::{
     ConnectionBoundCredential, Core, EffectiveCapability, GenerationCredentialAdmissionLease,
     GenerationEventSubscription, GenerationOperationContext, MAX_GENERATION_OPERATION_NONCE_BYTES,
-    MAX_GENERATION_OPERATION_NONCE_CHARS, ProviderModelRefreshProvenance,
-    ProviderModelRefreshResult, ProviderTemplateView, RuntimeGenerationAuditContext,
-    RuntimeGenerationCapability, RuntimePromptMessage,
+    MAX_GENERATION_OPERATION_NONCE_CHARS, PortableRuntimeStatePayload, PortableRuntimeStateRecord,
+    PortableRuntimeStateSaveResult, PortableRuntimeStateScope, PortableRuntimeStateSnapshot,
+    PortableRuntimeStateWrite, ProviderModelRefreshProvenance, ProviderModelRefreshResult,
+    ProviderTemplateView, RuntimeGenerationAuditContext, RuntimeGenerationCapability,
+    RuntimePromptMessage,
 };
 pub use asset_delivery::{AssetDeliveryDescriptor, AssetDeliveryKind, AssetDeliveryRange};
 pub use catalog::{
@@ -42,6 +49,12 @@ pub use content_package::{
     ContentPackageImportInspection, ContentPackageImportReview,
     ContentPackageImportSelectionReview, ContentPackageSelectionReceipt,
     ContentPackageSelectionRequest,
+};
+pub use interaction_derived_drain::InteractionDerivedDrainReceipt;
+pub use interaction_projection::{
+    InteractionChoiceEffectStatus, InteractionChoiceSelectionReceipt, InteractionEffectClaim,
+    InteractionEffectHistoryCursor, InteractionEffectHistoryEntry, InteractionEffectHistoryView,
+    InteractionProposalView,
 };
 pub use lorepia_chat::{CHAT_EVENT_VERSION, ChatEvent, ChatEventKind};
 pub use lorepia_content::{
@@ -113,7 +126,6 @@ pub use lorepia_providers::{
     ProviderPromptPlacement, ProviderWireRole, RequestBodyField, RequestBodyShape, RequestPreview,
     SecretBytes, SecretCurlInput,
 };
-pub use lorepia_storage::StoredInteractionEvent;
 pub use lorepia_storage::{
     CompletedPackageAssetAuthority, CompletedPackageAssetSourceAuthority,
     CompletedPackageAuthority, CompletedPackageComponentAuthority,
@@ -124,24 +136,20 @@ pub use lorepia_storage::{
     DiscoveryOutboxEvent, DiscoveryRecoveryResult, DiscoverySessionSnapshot,
     GenerationApprovalEvidence, GenerationAttemptInput, GenerationAttemptStatus,
     GenerationBeforeEventEvidence, GenerationDispatchSeal, GenerationPromptPlanRecord,
-    InteractionChoiceEffectStatus, InteractionChoiceSelectionReceipt,
-    InteractionEffectHistoryCursor, KnowledgeActivationLog, LifecycleOccurrenceKind,
-    MAX_COMPLETED_PACKAGE_EXPORTS, MAX_PACKAGE_TARGET_REVIEW_DOCUMENTS, MemoryEmbeddingRecord,
-    MemoryInvalidationResult, MemoryQueryEmbeddingStatus, MemoryRecordExclusionScope,
-    MemoryRecordUserPatch, MessageTransformDiagnostic, MessageTransformDisposition,
-    MessageTransformStage, ObjectRevision, PackageCapability, PackageCapabilityDecision,
-    PackageCapabilityReview, PackageCapabilitySupport, PackageDocumentTargetDisposition,
-    PackageDocumentTargetReview, PackageImportRecord, PackageImportStatus,
-    PackageImportTargetReview, PackageNormalizationEvidence, PackageSourceRecord,
-    PackageUpdateTargetConfirmation, PromptPresetBinding, PromptPresetRevisionDiff,
-    PromptPresetRollbackApproval, PromptPresetRollbackReview, PromptResponseLength,
-    ProviderCredentialAccessAuthority, ProviderCredentialObservedStatus,
-    ProviderCredentialOperationKind, ProviderCredentialOperationPlan,
-    ProviderCredentialOperationStatus, ProviderCredentialOutcomeCode,
-    ProviderCredentialSlotGarbage, ProviderCredentialSlotGarbageStatus,
-    RetryableGenerationAttemptProjection, StoredDiscoveryCandidate, StoredGenerationAttempt,
-    StoredInteractionEffect, StoredInteractionEffectHistory, StoredInteractionProposal,
-    StoredPromptMessage, StoredProviderCredentialOperation, StoredRevision,
+    KnowledgeActivationLog, LifecycleOccurrenceKind, MAX_COMPLETED_PACKAGE_EXPORTS,
+    MAX_PACKAGE_TARGET_REVIEW_DOCUMENTS, MemoryEmbeddingRecord, MemoryInvalidationResult,
+    MemoryQueryEmbeddingStatus, MemoryRecordExclusionScope, MemoryRecordUserPatch,
+    MessageTransformDiagnostic, MessageTransformDisposition, MessageTransformStage, ObjectRevision,
+    PackageCapability, PackageCapabilityDecision, PackageCapabilityReview,
+    PackageCapabilitySupport, PackageDocumentTargetDisposition, PackageDocumentTargetReview,
+    PackageImportRecord, PackageImportStatus, PackageImportTargetReview,
+    PackageNormalizationEvidence, PackageSourceRecord, PackageUpdateTargetConfirmation,
+    PromptPresetBinding, PromptPresetRevisionDiff, PromptPresetRollbackApproval,
+    PromptPresetRollbackReview, PromptResponseLength, ProviderCredentialAccessAuthority,
+    ProviderCredentialObservedStatus, ProviderCredentialOperationKind,
+    ProviderCredentialOperationPlan, ProviderCredentialOperationStatus,
+    ProviderCredentialOutcomeCode, ProviderCredentialSlotGarbage,
+    ProviderCredentialSlotGarbageStatus, RetryableGenerationAttemptProjection,
     package_update_target_confirmations_sha256, provider_credential_binding_sha256_for_connection,
 };
 pub use message_display_projection::MessagePresentation;
@@ -181,6 +189,9 @@ pub use persona::{
     PersonaCreateRequest, PersonaDeleteRequest, PersonaListCursor, PersonaListPage,
     PersonaUpdateRequest,
 };
+pub use provider_credential::{
+    ProviderCredentialOperationPlanView, ProviderCredentialOperationView,
+};
 #[cfg(feature = "test-support")]
 pub use provider_discovery::test_support as provider_discovery_test_support;
 pub use provider_discovery::{
@@ -191,8 +202,10 @@ pub use provider_discovery::{
     ProviderDiscoveryCurlInput, ProviderDiscoveryReviewProposal, ProviderDiscoverySource,
     provider_discovery_action_envelope,
 };
+pub use provider_discovery_view::ProviderDiscoveryCandidateView;
+pub use revision::Revisioned;
 
-pub const CORE_API_VERSION: u32 = 9;
+pub const CORE_API_VERSION: u32 = 10;
 
 pub fn core_version() -> &'static str {
     env!("CARGO_PKG_VERSION")

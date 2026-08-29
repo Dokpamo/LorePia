@@ -24,7 +24,7 @@ fn import_synthetic_character(core: &Core) -> String {
     core.commit_import(&review.id).expect("commit character").id
 }
 
-fn create_persona(core: &Core, name: &str) -> lorepia_core::StoredRevision<Persona> {
+fn create_persona(core: &Core, name: &str) -> lorepia_core::Revisioned<Persona> {
     core.create_persona(&PersonaCreateRequest {
         name: name.to_owned(),
         description: format!("{name} description"),

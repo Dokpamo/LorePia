@@ -11,8 +11,8 @@ import type {
 import App from './App.svelte';
 
 const BOOTSTRAP: BootstrapDto = {
-    shell_api_version: 2,
-    core_api_version: 9,
+    shell_api_version: 3,
+    core_api_version: 10,
     chat_event_version: 4,
     health: {
         core_version: '0.1.0',

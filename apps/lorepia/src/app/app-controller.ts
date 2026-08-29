@@ -14,10 +14,8 @@ import {
     type ChatEventDto,
     type ChatStreamItemDto,
     type ContinueProviderDiscoveryActionInput,
-    type ConversationBranchDto,
     type ConversationDto,
     type ConversationMode,
-    type ConversationStateDto,
     type CreateProviderConnectionInput,
     type CredentialTargetDto,
     type GenerationPresetInput,
@@ -26,8 +24,6 @@ import {
     type GenerationPresetDto,
     type GenerationSelectionInput,
     type GenerationTargetDto,
-    type ImportInspectionDto,
-    type LoadingPhase,
     type LorepiaClient,
     type MessageActionGenerationDto,
     type MessageDto,
@@ -53,140 +49,30 @@ import {
 import { t } from '../lib/i18n';
 import { LorepiaClientError, normalizeClientError } from '../lib/ipc/errors';
 import { ChatStreamVerifier } from '../features/chat/chat-stream';
+import { INITIAL_APP_STATE, type ChatState, type LorepiaAppState } from './app-state';
+import { credentialKey, discoveryCredentialTarget } from './provider-credential';
+import {
+    drainProviderDiscoveryEvents,
+    loadProviderDiscoverySnapshot,
+    mergeProviderDiscoverySnapshot,
+    storeProviderDiscoverySession,
+} from './provider-discovery-flow';
 
-export interface SectionState {
-    phase: LoadingPhase;
-    error: string | null;
+export {
+    INITIAL_APP_STATE,
+    type ChatState,
+    type GreetingCatalogState,
+    type ImportFlowState,
+    type LorepiaAppState,
+    type MemoryQueryRetryState,
+    type SectionState,
+} from './app-state';
+export { discoveryCredentialTarget } from './provider-credential';
+
+export interface RemoveMessageResult {
+    mutationCommitted: boolean;
+    messagesRefreshed: boolean;
 }
-
-export interface ImportFlowState extends SectionState {
-    inspection: ImportInspectionDto | null;
-}
-
-export interface ChatState extends SectionState {
-    active_generation_id: string | null;
-    live_assistant_message_id: string | null;
-    streaming_text: string;
-    reasoning_text: string;
-    reconcile_notice: string | null;
-    usage_label: string | null;
-}
-
-export interface GreetingCatalogState extends SectionState {
-    value: CharacterGreetingCatalogDto | null;
-    selected_greeting_id: string | null;
-}
-
-export interface MemoryQueryRetryState extends SectionState {
-    candidates: MemoryQueryEmbeddingRetryCandidateDto[];
-    interrupted_jobs: InterruptedMemoryJobDto[];
-    busy_id: string | null;
-    notice: string | null;
-}
-
-export interface LorepiaAppState {
-    bootstrap: SectionState & { value: BootstrapDto | null };
-    memory_supervisor: SectionState & { status: MemorySupervisorStatusDto | null };
-    library: SectionState & { characters: CharacterDto[] };
-    import_flow: ImportFlowState;
-    selected_character: CharacterDto | null;
-    conversations: SectionState & { items: ConversationDto[] };
-    greeting_catalog: GreetingCatalogState;
-    selected_conversation: ConversationDto | null;
-    conversation_state: ConversationStateDto | null;
-    branches: ConversationBranchDto[];
-    messages: SectionState & { items: MessageDto[] };
-    memory_query_retries: MemoryQueryRetryState;
-    chat: ChatState;
-    providers: SectionState & { workspace: ProviderWorkspaceDto };
-    announcement: string;
-}
-
-const EMPTY_SETTINGS: AppSettingsDto = {
-    preserve_partial_generations: true,
-    selected_provider_profile_id: null,
-    selected_model_route_id: null,
-    selected_generation_preset_id: null,
-};
-
-const EMPTY_PROVIDER_WORKSPACE: ProviderWorkspaceDto = {
-    templates: [],
-    connections: [],
-    legacy_profiles: [],
-    routes: [],
-    presets: [],
-    settings: EMPTY_SETTINGS,
-    credential_statuses: {},
-    request_preview: null,
-    selected_capability_model_route_id: null,
-    capability_observations: [],
-    capability_parameter_specs: [],
-    effective_capability: null,
-    model_sync_jobs: [],
-    selected_model_sync_job_id: null,
-    model_sync_event: null,
-    discoveries: [],
-    selected_discovery_id: null,
-    discovery_candidates: [],
-    discovery_evidence: [],
-    discovery_approvals: [],
-    discovery_review: null,
-    discovery_approval_proposal: null,
-    discovery_review_proposal: null,
-    discovery_assistant_resume_boundary: null,
-    discovery_assistant_host_action: null,
-    discovery_event: null,
-    discovery_compensation_steps: [],
-    discovery_recovery_results: [],
-    catalog_status: null,
-    catalog_history: null,
-    pending_catalog_import: null,
-    pending_catalog_rollback: null,
-    catalog_diff: null,
-};
-
-export const INITIAL_APP_STATE: LorepiaAppState = {
-    bootstrap: { phase: 'idle', error: null, value: null },
-    memory_supervisor: { phase: 'idle', error: null, status: null },
-    library: { phase: 'idle', error: null, characters: [] },
-    import_flow: { phase: 'idle', error: null, inspection: null },
-    selected_character: null,
-    conversations: { phase: 'idle', error: null, items: [] },
-    greeting_catalog: {
-        phase: 'idle',
-        error: null,
-        value: null,
-        selected_greeting_id: null,
-    },
-    selected_conversation: null,
-    conversation_state: null,
-    branches: [],
-    messages: { phase: 'idle', error: null, items: [] },
-    memory_query_retries: {
-        phase: 'idle',
-        error: null,
-        candidates: [],
-        interrupted_jobs: [],
-        busy_id: null,
-        notice: null,
-    },
-    chat: {
-        phase: 'idle',
-        error: null,
-        active_generation_id: null,
-        live_assistant_message_id: null,
-        streaming_text: '',
-        reasoning_text: '',
-        reconcile_notice: null,
-        usage_label: null,
-    },
-    providers: {
-        phase: 'idle',
-        error: null,
-        workspace: EMPTY_PROVIDER_WORKSPACE,
-    },
-    announcement: '',
-};
 
 const GENERATION_REATTACHMENT_UNAVAILABLE_MESSAGE = t('app.error.stream_lost');
 
@@ -209,7 +95,6 @@ const MAX_INTERRUPTED_MEMORY_JOBS = 16;
 // so these guards compare over `string` instead of the narrowed literal types.
 const MEMORY_JOB_RETRY_KINDS: readonly string[] = ['summary', 'embedding'];
 const MEMORY_JOB_RETRY_STATUSES: readonly string[] = ['queued'];
-const MAX_PROVIDER_DISCOVERY_EVENT_DRAIN = 100;
 
 function isRetryableMemoryQueryCandidate(
     candidate: MemoryQueryEmbeddingRetryCandidateDto,
@@ -348,38 +233,6 @@ function isMemorySupervisorStatus(value: unknown): value is MemorySupervisorStat
         Number.isSafeInteger(candidate.completed_jobs) &&
         Number(candidate.completed_jobs) >= 0
     );
-}
-
-function credentialKey(target: CredentialTargetDto): string {
-    switch (target.kind) {
-        case 'connection':
-            return `connection:${target.connection_id}`;
-        case 'legacy_profile':
-            return `legacy_profile:${target.provider_profile_id}`;
-        case 'discovery_session':
-            return `discovery_session:${target.session_id}`;
-    }
-}
-
-export function discoveryCredentialTarget(
-    session: ProviderDiscoverySessionDto,
-): Extract<CredentialTargetDto, { kind: 'discovery_session' }> | null {
-    if (!session.credential_binding_requested) return null;
-    const eligible =
-        session.state === 'awaiting_credential_origin_approval' ||
-        session.state === 'awaiting_probe_consent' ||
-        session.state === 'awaiting_review' ||
-        session.state === 'committing' ||
-        (session.state === 'interrupted' &&
-            (session.recovery_operation === 'list_models' ||
-                session.recovery_operation === 'probe_capabilities'));
-    return eligible
-        ? {
-              kind: 'discovery_session',
-              session_id: session.id,
-              expected_revision: session.revision,
-          }
-        : null;
 }
 
 function captureAnnouncement(status: NativeCaptureStatusDto, success: string): string {
@@ -1450,11 +1303,13 @@ export class LorepiaAppController {
         }
     }
 
-    async removeMessage(messageId: string): Promise<void> {
+    async removeMessage(messageId: string): Promise<RemoveMessageResult> {
         const state = get(this.mutable);
         const conversation = state.selected_conversation;
         const branchId = state.conversation_state?.active_branch_id;
-        if (conversation === null || branchId === undefined) return;
+        if (conversation === null || branchId === undefined) {
+            return { mutationCommitted: false, messagesRefreshed: false };
+        }
         const conversationId = conversation.id;
         const expectedHead = this.activeBranchHead(state);
         const epoch = this.conversationEpoch;
@@ -1470,22 +1325,46 @@ export class LorepiaAppController {
                 expected_head: expectedHead,
                 message_id: messageId,
             });
-            if (!isCurrentBranchSnapshot(get(this.mutable))) return;
             if (branch.id !== branchId || branch.conversation_id !== conversationId) {
-                this.announce(t('chat.notice.remove_mismatch'));
-                return;
+                if (isCurrentBranchSnapshot(get(this.mutable))) {
+                    this.announce(t('chat.notice.remove_mismatch'));
+                }
+                return { mutationCommitted: false, messagesRefreshed: false };
             }
-            const messages = await this.client.listBranchMessages(branchId);
-            if (!isCurrentBranchSnapshot(get(this.mutable))) return;
-            this.update((current) => ({
-                ...current,
-                branches: current.branches.map((item) => (item.id === branchId ? branch : item)),
-                messages: { phase: 'ready', error: null, items: messages },
-            }));
-            this.announce(t('chat.notice.removed'));
+            if (!isCurrentBranchSnapshot(get(this.mutable))) {
+                return { mutationCommitted: true, messagesRefreshed: false };
+            }
+            try {
+                const messages = await this.client.listBranchMessages(branchId);
+                if (!isCurrentBranchSnapshot(get(this.mutable))) {
+                    return { mutationCommitted: true, messagesRefreshed: false };
+                }
+                this.update((current) => ({
+                    ...current,
+                    branches: current.branches.map((item) =>
+                        item.id === branchId ? branch : item,
+                    ),
+                    messages: { phase: 'ready', error: null, items: messages },
+                }));
+                this.announce(t('chat.notice.removed'));
+                return { mutationCommitted: true, messagesRefreshed: true };
+            } catch (error: unknown) {
+                if (isCurrentBranchSnapshot(get(this.mutable))) {
+                    const message = errorLabel(error);
+                    this.update((current) => ({
+                        ...current,
+                        branches: current.branches.map((item) =>
+                            item.id === branchId ? branch : item,
+                        ),
+                        messages: { ...current.messages, phase: 'error', error: message },
+                    }));
+                    this.announce(message);
+                }
+                return { mutationCommitted: true, messagesRefreshed: false };
+            }
         } catch (error: unknown) {
-            if (!isCurrentBranchSnapshot(get(this.mutable))) return;
-            this.announce(errorLabel(error));
+            if (isCurrentBranchSnapshot(get(this.mutable))) this.announce(errorLabel(error));
+            return { mutationCommitted: false, messagesRefreshed: false };
         }
     }
 
@@ -2705,14 +2584,9 @@ export class LorepiaAppController {
     }
 
     private storeDiscoverySession(session: ProviderDiscoverySessionDto): void {
-        this.updateProviderWorkspace((workspace) => ({
-            ...workspace,
-            discoveries: [
-                session,
-                ...workspace.discoveries.filter((candidate) => candidate.id !== session.id),
-            ],
-            selected_discovery_id: session.id,
-        }));
+        this.updateProviderWorkspace((workspace) =>
+            storeProviderDiscoverySession(workspace, session),
+        );
     }
 
     async loadProviderCapabilities(modelRouteId: string): Promise<void> {
@@ -2947,71 +2821,14 @@ export class LorepiaAppController {
         requestEpoch: number,
     ): Promise<void> {
         try {
-            const [
-                session,
-                candidates,
-                evidence,
-                approvals,
-                review,
-                approvalProposal,
-                reviewProposal,
-                assistantResumeBoundary,
-            ] = await Promise.all([
-                this.client.getProviderDiscovery(sessionId),
-                this.client.listProviderDiscoveryCandidates(sessionId),
-                this.client.listProviderDiscoveryEvidence(sessionId),
-                this.client.listProviderDiscoveryApprovals(sessionId),
-                this.client.getProviderDiscoveryReview(sessionId),
-                this.client.getProviderDiscoveryApprovalProposal(sessionId),
-                this.client.getProviderDiscoveryReviewProposal(sessionId),
-                this.client.getProviderDiscoveryAssistantResumeBoundary(sessionId),
-            ]);
-            if (
-                session.id !== sessionId ||
-                !this.isCurrentDiscoveryRequest(sessionId, requestEpoch)
-            ) {
+            const snapshot = await loadProviderDiscoverySnapshot(this.client, sessionId, () =>
+                this.isCurrentDiscoveryRequest(sessionId, requestEpoch),
+            );
+            if (snapshot === null || !this.isCurrentDiscoveryRequest(sessionId, requestEpoch))
                 return;
-            }
-            const compensationSteps =
-                session.commit_attempt_id === null
-                    ? []
-                    : await this.client.listProviderDiscoveryCompensationSteps(
-                          session.commit_attempt_id,
-                      );
-            const credentialTarget = discoveryCredentialTarget(session);
-            const credentialStatus =
-                credentialTarget === null
-                    ? null
-                    : (await this.client.credentialStatus(credentialTarget)).status;
-            if (!this.isCurrentDiscoveryRequest(sessionId, requestEpoch)) return;
-            this.updateProviderWorkspace((workspace) => {
-                const sessionCredentialKey = `discovery_session:${session.id}`;
-                const credentialStatuses = Object.fromEntries(
-                    Object.entries(workspace.credential_statuses).filter(
-                        ([key]) => key !== sessionCredentialKey,
-                    ),
-                );
-                if (credentialTarget !== null && credentialStatus !== null) {
-                    credentialStatuses[credentialKey(credentialTarget)] = credentialStatus;
-                }
-                return {
-                    ...workspace,
-                    credential_statuses: credentialStatuses,
-                    discoveries: [
-                        session,
-                        ...workspace.discoveries.filter((candidate) => candidate.id !== session.id),
-                    ],
-                    selected_discovery_id: session.id,
-                    discovery_candidates: candidates,
-                    discovery_evidence: evidence,
-                    discovery_approvals: approvals,
-                    discovery_review: review,
-                    discovery_approval_proposal: approvalProposal,
-                    discovery_review_proposal: reviewProposal,
-                    discovery_assistant_resume_boundary: assistantResumeBoundary,
-                    discovery_compensation_steps: compensationSteps,
-                };
-            });
+            this.updateProviderWorkspace((workspace) =>
+                mergeProviderDiscoverySnapshot(workspace, snapshot),
+            );
         } catch (error: unknown) {
             if (!this.isCurrentDiscoveryRequest(sessionId, requestEpoch)) return;
             this.announce(errorLabel(error));
@@ -3103,47 +2920,20 @@ export class LorepiaAppController {
         if (selectedId === null) return;
         const requestEpoch = ++this.discoveryRequestEpoch;
         try {
-            let latest = null as ProviderWorkspaceDto['discovery_event'];
-            let acknowledgedCount = 0;
-            let drained = false;
-            while (acknowledgedCount < MAX_PROVIDER_DISCOVERY_EVENT_DRAIN) {
-                if (!this.isCurrentDiscoveryRequest(selectedId, requestEpoch)) return;
-                const remaining = MAX_PROVIDER_DISCOVERY_EVENT_DRAIN - acknowledgedCount;
-                const events = await this.client.pollProviderDiscoveryEventsForSession(
-                    selectedId,
-                    remaining,
-                );
-                if (!this.isCurrentDiscoveryRequest(selectedId, requestEpoch)) return;
-                if (events.some((item) => item.event.session_id !== selectedId)) {
-                    throw new Error('session-filtered discovery poll returned a foreign event');
-                }
-                if (events.length > remaining) {
-                    throw new Error('session-filtered discovery poll exceeded its requested limit');
-                }
-                if (events.length === 0) {
-                    drained = true;
-                    break;
-                }
-                for (const item of events) {
-                    if (!this.isCurrentDiscoveryRequest(selectedId, requestEpoch)) return;
-                    const acknowledged = await this.client.ackProviderDiscoveryEvent(item.event.id);
-                    if (!this.isCurrentDiscoveryRequest(selectedId, requestEpoch)) return;
-                    if (!acknowledged) {
-                        throw new Error('provider discovery event acknowledgement was rejected');
-                    }
-                    latest = item.event;
-                    acknowledgedCount += 1;
-                }
-            }
-            if (latest !== null) {
+            const result = await drainProviderDiscoveryEvents(this.client, selectedId, () =>
+                this.isCurrentDiscoveryRequest(selectedId, requestEpoch),
+            );
+            if (result === null || !this.isCurrentDiscoveryRequest(selectedId, requestEpoch))
+                return;
+            if (result.latest !== null) {
                 this.updateProviderWorkspace((workspace) => ({
                     ...workspace,
-                    discovery_event: latest,
+                    discovery_event: result.latest,
                 }));
             }
             if (!this.isCurrentDiscoveryRequest(selectedId, requestEpoch)) return;
             await this.refreshProviderDiscoveryAtEpoch(selectedId, requestEpoch);
-            if (!drained && this.isCurrentDiscoveryRequest(selectedId, requestEpoch)) {
+            if (!result.drained && this.isCurrentDiscoveryRequest(selectedId, requestEpoch)) {
                 this.announce(t('provider.notice.events_truncated'));
             }
         } catch (error: unknown) {

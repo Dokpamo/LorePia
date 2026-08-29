@@ -1141,8 +1141,8 @@ fn checkpoint_and_close(connection: Connection) {
 /// Update the migration constant and the expected version together whenever a
 /// migration is added; the assertion below is what forces that.
 fn downgrade_latest_schema_by_one(path: &Path, current_schema: u32) {
-    const LATEST_MIGRATION: &str = include_str!("../migrations/0039_runtime_model_audit.sql");
-    const LATEST_SCHEMA: u32 = 39;
+    const LATEST_MIGRATION: &str = include_str!("../migrations/0040_portable_runtime_state.sql");
+    const LATEST_SCHEMA: u32 = 40;
 
     assert_eq!(
         current_schema, LATEST_SCHEMA,
@@ -1165,9 +1165,19 @@ fn downgrade_latest_schema_by_one(path: &Path, current_schema: u32) {
             Some((object_type, name.trim_end_matches(';')))
         })
         .collect::<Vec<_>>();
-    assert!(
-        created_objects.contains(&("TABLE", "portable_runtime_model_audit")),
-        "schema-39 inverse must track every runtime-model audit object"
+    const EXPECTED_SCHEMA_40_OBJECTS: &[(&str, &str)] = &[
+        ("TABLE", "portable_runtime_branch_epochs"),
+        ("TRIGGER", "portable_runtime_branch_epoch_on_branch_insert"),
+        ("TABLE", "portable_runtime_state_sequence"),
+        ("TABLE", "portable_runtime_states"),
+        ("INDEX", "portable_runtime_states_lru"),
+        ("TRIGGER", "portable_runtime_state_scope_guard_insert"),
+        ("TRIGGER", "portable_runtime_state_scope_guard_update"),
+    ];
+    assert_eq!(
+        created_objects.as_slice(),
+        EXPECTED_SCHEMA_40_OBJECTS,
+        "schema-40 inverse must track every additive object"
     );
     connection
         .execute_batch("PRAGMA foreign_keys = OFF;")
@@ -1180,7 +1190,7 @@ fn downgrade_latest_schema_by_one(path: &Path, current_schema: u32) {
         {
             connection
                 .execute(&format!("DROP {object_type} \"{name}\""), [])
-                .unwrap_or_else(|error| panic!("drop schema-39 {object_type} {name}: {error}"));
+                .unwrap_or_else(|error| panic!("drop schema-40 {object_type} {name}: {error}"));
         }
     }
     connection
@@ -1188,7 +1198,7 @@ fn downgrade_latest_schema_by_one(path: &Path, current_schema: u32) {
             "DELETE FROM schema_migrations WHERE version = ?1",
             [LATEST_SCHEMA],
         )
-        .expect("remove schema-39 migration registry row");
+        .expect("remove schema-40 migration registry row");
     connection
         .execute_batch("PRAGMA foreign_keys = ON;")
         .expect("reenable foreign keys after the previous-release fixture downgrade");

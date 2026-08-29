@@ -8,7 +8,13 @@ SCRIPT_DIRECTORY = Path(__file__).resolve().parent
 if str(SCRIPT_DIRECTORY) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIRECTORY))
 
-from check_source_architecture import evaluate_baseline_changes, evaluate_source_sizes
+from check_source_architecture import (
+    evaluate_baseline_changes,
+    evaluate_core_storage_api_baseline_changes,
+    evaluate_core_storage_public_reexports,
+    evaluate_source_sizes,
+    strip_rust_comments_and_strings,
+)
 
 
 def write_config(root: Path, *, baselines: dict[str, dict[str, int]]) -> Path:
@@ -27,6 +33,73 @@ def write_config(root: Path, *, baselines: dict[str, dict[str, int]]) -> Path:
 
 
 class SourceArchitectureTests(unittest.TestCase):
+    def test_core_cannot_add_storage_persistence_row_reexports(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "crates" / "core" / "src" / "lib.rs"
+            source.parent.mkdir(parents=True)
+            source.write_text(
+                "pub use lorepia_storage::{DatabaseStats, "
+                "StoredNewPersistenceRow as CoreAlias};\n",
+                encoding="utf-8",
+            )
+
+            failures = evaluate_core_storage_public_reexports(root, set())
+
+            self.assertEqual(len(failures), 1)
+            self.assertIn("StoredNewPersistenceRow", failures[0])
+
+    def test_core_cannot_wildcard_reexport_storage(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "crates" / "core" / "src" / "facade.rs"
+            source.parent.mkdir(parents=True)
+            source.write_text("pub use lorepia_storage::*;\n", encoding="utf-8")
+
+            failures = evaluate_core_storage_public_reexports(root, set())
+
+            self.assertEqual(len(failures), 1)
+            self.assertIn("wildcard-reexport", failures[0])
+
+    def test_core_storage_reexport_baseline_must_shrink_with_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "crates" / "core" / "src" / "lib.rs"
+            source.parent.mkdir(parents=True)
+            source.write_text("pub use lorepia_storage::DatabaseStats;\n", encoding="utf-8")
+
+            failures = evaluate_core_storage_public_reexports(
+                root, {"StoredRemovedPersistenceRow"}
+            )
+
+            self.assertEqual(len(failures), 1)
+            self.assertIn("StoredRemovedPersistenceRow", failures[0])
+
+    def test_empty_core_storage_reexport_baseline_cannot_regrow(self) -> None:
+        base = {"version": 1, "allowed_stored_reexports": []}
+        current = {
+            "version": 1,
+            "allowed_stored_reexports": ["StoredNewRow"],
+        }
+
+        failures = evaluate_core_storage_api_baseline_changes(current, base)
+
+        self.assertEqual(len(failures), 1)
+        self.assertIn("StoredNewRow", failures[0])
+
+    def test_rust_comments_and_strings_do_not_create_reexports(self) -> None:
+        content = (
+            '// pub use lorepia_storage::StoredComment;\n'
+            'const EXAMPLE: &str = r#"pub use lorepia_storage::StoredString;"#;\n'
+            'pub use lorepia_storage::StoredVisible;\n'
+        )
+
+        stripped = strip_rust_comments_and_strings(content)
+
+        self.assertNotIn("StoredComment", stripped)
+        self.assertNotIn("StoredString", stripped)
+        self.assertIn("StoredVisible", stripped)
+
     def test_existing_giant_may_shrink_but_must_not_grow(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

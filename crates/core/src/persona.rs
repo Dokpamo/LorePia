@@ -11,7 +11,7 @@ use lorepia_storage::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::Core;
+use crate::{Core, Revisioned, revision::project_revision};
 
 const PERSONA_SCHEMA_VERSION: u32 = 1;
 pub const MAX_PERSONA_LIST_LIMIT: u32 = 100;
@@ -54,7 +54,7 @@ pub struct PersonaListCursor {
 pub enum PersonaListPage {
     Page {
         catalog_revision: Sha256Digest,
-        items: Vec<StoredRevision<Persona>>,
+        items: Vec<Revisioned<Persona>>,
         next_cursor: Option<PersonaListCursor>,
     },
     RestartRequired {
@@ -84,7 +84,7 @@ impl Core {
     pub fn create_persona(
         &self,
         request: &PersonaCreateRequest,
-    ) -> CoreResult<StoredRevision<Persona>> {
+    ) -> CoreResult<Revisioned<Persona>> {
         let local_user_id = self.authoritative_local_user_id()?;
         let now = Utc::now();
         let stored = self.storage().save_persona(
@@ -107,17 +107,17 @@ impl Core {
             None,
         )?;
         validate_owned_persona(&local_user_id, Some(&stored.value.id), &stored.value)?;
-        Ok(stored)
+        Ok(project_revision(stored))
     }
 
-    pub fn get_persona(&self, persona_id: &PersonaId) -> CoreResult<StoredRevision<Persona>> {
+    pub fn get_persona(&self, persona_id: &PersonaId) -> CoreResult<Revisioned<Persona>> {
         let local_user_id = self.authoritative_local_user_id()?;
         let stored = self.storage().get_persona(persona_id)?;
         validate_owned_persona(&local_user_id, Some(persona_id), &stored.value)?;
-        Ok(stored)
+        Ok(project_revision(stored))
     }
 
-    pub fn list_personas(&self, limit: u32) -> CoreResult<Vec<StoredRevision<Persona>>> {
+    pub fn list_personas(&self, limit: u32) -> CoreResult<Vec<Revisioned<Persona>>> {
         match self.list_persona_page(None, limit)? {
             PersonaListPage::Page { items, .. } => Ok(items),
             PersonaListPage::RestartRequired { .. } => Err(CoreError::internal(
@@ -176,7 +176,7 @@ impl Core {
                 });
         Ok(PersonaListPage::Page {
             catalog_revision,
-            items,
+            items: items.into_iter().map(project_revision).collect(),
             next_cursor,
         })
     }
@@ -184,7 +184,7 @@ impl Core {
     pub fn update_persona(
         &self,
         request: &PersonaUpdateRequest,
-    ) -> CoreResult<StoredRevision<Persona>> {
+    ) -> CoreResult<Revisioned<Persona>> {
         let local_user_id = self.authoritative_local_user_id()?;
         let current = self.storage().get_persona(&request.persona_id)?;
         validate_owned_persona(&local_user_id, Some(&request.persona_id), &current.value)?;
@@ -196,7 +196,7 @@ impl Core {
             .storage()
             .save_persona(&persona, Some(request.expected_revision))?;
         validate_owned_persona(&local_user_id, Some(&request.persona_id), &stored.value)?;
-        Ok(stored)
+        Ok(project_revision(stored))
     }
 
     pub fn list_persona_revisions(
@@ -229,12 +229,13 @@ impl Core {
     pub fn delete_persona(
         &self,
         request: &PersonaDeleteRequest,
-    ) -> CoreResult<StoredRevision<Persona>> {
+    ) -> CoreResult<Revisioned<Persona>> {
         let local_user_id = self.authoritative_local_user_id()?;
         let current = self.storage().get_persona(&request.persona_id)?;
         validate_owned_persona(&local_user_id, Some(&request.persona_id), &current.value)?;
         self.storage()
             .soft_delete_persona(&request.persona_id, request.expected_revision)
+            .map(project_revision)
     }
 
     pub fn get_conversation_persona_selection_state(

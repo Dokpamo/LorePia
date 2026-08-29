@@ -13,7 +13,14 @@ use lorepia_domain::{
 use sha2::{Digest, Sha256};
 use zip::{ZipArchive, read::ZipFile};
 
-use crate::{StagedAsset, adapters, path::validate_archive_path, runtime};
+use crate::{
+    StagedAsset, adapters,
+    capabilities::{
+        intersect_runtime_profile_capabilities, normalize_runtime_profile_capabilities,
+    },
+    path::validate_archive_path,
+    runtime,
+};
 
 const CARD_METADATA_PATH: &str = "card.json";
 const ASSET_HEADER_BYTES: usize = 16;
@@ -251,7 +258,7 @@ fn merge_runtime_documents(
                 "Embedded knowledge",
             )?;
         }
-        merge_runtime_profile(&mut metadata.content.runtime, profile);
+        merge_runtime_profile(&mut metadata.content.runtime, profile)?;
         for (asset_index, asset) in embedded_assets.into_iter().enumerate() {
             project_runtime_asset(
                 state,
@@ -356,7 +363,8 @@ fn project_runtime_asset(
 fn merge_runtime_profile(
     target: &mut lorepia_domain::CharacterRuntimeProfile,
     mut incoming: lorepia_domain::CharacterRuntimeProfile,
-) {
+) -> CoreResult<()> {
+    intersect_runtime_profile_capabilities(target, &mut incoming)?;
     target.transforms.append(&mut incoming.transforms);
     target.scripts.append(&mut incoming.scripts);
     if target.background_markup.is_empty() {
@@ -373,6 +381,7 @@ fn merge_runtime_profile(
     if target.source_id.is_none() {
         target.source_id = incoming.source_id;
     }
+    normalize_runtime_profile_capabilities(target)
 }
 
 fn parse_archive_metadata(

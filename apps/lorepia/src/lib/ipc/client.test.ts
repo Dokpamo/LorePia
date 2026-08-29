@@ -8,6 +8,10 @@ import {
     LiveLorepiaClient,
     type LorepiaTransport,
 } from './client';
+import type {
+    PortableRuntimeStateRecordDto,
+    PortableRuntimeStateScopeInput,
+} from './portable-runtime-state-contracts';
 
 class RecordingTransport implements LorepiaTransport {
     readonly calls: {
@@ -50,6 +54,76 @@ class RecordingTransport implements LorepiaTransport {
 }
 
 describe('LiveLorepiaClient transport boundary', () => {
+    it('routes portable runtime state through the typed scope and CAS request boundary', async () => {
+        const transport = new RecordingTransport();
+        const client = new LiveLorepiaClient(transport);
+        const scope: PortableRuntimeStateScopeInput = {
+            character_id: 'character:1',
+            character_content_revision_id: 'revision:2',
+            conversation_id: 'conversation:3',
+            branch_id: 'branch:4',
+        };
+        const record: PortableRuntimeStateRecordDto = {
+            scope,
+            scope_epoch: 5,
+            revision: 6,
+            payload: {
+                schema_version: 1,
+                value: {
+                    options: {},
+                    chatVars: {},
+                    state: {},
+                    messageOverrides: {},
+                    background: '',
+                    auxiliarySelection: null,
+                },
+            },
+            created_at: '2026-08-29T00:00:00Z',
+            updated_at: '2026-08-29T00:00:00Z',
+        };
+        transport.responses.set(LOREPIA_COMMANDS.getPortableRuntimeState, {
+            scope_epoch: 5,
+            record,
+        });
+        transport.responses.set(LOREPIA_COMMANDS.putPortableRuntimeState, {
+            status: 'saved',
+            record,
+            evicted_rows: 0,
+            evicted_bytes: 0,
+        });
+
+        await expect(client.getPortableRuntimeState(scope)).resolves.toEqual({
+            scope_epoch: 5,
+            record,
+        });
+        await expect(
+            client.putPortableRuntimeState({
+                scope,
+                expected_scope_epoch: 5,
+                expected_revision: 4,
+                payload: record.payload,
+            }),
+        ).resolves.toMatchObject({ status: 'saved', record });
+
+        expect(transport.calls).toEqual([
+            {
+                commandName: 'get_portable_runtime_state',
+                args: { request: { scope } },
+            },
+            {
+                commandName: 'put_portable_runtime_state',
+                args: {
+                    request: {
+                        scope,
+                        expected_scope_epoch: 5,
+                        expected_revision: 4,
+                        payload: record.payload,
+                    },
+                },
+            },
+        ]);
+    });
+
     it('sends only greeting identity and exact character-content revision selectors', async () => {
         const transport = new RecordingTransport();
         const client = new LiveLorepiaClient(transport);

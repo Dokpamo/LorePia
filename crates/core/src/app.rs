@@ -1,18 +1,18 @@
 use std::{
     collections::{HashMap, HashSet},
     fs::{self, File, OpenOptions},
-    future::Future,
     io::{BufReader, Read, Write},
     path::{Path, PathBuf},
-    sync::{Arc, Condvar, Mutex, RwLock},
-    time::{Duration, Instant},
+    sync::{Arc, Mutex, RwLock},
+    time::Duration,
 };
 
 use chrono::{DateTime, Utc};
+#[cfg(test)]
+use lorepia_chat::MAX_GENERATED_OUTPUT_CHARS;
 use lorepia_chat::{
-    ChatEvent, ChatEventKind, GenerationFailure, GenerationOutcome, MAX_GENERATED_OUTPUT_BYTES,
-    MAX_GENERATED_OUTPUT_CHARS, MAX_HISTORY_MESSAGE_BYTES, MAX_HISTORY_MESSAGE_CHARS,
-    MAX_PROMPT_MESSAGES, run_generation,
+    ChatEvent, ChatEventKind, GenerationFailure, GenerationOutcome, MAX_HISTORY_MESSAGE_BYTES,
+    MAX_HISTORY_MESSAGE_CHARS, MAX_PROMPT_MESSAGES, run_generation,
 };
 use lorepia_content::{StagedAsset, prepare_import};
 use lorepia_domain::{
@@ -60,7 +60,7 @@ use lorepia_storage::{
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use tokio::{
-    runtime::{Builder, Handle},
+    runtime::Handle,
     sync::{broadcast, mpsc, watch},
     time::{self, MissedTickBehavior},
 };
@@ -68,17 +68,39 @@ use uuid::Uuid;
 use zeroize::Zeroize;
 
 use crate::{
-    CoreConfig, DiscoveryRecoveryOwner,
+    CoreConfig, DiscoveryRecoveryOwner, Revisioned,
     catalog::{CatalogRouteProjection, PendingProviderCatalogImportPlan},
     core_version,
     orchestration::{
         GenerationPlanInput, GenerationPromptAuthorityCapture, deterministic_prompt_user_message_id,
     },
+    revision::project_revision,
 };
 
+mod generation_events;
+mod generation_workflow;
 mod model_sync;
+mod portable_runtime_state;
+mod runtime_control;
 mod runtime_generation;
 
+pub use generation_events::GenerationEventSubscription;
+#[cfg(test)]
+use generation_events::GenerationLivePrefix;
+use generation_events::{
+    GenerationDeliveryPhase, GenerationProviderAdmissionKey, GenerationRegistry,
+    generation_subscription_unavailable,
+};
+use generation_workflow::{
+    apply_generation_output_transforms, apply_generation_result, execute_generation_task,
+    partial_checkpoint_due, transform_content_sha256,
+};
+use runtime_control::RuntimeControl;
+
+pub use portable_runtime_state::{
+    PortableRuntimeStatePayload, PortableRuntimeStateRecord, PortableRuntimeStateSaveResult,
+    PortableRuntimeStateScope, PortableRuntimeStateSnapshot, PortableRuntimeStateWrite,
+};
 #[cfg(test)]
 use runtime_generation::{
     RUNTIME_MAX_OUTPUT_TOKENS, runtime_generation_request, runtime_generation_result,
@@ -96,7 +118,7 @@ const MAX_ACTIVE_GENERATIONS_PER_PROCESS: usize = 32;
 const MAX_ACTIVE_GENERATIONS_PER_PROVIDER: usize = 8;
 const MAX_ACTIVE_GENERATIONS_PER_CONVERSATION: usize = 4;
 const GENERATION_SHUTDOWN_GRACE: Duration = Duration::from_millis(750);
-const RUNTIME_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(1);
+const AUXILIARY_PROVIDER_TEARDOWN_GRACE: Duration = Duration::from_millis(750);
 const PARTIAL_CHECKPOINT_INTERVAL: Duration = Duration::from_millis(500);
 const PARTIAL_CHECKPOINT_BYTES: usize = 64 * 1024;
 // A live catch-up snapshot may contain the provider's bounded reasoning plus
@@ -152,44 +174,6 @@ const INTERACTION_DERIVED_SUPERVISOR_MIN_DELAY: Duration = Duration::from_millis
 #[derive(Clone)]
 pub struct Core {
     inner: Arc<CoreInner>,
-}
-
-/// Atomic process-local subscription state for one running generation.
-///
-/// The receiver, sequence watermark, and bounded display/reasoning prefixes are
-/// captured under the same delivery mutex used by generation publishers.
-/// Callers therefore either observe a durable terminal status or can rebuild
-/// the exact live presentation through the returned watermark before receiving
-/// every later event. This process-local snapshot exists only while the
-/// generation is registered as live; terminal recovery reads the durable
-/// message/projection instead of subscribing again.
-pub struct GenerationEventSubscription {
-    receiver: broadcast::Receiver<ChatEvent>,
-    assistant_message_id: MessageId,
-    sequence_watermark: u64,
-    display_prefix: String,
-    reasoning_prefix: String,
-}
-
-impl GenerationEventSubscription {
-    #[must_use]
-    pub fn into_parts(
-        self,
-    ) -> (
-        broadcast::Receiver<ChatEvent>,
-        MessageId,
-        u64,
-        String,
-        String,
-    ) {
-        (
-            self.receiver,
-            self.assistant_message_id,
-            self.sequence_watermark,
-            self.display_prefix,
-            self.reasoning_prefix,
-        )
-    }
 }
 
 /// Request-scoped credential material bound to one provider connection.
@@ -349,102 +333,6 @@ struct CoreInner {
     active_generations: Arc<GenerationRegistry>,
     active_model_syncs: Arc<model_sync::ModelSyncRegistry>,
     event_bus: broadcast::Sender<ChatEvent>,
-}
-
-struct RuntimeControl {
-    handle: Handle,
-    shutdown_sender: Option<tokio::sync::oneshot::Sender<()>>,
-    owner_thread: Option<std::thread::JoinHandle<()>>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum GenerationDeliveryPhase {
-    Preparing,
-    Running,
-    Terminal,
-}
-
-struct GenerationRoute {
-    conversation: ConversationId,
-    branch: ConversationBranchId,
-    assistant_message: MessageId,
-}
-
-#[derive(Clone, PartialEq, Eq)]
-enum GenerationProviderAdmissionKey {
-    Connection(ProviderConnectionId),
-    ProviderProfile(String),
-    #[cfg(test)]
-    DirectModel(String),
-}
-
-struct GenerationDeliveryState {
-    phase: GenerationDeliveryPhase,
-    sequence_watermark: u64,
-    live_prefix: Option<GenerationLivePrefix>,
-}
-
-#[derive(Default)]
-struct GenerationLivePrefix {
-    display: String,
-    reasoning: String,
-    display_chars: usize,
-    reasoning_chars: usize,
-}
-
-impl GenerationLivePrefix {
-    fn append(&mut self, kind: &ChatEventKind) -> bool {
-        let (target, chars, max_bytes, max_chars, delta) = match kind {
-            ChatEventKind::TextDelta(delta) => (
-                &mut self.display,
-                &mut self.display_chars,
-                MAX_LIVE_DISPLAY_PREFIX_BYTES,
-                MAX_LIVE_DISPLAY_PREFIX_CHARS,
-                delta,
-            ),
-            ChatEventKind::ReasoningDelta(delta) => (
-                &mut self.reasoning,
-                &mut self.reasoning_chars,
-                MAX_GENERATED_OUTPUT_BYTES,
-                MAX_GENERATED_OUTPUT_CHARS,
-                delta,
-            ),
-            _ => return true,
-        };
-        let Some(next_bytes) = target.len().checked_add(delta.len()) else {
-            return false;
-        };
-        let Some(next_chars) = chars.checked_add(delta.chars().count()) else {
-            return false;
-        };
-        if next_bytes > max_bytes || next_chars > max_chars {
-            return false;
-        }
-        target.push_str(delta);
-        *chars = next_chars;
-        true
-    }
-}
-
-struct ActiveGeneration {
-    cancel: watch::Sender<bool>,
-    route: GenerationRoute,
-    provider_admission_key: GenerationProviderAdmissionKey,
-    delivery: Mutex<GenerationDeliveryState>,
-    #[cfg(test)]
-    subscription_pause: Mutex<Option<GenerationSubscriptionPause>>,
-}
-
-#[cfg(test)]
-struct GenerationSubscriptionPause {
-    entered: std::sync::mpsc::Sender<()>,
-    release: std::sync::mpsc::Receiver<()>,
-}
-
-#[derive(Default)]
-struct GenerationRegistry {
-    active: Mutex<HashMap<GenerationId, Arc<ActiveGeneration>>>,
-    drained: Condvar,
 }
 
 #[derive(Clone)]
@@ -1037,308 +925,6 @@ impl Drop for ActiveGenerationGuard {
     }
 }
 
-impl RuntimeControl {
-    fn start() -> CoreResult<Self> {
-        let (ready_sender, ready_receiver) =
-            std::sync::mpsc::sync_channel::<Result<Handle, String>>(1);
-        let (shutdown_sender, shutdown_receiver) = tokio::sync::oneshot::channel();
-        let owner_thread = std::thread::Builder::new()
-            .name("lorepia-core-owner".to_owned())
-            .spawn(move || {
-                let runtime = match Builder::new_multi_thread()
-                    .worker_threads(2)
-                    .enable_all()
-                    .thread_name("lorepia-core-worker")
-                    .build()
-                {
-                    Ok(runtime) => runtime,
-                    Err(error) => {
-                        let _ = ready_sender
-                            .send(Err(format!("cannot create core async runtime: {error}")));
-                        return;
-                    }
-                };
-                if ready_sender.send(Ok(runtime.handle().clone())).is_err() {
-                    runtime.shutdown_timeout(RUNTIME_SHUTDOWN_TIMEOUT);
-                    return;
-                }
-                let _ = runtime.block_on(shutdown_receiver);
-                runtime.shutdown_timeout(RUNTIME_SHUTDOWN_TIMEOUT);
-            })
-            .map_err(|error| {
-                CoreError::internal(format!("cannot start core runtime owner: {error}"))
-            })?;
-
-        match ready_receiver.recv() {
-            Ok(Ok(handle)) => Ok(Self {
-                handle,
-                shutdown_sender: Some(shutdown_sender),
-                owner_thread: Some(owner_thread),
-            }),
-            Ok(Err(message)) => {
-                let _ = owner_thread.join();
-                Err(CoreError::internal(message))
-            }
-            Err(error) => {
-                let _ = owner_thread.join();
-                Err(CoreError::internal(format!(
-                    "core runtime owner stopped during startup: {error}"
-                )))
-            }
-        }
-    }
-
-    fn spawn(&self, future: impl Future<Output = ()> + Send + 'static) {
-        std::mem::drop(self.handle.spawn(future));
-    }
-
-    fn shutdown(&mut self) {
-        if let Some(sender) = self.shutdown_sender.take() {
-            let _ = sender.send(());
-        }
-        if let Some(owner_thread) = self.owner_thread.take() {
-            let _ = owner_thread.join();
-        }
-    }
-}
-
-impl GenerationRegistry {
-    fn register(
-        &self,
-        generation: &GenerationRecord,
-        provider_admission_key: GenerationProviderAdmissionKey,
-        cancel: watch::Sender<bool>,
-    ) -> CoreResult<()> {
-        let assistant_message_id = generation.assistant_message_id.clone().ok_or_else(|| {
-            CoreError::internal("running generation is missing its assistant message route")
-        })?;
-        let mut active = self
-            .active
-            .lock()
-            .map_err(|_| CoreError::internal("generation registry lock was poisoned"))?;
-        if active.contains_key(&generation.id) {
-            return Err(CoreError::internal(
-                "generation is already registered for delivery",
-            ));
-        }
-        if active.len() >= MAX_ACTIVE_GENERATIONS_PER_PROCESS {
-            return Err(generation_admission_limit_reached("process"));
-        }
-        if active
-            .values()
-            .filter(|entry| entry.route.conversation == generation.conversation_id)
-            .count()
-            >= MAX_ACTIVE_GENERATIONS_PER_CONVERSATION
-        {
-            return Err(generation_admission_limit_reached("conversation"));
-        }
-        if active
-            .values()
-            .filter(|entry| entry.provider_admission_key == provider_admission_key)
-            .count()
-            >= MAX_ACTIVE_GENERATIONS_PER_PROVIDER
-        {
-            return Err(generation_admission_limit_reached("provider"));
-        }
-        active.insert(
-            generation.id.clone(),
-            Arc::new(ActiveGeneration {
-                cancel,
-                route: GenerationRoute {
-                    conversation: generation.conversation_id.clone(),
-                    branch: generation.branch_id.clone(),
-                    assistant_message: assistant_message_id,
-                },
-                provider_admission_key,
-                delivery: Mutex::new(GenerationDeliveryState {
-                    phase: GenerationDeliveryPhase::Preparing,
-                    sequence_watermark: 0,
-                    live_prefix: Some(GenerationLivePrefix::default()),
-                }),
-                #[cfg(test)]
-                subscription_pause: Mutex::new(None),
-            }),
-        );
-        Ok(())
-    }
-
-    fn activate(&self, generation_id: &GenerationId) -> CoreResult<()> {
-        let entry = self.entry(generation_id)?;
-        let mut delivery = entry
-            .delivery
-            .lock()
-            .map_err(|_| CoreError::internal("generation delivery lock was poisoned"))?;
-        if delivery.phase != GenerationDeliveryPhase::Preparing {
-            return Err(CoreError::internal(
-                "generation delivery phase cannot be activated",
-            ));
-        }
-        delivery.phase = GenerationDeliveryPhase::Running;
-        Ok(())
-    }
-
-    fn entry(&self, generation_id: &GenerationId) -> CoreResult<Arc<ActiveGeneration>> {
-        self.active
-            .lock()
-            .map_err(|_| CoreError::internal("generation registry lock was poisoned"))?
-            .get(generation_id)
-            .cloned()
-            .ok_or_else(generation_subscription_unavailable)
-    }
-
-    fn publish(
-        &self,
-        event_bus: &broadcast::Sender<ChatEvent>,
-        event: ChatEvent,
-    ) -> CoreResult<()> {
-        let entry = self.entry(&event.generation_id)?;
-        let mut delivery = entry
-            .delivery
-            .lock()
-            .map_err(|_| CoreError::internal("generation delivery lock was poisoned"))?;
-        if delivery.phase != GenerationDeliveryPhase::Running {
-            return Err(CoreError::internal(
-                "generation event was published outside the running phase",
-            ));
-        }
-        if event.conversation_id != entry.route.conversation
-            || event.branch_id.as_ref() != Some(&entry.route.branch)
-            || event.assistant_message_id.as_ref() != Some(&entry.route.assistant_message)
-        {
-            return Err(CoreError::internal(
-                "generation event route does not match the registered route",
-            ));
-        }
-        if event.sequence <= delivery.sequence_watermark {
-            return Err(CoreError::internal(
-                "generation event sequence is not strictly increasing",
-            ));
-        }
-        let is_terminal = matches!(
-            &event.kind,
-            ChatEventKind::GenerationCancelled
-                | ChatEventKind::GenerationFailed { .. }
-                | ChatEventKind::GenerationFinished
-        );
-        if delivery
-            .live_prefix
-            .as_mut()
-            .is_some_and(|prefix| !prefix.append(&event.kind))
-        {
-            // The normal provider stream is already bounded by these same
-            // cumulative output limits. A larger post-commit display
-            // projection may still be delivered to an existing receiver, but
-            // cannot be used as a process-local reattachment snapshot.
-            delivery.live_prefix = None;
-        }
-        let sequence = event.sequence;
-        let _ = event_bus.send(event);
-        delivery.sequence_watermark = sequence;
-        if is_terminal {
-            delivery.phase = GenerationDeliveryPhase::Terminal;
-        }
-        Ok(())
-    }
-
-    fn cancel(&self, generation_id: &GenerationId) -> CoreResult<()> {
-        let entry = self.entry(generation_id)?;
-        entry.cancel.send(true).map_err(|_| {
-            CoreError::new(CoreErrorCode::Cancelled, "generation already stopped", true)
-        })
-    }
-
-    fn remove(&self, generation_id: &GenerationId) {
-        if let Ok(mut active) = self.active.lock() {
-            active.remove(generation_id);
-            if active.is_empty() {
-                self.drained.notify_all();
-            }
-        }
-    }
-
-    fn len(&self) -> usize {
-        self.active.lock().map_or(0, |active| active.len())
-    }
-
-    fn cancel_all_and_wait(&self, timeout: Duration) {
-        let Ok(mut active) = self.active.lock() else {
-            return;
-        };
-        for entry in active.values() {
-            let _ = entry.cancel.send(true);
-        }
-        let deadline = Instant::now() + timeout;
-        while !active.is_empty() {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
-                break;
-            }
-            match self.drained.wait_timeout(active, remaining) {
-                Ok((next, result)) => {
-                    active = next;
-                    if result.timed_out() {
-                        break;
-                    }
-                }
-                Err(_) => break,
-            }
-        }
-    }
-
-    #[cfg(test)]
-    fn sequence_watermark_for_test(&self, generation_id: &GenerationId) -> Option<u64> {
-        let entry = self.active.lock().ok()?.get(generation_id).cloned()?;
-        entry
-            .delivery
-            .lock()
-            .ok()
-            .map(|delivery| delivery.sequence_watermark)
-    }
-
-    #[cfg(test)]
-    fn phase_for_test(&self, generation_id: &GenerationId) -> Option<GenerationDeliveryPhase> {
-        let entry = self.active.lock().ok()?.get(generation_id).cloned()?;
-        entry.delivery.lock().ok().map(|delivery| delivery.phase)
-    }
-
-    #[cfg(test)]
-    fn pause_next_subscription_for_test(
-        &self,
-        generation_id: &GenerationId,
-        entered: std::sync::mpsc::Sender<()>,
-        release: std::sync::mpsc::Receiver<()>,
-    ) -> CoreResult<()> {
-        let entry = self.entry(generation_id)?;
-        let mut pause = entry
-            .subscription_pause
-            .lock()
-            .map_err(|_| CoreError::internal("generation subscription test lock was poisoned"))?;
-        if pause.is_some() {
-            return Err(CoreError::internal(
-                "generation subscription test pause is already installed",
-            ));
-        }
-        *pause = Some(GenerationSubscriptionPause { entered, release });
-        Ok(())
-    }
-}
-
-fn generation_subscription_unavailable() -> CoreError {
-    CoreError::new(
-        CoreErrorCode::NotFound,
-        "generation subscription is unavailable",
-        false,
-    )
-}
-
-fn generation_admission_limit_reached(scope: &str) -> CoreError {
-    CoreError::new(
-        CoreErrorCode::ProviderRateLimited,
-        format!("active generation {scope} concurrency limit reached"),
-        true,
-    )
-}
-
 impl Drop for CoreInner {
     fn drop(&mut self) {
         self.active_generations
@@ -1549,7 +1135,7 @@ impl Core {
     }
 
     pub(crate) fn runtime_handle(&self) -> &Handle {
-        &self.inner.runtime.handle
+        self.inner.runtime.handle()
     }
 
     pub fn inspect_import(&self, staged_path: impl AsRef<Path>) -> CoreResult<ImportInspection> {
@@ -1700,11 +1286,11 @@ impl Core {
 
     /// Returns the normalized companion content persisted atomically with a
     /// character-card import.
-    pub fn get_character_content(
-        &self,
-        id: &str,
-    ) -> CoreResult<lorepia_storage::StoredRevision<CharacterContentV1>> {
-        self.inner.storage.get_character_content(id)
+    pub fn get_character_content(&self, id: &str) -> CoreResult<Revisioned<CharacterContentV1>> {
+        self.inner
+            .storage
+            .get_character_content(id)
+            .map(project_revision)
     }
 
     pub fn open_conversation(&self, character_id: &str) -> CoreResult<Conversation> {
@@ -7903,10 +7489,27 @@ async fn dispatch_auxiliary_task_provider(
         result = &mut provider_attempt => result,
         () = &mut cancellation => {
             let _ = attempt_cancel_sender.send(true);
+            // Built-in adapters observe this exact signal and tear down their
+            // in-flight transport. Give the local provider future and event
+            // collector a bounded opportunity to confirm that teardown before
+            // dropping them; the remote provider outcome remains unknown.
+            let _ = time::timeout(
+                AUXILIARY_PROVIDER_TEARDOWN_GRACE,
+                &mut provider_attempt,
+            )
+            .await;
             return unknown_task_outcome("auxiliary task was cancelled after provider dispatch began");
         }
         () = &mut timeout => {
             let _ = attempt_cancel_sender.send(true);
+            // Apply the same bounded local teardown handshake on timeout. A
+            // provider which ignores cancellation still has its local attempt
+            // force-dropped when this grace period expires.
+            let _ = time::timeout(
+                AUXILIARY_PROVIDER_TEARDOWN_GRACE,
+                &mut provider_attempt,
+            )
+            .await;
             return unknown_task_outcome("auxiliary task timed out after provider dispatch began");
         }
     };
@@ -8221,592 +7824,6 @@ fn load_opaque_reasoning_context(
     }
     validate_opaque_reasoning_states(&states).map_err(CoreError::invalid)?;
     Ok(contexts)
-}
-
-async fn execute_generation_task(task: GenerationTask) {
-    let GenerationTask {
-        storage,
-        active_generations,
-        event_bus,
-        branch_id,
-        request,
-        assistant,
-        provider,
-        credential,
-        cancel_receiver,
-        preserve_partial,
-        transforms,
-    } = task;
-    let generation_id = request.generation_id.clone();
-    let _active_generation = ActiveGenerationGuard {
-        generation_id: generation_id.clone(),
-        active_generations: Arc::clone(&active_generations),
-    };
-    let conversation_id = request.conversation_id.clone();
-    let assistant_message_id = assistant.id.clone();
-    let defer_text_events = generation_has_output_transforms(&transforms);
-    let (event_sender, event_receiver) = mpsc::channel(128);
-    let forward_events = tokio::spawn(forward_generation_events(
-        event_receiver,
-        GenerationEventForwardingContext {
-            active_generations: Arc::clone(&active_generations),
-            event_bus: event_bus.clone(),
-            storage: Arc::clone(&storage),
-            checkpoint: assistant.clone(),
-            branch_id: branch_id.clone(),
-            assistant_message_id: assistant_message_id.clone(),
-            preserve_partial,
-            defer_text_events,
-        },
-    ));
-    let generation_result = run_generation(
-        provider.as_ref(),
-        request,
-        credential.as_deref(),
-        event_sender,
-        cancel_receiver,
-    )
-    .await;
-    drop(credential);
-    drop(provider);
-    let forwarding_result = forward_events
-        .await
-        .map_err(|error| {
-            CoreError::internal(format!(
-                "generation event forwarder stopped unexpectedly: {error}"
-            ))
-        })
-        .and_then(std::convert::identity);
-    let result = merge_generation_and_forwarding_results(generation_result, forwarding_result);
-    finish_generation_task(
-        GenerationCompletionContext {
-            storage,
-            active_generations,
-            event_bus,
-            branch_id,
-            conversation_id,
-            generation_id,
-            assistant_message_id,
-            preserve_partial,
-            transforms,
-        },
-        assistant,
-        result,
-    );
-}
-
-fn finish_generation_task(
-    context: GenerationCompletionContext,
-    mut assistant: Message,
-    result: Result<GenerationOutcome, GenerationFailure>,
-) {
-    let GenerationCompletionContext {
-        storage,
-        active_generations,
-        event_bus,
-        branch_id,
-        conversation_id,
-        generation_id,
-        assistant_message_id,
-        preserve_partial,
-        transforms,
-    } = context;
-    let (result, display_projection) = apply_generation_output_transforms(result, &transforms);
-    let usage = result.as_ref().ok().map(|outcome| outcome.usage.clone());
-    let opaque_reasoning_state = result
-        .as_ref()
-        .ok()
-        .map(|outcome| outcome.opaque_reasoning_state.clone())
-        .unwrap_or_default();
-    let error_code = result
-        .as_ref()
-        .err()
-        .map(|failure| failure.error.code.as_str().to_owned());
-
-    let (mut sequence, terminal_kind, should_commit) =
-        apply_generation_result(&mut assistant, result, preserve_partial);
-    let (terminal_kind, committed, projection_committed) = persist_generation_terminal(
-        TerminalPersistenceContext {
-            storage: &storage,
-            generation_id: &generation_id,
-        },
-        &mut assistant,
-        usage.as_ref(),
-        &opaque_reasoning_state,
-        error_code.as_deref(),
-        should_commit,
-        display_projection.as_ref(),
-        terminal_kind,
-    );
-    let deferred_display_text = display_projection.as_ref().and_then(|projection| {
-        committed.then(|| {
-            if projection_committed {
-                projection.display_content.clone()
-            } else {
-                assistant.content.clone()
-            }
-        })
-    });
-    if let Some(display_text) = deferred_display_text.filter(|text| !text.is_empty()) {
-        let _ = active_generations.publish(
-            &event_bus,
-            ChatEvent::new(
-                generation_id.clone(),
-                conversation_id.clone(),
-                sequence,
-                ChatEventKind::TextDelta(display_text),
-            )
-            .with_route(branch_id.clone(), assistant_message_id.clone()),
-        );
-        sequence = sequence.saturating_add(1);
-    }
-    if committed {
-        let _ = active_generations.publish(
-            &event_bus,
-            ChatEvent::new(
-                generation_id.clone(),
-                conversation_id.clone(),
-                sequence,
-                ChatEventKind::MessageCommitted {
-                    message_id: assistant.id.clone(),
-                    status: assistant.status,
-                },
-            )
-            .with_route(branch_id.clone(), assistant_message_id.clone()),
-        );
-        sequence = sequence.saturating_add(1);
-    }
-    let _ = active_generations.publish(
-        &event_bus,
-        ChatEvent::new(
-            generation_id.clone(),
-            conversation_id,
-            sequence,
-            terminal_kind,
-        )
-        .with_route(branch_id, assistant_message_id),
-    );
-}
-
-#[allow(
-    clippy::too_many_arguments,
-    reason = "terminal persistence keeps the complete transaction and compensation inputs explicit"
-)]
-fn persist_generation_terminal(
-    context: TerminalPersistenceContext<'_>,
-    assistant: &mut Message,
-    usage: Option<&lorepia_domain::GenerationUsage>,
-    opaque_reasoning_state: &[OpaqueReasoningState],
-    error_code: Option<&str>,
-    should_commit: bool,
-    display_projection: Option<&MessageDisplayProjectionWrite>,
-    mut terminal_kind: ChatEventKind,
-) -> (ChatEventKind, bool, bool) {
-    let original_status = assistant.status;
-    let display_projection = should_commit.then_some(display_projection).flatten();
-    let persistence = context
-        .storage
-        .finalize_generation_with_protocol_state_and_display(
-            assistant,
-            usage,
-            opaque_reasoning_state,
-            error_code,
-            should_commit,
-            display_projection,
-        );
-    let persistence_succeeded = persistence.is_ok();
-    let committed = if persistence_succeeded {
-        should_commit
-    } else {
-        assistant.status = MessageStatus::Failed;
-        let compensation = context
-            .storage
-            .fail_generation_after_finalize_error(assistant, should_commit);
-        if compensation.is_ok() {
-            terminal_kind = generation_persistence_failure();
-            should_commit
-        } else if context
-            .storage
-            .get_generation(context.generation_id)
-            .is_ok_and(|generation| {
-                generation.status == generation_status_for_message(original_status)
-            })
-        {
-            assistant.status = original_status;
-            should_commit
-        } else {
-            terminal_kind = generation_persistence_failure();
-            false
-        }
-    };
-    let projection_committed = committed
-        && display_projection.is_some_and(|expected| {
-            persistence_succeeded
-                || context
-                    .storage
-                    .get_message_display_projection(assistant)
-                    .is_ok_and(|stored| {
-                        stored.is_some_and(|stored| {
-                            stored.display_content == expected.display_content
-                        })
-                    })
-        });
-    (terminal_kind, committed, projection_committed)
-}
-
-const fn generation_status_for_message(status: MessageStatus) -> GenerationStatus {
-    match status {
-        MessageStatus::Pending => GenerationStatus::Running,
-        MessageStatus::Complete => GenerationStatus::Complete,
-        MessageStatus::Cancelled => GenerationStatus::Cancelled,
-        MessageStatus::Failed => GenerationStatus::Failed,
-    }
-}
-
-fn generation_persistence_failure() -> ChatEventKind {
-    ChatEventKind::GenerationFailed {
-        code: CoreErrorCode::StorageUnavailable.as_str().to_owned(),
-        message: GENERATION_PERSISTENCE_FAILURE_MESSAGE.to_owned(),
-    }
-}
-
-async fn forward_generation_events(
-    mut event_receiver: mpsc::Receiver<ChatEvent>,
-    context: GenerationEventForwardingContext,
-) -> CoreResult<()> {
-    let GenerationEventForwardingContext {
-        active_generations,
-        event_bus,
-        storage,
-        mut checkpoint,
-        branch_id,
-        assistant_message_id,
-        preserve_partial,
-        defer_text_events,
-    } = context;
-    let start = time::Instant::now() + PARTIAL_CHECKPOINT_INTERVAL;
-    let mut interval = time::interval_at(start, PARTIAL_CHECKPOINT_INTERVAL);
-    interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
-    let mut last_checkpoint_bytes = 0;
-    let mut dirty = false;
-
-    loop {
-        tokio::select! {
-            event = event_receiver.recv() => {
-                let Some(event) = event else {
-                    if preserve_partial && dirty {
-                        storage.checkpoint_pending_assistant(&checkpoint)?;
-                    }
-                    return Ok(());
-                };
-                let is_text_delta = matches!(&event.kind, ChatEventKind::TextDelta(_));
-                if !defer_text_events {
-                    if preserve_partial
-                        && let ChatEventKind::TextDelta(delta) = &event.kind
-                    {
-                        checkpoint.content.push_str(delta);
-                        dirty = true;
-                    }
-                    active_generations.publish(
-                        &event_bus,
-                        event.with_route(branch_id.clone(), assistant_message_id.clone())
-                    )?;
-                } else if !is_text_delta {
-                    active_generations.publish(
-                        &event_bus,
-                        event.with_route(branch_id.clone(), assistant_message_id.clone())
-                    )?;
-                }
-                if preserve_partial
-                    && dirty
-                    && partial_checkpoint_due(checkpoint.content.len(), last_checkpoint_bytes)
-                {
-                    storage.checkpoint_pending_assistant(&checkpoint)?;
-                    last_checkpoint_bytes = checkpoint.content.len();
-                    dirty = false;
-                }
-            }
-            _ = interval.tick(), if preserve_partial => {
-                if dirty {
-                    storage.checkpoint_pending_assistant(&checkpoint)?;
-                    last_checkpoint_bytes = checkpoint.content.len();
-                    dirty = false;
-                }
-            }
-        }
-    }
-}
-
-fn partial_checkpoint_due(current_bytes: usize, last_checkpoint_bytes: usize) -> bool {
-    current_bytes.saturating_sub(last_checkpoint_bytes) >= PARTIAL_CHECKPOINT_BYTES
-}
-
-fn merge_generation_and_forwarding_results(
-    generation: Result<GenerationOutcome, GenerationFailure>,
-    forwarding: CoreResult<()>,
-) -> Result<GenerationOutcome, GenerationFailure> {
-    match (generation, forwarding) {
-        (result, Ok(())) => result,
-        (Ok(outcome), Err(error)) => Err(GenerationFailure {
-            error,
-            partial_text: outcome.text,
-            last_sequence: outcome.last_sequence,
-        }),
-        (Err(mut failure), Err(error)) => {
-            failure.error = error;
-            Err(failure)
-        }
-    }
-}
-
-fn generation_has_output_transforms(context: &GenerationTransformContext) -> bool {
-    context.sets.iter().any(|set| {
-        set.enabled
-            && set.rules.iter().any(|rule| {
-                rule.enabled
-                    && matches!(
-                        rule.phase,
-                        TransformPhase::ProviderOutputCanonical | TransformPhase::DisplayOnly
-                    )
-            })
-    })
-}
-
-fn apply_generation_output_transforms(
-    mut result: Result<GenerationOutcome, GenerationFailure>,
-    context: &GenerationTransformContext,
-) -> (
-    Result<GenerationOutcome, GenerationFailure>,
-    Option<MessageDisplayProjectionWrite>,
-) {
-    if !generation_has_output_transforms(context) {
-        return (result, None);
-    }
-    let text = match &result {
-        Ok(outcome) => outcome.text.as_str(),
-        Err(failure) => failure.partial_text.as_str(),
-    };
-    let canonical_phase = apply_generation_transform_phase(
-        context,
-        TransformPhase::ProviderOutputCanonical,
-        text,
-        MessageTransformStage::ProviderOutputCanonical,
-    );
-    let display_phase = apply_generation_transform_phase(
-        context,
-        TransformPhase::DisplayOnly,
-        &canonical_phase.output,
-        MessageTransformStage::DisplayOnly,
-    );
-    let canonical = canonical_phase.output;
-    let display = context.display_context.as_ref().map_or_else(
-        || display_phase.output.clone(),
-        |base_context| {
-            let mut display_context = base_context.clone();
-            display_context
-                .messages
-                .push(lorepia_domain::PromptConversationMessage {
-                    id: MessageId("portable-display-output".to_owned()),
-                    branch_id: display_context.branch_id.clone(),
-                    role: lorepia_domain::PromptMessageRole::Assistant,
-                    content: canonical.clone(),
-                    turn_index: u32::try_from(display_context.messages.len()).unwrap_or(u32::MAX),
-                });
-            lorepia_orchestration::render_portable_text(&display_phase.output, &display_context)
-        },
-    );
-    match &mut result {
-        Ok(outcome) => outcome.text.clone_from(&canonical),
-        Err(failure) => failure.partial_text.clone_from(&canonical),
-    }
-    let mut applications = canonical_phase.applications;
-    applications.extend(display_phase.applications);
-    let pipeline_failures = canonical_phase
-        .pipeline_failure
-        .into_iter()
-        .chain(display_phase.pipeline_failure)
-        .collect();
-    (
-        result,
-        Some(MessageDisplayProjectionWrite {
-            display_content: display,
-            applications,
-            pipeline_failures,
-        }),
-    )
-}
-
-struct GenerationTransformPhaseResult {
-    output: String,
-    applications: Vec<MessageTransformApplicationWrite>,
-    pipeline_failure: Option<MessageTransformPipelineFailureWrite>,
-}
-
-fn apply_generation_transform_phase(
-    context: &GenerationTransformContext,
-    phase: TransformPhase,
-    input: &str,
-    stage: MessageTransformStage,
-) -> GenerationTransformPhaseResult {
-    let transformed = crate::orchestration::apply_transform_sets_with_import_approvals(
-        &context.sets,
-        phase,
-        input,
-        &context.variables,
-        &context.supported_capabilities,
-        &context.approved_import_source_ids,
-    );
-    let Ok(transformed) = transformed else {
-        return GenerationTransformPhaseResult {
-            output: input.to_owned(),
-            applications: Vec::new(),
-            pipeline_failure: Some(MessageTransformPipelineFailureWrite {
-                stage,
-                code: "pipeline_invalid".to_owned(),
-                before_sha256: transform_content_sha256(input),
-            }),
-        };
-    };
-    let mut diagnostic_invalid = false;
-    let applications = transformed
-        .reports
-        .iter()
-        .filter_map(|report| {
-            let application = map_generation_transform_report(report, stage);
-            diagnostic_invalid |= application.is_none();
-            application
-        })
-        .collect::<Vec<_>>();
-    let pipeline_failure =
-        transformed
-            .error
-            .as_ref()
-            .map(|error| MessageTransformPipelineFailureWrite {
-                stage,
-                code: error.code.as_str().to_owned(),
-                before_sha256: transform_content_sha256(input),
-            });
-    GenerationTransformPhaseResult {
-        output: transformed.output,
-        applications: if diagnostic_invalid {
-            Vec::new()
-        } else {
-            applications
-        },
-        pipeline_failure: pipeline_failure.or_else(|| {
-            diagnostic_invalid.then(|| MessageTransformPipelineFailureWrite {
-                stage,
-                code: "diagnostic_invalid".to_owned(),
-                before_sha256: transform_content_sha256(input),
-            })
-        }),
-    }
-}
-
-fn map_generation_transform_report(
-    report: &lorepia_orchestration::TransformRuleReport,
-    stage: MessageTransformStage,
-) -> Option<MessageTransformApplicationWrite> {
-    let audit = report.execution_audit.as_ref()?;
-    let before_sha256 = Sha256Digest::parse(audit.before_sha256.clone()).ok()?;
-    let after_sha256 = audit
-        .after_sha256
-        .as_ref()
-        .map(|value| Sha256Digest::parse(value.clone()))
-        .transpose()
-        .ok()?;
-    let (disposition, code) = match report.status {
-        lorepia_orchestration::TransformRuleStatus::Applied => {
-            (MessageTransformDisposition::Applied, None)
-        }
-        lorepia_orchestration::TransformRuleStatus::NoMatch => {
-            (MessageTransformDisposition::NoMatch, None)
-        }
-        lorepia_orchestration::TransformRuleStatus::Disabled => {
-            (MessageTransformDisposition::Disabled, None)
-        }
-        lorepia_orchestration::TransformRuleStatus::PendingImportApproval => {
-            (MessageTransformDisposition::PendingImportApproval, None)
-        }
-        lorepia_orchestration::TransformRuleStatus::ResolvedPromptDisabled => {
-            (MessageTransformDisposition::ResolvedPromptDisabled, None)
-        }
-        lorepia_orchestration::TransformRuleStatus::ConditionFalse => {
-            (MessageTransformDisposition::ConditionFalse, None)
-        }
-        lorepia_orchestration::TransformRuleStatus::Failed => {
-            let failure_code = audit.failure_code?;
-            let disposition = if matches!(
-                failure_code,
-                lorepia_orchestration::TransformFailureCode::InputLimitExceeded
-                    | lorepia_orchestration::TransformFailureCode::OutputLimitExceeded
-            ) {
-                MessageTransformDisposition::LimitRejected
-            } else {
-                MessageTransformDisposition::Failed
-            };
-            (disposition, Some(failure_code.as_str().to_owned()))
-        }
-    };
-    Some(MessageTransformApplicationWrite {
-        set_id: audit.set_id.as_str().to_owned(),
-        rule_id: report.trace.rule_id.as_str().to_owned(),
-        stage,
-        disposition,
-        code,
-        before_sha256,
-        after_sha256,
-        replacement_count: report.trace.replacements,
-        input_chars: report.trace.input_chars,
-        output_chars: report.trace.output_chars,
-    })
-}
-
-fn transform_content_sha256(value: &str) -> Sha256Digest {
-    match Sha256Digest::parse(format!("{:x}", Sha256::digest(value.as_bytes()))) {
-        Ok(digest) => digest,
-        Err(error) => unreachable!("SHA-256 formatter produced an invalid digest: {error}"),
-    }
-}
-
-fn apply_generation_result(
-    assistant: &mut Message,
-    result: Result<GenerationOutcome, GenerationFailure>,
-    preserve_partial: bool,
-) -> (u64, ChatEventKind, bool) {
-    match result {
-        Ok(outcome) => {
-            assistant.content = outcome.text;
-            assistant.status = MessageStatus::Complete;
-            (
-                outcome.last_sequence.saturating_add(1),
-                ChatEventKind::GenerationFinished,
-                true,
-            )
-        }
-        Err(failure) => {
-            let cancelled = failure.error.code == CoreErrorCode::Cancelled;
-            assistant.content = failure.partial_text;
-            assistant.status = if cancelled {
-                MessageStatus::Cancelled
-            } else {
-                MessageStatus::Failed
-            };
-            let terminal = if cancelled {
-                ChatEventKind::GenerationCancelled
-            } else {
-                ChatEventKind::GenerationFailed {
-                    code: failure.error.code.as_str().to_owned(),
-                    message: failure.error.message,
-                }
-            };
-            (
-                failure.last_sequence.saturating_add(1),
-                terminal,
-                preserve_partial && !assistant.content.is_empty(),
-            )
-        }
-    }
 }
 
 pub(crate) type ReconciledModelRoutes = (Vec<ModelRoute>, Vec<ModelRouteId>, Vec<ModelRouteId>);
@@ -13745,7 +12762,7 @@ mod tests {
         conversation_id: &ConversationId,
         branch_id: &ConversationBranchId,
         summary_id: &MemoryRecordId,
-    ) -> StoredRevision<PromptPresetBinding> {
+    ) -> Revisioned<PromptPresetBinding> {
         let preset = prompt_source_test_preset(summary_id);
         core.upsert_prompt_preset(&preset, None)
             .expect("save prompt-source preset");
@@ -13817,7 +12834,7 @@ mod tests {
         branch_id: &ConversationBranchId,
         messages: &[Message],
         summary: &StoredRevision<MemoryRecord>,
-        binding: &StoredRevision<PromptPresetBinding>,
+        binding: &Revisioned<PromptPresetBinding>,
     ) {
         assert_eq!(snapshot.conversation_id, *conversation_id);
         assert_eq!(snapshot.source_branch_id, *branch_id);
@@ -16295,7 +15312,7 @@ mod tests {
             .recv_timeout(Duration::from_secs(2))
             .expect("provider started");
 
-        let runtime_handle = core.inner.runtime.handle.clone();
+        let runtime_handle = core.inner.runtime.handle().clone();
         let (dropped_sender, dropped_receiver) = std_mpsc::channel();
         std::mem::drop(runtime_handle.spawn(async move {
             let started = Instant::now();

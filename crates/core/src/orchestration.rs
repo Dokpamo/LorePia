@@ -58,11 +58,12 @@ use lorepia_storage::{
 use sha2::{Digest, Sha256};
 
 use crate::{
-    Core,
+    Core, Revisioned,
     orchestration_runtime::{
         MemorySemanticQueryEvidence, ResolvedMemorySemanticQuery, TaskCredentialBroker,
         apply_exact_transform_runtime_overlay, collect_exact_component_import_approvals,
     },
+    revision::{project_revision, project_revisions},
 };
 use lorepia_domain::{
     ConversationBranchId, ConversationId, CoreError, CoreResult, GenerationId, GenerationTarget,
@@ -275,7 +276,7 @@ pub struct PromptPresetRollbackApplyRequest {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PromptPresetRollbackReceipt {
-    pub preset: StoredRevision<PromptPreset>,
+    pub preset: Revisioned<PromptPreset>,
     pub approval: PromptPresetRollbackApproval,
 }
 
@@ -2088,7 +2089,7 @@ impl Core {
     fn character_runtime_transform_set(
         &self,
         input: &GenerationPlanInput<'_>,
-    ) -> CoreResult<Option<StoredRevision<TransformSet>>> {
+    ) -> CoreResult<Option<Revisioned<TransformSet>>> {
         let transform_set_id = if let Some(authority) = input.prompt_selection_authority {
             authority
                 .character_content
@@ -2491,7 +2492,7 @@ impl Core {
         &self,
         preset: &PromptPreset,
         expected_revision: Option<u64>,
-    ) -> CoreResult<StoredRevision<PromptPreset>> {
+    ) -> CoreResult<Revisioned<PromptPreset>> {
         if is_builtin_prompt_preset_id(&preset.id) {
             return Err(CoreError::invalid(
                 "built-in prompt presets cannot be edited",
@@ -2515,25 +2516,19 @@ impl Core {
         self.validate_prompt_preset(&preset)?;
         self.storage()
             .save_prompt_preset(&preset, expected_revision)
+            .map(project_revision)
     }
 
-    pub fn get_prompt_preset(
-        &self,
-        id: &PromptPresetId,
-    ) -> CoreResult<StoredRevision<PromptPreset>> {
-        self.storage().get_prompt_preset(id)
+    pub fn get_prompt_preset(&self, id: &PromptPresetId) -> CoreResult<Revisioned<PromptPreset>> {
+        self.storage().get_prompt_preset(id).map(project_revision)
     }
 
-    /// Returns the exact creator-owned revision with the canonical
-    /// application-policy block removed.
-    ///
-    /// Built-in presets remain read-only. Saving this projection through
-    /// `upsert_prompt_preset` validates the creator document and reinjects the
-    /// canonical policy from Core, so callers never read or author that block.
+    /// Returns a creator revision without application policy.
+    /// Saving validates creator content and restores Core policy.
     pub fn get_editable_prompt_preset(
         &self,
         id: &PromptPresetId,
-    ) -> CoreResult<StoredRevision<PromptPreset>> {
+    ) -> CoreResult<Revisioned<PromptPreset>> {
         let mut stored = self.get_prompt_preset(id)?;
         if is_builtin_prompt_preset_id(id)
             || stored.value.metadata.provenance.source_kind == SourceKind::ApplicationBuiltIn
@@ -2555,8 +2550,8 @@ impl Core {
         Ok(stored)
     }
 
-    pub fn list_prompt_presets(&self) -> CoreResult<Vec<StoredRevision<PromptPreset>>> {
-        self.storage().list_prompt_presets()
+    pub fn list_prompt_presets(&self) -> CoreResult<Vec<Revisioned<PromptPreset>>> {
+        self.storage().list_prompt_presets().map(project_revisions)
     }
 
     /// Lists immutable preset history in ascending revision order.
@@ -2663,7 +2658,7 @@ impl Core {
             ));
         }
         Ok(PromptPresetRollbackReceipt {
-            preset,
+            preset: project_revision(preset),
             approval: durable_approval,
         })
     }
@@ -2672,7 +2667,7 @@ impl Core {
         &self,
         id: &PromptPresetId,
         expected_revision: u64,
-    ) -> CoreResult<StoredRevision<PromptPreset>> {
+    ) -> CoreResult<Revisioned<PromptPreset>> {
         let preset = self.get_prompt_preset(id)?;
         if is_builtin_prompt_preset_id(id)
             || preset.value.metadata.provenance.source_kind == SourceKind::ApplicationBuiltIn
@@ -2683,6 +2678,7 @@ impl Core {
         }
         self.storage()
             .soft_delete_prompt_preset(id, expected_revision)
+            .map(project_revision)
     }
 
     fn ensure_prompt_preset_is_creator_owned(&self, id: &PromptPresetId) -> CoreResult<()> {
@@ -2740,7 +2736,7 @@ impl Core {
         id: &PromptPresetId,
         ordered_block_ids: &[lorepia_domain::PromptBlockId],
         expected_revision: u64,
-    ) -> CoreResult<StoredRevision<PromptPreset>> {
+    ) -> CoreResult<Revisioned<PromptPreset>> {
         if is_builtin_prompt_preset_id(id) {
             return Err(CoreError::invalid(
                 "built-in prompt presets cannot be reordered",
@@ -2798,11 +2794,12 @@ impl Core {
         &self,
         binding: &PromptPresetBinding,
         expected_revision: Option<u64>,
-    ) -> CoreResult<StoredRevision<PromptPresetBinding>> {
+    ) -> CoreResult<Revisioned<PromptPresetBinding>> {
         let preset = self.get_prompt_preset(&binding.prompt_preset_id)?.value;
         validate_prompt_binding_sources(&preset, Some(binding))?;
         self.storage()
             .save_prompt_preset_binding(binding, expected_revision)
+            .map(project_revision)
     }
 
     pub fn get_room_orchestration_config(
@@ -2966,43 +2963,49 @@ impl Core {
         &self,
         scope: ModuleScope,
         target_id: Option<&str>,
-    ) -> CoreResult<Vec<StoredRevision<PromptPresetBinding>>> {
-        self.storage().list_prompt_preset_bindings(scope, target_id)
+    ) -> CoreResult<Vec<Revisioned<PromptPresetBinding>>> {
+        self.storage()
+            .list_prompt_preset_bindings(scope, target_id)
+            .map(project_revisions)
     }
 
     pub fn unbind_prompt_preset(
         &self,
         binding_id: &str,
         expected_revision: u64,
-    ) -> CoreResult<StoredRevision<PromptPresetBinding>> {
+    ) -> CoreResult<Revisioned<PromptPresetBinding>> {
         self.storage()
             .soft_delete_prompt_preset_binding(binding_id, expected_revision)
+            .map(project_revision)
     }
 
     pub fn upsert_task_profile(
         &self,
         profile: &TaskProfile,
         expected_revision: Option<u64>,
-    ) -> CoreResult<StoredRevision<TaskProfile>> {
+    ) -> CoreResult<Revisioned<TaskProfile>> {
         self.validate_task_profile(profile)?;
-        self.storage().save_task_profile(profile, expected_revision)
+        self.storage()
+            .save_task_profile(profile, expected_revision)
+            .map(project_revision)
     }
 
-    pub fn get_task_profile(&self, id: &TaskProfileId) -> CoreResult<StoredRevision<TaskProfile>> {
-        self.storage().get_task_profile(id)
+    pub fn get_task_profile(&self, id: &TaskProfileId) -> CoreResult<Revisioned<TaskProfile>> {
+        self.storage().get_task_profile(id).map(project_revision)
     }
 
-    pub fn list_task_profiles(&self) -> CoreResult<Vec<StoredRevision<TaskProfile>>> {
-        self.storage().list_task_profiles()
+    pub fn list_task_profiles(&self) -> CoreResult<Vec<Revisioned<TaskProfile>>> {
+        self.storage().list_task_profiles().map(project_revisions)
     }
 
     pub fn delete_task_profile(
         &self,
         id: &TaskProfileId,
         expected_revision: u64,
-    ) -> CoreResult<StoredRevision<TaskProfile>> {
+    ) -> CoreResult<Revisioned<TaskProfile>> {
         self.storage()
             .soft_delete_task_profile(id, expected_revision)
+            .map(project_revision)
     }
 
     /// Resolves a task profile to an ordered, provider-valid target list.
@@ -3092,30 +3095,32 @@ impl Core {
         &self,
         profile: &MemoryProfile,
         expected_revision: Option<u64>,
-    ) -> CoreResult<StoredRevision<MemoryProfile>> {
+    ) -> CoreResult<Revisioned<MemoryProfile>> {
         profile.validate().map_err(orchestration_validation_error)?;
         self.storage()
             .save_memory_profile(profile, expected_revision)
+            .map(project_revision)
     }
 
     pub fn get_memory_profile(
         &self,
         id: &MemoryProfileId,
-    ) -> CoreResult<StoredRevision<MemoryProfile>> {
-        self.storage().get_memory_profile(id)
+    ) -> CoreResult<Revisioned<MemoryProfile>> {
+        self.storage().get_memory_profile(id).map(project_revision)
     }
 
-    pub fn list_memory_profiles(&self) -> CoreResult<Vec<StoredRevision<MemoryProfile>>> {
-        self.storage().list_memory_profiles()
+    pub fn list_memory_profiles(&self) -> CoreResult<Vec<Revisioned<MemoryProfile>>> {
+        self.storage().list_memory_profiles().map(project_revisions)
     }
 
     pub fn delete_memory_profile(
         &self,
         id: &MemoryProfileId,
         expected_revision: u64,
-    ) -> CoreResult<StoredRevision<MemoryProfile>> {
+    ) -> CoreResult<Revisioned<MemoryProfile>> {
         self.storage()
             .soft_delete_memory_profile(id, expected_revision)
+            .map(project_revision)
     }
 
     pub fn get_memory_record(
@@ -3123,9 +3128,10 @@ impl Core {
         conversation_id: &ConversationId,
         branch_id: &ConversationBranchId,
         id: &MemoryRecordId,
-    ) -> CoreResult<StoredRevision<MemoryRecord>> {
+    ) -> CoreResult<Revisioned<MemoryRecord>> {
         self.storage()
             .get_memory_record(conversation_id, branch_id, id)
+            .map(project_revision)
     }
 
     pub fn delete_memory_record(
@@ -3134,14 +3140,16 @@ impl Core {
         branch_id: &ConversationBranchId,
         id: &MemoryRecordId,
         expected_revision: u64,
-    ) -> CoreResult<StoredRevision<MemoryRecord>> {
-        self.storage().delete_memory_record_tombstone(
-            conversation_id,
-            branch_id,
-            id,
-            expected_revision,
-            Utc::now(),
-        )
+    ) -> CoreResult<Revisioned<MemoryRecord>> {
+        self.storage()
+            .delete_memory_record_tombstone(
+                conversation_id,
+                branch_id,
+                id,
+                expected_revision,
+                Utc::now(),
+            )
+            .map(project_revision)
     }
 
     pub fn list_memory_records(
@@ -3149,9 +3157,10 @@ impl Core {
         conversation_id: &ConversationId,
         branch_id: &ConversationBranchId,
         include_invalidated: bool,
-    ) -> CoreResult<Vec<StoredRevision<MemoryRecord>>> {
+    ) -> CoreResult<Vec<Revisioned<MemoryRecord>>> {
         self.storage()
             .list_memory_records(conversation_id, branch_id, include_invalidated)
+            .map(project_revisions)
     }
 
     pub fn retrieve_memory(&self, request: &MemoryRetrievalRequest) -> CoreResult<MemorySelection> {
@@ -3221,37 +3230,40 @@ impl Core {
         )
     }
 
-    pub fn get_memory_job(&self, id: &MemoryJobId) -> CoreResult<StoredRevision<MemoryJob>> {
-        self.storage().get_memory_job(id)
+    pub fn get_memory_job(&self, id: &MemoryJobId) -> CoreResult<Revisioned<MemoryJob>> {
+        self.storage().get_memory_job(id).map(project_revision)
     }
 
     pub fn upsert_knowledge_book(
         &self,
         book: &KnowledgeBook,
         expected_revision: Option<u64>,
-    ) -> CoreResult<StoredRevision<KnowledgeBook>> {
+    ) -> CoreResult<Revisioned<KnowledgeBook>> {
         book.validate().map_err(orchestration_validation_error)?;
-        self.storage().save_knowledge_book(book, expected_revision)
+        self.storage()
+            .save_knowledge_book(book, expected_revision)
+            .map(project_revision)
     }
 
     pub fn get_knowledge_book(
         &self,
         id: &KnowledgeBookId,
-    ) -> CoreResult<StoredRevision<KnowledgeBook>> {
-        self.storage().get_knowledge_book(id)
+    ) -> CoreResult<Revisioned<KnowledgeBook>> {
+        self.storage().get_knowledge_book(id).map(project_revision)
     }
 
-    pub fn list_knowledge_books(&self) -> CoreResult<Vec<StoredRevision<KnowledgeBook>>> {
-        self.storage().list_knowledge_books()
+    pub fn list_knowledge_books(&self) -> CoreResult<Vec<Revisioned<KnowledgeBook>>> {
+        self.storage().list_knowledge_books().map(project_revisions)
     }
 
     pub fn delete_knowledge_book(
         &self,
         id: &KnowledgeBookId,
         expected_revision: u64,
-    ) -> CoreResult<StoredRevision<KnowledgeBook>> {
+    ) -> CoreResult<Revisioned<KnowledgeBook>> {
         self.storage()
             .soft_delete_knowledge_book(id, expected_revision)
+            .map(project_revision)
     }
 
     pub fn simulate_knowledge_activation(
@@ -3288,35 +3300,6 @@ impl Core {
             },
         )
         .map_err(orchestration_validation_error)
-    }
-
-    pub fn upsert_transform_set(
-        &self,
-        transform_set: &TransformSet,
-        expected_revision: Option<u64>,
-    ) -> CoreResult<StoredRevision<TransformSet>> {
-        self.storage()
-            .save_transform_set(transform_set, expected_revision)
-    }
-
-    pub fn get_transform_set(
-        &self,
-        id: &TransformSetId,
-    ) -> CoreResult<StoredRevision<TransformSet>> {
-        self.storage().get_transform_set(id)
-    }
-
-    pub fn list_transform_sets(&self) -> CoreResult<Vec<StoredRevision<TransformSet>>> {
-        self.storage().list_transform_sets()
-    }
-
-    pub fn delete_transform_set(
-        &self,
-        id: &TransformSetId,
-        expected_revision: u64,
-    ) -> CoreResult<StoredRevision<TransformSet>> {
-        self.storage()
-            .soft_delete_transform_set(id, expected_revision)
     }
 
     pub fn preview_transform(
@@ -3359,76 +3342,85 @@ impl Core {
         &self,
         rule_set: &InteractionRuleSet,
         expected_revision: Option<u64>,
-    ) -> CoreResult<StoredRevision<InteractionRuleSet>> {
+    ) -> CoreResult<Revisioned<InteractionRuleSet>> {
         self.storage()
             .save_interaction_rule_set(rule_set, expected_revision)
+            .map(project_revision)
     }
 
     pub fn get_interaction_rule_set(
         &self,
         id: &InteractionRuleSetId,
-    ) -> CoreResult<StoredRevision<InteractionRuleSet>> {
-        self.storage().get_interaction_rule_set(id)
+    ) -> CoreResult<Revisioned<InteractionRuleSet>> {
+        self.storage()
+            .get_interaction_rule_set(id)
+            .map(project_revision)
     }
 
-    pub fn list_interaction_rule_sets(
-        &self,
-    ) -> CoreResult<Vec<StoredRevision<InteractionRuleSet>>> {
-        self.storage().list_interaction_rule_sets()
+    pub fn list_interaction_rule_sets(&self) -> CoreResult<Vec<Revisioned<InteractionRuleSet>>> {
+        self.storage()
+            .list_interaction_rule_sets()
+            .map(project_revisions)
     }
 
     pub fn delete_interaction_rule_set(
         &self,
         id: &InteractionRuleSetId,
         expected_revision: u64,
-    ) -> CoreResult<StoredRevision<InteractionRuleSet>> {
+    ) -> CoreResult<Revisioned<InteractionRuleSet>> {
         self.storage()
             .soft_delete_interaction_rule_set(id, expected_revision)
+            .map(project_revision)
     }
 
     pub fn upsert_content_module(
         &self,
         module: &ContentModule,
         expected_revision: Option<u64>,
-    ) -> CoreResult<StoredRevision<ContentModule>> {
+    ) -> CoreResult<Revisioned<ContentModule>> {
         self.storage()
             .save_content_module(module, expected_revision)
+            .map(project_revision)
     }
 
     pub fn get_content_module(
         &self,
         id: &ContentModuleId,
-    ) -> CoreResult<StoredRevision<ContentModule>> {
-        self.storage().get_content_module(id)
+    ) -> CoreResult<Revisioned<ContentModule>> {
+        self.storage().get_content_module(id).map(project_revision)
     }
 
-    pub fn list_content_modules(&self) -> CoreResult<Vec<StoredRevision<ContentModule>>> {
-        self.storage().list_content_modules()
+    pub fn list_content_modules(&self) -> CoreResult<Vec<Revisioned<ContentModule>>> {
+        self.storage().list_content_modules().map(project_revisions)
     }
 
     pub fn delete_content_module(
         &self,
         id: &ContentModuleId,
         expected_revision: u64,
-    ) -> CoreResult<StoredRevision<ContentModule>> {
+    ) -> CoreResult<Revisioned<ContentModule>> {
         self.storage()
             .soft_delete_content_module(id, expected_revision)
+            .map(project_revision)
     }
 
     pub fn list_content_module_bindings(
         &self,
         module_id: &ContentModuleId,
-    ) -> CoreResult<Vec<StoredRevision<ModuleBinding>>> {
-        self.storage().list_module_bindings(module_id)
+    ) -> CoreResult<Vec<Revisioned<ModuleBinding>>> {
+        self.storage()
+            .list_module_bindings(module_id)
+            .map(project_revisions)
     }
 
     pub fn unbind_content_module(
         &self,
         binding_id: &ModuleBindingId,
         expected_revision: u64,
-    ) -> CoreResult<StoredRevision<ModuleBinding>> {
+    ) -> CoreResult<Revisioned<ModuleBinding>> {
         self.storage()
             .soft_delete_module_binding(binding_id, expected_revision)
+            .map(project_revision)
     }
 
     pub fn list_content_module_revisions(
@@ -3514,6 +3506,7 @@ impl Core {
         let mut selected_binding = None;
         for (scope, target_id) in scopes {
             let enabled = self
+                .storage()
                 .list_prompt_preset_bindings(scope, target_id)?
                 .into_iter()
                 .filter(|stored| stored.deleted_at.is_none() && stored.value.enabled)

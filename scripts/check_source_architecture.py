@@ -15,6 +15,9 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = REPO_ROOT / "config" / "source-size-baseline.json"
+DEFAULT_CORE_STORAGE_API_CONFIG = (
+    REPO_ROOT / "config" / "core-storage-public-api-baseline.json"
+)
 SOURCE_ROOTS = (
     "apps/lorepia/src",
     "apps/lorepia/src-tauri",
@@ -60,6 +63,11 @@ PORTABLE_REGEX_OPERATION = Path(
     "apps/lorepia/src/features/chat/portable-regex-operation.ts"
 )
 PORTABLE_REGEX_WORKER = Path("apps/lorepia/src/features/chat/portable-regex.worker.ts")
+CORE_STORAGE_REEXPORT_RE = re.compile(
+    r"\bpub\s+use\s+lorepia_storage::(?P<body>[^;]+);", re.DOTALL
+)
+STORED_TYPE_RE = re.compile(r"\bStored[A-Za-z0-9_]*\b")
+RUST_RAW_STRING_RE = re.compile(r'(?:br|cr|r)(?P<hashes>#{0,255})"')
 
 
 @dataclass(frozen=True)
@@ -289,6 +297,27 @@ def load_config(config_path: Path) -> dict[str, Any]:
     return config
 
 
+def load_core_storage_api_config(config_path: Path) -> dict[str, Any]:
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"cannot read {config_path}: {error}") from error
+    return validate_core_storage_api_config(config)
+
+
+def validate_core_storage_api_config(config: object) -> dict[str, Any]:
+    if not isinstance(config, dict) or config.get("version") != 1:
+        raise ValueError("core-storage public API baseline version must be 1")
+    allowed = config.get("allowed_stored_reexports")
+    if not isinstance(allowed, list) or not all(isinstance(name, str) for name in allowed):
+        raise ValueError("allowed_stored_reexports must be a string array")
+    if any(STORED_TYPE_RE.fullmatch(name) is None for name in allowed):
+        raise ValueError("allowed_stored_reexports may contain only Stored* type names")
+    if allowed != sorted(set(allowed)):
+        raise ValueError("allowed_stored_reexports must be unique and sorted")
+    return config
+
+
 def evaluate_baseline_changes(
     current: dict[str, Any], base: dict[str, Any]
 ) -> list[str]:
@@ -328,11 +357,23 @@ def evaluate_baseline_changes(
     return failures
 
 
-def load_base_config(root: Path, config_path: Path, base_ref: str) -> dict[str, Any] | None:
+def evaluate_core_storage_api_baseline_changes(
+    current: dict[str, Any], base: dict[str, Any]
+) -> list[str]:
+    current_allowed = set(current["allowed_stored_reexports"])
+    base_allowed = set(validate_core_storage_api_config(base)["allowed_stored_reexports"])
+    additions = sorted(current_allowed - base_allowed)
+    return [
+        f"new Core storage Stored* re-export exception is not allowed: {name}"
+        for name in additions
+    ]
+
+
+def load_json_at_ref(root: Path, config_path: Path, base_ref: str) -> object | None:
     try:
         relative_config = config_path.relative_to(root).as_posix()
     except ValueError as error:
-        raise ValueError("baseline config must be inside the repository root") from error
+        raise ValueError("architecture config must be inside the repository root") from error
     verify = subprocess.run(
         ["git", "rev-parse", "--verify", f"{base_ref}^{{commit}}"],
         cwd=root,
@@ -354,7 +395,14 @@ def load_base_config(root: Path, config_path: Path, base_ref: str) -> dict[str, 
     try:
         parsed = json.loads(process.stdout)
     except json.JSONDecodeError as error:
-        raise ValueError(f"base revision has an invalid source-size baseline: {error}") from error
+        raise ValueError(f"base revision has invalid architecture JSON: {error}") from error
+    return parsed
+
+
+def load_base_config(root: Path, config_path: Path, base_ref: str) -> dict[str, Any] | None:
+    parsed = load_json_at_ref(root, config_path, base_ref)
+    if parsed is None:
+        return None
     if not isinstance(parsed, dict):
         raise ValueError("base revision source-size baseline must be an object")
     return parsed
@@ -518,6 +566,105 @@ def evaluate_dependency_architecture(metadata: dict[str, Any]) -> list[str]:
     return failures
 
 
+def strip_rust_comments_and_strings(content: str) -> str:
+    """Blank Rust comments and strings while preserving source positions."""
+
+    output = list(content)
+    index = 0
+    length = len(content)
+
+    def blank(start: int, end: int) -> None:
+        for offset in range(start, end):
+            if output[offset] != "\n":
+                output[offset] = " "
+
+    while index < length:
+        if content.startswith("//", index):
+            end = content.find("\n", index + 2)
+            end = length if end == -1 else end
+            blank(index, end)
+            index = end
+            continue
+        if content.startswith("/*", index):
+            start = index
+            index += 2
+            depth = 1
+            while index < length and depth:
+                if content.startswith("/*", index):
+                    depth += 1
+                    index += 2
+                elif content.startswith("*/", index):
+                    depth -= 1
+                    index += 2
+                else:
+                    index += 1
+            blank(start, index)
+            continue
+
+        raw = RUST_RAW_STRING_RE.match(content, index)
+        if raw is not None:
+            start = index
+            delimiter = '"' + raw.group("hashes")
+            body_start = raw.end()
+            end = content.find(delimiter, body_start)
+            index = length if end == -1 else end + len(delimiter)
+            blank(start, index)
+            continue
+
+        quote_start = index
+        if content.startswith(('b"', 'c"'), index):
+            index += 1
+        if content[index] == '"':
+            index += 1
+            while index < length:
+                if content[index] == "\\":
+                    index += 2
+                elif content[index] == '"':
+                    index += 1
+                    break
+                else:
+                    index += 1
+            blank(quote_start, min(index, length))
+            continue
+        index += 1
+
+    return "".join(output)
+
+
+def evaluate_core_storage_public_reexports(
+    root: Path, allowed_stored_reexports: set[str]
+) -> list[str]:
+    """Prevent Core from publicly exposing additional Storage persistence rows."""
+
+    source_root = root / "crates" / "core" / "src"
+    if not source_root.is_dir():
+        return []
+
+    failures: list[str] = []
+    observed: set[str] = set()
+    for source in sorted(source_root.rglob("*.rs")):
+        relative = source.relative_to(root).as_posix()
+        content = strip_rust_comments_and_strings(source.read_text(encoding="utf-8"))
+        for reexport in CORE_STORAGE_REEXPORT_RE.finditer(content):
+            body = reexport.group("body")
+            if "*" in body:
+                failures.append(
+                    f"{relative} must not wildcard-reexport lorepia_storage from Core"
+                )
+            for name in STORED_TYPE_RE.findall(body):
+                observed.add(name)
+                if name not in allowed_stored_reexports:
+                    failures.append(
+                        f"{relative} must not publicly re-export storage persistence row "
+                        f"{name}; define a Core-owned view instead"
+                    )
+    for name in sorted(allowed_stored_reexports - observed):
+        failures.append(
+            f"core-storage public API baseline is stale after removing re-export {name}"
+        )
+    return sorted(set(failures))
+
+
 def print_source_table(measurements: list[SourceMeasurement]) -> None:
     print("source-size ratchet (all current baselines and any failures)")
     print("status  bytes/current-cap  lines/current-cap  decl  public  source")
@@ -535,6 +682,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--root", type=Path, default=REPO_ROOT)
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument(
+        "--core-storage-api-config",
+        type=Path,
+        default=DEFAULT_CORE_STORAGE_API_CONFIG,
+    )
+    parser.add_argument(
         "--base-ref",
         help="Reject baseline cap increases relative to this trusted Git commit.",
     )
@@ -550,12 +702,28 @@ def main() -> int:
     args = parse_args()
     root = args.root.resolve()
     config = args.config.resolve()
+    core_storage_api_config = args.core_storage_api_config.resolve()
     try:
         failures, measurements = evaluate_source_sizes(root, config)
+        core_storage_api = load_core_storage_api_config(core_storage_api_config)
         if args.base_ref:
             base_config = load_base_config(root, config, args.base_ref)
             if base_config is not None:
                 failures.extend(evaluate_baseline_changes(load_config(config), base_config))
+            base_core_storage_api = load_json_at_ref(
+                root, core_storage_api_config, args.base_ref
+            )
+            if base_core_storage_api is not None:
+                failures.extend(
+                    evaluate_core_storage_api_baseline_changes(
+                        core_storage_api, base_core_storage_api
+                    )
+                )
+        failures.extend(
+            evaluate_core_storage_public_reexports(
+                root, set(core_storage_api["allowed_stored_reexports"])
+            )
+        )
         if not args.skip_dependency_check:
             failures.extend(evaluate_dependency_architecture(cargo_metadata(root)))
     except ValueError as error:

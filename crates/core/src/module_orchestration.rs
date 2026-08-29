@@ -32,7 +32,7 @@ use lorepia_storage::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::Core;
+use crate::{Core, Revisioned, revision::project_revision};
 
 const MAXIMUM_CONTENT_MODULE_SCHEMA_VERSION: u32 = 1;
 pub(crate) const SUPPORTED_CONTENT_CAPABILITIES: [ContentCapability; 10] = [
@@ -184,14 +184,11 @@ pub struct ApprovedContentModuleComponent {
     pub runtime_enabled: bool,
 }
 
-/// Result of one atomic activation.
-///
-/// `approved_plan` is persisted by storage and remains the canonical authority;
-/// `approved_components` is its explicit runtime-safe projection.
+/// Atomic activation receipt.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ContentModuleActivationReceipt {
-    pub binding: StoredRevision<ModuleBinding>,
+    pub binding: Revisioned<ModuleBinding>,
     pub approved_plan: ApprovedModuleActivationPlan,
     pub approved_components: Vec<ApprovedContentModuleComponent>,
 }
@@ -236,7 +233,7 @@ pub struct ContentModuleDeactivationReview {
 #[serde(deny_unknown_fields)]
 pub struct ContentModuleDeactivationReceipt {
     pub review: ContentModuleDeactivationReview,
-    pub binding: StoredRevision<ModuleBinding>,
+    pub binding: Revisioned<ModuleBinding>,
 }
 
 /// Reader-safe metadata for the exact immutable module revision in an
@@ -925,7 +922,7 @@ impl Core {
             ));
         }
         let receipt = ContentModuleActivationReceipt {
-            binding,
+            binding: project_revision(binding),
             approved_components: approved_components(&approved),
             approved_plan: approved,
         };
@@ -1156,7 +1153,7 @@ impl Core {
         }
 
         let receipt = ContentModuleActivationReceipt {
-            binding,
+            binding: project_revision(binding),
             approved_components: approved_components(approved_activation),
             approved_plan: approved.activation,
         };
@@ -1170,7 +1167,7 @@ impl Core {
     ) -> CoreResult<ContentModuleActivationReceipt> {
         let binding = self.storage().apply_approved_module_rollback(approved)?;
         let receipt = ContentModuleActivationReceipt {
-            binding,
+            binding: project_revision(binding),
             approved_plan: approved.activation.clone(),
             approved_components: approved_components(&approved.activation),
         };
@@ -1576,7 +1573,7 @@ impl Core {
             .storage()
             .apply_approved_module_activation(&prepared.review, approved)?;
         let receipt = ContentModuleActivationReceipt {
-            binding,
+            binding: project_revision(binding),
             approved_plan: approved.clone(),
             approved_components: approved_components(approved),
         };

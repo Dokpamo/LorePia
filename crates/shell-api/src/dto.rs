@@ -129,6 +129,8 @@ pub struct CharacterRenderProfileDto {
     pub output_transforms: Vec<CharacterDisplayTransformDto>,
     pub display_transforms: Vec<CharacterDisplayTransformDto>,
     pub runtime_scripts: Vec<CharacterRuntimeScriptDto>,
+    pub required_runtime_capabilities: Vec<String>,
+    pub runtime_capabilities_declared: bool,
     pub runtime_knowledge: Vec<CharacterRuntimeKnowledgeDto>,
     pub runtime_script_count: u32,
 }
@@ -147,6 +149,15 @@ impl CharacterRenderProfileDto {
         let display_transforms =
             display_transforms(&content, lorepia_core::PortableTransformPhase::Display);
         let runtime_scripts = runtime_scripts(&content);
+        let runtime_capabilities_declared = content.runtime.required_capabilities.is_some();
+        let required_runtime_capabilities = content
+            .runtime
+            .required_capabilities
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .map(|capability| capability.as_str().to_owned())
+            .collect();
         let runtime_knowledge = runtime_knowledge(&content);
         let runtime_script_count = u32::try_from(content.runtime.scripts.len()).unwrap_or(u32::MAX);
         Self {
@@ -159,6 +170,8 @@ impl CharacterRenderProfileDto {
             output_transforms,
             display_transforms,
             runtime_scripts,
+            required_runtime_capabilities,
+            runtime_capabilities_declared,
             runtime_knowledge,
             runtime_script_count,
         }
@@ -423,6 +436,8 @@ pub struct ImportRegexRuleReviewDto {
 pub struct ImportDynamicContentReviewDto {
     pub runtime_script_count: u32,
     pub elevated_runtime_script_count: u32,
+    pub required_runtime_capabilities: Vec<String>,
+    pub runtime_capabilities_declared: bool,
     pub regex_rule_count: u32,
     pub enabled_regex_rule_count: u32,
     pub model_calls_possible: bool,
@@ -475,6 +490,13 @@ impl From<ImportInspection> for ImportInspectionDto {
             dynamic_content: ImportDynamicContentReviewDto {
                 runtime_script_count: value.dynamic_content.runtime_script_count,
                 elevated_runtime_script_count: value.dynamic_content.elevated_runtime_script_count,
+                required_runtime_capabilities: value
+                    .dynamic_content
+                    .required_runtime_capabilities
+                    .iter()
+                    .map(|capability| capability.as_str().to_owned())
+                    .collect(),
+                runtime_capabilities_declared: value.dynamic_content.runtime_capabilities_declared,
                 regex_rule_count: value.dynamic_content.regex_rule_count,
                 enabled_regex_rule_count: value.dynamic_content.enabled_regex_rule_count,
                 model_calls_possible: value.dynamic_content.model_calls_possible,

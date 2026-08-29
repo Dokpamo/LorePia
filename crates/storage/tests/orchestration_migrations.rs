@@ -57,6 +57,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0037_provider_credential_operations.sql"),
     include_str!("../migrations/0038_conversation_speakers.sql"),
     include_str!("../migrations/0039_runtime_model_audit.sql"),
+    include_str!("../migrations/0040_portable_runtime_state.sql"),
 ];
 
 fn expected_schema_version() -> u32 {
@@ -926,6 +927,63 @@ fn migration_thirteen_is_atomic_and_can_resume_after_object_conflict() {
 }
 
 #[test]
+fn migration_forty_is_atomic_and_can_resume_after_object_conflict() {
+    let root = tempdir().expect("temporary data root");
+    let database_dir = root.path().join("db");
+    fs::create_dir_all(&database_dir).expect("create database directory");
+    let database_path = database_dir.join("lorepia.sqlite3");
+    {
+        let mut connection = Connection::open(&database_path).expect("open fixture database");
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .expect("enable foreign keys");
+        apply_through(&mut connection, 39);
+        connection
+            .execute_batch("CREATE TABLE portable_runtime_state_sequence (conflict INTEGER);")
+            .expect("create migration conflict");
+    }
+
+    assert!(
+        Storage::open(root.path()).is_err(),
+        "a conflicting schema object must fail migration forty"
+    );
+    {
+        let connection = Connection::open(&database_path).expect("inspect failed migration");
+        assert_eq!(
+            connection
+                .query_row("SELECT MAX(version) FROM schema_migrations", [], |row| {
+                    row.get::<_, u32>(0)
+                })
+                .expect("schema version"),
+            39
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_schema
+                     WHERE type = 'table' AND name = 'portable_runtime_branch_epochs'",
+                    [],
+                    |row| row.get::<_, u32>(0),
+                )
+                .expect("rolled-back branch epoch table count"),
+            0,
+            "all earlier DDL in migration forty must roll back"
+        );
+        connection
+            .execute("DROP TABLE portable_runtime_state_sequence", [])
+            .expect("remove deliberate conflict");
+    }
+
+    let reopened = Storage::open(root.path()).expect("resume repaired migration");
+    assert_eq!(
+        reopened
+            .schema_version()
+            .expect("read durable schema version"),
+        expected_schema_version()
+    );
+}
+
+#[test]
 fn version_twenty_five_upgrade_requires_typed_atomic_commit_attestation() {
     let root = tempdir().expect("temporary data root");
     let database_dir = root.path().join("db");
@@ -1610,6 +1668,9 @@ fn assert_schema_connection_is_complete(connection: &Connection) {
         "provider_discovery_native_no_effect_attestations",
         "provider_selection_state",
         "provider_discovery_selection_restore_authorities",
+        "portable_runtime_branch_epochs",
+        "portable_runtime_state_sequence",
+        "portable_runtime_states",
         "core_lifecycle_outbox",
         "interaction_state_checkpoints",
         "prompt_preset_rollback_reviews",

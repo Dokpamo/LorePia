@@ -19,12 +19,12 @@ use lorepia_core::{
     HttpMethod, HttpUrl, ManifestSourceKind, ModelRouteId, ProviderConnectionId,
     ProviderDiscoveryAction, ProviderDiscoveryAdditionalEvidence,
     ProviderDiscoveryApprovalProposal, ProviderDiscoveryAssistantResumeAction,
-    ProviderDiscoveryAssistantResumeBoundary, ProviderDiscoveryConnectionOptions,
-    ProviderDiscoveryCredentialAuthority, ProviderDiscoveryCredentialCommitConfirmation,
-    ProviderDiscoveryCredentialInstallContext, ProviderDiscoveryCredentialLeaseContext,
-    ProviderDiscoveryCurlInput, ProviderDiscoveryReviewProposal, ProviderLocalNetworkApproval,
-    ProviderTemplateId, SanitizedDiscoveryInput, StoredDiscoveryCandidate, UnresolvedQuestion,
-    provider_discovery_action_envelope,
+    ProviderDiscoveryAssistantResumeBoundary, ProviderDiscoveryCandidateView,
+    ProviderDiscoveryConnectionOptions, ProviderDiscoveryCredentialAuthority,
+    ProviderDiscoveryCredentialCommitConfirmation, ProviderDiscoveryCredentialInstallContext,
+    ProviderDiscoveryCredentialLeaseContext, ProviderDiscoveryCurlInput,
+    ProviderDiscoveryReviewProposal, ProviderLocalNetworkApproval, ProviderTemplateId,
+    SanitizedDiscoveryInput, UnresolvedQuestion, provider_discovery_action_envelope,
 };
 use serde::{Deserialize, Serialize};
 
@@ -795,19 +795,15 @@ pub struct DiscoveryCandidateDto {
     pub proposed_revision: u64,
 }
 
-impl From<StoredDiscoveryCandidate> for DiscoveryCandidateDto {
-    fn from(value: StoredDiscoveryCandidate) -> Self {
+impl From<ProviderDiscoveryCandidateView> for DiscoveryCandidateDto {
+    fn from(value: ProviderDiscoveryCandidateView) -> Self {
+        let candidate = value.candidate;
         Self {
-            id: value.candidate.id.to_string(),
-            session_id: value.candidate.session_id.0,
-            summary: value.candidate.summary.into(),
-            evidence_ids: value
-                .candidate
-                .evidence_ids
-                .into_iter()
-                .map(|id| id.0)
-                .collect(),
-            created_at: value.candidate.created_at,
+            id: candidate.id.to_string(),
+            session_id: candidate.session_id.0,
+            summary: candidate.summary.into(),
+            evidence_ids: candidate.evidence_ids.into_iter().map(|id| id.0).collect(),
+            created_at: candidate.created_at,
             proposed_revision: value.proposed_revision,
         }
     }

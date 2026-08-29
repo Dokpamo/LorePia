@@ -282,12 +282,19 @@ export const ko = {
         '이 앱 빌드는 카드의 별도 생성 호출을 지원하지 않습니다.',
     'chat.runtime.approval_required':
         '이 정확한 카드 리비전과 스크립트 권한에 대한 실행 승인이 필요합니다.',
+    'chat.runtime.action_failed': '카드 버튼 동작을 실행하지 못했습니다.',
+    'chat.runtime.after_output_failed': '응답 후 캐릭터 기능을 실행하지 못했습니다.',
+    'chat.runtime.approval_create_failed': '카드 기능 승인을 만들지 못했습니다.',
     'chat.runtime.approval_unavailable': '안전한 카드 런타임 승인 지문을 계산할 수 없습니다.',
     'chat.runtime.event_timeout': '캐릭터 기능 실행 시간이 초과되어 안전하게 중지했습니다.',
     'chat.runtime.not_ready': '캐릭터 런타임이 준비되지 않았습니다.',
+    'chat.runtime.option_failed': '카드 옵션을 변경하지 못했습니다.',
+    'chat.runtime.persistence.memory_only':
+        '현재 카드 상태는 메모리에만 있으며 앱을 닫으면 사라질 수 있습니다.',
     'chat.runtime.persona.default': '사용자',
     'chat.runtime.prompt.empty': '카드가 빈 생성 프롬프트를 요청했습니다.',
     'chat.runtime.prompt.invalid': '카드의 생성 프롬프트 형식이 올바르지 않습니다.',
+    'chat.runtime.start_failed': '캐릭터 런타임을 시작하지 못했습니다.',
     'chat.usage.output_tokens': '출력 {count} 토큰',
     'common.refresh': '새로고침',
     'content_package.error.export_mismatch':
@@ -379,6 +386,10 @@ export const ko = {
     'import.description.empty': '설명이 없습니다.',
     'import.dialog.close': '가져오기 검토 닫기',
     'import.dynamic.elevated': '고급 권한을 요청하는 Lua 스크립트 {count}개',
+    'import.dynamic.capabilities': '카드가 선언한 권한: {capabilities}',
+    'import.dynamic.capabilities.legacy':
+        '이전 형식 카드로, 실행 전에 필요한 권한을 사용자가 직접 선택해야 합니다.',
+    'import.dynamic.capabilities.none': '호스트 권한 없음',
     'import.dynamic.lua': 'Lua 런타임 스크립트 {count}개',
     'import.dynamic.markup': '사용자 정의 HTML/CSS 표시',
     'import.dynamic.model': '선택한 모델을 추가로 호출할 수 있음',

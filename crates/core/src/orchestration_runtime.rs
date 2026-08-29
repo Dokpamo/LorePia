@@ -46,21 +46,19 @@ use lorepia_storage::{
     GenerationAttemptDerivedGuardKind, GenerationAttemptDerivedTransition,
     GenerationAttemptProposalDecision, GenerationAttemptProposalDecisionCommit,
     GenerationAttemptStatus, GenerationBeforeEventEvidence, InteractionActionResultStatus,
-    InteractionActionResultWrite, InteractionChoiceSelectionCommit,
-    InteractionChoiceSelectionReceipt, InteractionDerivedEventCommit, InteractionDerivedEventWrite,
-    InteractionDerivedOccurrenceCommit, InteractionEffectHistoryCursor,
+    InteractionActionResultWrite, InteractionChoiceSelectionCommit, InteractionDerivedEventCommit,
+    InteractionDerivedEventWrite, InteractionDerivedOccurrenceCommit,
     InteractionEvaluationAssetDiagnostic, InteractionEvaluationKnowledgeRevision,
     InteractionEvaluationLimits, InteractionEvaluationSeal, InteractionEvaluationTemplateValues,
     InteractionEventCommit, InteractionEventOccurrenceLookup, InteractionKnowledgeBinding,
     InteractionPolicyRuleSetRevision, InteractionPolicySnapshot, InteractionProposalApprovalCommit,
-    InteractionProposalExpiryCommit, InteractionProposalRejectionCommit, InteractionProposalWrite,
-    InteractionStateKey, KnowledgeEmbeddingCoverageQuery, LifecycleOccurrenceKind,
-    MemoryEmbeddingJobInput, MemoryEmbeddingJobSeed, MemoryEmbeddingQuery, MemoryEmbeddingRecord,
-    MemoryJobEnqueue, MemoryJobFinish, MemoryJobInterruption, MemoryQueryEmbeddingIntent,
-    MemoryQueryEmbeddingStatus, MemoryRecordExclusionScope, MemoryRecordUserPatch,
-    ModuleRevisionComponentSnapshot, ObjectRevision, PromptPresetBinding,
-    RetryableGenerationAttemptProjection, StoredGenerationAttempt, StoredGenerationAttemptProposal,
-    StoredInteractionDerivedEvent, StoredInteractionEffect, StoredInteractionEffectHistory,
+    InteractionProposalRejectionCommit, InteractionProposalWrite, InteractionStateKey,
+    KnowledgeEmbeddingCoverageQuery, LifecycleOccurrenceKind, MemoryEmbeddingJobInput,
+    MemoryEmbeddingJobSeed, MemoryEmbeddingQuery, MemoryEmbeddingRecord, MemoryJobEnqueue,
+    MemoryJobFinish, MemoryJobInterruption, MemoryQueryEmbeddingIntent, MemoryQueryEmbeddingStatus,
+    MemoryRecordExclusionScope, MemoryRecordUserPatch, ModuleRevisionComponentSnapshot,
+    ObjectRevision, PromptPresetBinding, RetryableGenerationAttemptProjection,
+    StoredGenerationAttempt, StoredGenerationAttemptProposal, StoredInteractionDerivedEvent,
     StoredInteractionEvent, StoredInteractionProposal, StoredInteractionState,
     StoredLifecycleOccurrence, StoredMemoryJobQueueEntry, StoredMemoryQueryEmbedding,
     StoredRevision, built_in_prompt_presets, generation_attempt_derived_chain_sha256,
@@ -74,16 +72,18 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    ConnectionBoundCredential, Core,
+    ConnectionBoundCredential, Core, InteractionChoiceSelectionReceipt, Revisioned,
     app::{
         BoundedTaskPrompt, PromptRouteWireContract, TaskDispatchClassification,
         TaskExecutionOutcome, generation_attempt_module_authority, prompt_route_wire_contract,
         resolve_generation_target,
     },
+    interaction_projection::project_interaction_choice_selection_receipt,
     orchestration::{
         KnowledgeSemanticProviderRequirement, charge_provider_knowledge_work,
         semantic_score_from_millionths,
     },
+    revision::project_revision,
 };
 
 const MAX_MEMORY_SOURCE_MESSAGES: usize = 512;
@@ -92,11 +92,9 @@ const MAX_MEMORY_SOURCE_CHARS: usize = 1_048_576;
 const MAX_MEMORY_EMBEDDING_CANDIDATES: usize = 2_048;
 const MAX_MEMORY_EMBEDDING_QUERY_BYTES: usize = 16 * 1_024 * 1_024;
 const MAX_CORE_LIFECYCLE_DRAIN: u32 = 256;
-const MAX_INTERACTION_DERIVED_DRAIN: u32 = 256;
 const MAX_GENERATION_ATTEMPT_DERIVED_EVENTS: usize = 256;
 const MAX_GENERATION_ATTEMPT_DERIVED_DEPTH: u32 = 16;
 const MAX_GENERATION_ATTEMPT_DERIVED_GUARDS: usize = 1_024;
-const INTERACTION_DERIVED_LEASE_SECONDS: i64 = 30;
 const CORE_LIFECYCLE_LEASE_SECONDS: i64 = 30;
 const CORE_LIFECYCLE_APPROVAL_POLL_SECONDS: i64 = 1;
 const MAX_CORE_LIFECYCLE_RETRY_SECONDS: i64 = 300;
@@ -120,7 +118,7 @@ pub struct EnqueueMemorySummaryRequest {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MemoryJobEnqueueReceipt {
-    pub job: StoredRevision<MemoryJob>,
+    pub job: Revisioned<MemoryJob>,
     pub memory_profile_revision_id: String,
     pub task_profile_revision_id: String,
     pub reused: bool,
@@ -130,7 +128,7 @@ pub struct MemoryJobEnqueueReceipt {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ClaimedMemoryJob {
-    pub job: StoredRevision<MemoryJob>,
+    pub job: Revisioned<MemoryJob>,
     pub memory_profile_revision_id: String,
     pub task_profile_revision_id: String,
 }
@@ -141,7 +139,7 @@ pub struct ClaimedMemoryJob {
 /// interruption audit trail. Raw message text never crosses this seam.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InterruptedMemoryJob {
-    pub job: StoredRevision<MemoryJob>,
+    pub job: Revisioned<MemoryJob>,
     pub interruptions: Vec<MemoryJobInterruption>,
 }
 
@@ -223,8 +221,8 @@ pub trait TaskCredentialBroker: Send + Sync {
 /// output, credentials, endpoint details, and queue payloads are excluded.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MemoryJobExecutionResult {
-    pub job: StoredRevision<MemoryJob>,
-    pub record: Option<StoredRevision<MemoryRecord>>,
+    pub job: Revisioned<MemoryJob>,
+    pub record: Option<Revisioned<MemoryRecord>>,
 }
 
 /// Read-only interaction review request.
@@ -843,7 +841,7 @@ impl Core {
                 available_at: now,
             })?;
         Ok(MemoryJobEnqueueReceipt {
-            job: queue_entry_as_stored_revision(&result.entry),
+            job: queue_entry_as_revisioned(&result.entry),
             memory_profile_revision_id: plan.memory_profile_revision_id,
             task_profile_revision_id: plan.task_profile_revision_id,
             reused: result.exact_replay,
@@ -882,7 +880,7 @@ impl Core {
             .list_interrupted_memory_jobs(conversation_id, branch_id, limit)?
             .iter()
             .map(|entry| InterruptedMemoryJob {
-                job: queue_entry_as_stored_revision(entry),
+                job: queue_entry_as_revisioned(entry),
                 interruptions: entry.interruptions.clone(),
             })
             .collect())
@@ -919,20 +917,22 @@ impl Core {
         id: &MemoryRecordId,
         expected_revision: u64,
         patch: &MemoryRecordUserPatch,
-    ) -> CoreResult<StoredRevision<MemoryRecord>> {
+    ) -> CoreResult<Revisioned<MemoryRecord>> {
         if patch.excluded_from_conversation.is_some() || patch.excluded_from_character.is_some() {
             return Err(CoreError::invalid(
                 "memory exclusions must use the scope-specific exclusion API",
             ));
         }
-        self.storage().patch_memory_record_user_fields(
-            conversation_id,
-            branch_id,
-            id,
-            expected_revision,
-            patch,
-            Utc::now(),
-        )
+        self.storage()
+            .patch_memory_record_user_fields(
+                conversation_id,
+                branch_id,
+                id,
+                expected_revision,
+                patch,
+                Utc::now(),
+            )
+            .map(project_revision)
     }
 
     /// Changes exactly one room- or character-level exclusion flag.
@@ -944,15 +944,17 @@ impl Core {
         expected_revision: u64,
         scope: MemoryRecordExclusionScope,
         excluded: bool,
-    ) -> CoreResult<StoredRevision<MemoryRecord>> {
-        self.storage().set_memory_record_exclusion(
-            conversation_id,
-            branch_id,
-            id,
-            expected_revision,
-            (scope, excluded),
-            Utc::now(),
-        )
+    ) -> CoreResult<Revisioned<MemoryRecord>> {
+        self.storage()
+            .set_memory_record_exclusion(
+                conversation_id,
+                branch_id,
+                id,
+                expected_revision,
+                (scope, excluded),
+                Utc::now(),
+            )
+            .map(project_revision)
     }
 
     /// Claims and executes at most one memory job.
@@ -1200,8 +1202,8 @@ impl Core {
             finished_at,
         )?;
         Ok(MemoryJobExecutionResult {
-            job: queue_entry_as_stored_revision(&completed.job),
-            record: Some(completed.record),
+            job: queue_entry_as_revisioned(&completed.job),
+            record: Some(project_revision(completed.record)),
         })
     }
 
@@ -1876,7 +1878,7 @@ impl Core {
             finished_at,
         )?;
         Ok(MemoryJobExecutionResult {
-            job: queue_entry_as_stored_revision(&completed.job),
+            job: queue_entry_as_revisioned(&completed.job),
             record: None,
         })
     }
@@ -2813,45 +2815,7 @@ impl Core {
         Ok(stored)
     }
 
-    /// Drains durable VariableChanged/KnowledgeActivated occurrences through
-    /// the same compiled policy and state-CAS path as ordinary events.
-    ///
-    /// Each occurrence is claimed at least once. Storage commits the derived
-    /// transition, any child occurrences, and the acknowledgement in one
-    /// transaction, so response loss or restart cannot duplicate an action.
-    pub fn drain_interaction_derived_events(&self) -> CoreResult<Vec<StoredInteractionEvent>> {
-        let mut committed = Vec::new();
-        for _ in 0..MAX_INTERACTION_DERIVED_DRAIN {
-            let now = Utc::now();
-            let mut claimed = self.storage().claim_interaction_derived_events(
-                now,
-                now + chrono::Duration::seconds(INTERACTION_DERIVED_LEASE_SECONDS),
-                1,
-            )?;
-            let Some(occurrence) = claimed.pop() else {
-                break;
-            };
-            match self.process_interaction_derived_occurrence(&occurrence) {
-                Ok(Some(event)) => committed.push(event),
-                Ok(None) => {}
-                Err(error) => {
-                    let retry_at = Utc::now()
-                        + chrono::Duration::seconds(core_lifecycle_retry_seconds(
-                            occurrence.delivery_attempts,
-                        ));
-                    self.storage().retry_interaction_derived_event_after(
-                        &occurrence.occurrence_id,
-                        occurrence.delivery_attempts,
-                        retry_at,
-                    )?;
-                    return Err(error);
-                }
-            }
-        }
-        Ok(committed)
-    }
-
-    fn process_interaction_derived_occurrence(
+    pub(crate) fn process_interaction_derived_occurrence(
         &self,
         occurrence: &StoredInteractionDerivedEvent,
     ) -> CoreResult<Option<StoredInteractionEvent>> {
@@ -3092,22 +3056,6 @@ impl Core {
                 })
             }
         }
-    }
-
-    /// Lists a bounded durable proposal view for one exact room branch.
-    ///
-    /// Storage-derived state and proposal revisions are returned as the only
-    /// valid decision CAS tokens; callers cannot supply an action payload.
-    pub fn list_interaction_proposals(
-        &self,
-        conversation_id: &ConversationId,
-        branch_id: &ConversationBranchId,
-        status: InteractionProposalStatus,
-        limit: u32,
-    ) -> CoreResult<Vec<StoredInteractionProposal>> {
-        self.validate_runtime_branch_identity(conversation_id, branch_id)?;
-        self.storage()
-            .list_interaction_proposals(conversation_id, branch_id, status, limit)
     }
 
     /// Lists isolated generation-attempt proposals for one exact source room.
@@ -3599,179 +3547,6 @@ impl Core {
         })
     }
 
-    /// Returns only the current durable interaction-state revision for choice
-    /// and proposal CAS. No variables, proposals, or internal state identity
-    /// are exposed.
-    pub fn get_interaction_state_revision(
-        &self,
-        conversation_id: &ConversationId,
-        branch_id: &ConversationBranchId,
-    ) -> CoreResult<u64> {
-        self.validate_runtime_branch_identity(conversation_id, branch_id)?;
-        match self
-            .storage()
-            .get_interaction_state_snapshot(conversation_id, branch_id)
-        {
-            Ok(snapshot) => Ok(snapshot.state.revision),
-            Err(error) if error.code == CoreErrorCode::NotFound => Ok(0),
-            Err(error) => Err(error),
-        }
-    }
-
-    /// Expires every due pending proposal in one atomic room-scoped transition.
-    ///
-    /// This is an explicit maintenance operation for room refresh. The
-    /// timestamp and state CAS are Core-owned, no frontend event is accepted,
-    /// and the storage transition never derives or dispatches a `UserAction`.
-    /// Generation-attempt proposals use their separate aggregate CAS and are
-    /// intentionally outside this operation.
-    pub fn expire_due_interaction_proposals(
-        &self,
-        conversation_id: &ConversationId,
-        branch_id: &ConversationBranchId,
-    ) -> CoreResult<Vec<StoredInteractionProposal>> {
-        self.validate_runtime_branch_identity(conversation_id, branch_id)?;
-        let snapshot = match self
-            .storage()
-            .get_interaction_state_snapshot(conversation_id, branch_id)
-        {
-            Ok(snapshot) => snapshot,
-            Err(error) if error.code == CoreErrorCode::NotFound => return Ok(Vec::new()),
-            Err(error) => return Err(error),
-        };
-        let now = Utc::now();
-        self.storage()
-            .expire_due_interaction_proposals(&InteractionProposalExpiryCommit {
-                conversation_id: conversation_id.clone(),
-                branch_id: branch_id.clone(),
-                expected_state_revision: snapshot.state.revision,
-                now_epoch_seconds: now.timestamp(),
-                updated_at: now,
-            })
-            .map(|receipt| receipt.expired_proposals)
-    }
-
-    /// Pages immutable durable effects, including already delivered rows, so a
-    /// UI can reconstruct history without reevaluating interaction rules.
-    pub fn list_interaction_effect_history(
-        &self,
-        conversation_id: &ConversationId,
-        branch_id: &ConversationBranchId,
-        after: Option<InteractionEffectHistoryCursor>,
-        limit: u32,
-    ) -> CoreResult<Vec<StoredInteractionEffectHistory>> {
-        self.prepare_interaction_projection_read(conversation_id, branch_id)?;
-        self.storage()
-            .list_interaction_effect_history(conversation_id, branch_id, after, limit)
-    }
-
-    /// Pages the durable reopen projection. One-shot audio is excluded by
-    /// storage, while pending/consumed/expired choices retain their lifecycle.
-    pub fn list_reopen_interaction_effects(
-        &self,
-        conversation_id: &ConversationId,
-        branch_id: &ConversationBranchId,
-        after: Option<InteractionEffectHistoryCursor>,
-        limit: u32,
-    ) -> CoreResult<Vec<StoredInteractionEffectHistory>> {
-        self.prepare_interaction_projection_read(conversation_id, branch_id)?;
-        self.storage()
-            .list_reopen_interaction_effects(conversation_id, branch_id, after, limit)
-    }
-
-    /// Returns the latest bounded reopen projection in chronological order.
-    /// This reconstructs current region assets in long rooms without an
-    /// unbounded scan from the oldest event.
-    pub fn list_recent_reopen_interaction_effects(
-        &self,
-        conversation_id: &ConversationId,
-        branch_id: &ConversationBranchId,
-        limit: u32,
-    ) -> CoreResult<Vec<StoredInteractionEffectHistory>> {
-        self.prepare_interaction_projection_read(conversation_id, branch_id)?;
-        self.storage()
-            .list_recent_reopen_interaction_effects(conversation_id, branch_id, limit)
-    }
-
-    /// Pages older reopen-safe effects before an exclusive durable cursor.
-    pub fn list_older_reopen_interaction_effects(
-        &self,
-        conversation_id: &ConversationId,
-        branch_id: &ConversationBranchId,
-        before: InteractionEffectHistoryCursor,
-        limit: u32,
-    ) -> CoreResult<Vec<StoredInteractionEffectHistory>> {
-        self.prepare_interaction_projection_read(conversation_id, branch_id)?;
-        self.storage().list_older_reopen_interaction_effects(
-            conversation_id,
-            branch_id,
-            before,
-            limit,
-        )
-    }
-
-    /// Returns the newest durable `AssetShown` effect for each UI region.
-    ///
-    /// This projection is independent of the bounded recent tail, so reopening
-    /// a long room cannot lose a still-current background or portrait.
-    pub fn get_interaction_region_effects(
-        &self,
-        conversation_id: &ConversationId,
-        branch_id: &ConversationBranchId,
-    ) -> CoreResult<Vec<StoredInteractionEffectHistory>> {
-        self.prepare_interaction_projection_read(conversation_id, branch_id)?;
-        self.storage()
-            .get_interaction_region_effects(conversation_id, branch_id)
-    }
-
-    /// Returns a bounded list of still-actionable durable choice effects.
-    ///
-    /// Pending choices are projected separately from the recent tail so they
-    /// remain available after a long-running conversation is reopened.
-    pub fn list_pending_interaction_choice_effects(
-        &self,
-        conversation_id: &ConversationId,
-        branch_id: &ConversationBranchId,
-        limit: u32,
-    ) -> CoreResult<Vec<StoredInteractionEffectHistory>> {
-        self.prepare_interaction_projection_read(conversation_id, branch_id)?;
-        self.storage()
-            .list_pending_interaction_choice_effects(conversation_id, branch_id, limit)
-    }
-
-    /// Builds the complete bounded branch-reopen projection from one storage
-    /// read snapshot.
-    ///
-    /// The recent tail alone is insufficient for long rooms: the latest
-    /// asset in a region or a still-pending choice may be older than that
-    /// window. Exact duplicate rows are coalesced by durable effect identity.
-    pub fn get_interaction_reopen_projection(
-        &self,
-        conversation_id: &ConversationId,
-        branch_id: &ConversationBranchId,
-        recent_limit: u32,
-        pending_choice_limit: u32,
-    ) -> CoreResult<Vec<StoredInteractionEffectHistory>> {
-        self.prepare_interaction_projection_read(conversation_id, branch_id)?;
-        self.storage().get_interaction_reopen_projection(
-            conversation_id,
-            branch_id,
-            recent_limit,
-            pending_choice_limit,
-        )
-    }
-
-    fn prepare_interaction_projection_read(
-        &self,
-        conversation_id: &ConversationId,
-        branch_id: &ConversationBranchId,
-    ) -> CoreResult<()> {
-        self.validate_runtime_branch_identity(conversation_id, branch_id)?;
-        self.drain_available_core_lifecycle_occurrences()?;
-        self.validate_runtime_branch_identity(conversation_id, branch_id)?;
-        Ok(())
-    }
-
     /// Selects one exact option from one exact durable `ChoicesPresented`
     /// effect and atomically commits the storage-derived `UserAction`.
     ///
@@ -3877,64 +3652,10 @@ impl Core {
                     },
                 })?;
         self.drain_interaction_derived_events()?;
-        Ok(receipt)
+        Ok(project_interaction_choice_selection_receipt(receipt))
     }
 
-    /// Claims stored UI effects for a Rust-only dispatcher. Actions are never
-    /// reevaluated during delivery.
-    pub fn claim_interaction_effects(
-        &self,
-        limit: u32,
-        lease_seconds: u32,
-    ) -> CoreResult<Vec<StoredInteractionEffect>> {
-        if !(1..=300).contains(&lease_seconds) {
-            return Err(CoreError::invalid(
-                "interaction effect lease must be between 1 and 300 seconds",
-            ));
-        }
-        let now = Utc::now();
-        self.storage().claim_pending_interaction_effects(
-            now,
-            now + chrono::Duration::seconds(i64::from(lease_seconds)),
-            limit,
-        )
-    }
-
-    pub fn acknowledge_interaction_effect(
-        &self,
-        event_id: &str,
-        sequence: u64,
-        expected_delivery_attempts: u64,
-    ) -> CoreResult<()> {
-        self.storage().mark_interaction_effect_delivered(
-            event_id,
-            sequence,
-            expected_delivery_attempts,
-            Utc::now(),
-        )
-    }
-
-    pub fn retry_interaction_effect(
-        &self,
-        event_id: &str,
-        sequence: u64,
-        expected_delivery_attempts: u64,
-        delay_seconds: u32,
-    ) -> CoreResult<()> {
-        if delay_seconds > 86_400 {
-            return Err(CoreError::invalid(
-                "interaction effect retry delay exceeds one day",
-            ));
-        }
-        self.storage().retry_interaction_effect_after(
-            event_id,
-            sequence,
-            expected_delivery_attempts,
-            Utc::now() + chrono::Duration::seconds(i64::from(delay_seconds)),
-        )
-    }
-
-    fn validate_runtime_branch_identity(
+    pub(crate) fn validate_runtime_branch_identity(
         &self,
         conversation_id: &ConversationId,
         branch_id: &ConversationBranchId,
@@ -5310,7 +5031,7 @@ fn interaction_occurrence_identity(
     ))
 }
 
-fn core_lifecycle_retry_seconds(delivery_attempts: u64) -> i64 {
+pub(crate) fn core_lifecycle_retry_seconds(delivery_attempts: u64) -> i64 {
     let exponent = delivery_attempts.saturating_sub(1).min(8) as u32;
     1_i64
         .checked_shl(exponent)
@@ -6564,6 +6285,10 @@ fn queue_entry_as_stored_revision(entry: &StoredMemoryJobQueueEntry) -> StoredRe
     }
 }
 
+fn queue_entry_as_revisioned(entry: &StoredMemoryJobQueueEntry) -> Revisioned<MemoryJob> {
+    project_revision(queue_entry_as_stored_revision(entry))
+}
+
 fn object_revision_as_stored<T: Clone>(revision: &ObjectRevision<T>) -> StoredRevision<T> {
     StoredRevision {
         value: revision.value.clone(),
@@ -6577,7 +6302,7 @@ fn object_revision_as_stored<T: Clone>(revision: &ObjectRevision<T>) -> StoredRe
 
 fn memory_execution_without_record(entry: &StoredMemoryJobQueueEntry) -> MemoryJobExecutionResult {
     MemoryJobExecutionResult {
-        job: queue_entry_as_stored_revision(entry),
+        job: queue_entry_as_revisioned(entry),
         record: None,
     }
 }
@@ -6618,7 +6343,7 @@ fn claimed_memory_job(entry: &StoredMemoryJobQueueEntry) -> CoreResult<ClaimedMe
         .clone()
         .ok_or_else(|| CoreError::invalid("memory job has no task profile revision"))?;
     Ok(ClaimedMemoryJob {
-        job: queue_entry_as_stored_revision(entry),
+        job: queue_entry_as_revisioned(entry),
         memory_profile_revision_id,
         task_profile_revision_id,
     })

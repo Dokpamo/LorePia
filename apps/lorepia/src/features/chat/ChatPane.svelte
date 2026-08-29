@@ -20,44 +20,33 @@
     import PortableMessage from './PortableMessage.svelte';
     import { onMount, tick } from 'svelte';
     import type { KeyboardEventHandler } from 'svelte/elements';
-    import { SvelteMap, SvelteSet } from 'svelte/reactivity';
+    import { SvelteMap } from 'svelte/reactivity';
 
     import type { LorepiaAppController, LorepiaAppState } from '../../app/app-controller';
     import ChoicePopover from '../../components/ChoicePopover.svelte';
     import SegmentedControl from '../../components/SegmentedControl.svelte';
     import type {
-        CharacterRenderProfileDto,
         ConversationMode,
         GenerationSelectionInput,
         MemoryRecordSourceNavigationDto,
         MessageDto,
-        OrchestrationVariableMapDto,
     } from '../../lib/ipc/contracts';
-    import TrustedAsset from '../assets/TrustedAsset.svelte';
     import MemoryQueryRetryPanel from '../orchestration/MemoryQueryRetryPanel.svelte';
     import OrchestrationQuickDrawer from '../orchestration/OrchestrationQuickDrawer.svelte';
     import type {
         OrchestrationController,
         OrchestrationState,
     } from '../orchestration/orchestration-controller';
-    import type { PersonaClientApi } from '../personas/persona-contracts';
     import { shouldSubmitComposer } from './composer';
     import GenerationAttemptApprovals from './GenerationAttemptApprovals.svelte';
+    import InteractionRoomSurface from './InteractionRoomSurface.svelte';
     import PortableRuntimeControls from './PortableRuntimeControls.svelte';
-    import {
-        PortableCharacterRuntime,
-        createPortableRuntimeGrant,
-        requiredPortableRuntimeCapabilities,
-        type PortableRuntimeCapability,
-        type PortableRuntimeGrant,
-        type PortableRuntimeModelCallStatus,
-    } from './portable-runtime';
+    import { PortableRuntimeLifecycle } from './portable-runtime-lifecycle.svelte';
     import {
         INITIAL_INTERACTION_ROOM_STATE,
         InteractionRoomController,
         type InteractionRoomCapableClient,
         type InteractionRoomState,
-        type RoomInteractionEffect,
     } from './interaction-room-controller';
     import {
         VIRTUAL_MESSAGE_BLOCK_PADDING,
@@ -135,23 +124,22 @@
     let copyNotice = $state('');
     let handledMessageFocusRequestId = 0;
     let interactionController = $state<InteractionRoomController | null>(null);
-    let characterRenderProfile = $state<CharacterRenderProfileDto | null>(null);
-    let portableRuntime = $state<PortableCharacterRuntime | null>(null);
-    let portableRuntimeGrant = $state<PortableRuntimeGrant | null>(null);
-    let portableRuntimeGrantProfile = $state<CharacterRenderProfileDto | null>(null);
-    let portableRuntimeProfileEpoch = 0;
-    let selectedPortableRuntimeCapabilities = $state<PortableRuntimeCapability[]>([]);
-    let portableRuntimeModelCall = $state<PortableRuntimeModelCallStatus | null>(null);
-    let portableRuntimePhase = $state<'idle' | 'blocked' | 'loading' | 'ready' | 'busy' | 'error'>(
-        'idle',
-    );
-    let portableRuntimeError = $state<string | null>(null);
+    const portableRuntimeLifecycle = new PortableRuntimeLifecycle({
+        currentMessages: () => appState.messages.items,
+        primarySelection: () => controller.runtimeGenerationSelection(),
+        onNotice: (message) => {
+            copyNotice = message;
+        },
+    });
+    const characterRenderProfile = $derived(portableRuntimeLifecycle.profile);
+    const portableRuntime = $derived(portableRuntimeLifecycle.runtime);
+    const portableRuntimeModelCall = $derived(portableRuntimeLifecycle.modelCall);
+    const portableRuntimePersistenceStatus = $derived(portableRuntimeLifecycle.persistenceStatus);
+    const portableRuntimePhase = $derived(portableRuntimeLifecycle.phase);
+    const portableRuntimeError = $derived(portableRuntimeLifecycle.error);
+    const portableRuntimeRevision = $derived(portableRuntimeLifecycle.revision);
     let dismissedChatError = $state<string | null>(null);
     let dismissedInteractionError = $state<string | null>(null);
-    let portableRuntimeRevision = $state(0);
-    let portableRuntimeCreationEpoch = 0;
-    let portableRuntimeLastOutputKey = '';
-    let portableRuntimeActionCount = 0;
     let interactionState = $state<InteractionRoomState>(
         structuredClone(INITIAL_INTERACTION_ROOM_STATE),
     );
@@ -679,9 +667,7 @@
     const displayMessageItems = $derived(
         projectDisplayMessages(appState.messages.items, appState.chat.live_assistant_message_id),
     );
-    const activePortableRuntimeGrant = $derived(
-        portableRuntimeGrantProfile === characterRenderProfile ? portableRuntimeGrant : null,
-    );
+    const activePortableRuntimeGrant = $derived(portableRuntimeLifecycle.activeGrant);
     const portableRuntimeVariables = $derived.by(() => {
         void portableRuntimeRevision;
         if (portableRuntime !== null) return portableRuntime.variables;
@@ -700,11 +686,7 @@
         if (!portableDisplayApproved) return '';
         return portableRuntime?.backgroundMarkup ?? characterRenderProfile?.background_markup ?? '';
     });
-    const portableRuntimeCapabilities = $derived(
-        characterRenderProfile === null
-            ? []
-            : requiredPortableRuntimeCapabilities(characterRenderProfile),
-    );
+    const portableRuntimeCapabilities = $derived(portableRuntimeLifecycle.capabilities);
     const portableRuntimeLastCharacterMessage = $derived.by(() => {
         void portableRuntimeRevision;
         if (!portableRuntimeCanReadChat) return '';
@@ -852,26 +834,6 @@
             appState.chat.streaming_text !== '' ||
             appState.chat.reasoning_text !== '',
     );
-    const displayInteractionEffects = $derived.by(() => {
-        const retained: RoomInteractionEffect[] = [];
-        const visualRegions = new SvelteSet<string>();
-        for (const effect of [...interactionState.effects].reverse()) {
-            if (
-                effect.effect.kind === 'state_changed' ||
-                effect.effect.kind === 'knowledge_activated'
-            ) {
-                continue;
-            }
-            if (effect.effect.kind === 'show_asset') {
-                if (visualRegions.has(effect.effect.region)) continue;
-                visualRegions.add(effect.effect.region);
-            }
-            retained.push(effect);
-            if (retained.length >= 32) break;
-        }
-        return retained.reverse();
-    });
-
     $effect(() => {
         const nextKey = branchKey;
         if (nextKey !== activeDraftKey) {
@@ -1046,176 +1008,27 @@
 
     $effect(() => {
         const characterId = appState.selected_character?.id ?? null;
-        const activeClient = client;
-        ++portableRuntimeProfileEpoch;
-        const getCharacterRenderProfile =
-            activeClient?.getCharacterRenderProfile?.bind(activeClient);
-        let cancelled = false;
-        characterRenderProfile = null;
-        portableRuntimeGrant = null;
-        portableRuntimeGrantProfile = null;
-        selectedPortableRuntimeCapabilities = [];
-        portableRuntimeModelCall = null;
-        if (characterId !== null && getCharacterRenderProfile !== undefined) {
-            void getCharacterRenderProfile(characterId)
-                .then((profile) => {
-                    if (!cancelled && profile.character_id === characterId) {
-                        characterRenderProfile = profile;
-                        selectedPortableRuntimeCapabilities = requiredPortableRuntimeCapabilities(
-                            profile,
-                        ).filter(
-                            (capability) =>
-                                capability !== 'model:primary' &&
-                                capability !== 'model:auxiliary' &&
-                                capability !== 'elevated',
-                        );
-                    }
-                })
-                .catch(() => {
-                    // Legacy characters have no companion render profile and
-                    // continue through the ordinary Markdown renderer.
-                });
-        }
-        return () => {
-            cancelled = true;
-        };
+        return portableRuntimeLifecycle.loadProfile(client, characterId);
     });
 
     $effect(() => {
-        const profile = characterRenderProfile;
-        const activeClient = client;
-        const conversationId = appState.selected_conversation?.id ?? null;
-        const branchId = appState.conversation_state?.active_branch_id ?? null;
-        const character = appState.selected_character;
-        const grant = activePortableRuntimeGrant;
-        const hasLuaRuntime =
-            profile?.runtime_scripts.some(
-                (script) => script.language.trim().toLowerCase() === 'lua',
-            ) ?? false;
-        const hasDynamicProfile =
-            hasLuaRuntime ||
-            (profile?.output_transforms.length ?? 0) > 0 ||
-            (profile?.display_transforms.length ?? 0) > 0 ||
-            (profile?.background_markup.trim().length ?? 0) > 0;
-        const creationEpoch = ++portableRuntimeCreationEpoch;
-        let createdRuntime: PortableCharacterRuntime | null = null;
-        portableRuntime = null;
-        portableRuntimeError = null;
-        portableRuntimeLastOutputKey = '';
-        portableRuntimeActionCount = 0;
-        portableRuntimeModelCall = null;
-        portableRuntimePhase = !hasDynamicProfile
-            ? 'idle'
-            : grant === null
-              ? 'blocked'
-              : hasLuaRuntime
-                ? 'loading'
-                : 'ready';
-        if (
-            !hasLuaRuntime ||
-            grant === null ||
-            profile === null ||
-            activeClient === undefined ||
-            conversationId === null ||
-            branchId === null ||
-            character === null
-        ) {
-            return;
-        }
-        void loadPortableRuntimePersona(activeClient, conversationId)
-            .then((persona) =>
-                PortableCharacterRuntime.create({
-                    profile,
-                    grant,
-                    conversationId,
-                    branchId,
-                    characterName: character.name,
-                    characterDescription: character.description,
-                    personaName: persona.name,
-                    personaDescription: persona.description,
-                    client: activeClient,
-                    primarySelection: () => controller.runtimeGenerationSelection(),
-                    onChanged: () => {
-                        portableRuntimeRevision += 1;
-                    },
-                    onNotice: (message, error) => {
-                        copyNotice = message;
-                        if (error) portableRuntimeError = message;
-                    },
-                    onModelCallStatus: (status) => {
-                        if (creationEpoch === portableRuntimeCreationEpoch) {
-                            portableRuntimeModelCall = status;
-                            portableRuntimeRevision += 1;
-                        }
-                    },
-                }),
-            )
-            .then(async (runtime) => {
-                if (creationEpoch !== portableRuntimeCreationEpoch) {
-                    runtime.close();
-                    return;
-                }
-                createdRuntime = runtime;
-                runtime.setMessages(appState.messages.items);
-                await runtime.refreshDisplay();
-                portableRuntimeLastOutputKey = runtimeOutputKey(appState.messages.items);
-                portableRuntime = runtime;
-                portableRuntimePhase = 'ready';
-                portableRuntimeRevision += 1;
-            })
-            .catch((error: unknown) => {
-                if (creationEpoch !== portableRuntimeCreationEpoch) return;
-                portableRuntimePhase = 'error';
-                portableRuntimeError =
-                    error instanceof Error ? error.message : '캐릭터 런타임을 시작하지 못했습니다.';
-            });
-        return () => {
-            createdRuntime?.close();
-            if (creationEpoch === portableRuntimeCreationEpoch) {
-                portableRuntimeCreationEpoch += 1;
-            }
-        };
+        return portableRuntimeLifecycle.recreate({
+            client,
+            conversationId: appState.selected_conversation?.id ?? null,
+            branchId: appState.conversation_state?.active_branch_id ?? null,
+            character: appState.selected_character,
+        });
     });
 
     $effect(() => {
-        const runtime = portableRuntime;
         const messages = appState.messages.items;
-        const activeGenerationId = appState.chat.active_generation_id;
-        const hasStreamingPresentation =
-            appState.chat.live_assistant_message_id !== null ||
-            appState.chat.streaming_text !== '' ||
-            appState.chat.reasoning_text !== '';
-        if (runtime === null) return;
-        runtime.setMessages(messages);
-        const outputKey = runtimeOutputKey(messages);
-        if (
-            outputKey !== '' &&
-            outputKey !== portableRuntimeLastOutputKey &&
-            activeGenerationId === null &&
-            !hasStreamingPresentation
-        ) {
-            portableRuntimeLastOutputKey = outputKey;
-            portableRuntimePhase = 'busy';
-            portableRuntimeError = null;
-            void runtime
-                .afterOutput(messages)
-                .then(() => {
-                    if (runtime !== portableRuntime) return;
-                    portableRuntimePhase = 'ready';
-                    portableRuntimeRevision += 1;
-                })
-                .catch((error: unknown) => {
-                    if (runtime !== portableRuntime) return;
-                    portableRuntimePhase = 'error';
-                    portableRuntimeError =
-                        error instanceof Error
-                            ? error.message
-                            : '응답 후 캐릭터 기능을 실행하지 못했습니다.';
-                });
-            return;
-        }
-        void runtime.refreshDisplay().then(() => {
-            if (runtime === portableRuntime) portableRuntimeRevision += 1;
+        portableRuntimeLifecycle.syncMessages({
+            messages,
+            activeGenerationId: appState.chat.active_generation_id,
+            hasStreamingPresentation:
+                appState.chat.live_assistant_message_id !== null ||
+                appState.chat.streaming_text !== '' ||
+                appState.chat.reasoning_text !== '',
         });
     });
 
@@ -1628,43 +1441,6 @@
         stableMeasurementAnchor = captureScrollAnchor();
     }
 
-    function runtimeOutputKey(messages: MessageDto[]): string {
-        const assistant = [...messages]
-            .reverse()
-            .find((message) => message.role === 'assistant' && message.status === 'complete');
-        return assistant === undefined
-            ? ''
-            : `${assistant.id}:${assistant.generation_id ?? 'greeting'}`;
-    }
-
-    async function loadPortableRuntimePersona(
-        activeClient: InteractionRoomCapableClient,
-        conversationId: string,
-    ): Promise<{ name: string; description: string }> {
-        const personaClient = activeClient as InteractionRoomCapableClient &
-            Partial<PersonaClientApi>;
-        if (personaClient.getConversationPersonaSelection === undefined) {
-            return { name: '사용자', description: '' };
-        }
-        try {
-            const selection = await personaClient.getConversationPersonaSelection({
-                conversation_id: conversationId,
-            });
-            const selectedName = selection.selected_persona?.value.name.trim();
-            return {
-                name:
-                    selectedName === undefined
-                        ? '사용자'
-                        : selectedName === ''
-                          ? '사용자'
-                          : selectedName,
-                description: selection.selected_persona?.value.description ?? '',
-            };
-        } catch {
-            return { name: '사용자', description: '' };
-        }
-    }
-
     function portableMessageText(message: MessageDto): string {
         void portableRuntimeRevision;
         return portableRuntime?.displayText(message) ?? message.content;
@@ -1676,106 +1452,35 @@
     }
 
     async function approvePortableRuntime(): Promise<void> {
-        const profile = characterRenderProfile;
-        if (profile === null) return;
-        const approvalEpoch = portableRuntimeProfileEpoch;
-        portableRuntimePhase = 'loading';
-        portableRuntimeError = null;
-        try {
-            const grant = await createPortableRuntimeGrant(
-                profile,
-                selectedPortableRuntimeCapabilities,
-            );
-            if (approvalEpoch !== portableRuntimeProfileEpoch || characterRenderProfile !== profile)
-                return;
-            portableRuntimeGrantProfile = profile;
-            portableRuntimeGrant = grant;
-        } catch (error) {
-            portableRuntimePhase = 'error';
-            portableRuntimeError =
-                error instanceof Error ? error.message : '카드 기능 승인을 만들지 못했습니다.';
-        }
+        await portableRuntimeLifecycle.approve();
     }
 
     function revokePortableRuntime(): void {
-        portableRuntimeGrant = null;
-        portableRuntimeGrantProfile = null;
-        portableRuntime?.close();
-        portableRuntime = null;
-        portableRuntimeModelCall = null;
-        portableRuntimePhase = 'blocked';
-        portableRuntimeError = null;
-        portableRuntimeRevision += 1;
+        portableRuntimeLifecycle.revoke();
     }
 
     async function cancelPortableRuntimeModelCall(): Promise<void> {
-        const runtime = portableRuntime;
-        if (runtime === null) return;
-        const requested = await runtime.cancelActiveModelCall();
+        const requested = await portableRuntimeLifecycle.cancelActiveModelCall();
         copyNotice = requested
             ? '캐릭터 모델 호출 중지를 요청했습니다.'
             : '중지할 캐릭터 모델 호출이 없습니다.';
     }
 
     async function setPortableRuntimeOption(key: string, value: string): Promise<void> {
-        const runtime = portableRuntime;
-        if (runtime === null) return;
-        portableRuntimePhase = 'busy';
-        portableRuntimeError = null;
-        try {
-            await runtime.setOption(key, value);
-            portableRuntimePhase = 'ready';
-            portableRuntimeRevision += 1;
-        } catch (error) {
-            portableRuntimePhase = 'error';
-            portableRuntimeError =
-                error instanceof Error ? error.message : '카드 옵션을 변경하지 못했습니다.';
-        }
+        await portableRuntimeLifecycle.setOption(key, value);
     }
 
     function setAuxiliaryRuntimeModel(value: string): void {
-        const runtime = portableRuntime;
-        if (runtime === null) return;
         const option = auxiliaryRuntimeModelOptions.find((candidate) => candidate.value === value);
-        runtime.setAuxiliarySelection(option?.selection ?? null);
-        portableRuntimeRevision += 1;
-    }
-
-    function portableRuntimeVariableOverrides(
-        runtime: PortableCharacterRuntime,
-    ): OrchestrationVariableMapDto {
-        const additions = Object.entries(runtime.generationVariables)
-            .sort(([left], [right]) => left.localeCompare(right))
-            .map(([id, value]) => ({
-                variable: { scope: 'character' as const, namespace: null, id },
-                value: { type: 'text' as const, value },
-            }));
-        return { values: additions };
+        portableRuntimeLifecycle.setAuxiliarySelection(option?.selection ?? null);
     }
 
     async function handlePortableRuntimeAction(action: string): Promise<void> {
-        const runtime = portableRuntime;
-        if (runtime === null) return;
-        if (portableRuntimeActionCount === 0) portableRuntimeError = null;
-        portableRuntimeActionCount += 1;
-        portableRuntimePhase = 'busy';
-        try {
-            await runtime.handleAction(action);
-            portableRuntimeRevision += 1;
-        } catch (error) {
-            portableRuntimeError =
-                error instanceof Error ? error.message : '카드 버튼 동작을 실행하지 못했습니다.';
-        } finally {
-            portableRuntimeActionCount = Math.max(0, portableRuntimeActionCount - 1);
-            if (runtime === portableRuntime && portableRuntimeActionCount === 0) {
-                portableRuntimePhase = portableRuntimeError === null ? 'ready' : 'error';
-            }
-        }
+        await portableRuntimeLifecycle.handleAction(action);
     }
 
     function dismissPortableRuntimeError(): void {
-        const dismissedError = portableRuntimeError;
-        portableRuntimeError = null;
+        const dismissedError = portableRuntimeLifecycle.dismissError();
         if (copyNotice === dismissedError) copyNotice = '';
     }
 
@@ -1785,24 +1490,22 @@
         try {
             let content = draft;
             let handledByRuntime = false;
-            const runtime = portableRuntime;
-            const requiresRuntime =
-                characterRenderProfile?.runtime_scripts.some(
-                    (script) => script.language.trim().toLowerCase() === 'lua',
-                ) ?? false;
-            if (requiresRuntime && activePortableRuntimeGrant !== null && runtime === null) {
+            let runtime = portableRuntime;
+            if (
+                portableRuntimeLifecycle.requiresLuaRuntime &&
+                activePortableRuntimeGrant !== null &&
+                runtime === null
+            ) {
                 copyNotice =
                     portableRuntimeError ??
                     '캐릭터 기능을 준비하는 중입니다. 잠시 뒤 다시 보내세요.';
                 return;
             }
-            if (runtime !== null) {
-                portableRuntimePhase = 'busy';
-                portableRuntimeError = null;
-                const prepared = await runtime.prepareInput(content);
+            const prepared = await portableRuntimeLifecycle.prepareInput(content);
+            if (prepared !== null) {
+                runtime = prepared.runtime;
                 content = prepared.text;
-                handledByRuntime = !prepared.shouldSend;
-                portableRuntimePhase = 'ready';
+                handledByRuntime = prepared.handledByRuntime;
             }
             const accepted =
                 handledByRuntime ||
@@ -1810,7 +1513,7 @@
                     ? await controller.sendMessage(content)
                     : await controller.sendMessage(
                           content,
-                          portableRuntimeVariableOverrides(runtime),
+                          portableRuntimeLifecycle.generationVariableOverrides(runtime),
                       ));
             if (accepted) {
                 draft = '';
@@ -1819,10 +1522,7 @@
             }
             attemptApprovalRefreshEpoch += 1;
         } catch (error) {
-            portableRuntimePhase = 'error';
-            portableRuntimeError =
-                error instanceof Error ? error.message : '캐릭터 기능을 실행하지 못했습니다.';
-            copyNotice = portableRuntimeError;
+            copyNotice = portableRuntimeLifecycle.fail(error, '캐릭터 기능을 실행하지 못했습니다.');
         } finally {
             sending = false;
         }
@@ -1980,6 +1680,11 @@
         pendingRemoveId = null;
     }
 
+    async function removeMessageAndResetRuntime(messageId: string): Promise<void> {
+        const result = await controller.removeMessage(messageId);
+        if (result.mutationCommitted) portableRuntimeLifecycle.resetScope();
+    }
+
     async function commitEdit(messageId: string): Promise<void> {
         const accepted = await controller.editUserMessage(messageId, editDraft);
         if (accepted) {
@@ -2056,12 +1761,13 @@
                 phase={portableRuntimePhase}
                 grant={activePortableRuntimeGrant}
                 capabilities={portableRuntimeCapabilities}
-                bind:selectedCapabilities={selectedPortableRuntimeCapabilities}
+                bind:selectedCapabilities={portableRuntimeLifecycle.selectedCapabilities}
                 runtime={portableRuntime}
                 selectedAuxiliaryModel={selectedAuxiliaryRuntimeModel}
                 auxiliaryModelOptions={auxiliaryRuntimeModelOptions}
                 modelBudget={portableRuntimeModelBudget}
                 modelCall={portableRuntimeModelCall}
+                persistenceStatus={portableRuntimePersistenceStatus}
                 optionValue={portableOptionValue}
                 onApprove={approvePortableRuntime}
                 onRevoke={revokePortableRuntime}
@@ -2291,207 +1997,11 @@
         {/if}
 
         {#if client !== undefined && interactionController !== null && interactionState.phase !== 'unavailable'}
-            {#if interactionState.phase === 'loading'}
-                <div class="interaction-status" role="status">
-                    대화 상호작용을 복원하는 중입니다.
-                </div>
-            {:else if interactionState.error === null && interactionState.announcement !== ''}
-                <div class="interaction-status" role="status" aria-live="polite">
-                    {interactionState.announcement}
-                </div>
-            {/if}
-
-            {#if interactionState.has_more_expired_proposals}
-                <div class="interaction-status error" role="alert">
-                    <span>
-                        만료된 승인 제안이 더 남아 있습니다. 최신 상태를 모두 정리하기 전에는 다른
-                        제안을 결정할 수 없습니다.
-                    </span>
-                    <button
-                        type="button"
-                        disabled={interactionState.phase === 'loading'}
-                        onclick={() => void interactionController?.reload()}
-                    >
-                        만료 제안 계속 정리
-                    </button>
-                </div>
-            {/if}
-
-            {#if displayInteractionEffects.length > 0 || interactionState.pending_proposals.length > 0}
-                <section class="interaction-surface" aria-labelledby="room-interaction-title">
-                    <header>
-                        <h3 id="room-interaction-title">대화 상호작용</h3>
-                        <span>상태 revision {interactionState.current_state_revision}</span>
-                    </header>
-
-                    {#if displayInteractionEffects.length > 0}
-                        <ul class="interaction-effects">
-                            {#each displayInteractionEffects as interactionEffect (interactionEffect.effect_id)}
-                                <li>
-                                    {#if interactionEffect.effect.kind === 'show_asset'}
-                                        <p class="interaction-label">
-                                            {interactionEffect.effect.region} 미디어
-                                        </p>
-                                        <div class="interaction-media">
-                                            <TrustedAsset
-                                                {client}
-                                                selector={{
-                                                    kind: 'asset_id',
-                                                    asset_id:
-                                                        interactionEffect.effect.asset.asset_id,
-                                                }}
-                                                expectedKind={interactionEffect.effect.asset.kind}
-                                                alt={`${interactionEffect.effect.region} 상호작용 미디어`}
-                                                showMetadata
-                                            />
-                                        </div>
-                                    {:else if interactionEffect.effect.kind === 'play_audio'}
-                                        <p class="interaction-label">상호작용 오디오</p>
-                                        <div class="interaction-audio">
-                                            <TrustedAsset
-                                                {client}
-                                                selector={{
-                                                    kind: 'asset_id',
-                                                    asset_id:
-                                                        interactionEffect.effect.asset.asset_id,
-                                                }}
-                                                expectedKind="audio"
-                                                alt="상호작용 오디오"
-                                                showMetadata
-                                            />
-                                        </div>
-                                    {:else if interactionEffect.effect.kind === 'present_choices'}
-                                        <fieldset>
-                                            <legend>선택지</legend>
-                                            <div class="interaction-actions">
-                                                {#each interactionEffect.effect.choices as choice (choice.id)}
-                                                    <button
-                                                        type="button"
-                                                        class:primary={interactionEffect.selected_choice_id ===
-                                                            choice.id}
-                                                        disabled={interactionEffect.choice_status !==
-                                                            'pending' ||
-                                                            interactionState.busy_effect_id ===
-                                                                interactionEffect.effect_id}
-                                                        onclick={() =>
-                                                            void interactionController?.submitChoice(
-                                                                interactionEffect.effect_id,
-                                                                choice.id,
-                                                            )}
-                                                    >
-                                                        {choice.label}
-                                                    </button>
-                                                {/each}
-                                            </div>
-                                            {#if interactionEffect.choice_status === 'consumed'}
-                                                <p class="interaction-label">
-                                                    선택 반영됨:
-                                                    {interactionEffect.selected_choice_id ??
-                                                        '알 수 없음'}
-                                                </p>
-                                            {:else if interactionEffect.choice_status === 'expired'}
-                                                <p class="interaction-label">
-                                                    이 선택지는 만료되었습니다.
-                                                </p>
-                                            {/if}
-                                        </fieldset>
-                                    {:else if interactionEffect.effect.kind === 'visible_system_event'}
-                                        <p>{interactionEffect.effect.text}</p>
-                                    {:else if interactionEffect.effect.kind === 'dice_rolled'}
-                                        <p>
-                                            주사위 {interactionEffect.effect
-                                                .count}d{interactionEffect.effect.sides}
-                                            {interactionEffect.effect.modifier >= 0 ? '+' : ''}
-                                            {interactionEffect.effect.modifier} →
-                                            {interactionEffect.effect.rolls.join(', ')} · 합계
-                                            {interactionEffect.effect.total}
-                                        </p>
-                                    {:else if interactionEffect.effect.kind === 'approval_pending'}
-                                        <article>
-                                            <h4>{interactionEffect.effect.title}</h4>
-                                            <p>{interactionEffect.effect.body}</p>
-                                            {#if interactionEffect.effect.expires_after_seconds !== null}
-                                                <small>
-                                                    {interactionEffect.effect
-                                                        .expires_after_seconds}초 안에 결정
-                                                </small>
-                                            {/if}
-                                        </article>
-                                    {:else if interactionEffect.effect.kind === 'projection_rejected'}
-                                        <p class="interaction-label" role="status">
-                                            {interactionEffect.effect.reason === 'asset_unavailable'
-                                                ? '저장된 미디어 효과를 현재 사용할 수 없어 숨겼습니다.'
-                                                : interactionEffect.effect.reason ===
-                                                    'unsafe_native_text'
-                                                  ? '안전한 표시 범위를 벗어난 저장 효과를 숨겼습니다.'
-                                                  : '호환되지 않는 저장 효과를 숨겼습니다.'}
-                                        </p>
-                                    {/if}
-                                </li>
-                            {/each}
-                        </ul>
-                    {/if}
-
-                    {#if interactionState.pending_proposals.length > 0}
-                        <section aria-labelledby="interaction-proposals-title">
-                            <h4 id="interaction-proposals-title">승인 대기 제안</h4>
-                            <ul class="interaction-proposals">
-                                {#each interactionState.pending_proposals as item (item.proposal.id)}
-                                    <li>
-                                        {#if item.proposal.projection_rejection_reason === 'unsafe_native_text'}
-                                            <strong>저장 제안 내용을 표시할 수 없음</strong>
-                                            <p>
-                                                안전한 표시 범위를 벗어난 원문은 숨겼습니다. 이
-                                                제안은 거절만 할 수 있습니다.
-                                            </p>
-                                        {:else}
-                                            <strong>{item.proposal.title}</strong>
-                                            <p>{item.proposal.body}</p>
-                                        {/if}
-                                        <div class="interaction-actions">
-                                            <button
-                                                type="button"
-                                                disabled={interactionState.busy_proposal_id !==
-                                                    null ||
-                                                    interactionState.has_more_expired_proposals}
-                                                onclick={() =>
-                                                    void interactionController?.decideProposal(
-                                                        item.proposal.id,
-                                                        'reject',
-                                                    )}
-                                            >
-                                                거절
-                                            </button>
-                                            <button
-                                                class="primary"
-                                                type="button"
-                                                disabled={interactionState.busy_proposal_id !==
-                                                    null ||
-                                                    interactionState.has_more_expired_proposals ||
-                                                    item.proposal.projection_rejection_reason ===
-                                                        'unsafe_native_text'}
-                                                onclick={() =>
-                                                    void interactionController?.decideProposal(
-                                                        item.proposal.id,
-                                                        'approve',
-                                                    )}
-                                            >
-                                                승인
-                                            </button>
-                                        </div>
-                                    </li>
-                                {/each}
-                            </ul>
-                        </section>
-                    {/if}
-
-                    {#if interactionState.has_older_effects}
-                        <p class="interaction-label">
-                            이전 상호작용 기록은 전문가 기록 화면에서 확인할 수 있습니다.
-                        </p>
-                    {/if}
-                </section>
-            {/if}
+            <InteractionRoomSurface
+                {client}
+                controller={interactionController}
+                state={interactionState}
+            />
         {/if}
 
         <div
@@ -2708,7 +2218,7 @@
                                             title="제거 확인"
                                             onclick={() => {
                                                 pendingRemoveId = null;
-                                                void controller.removeMessage(message.id);
+                                                void removeMessageAndResetRuntime(message.id);
                                             }}
                                         >
                                             <Check aria-hidden="true" />
@@ -3119,82 +2629,6 @@
         color: var(--ink-muted);
         font-size: 0.72rem;
         line-height: 1.35;
-    }
-
-    .interaction-status,
-    .interaction-surface {
-        width: min(100% - 2 * clamp(16px, 5vw, 32px), var(--reading));
-        margin: 8px auto 0;
-    }
-
-    .interaction-status {
-        color: var(--ink-muted);
-        font-size: 0.75rem;
-    }
-
-    .interaction-surface {
-        max-height: min(42vh, 32rem);
-        padding: 12px;
-        overflow-y: auto;
-        border: 1px solid var(--line);
-        border-radius: 14px;
-        background: var(--surface-sunken);
-    }
-
-    .interaction-surface > header,
-    .interaction-actions {
-        display: flex;
-        gap: 8px;
-        align-items: center;
-        justify-content: space-between;
-    }
-
-    .interaction-surface h3,
-    .interaction-surface h4,
-    .interaction-surface p {
-        margin: 0;
-    }
-
-    .interaction-surface > header span,
-    .interaction-label {
-        color: var(--ink-muted);
-        font-size: 0.72rem;
-    }
-
-    .interaction-effects,
-    .interaction-proposals {
-        display: grid;
-        gap: 8px;
-        margin: 10px 0 0;
-        padding: 0;
-        list-style: none;
-    }
-
-    .interaction-effects > li,
-    .interaction-proposals > li {
-        display: grid;
-        gap: 8px;
-        padding: 10px;
-        border: 1px solid var(--line);
-        border-radius: 10px;
-        background: var(--surface);
-    }
-
-    .interaction-media {
-        width: min(100%, 28rem);
-        height: min(38vh, 20rem);
-        overflow: hidden;
-        border-radius: 10px;
-    }
-
-    .interaction-audio {
-        width: min(100%, 32rem);
-        min-height: 3rem;
-    }
-
-    .interaction-actions {
-        flex-wrap: wrap;
-        justify-content: flex-start;
     }
 
     .memory-query-retry-slot {

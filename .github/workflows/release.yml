@@ -20,6 +20,9 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Verify generated IPC command registries
+        run: python3 scripts/generate_ipc_commands.py --check
+
       - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
         with:
           command: check
@@ -95,7 +98,6 @@ jobs:
       - name: Bundle
         working-directory: apps/lorepia
         run: npm run tauri build -- --config src-tauri/tauri.release.conf.json
-
       - name: Stage final candidate artifacts
         run: >-
           python scripts/stage_release_candidate.py

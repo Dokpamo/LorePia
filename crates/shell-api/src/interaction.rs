@@ -9,10 +9,10 @@ use lorepia_core::{
     GenerationAttemptProposalDecisionReceipt, GenerationAttemptProposalDecisionRequest,
     GenerationAttemptProposalExpiryReceipt, GenerationAttemptProposalView, GenerationAttemptStatus,
     GenerationId, InteractionChoiceEffectStatus, InteractionChoiceSelectionReceipt,
-    InteractionEffect, InteractionEffectHistoryCursor, InteractionProposalDecision,
-    InteractionProposalDecisionRequest, InteractionProposalRecord, InteractionProposalRecordId,
-    InteractionProposalStatus, RetryableGenerationAttemptProjection, StoredInteractionEffect,
-    StoredInteractionEffectHistory, StoredInteractionProposal, UiRegion,
+    InteractionEffect, InteractionEffectClaim, InteractionEffectHistoryCursor,
+    InteractionEffectHistoryView, InteractionProposalDecision, InteractionProposalDecisionRequest,
+    InteractionProposalRecord, InteractionProposalRecordId, InteractionProposalStatus,
+    InteractionProposalView, RetryableGenerationAttemptProjection, UiRegion,
 };
 use serde::{Deserialize, Serialize};
 
@@ -510,7 +510,7 @@ impl ShellApi {
             current_state_revision,
             expired_proposals: expired
                 .into_iter()
-                .map(project_stored_proposal)
+                .map(project_interaction_proposal_view)
                 .collect::<ShellResult<Vec<_>>>()?,
             has_more_expired,
         })
@@ -535,7 +535,7 @@ impl ShellApi {
             )
             .map_err(ShellError::from)?
             .into_iter()
-            .map(project_stored_proposal)
+            .map(project_interaction_proposal_view)
             .collect()
     }
 
@@ -787,7 +787,7 @@ impl ShellApi {
 
     fn project_claimed_interaction_effect(
         &self,
-        stored: StoredInteractionEffect,
+        stored: InteractionEffectClaim,
     ) -> ShellResult<ClaimedInteractionEffect> {
         validate_identifier("effect_id", &stored.effect_id)?;
         validate_identifier("event_id", &stored.event_id)?;
@@ -861,7 +861,7 @@ impl ShellApi {
 
     fn project_interaction_effect_history(
         &self,
-        value: StoredInteractionEffectHistory,
+        value: InteractionEffectHistoryView,
     ) -> ShellResult<InteractionEffectHistoryItemDto> {
         let stored = value.stored;
         validate_identifier("effect_id", &stored.effect_id)?;
@@ -1036,8 +1036,8 @@ fn project_proposal(value: InteractionProposalRecord) -> ShellResult<Interaction
     })
 }
 
-fn project_stored_proposal(
-    value: StoredInteractionProposal,
+fn project_interaction_proposal_view(
+    value: InteractionProposalView,
 ) -> ShellResult<InteractionProposalListItemDto> {
     validate_identifier("conversation_id", value.conversation_id.0.as_str())?;
     validate_identifier("branch_id", value.branch_id.0.as_str())?;

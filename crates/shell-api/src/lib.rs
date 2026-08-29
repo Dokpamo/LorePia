@@ -8,9 +8,8 @@
 
 /// Version of the serialized webview-facing shell contract.
 ///
-/// Version 2 adds the typed prompt-orchestration, creator-content, and
-/// redacted plan-review surfaces.
-pub const SHELL_API_VERSION: u32 = 2;
+/// Version 3 adds revisioned, epoch-safe portable-runtime state persistence.
+pub const SHELL_API_VERSION: u32 = 3;
 
 mod api;
 mod asset;
@@ -24,6 +23,7 @@ mod module_lifecycle;
 mod orchestration;
 mod package;
 mod persona;
+mod portable_runtime_state;
 mod provider;
 mod sensitive;
 mod stream;
@@ -193,6 +193,11 @@ pub use persona::{
     PersonaDeletionReceiptDto, PersonaDocumentDto, PersonaDto, PersonaListPageDto,
     PersonaPageCursorDto, SelectConversationPersonaInput, SelectedPersonaSnapshotDto,
     UpdatePersonaInput,
+};
+pub use portable_runtime_state::{
+    GetPortableRuntimeStateInput, PortableRuntimeStatePayloadDto, PortableRuntimeStateRecordDto,
+    PortableRuntimeStateSaveResultDto, PortableRuntimeStateScopeDto,
+    PortableRuntimeStateSnapshotDto, PutPortableRuntimeStateInput,
 };
 pub use provider::{
     ApiFamilyInput, AppSettingsDto, AuthBindingDto, CacheTtlBoundsDto, CapabilityKeyInput,

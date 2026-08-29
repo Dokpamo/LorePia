@@ -14,6 +14,8 @@
     "allow-get-character",
     "allow-get-character-greeting-catalog",
     "allow-get-character-render-profile",
+    "allow-get-portable-runtime-state",
+    "allow-put-portable-runtime-state",
     "allow-resolve-asset-delivery",
     "allow-pick-content-package-import",
     "allow-list-completed-content-package-exports",

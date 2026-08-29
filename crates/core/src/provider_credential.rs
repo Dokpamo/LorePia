@@ -4,14 +4,94 @@
 //! validates only exact native-vault operation plans and typed slot status
 //! attestations supplied by the native host.
 
-use lorepia_domain::{CoreResult, ProviderConnectionId};
+use chrono::{DateTime, Utc};
+use lorepia_domain::{CoreResult, CredentialScope, ProviderConnectionId};
 use lorepia_storage::{
     ProviderCredentialAccessAuthority, ProviderCredentialObservedStatus,
-    ProviderCredentialOperationKind, ProviderCredentialSlotGarbage,
+    ProviderCredentialOperationKind, ProviderCredentialOperationStatus,
+    ProviderCredentialOutcomeCode, ProviderCredentialSlotGarbage,
     StoredProviderCredentialOperation,
 };
 
 use crate::Core;
+
+/// Core-owned projection of an immutable native-vault operation plan.
+///
+/// Storage journal records stay behind the Core boundary; callers receive
+/// only the secret-free authority and recovery fields needed to carry out the
+/// already-authorized platform operation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderCredentialOperationPlanView {
+    pub schema_version: u32,
+    pub redaction_version: u32,
+    pub operation_id: String,
+    pub operation_sequence: u64,
+    pub operation_kind: ProviderCredentialOperationKind,
+    pub connection_id: ProviderConnectionId,
+    pub credential_ref: String,
+    pub connection_binding_sha256: String,
+    pub credential_authority_id: Option<String>,
+    pub credential_authority_binding_sha256: Option<String>,
+    pub predecessor_authority_id: Option<String>,
+    pub predecessor_authority_binding_sha256: Option<String>,
+    pub credential_scope: CredentialScope,
+}
+
+/// Core-owned, secret-free view of a provider credential operation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderCredentialOperationView {
+    pub plan: ProviderCredentialOperationPlanView,
+    pub plan_sha256: String,
+    pub preflight_evidence_sha256: String,
+    pub preflight_attested_at: DateTime<Utc>,
+    pub preflight_status: ProviderCredentialObservedStatus,
+    pub status: ProviderCredentialOperationStatus,
+    pub outcome_code: Option<ProviderCredentialOutcomeCode>,
+    pub outcome_attestation_sequence: Option<u64>,
+    pub cleanup_archives_connection: bool,
+    pub operation_slot_recovery_required: bool,
+    pub predecessor_slot_recovery_required: bool,
+    pub created_at: DateTime<Utc>,
+    pub started_at: Option<DateTime<Utc>>,
+    pub finished_at: Option<DateTime<Utc>>,
+    pub updated_at: DateTime<Utc>,
+}
+
+fn project_provider_credential_operation(
+    value: StoredProviderCredentialOperation,
+) -> ProviderCredentialOperationView {
+    ProviderCredentialOperationView {
+        plan: ProviderCredentialOperationPlanView {
+            schema_version: value.plan.schema_version,
+            redaction_version: value.plan.redaction_version,
+            operation_id: value.plan.operation_id,
+            operation_sequence: value.plan.operation_sequence,
+            operation_kind: value.plan.operation_kind,
+            connection_id: value.plan.connection_id,
+            credential_ref: value.plan.credential_ref,
+            connection_binding_sha256: value.plan.connection_binding_sha256,
+            credential_authority_id: value.plan.credential_authority_id,
+            credential_authority_binding_sha256: value.plan.credential_authority_binding_sha256,
+            predecessor_authority_id: value.plan.predecessor_authority_id,
+            predecessor_authority_binding_sha256: value.plan.predecessor_authority_binding_sha256,
+            credential_scope: value.plan.credential_scope,
+        },
+        plan_sha256: value.plan_sha256,
+        preflight_evidence_sha256: value.preflight_evidence_sha256,
+        preflight_attested_at: value.preflight_attested_at,
+        preflight_status: value.preflight_status,
+        status: value.status,
+        outcome_code: value.outcome_code,
+        outcome_attestation_sequence: value.outcome_attestation_sequence,
+        cleanup_archives_connection: value.cleanup_archives_connection,
+        operation_slot_recovery_required: value.operation_slot_recovery_required,
+        predecessor_slot_recovery_required: value.predecessor_slot_recovery_required,
+        created_at: value.created_at,
+        started_at: value.started_at,
+        finished_at: value.finished_at,
+        updated_at: value.updated_at,
+    }
+}
 
 impl Core {
     pub fn propose_provider_credential_install_authority(
@@ -27,7 +107,7 @@ impl Core {
         connection_id: &ProviderConnectionId,
         kind: ProviderCredentialOperationKind,
         preflight_status: ProviderCredentialObservedStatus,
-    ) -> CoreResult<StoredProviderCredentialOperation> {
+    ) -> CoreResult<ProviderCredentialOperationView> {
         if kind == ProviderCredentialOperationKind::Install {
             return Err(lorepia_domain::CoreError::invalid(
                 "generic provider credential installation is disabled; propose an authority and use the dedicated install preparation path",
@@ -35,6 +115,7 @@ impl Core {
         }
         self.storage()
             .prepare_provider_credential_operation(connection_id, kind, preflight_status)
+            .map(project_provider_credential_operation)
     }
 
     pub fn prepare_provider_credential_install_operation(
@@ -42,7 +123,7 @@ impl Core {
         connection_id: &ProviderConnectionId,
         authority: &ProviderCredentialAccessAuthority,
         preflight_status: ProviderCredentialObservedStatus,
-    ) -> CoreResult<StoredProviderCredentialOperation> {
+    ) -> CoreResult<ProviderCredentialOperationView> {
         self.storage()
             .prepare_provider_credential_operation_with_install_authority(
                 connection_id,
@@ -50,15 +131,17 @@ impl Core {
                 preflight_status,
                 Some(authority),
             )
+            .map(project_provider_credential_operation)
     }
 
     pub fn start_provider_credential_operation(
         &self,
         operation_id: &str,
         plan_sha256: &str,
-    ) -> CoreResult<StoredProviderCredentialOperation> {
+    ) -> CoreResult<ProviderCredentialOperationView> {
         self.storage()
             .start_provider_credential_operation(operation_id, plan_sha256)
+            .map(project_provider_credential_operation)
     }
 
     pub fn attest_provider_credential_predecessor_delete_intent(
@@ -66,22 +149,24 @@ impl Core {
         operation_id: &str,
         plan_sha256: &str,
         observed_status: ProviderCredentialObservedStatus,
-    ) -> CoreResult<StoredProviderCredentialOperation> {
+    ) -> CoreResult<ProviderCredentialOperationView> {
         self.storage()
             .attest_provider_credential_predecessor_delete_intent(
                 operation_id,
                 plan_sha256,
                 observed_status,
             )
+            .map(project_provider_credential_operation)
     }
 
     pub fn attest_provider_credential_predecessor_missing(
         &self,
         operation_id: &str,
         plan_sha256: &str,
-    ) -> CoreResult<StoredProviderCredentialOperation> {
+    ) -> CoreResult<ProviderCredentialOperationView> {
         self.storage()
             .attest_provider_credential_predecessor_missing(operation_id, plan_sha256)
+            .map(project_provider_credential_operation)
     }
 
     pub fn finish_provider_credential_operation(
@@ -89,12 +174,10 @@ impl Core {
         operation_id: &str,
         plan_sha256: &str,
         observed_status: ProviderCredentialObservedStatus,
-    ) -> CoreResult<StoredProviderCredentialOperation> {
-        self.storage().finish_provider_credential_operation(
-            operation_id,
-            plan_sha256,
-            observed_status,
-        )
+    ) -> CoreResult<ProviderCredentialOperationView> {
+        self.storage()
+            .finish_provider_credential_operation(operation_id, plan_sha256, observed_status)
+            .map(project_provider_credential_operation)
     }
 
     pub fn finish_provider_credential_archive(
@@ -102,12 +185,10 @@ impl Core {
         operation_id: &str,
         plan_sha256: &str,
         observed_status: ProviderCredentialObservedStatus,
-    ) -> CoreResult<StoredProviderCredentialOperation> {
-        self.storage().finish_provider_credential_archive(
-            operation_id,
-            plan_sha256,
-            observed_status,
-        )
+    ) -> CoreResult<ProviderCredentialOperationView> {
+        self.storage()
+            .finish_provider_credential_archive(operation_id, plan_sha256, observed_status)
+            .map(project_provider_credential_operation)
     }
 
     pub fn reconcile_provider_credential_operation(
@@ -115,12 +196,10 @@ impl Core {
         operation_id: &str,
         plan_sha256: &str,
         observed_status: ProviderCredentialObservedStatus,
-    ) -> CoreResult<StoredProviderCredentialOperation> {
-        self.storage().reconcile_provider_credential_operation(
-            operation_id,
-            plan_sha256,
-            observed_status,
-        )
+    ) -> CoreResult<ProviderCredentialOperationView> {
+        self.storage()
+            .reconcile_provider_credential_operation(operation_id, plan_sha256, observed_status)
+            .map(project_provider_credential_operation)
     }
 
     pub fn reconcile_provider_credential_archive(
@@ -128,12 +207,10 @@ impl Core {
         operation_id: &str,
         plan_sha256: &str,
         observed_status: ProviderCredentialObservedStatus,
-    ) -> CoreResult<StoredProviderCredentialOperation> {
-        self.storage().reconcile_provider_credential_archive(
-            operation_id,
-            plan_sha256,
-            observed_status,
-        )
+    ) -> CoreResult<ProviderCredentialOperationView> {
+        self.storage()
+            .reconcile_provider_credential_archive(operation_id, plan_sha256, observed_status)
+            .map(project_provider_credential_operation)
     }
 
     pub fn mark_provider_credential_cleanup_required(
@@ -142,13 +219,15 @@ impl Core {
         plan_sha256: &str,
         observed_status: ProviderCredentialObservedStatus,
         archive_connection: bool,
-    ) -> CoreResult<StoredProviderCredentialOperation> {
-        self.storage().mark_provider_credential_cleanup_required(
-            operation_id,
-            plan_sha256,
-            observed_status,
-            archive_connection,
-        )
+    ) -> CoreResult<ProviderCredentialOperationView> {
+        self.storage()
+            .mark_provider_credential_cleanup_required(
+                operation_id,
+                plan_sha256,
+                observed_status,
+                archive_connection,
+            )
+            .map(project_provider_credential_operation)
     }
 
     pub fn mark_provider_credential_durability_recovery_required(
@@ -156,22 +235,24 @@ impl Core {
         operation_id: &str,
         plan_sha256: &str,
         archive_connection: bool,
-    ) -> CoreResult<StoredProviderCredentialOperation> {
+    ) -> CoreResult<ProviderCredentialOperationView> {
         self.storage()
             .mark_provider_credential_durability_recovery_required(
                 operation_id,
                 plan_sha256,
                 archive_connection,
             )
+            .map(project_provider_credential_operation)
     }
 
     pub fn fence_started_provider_credential_operation_for_recovery(
         &self,
         operation_id: &str,
         plan_sha256: &str,
-    ) -> CoreResult<StoredProviderCredentialOperation> {
+    ) -> CoreResult<ProviderCredentialOperationView> {
         self.storage()
             .fence_started_provider_credential_operation_for_recovery(operation_id, plan_sha256)
+            .map(project_provider_credential_operation)
     }
 
     pub fn mark_provider_credential_predecessor_durability_recovery_required(
@@ -179,38 +260,47 @@ impl Core {
         operation_id: &str,
         plan_sha256: &str,
         archive_connection: bool,
-    ) -> CoreResult<StoredProviderCredentialOperation> {
+    ) -> CoreResult<ProviderCredentialOperationView> {
         self.storage()
             .mark_provider_credential_predecessor_durability_recovery_required(
                 operation_id,
                 plan_sha256,
                 archive_connection,
             )
+            .map(project_provider_credential_operation)
     }
 
     pub fn attest_provider_credential_durability_repaired(
         &self,
         operation_id: &str,
         plan_sha256: &str,
-    ) -> CoreResult<StoredProviderCredentialOperation> {
+    ) -> CoreResult<ProviderCredentialOperationView> {
         self.storage()
             .attest_provider_credential_durability_repaired(operation_id, plan_sha256)
+            .map(project_provider_credential_operation)
     }
 
     pub fn attest_provider_credential_predecessor_durability_repaired(
         &self,
         operation_id: &str,
         plan_sha256: &str,
-    ) -> CoreResult<StoredProviderCredentialOperation> {
+    ) -> CoreResult<ProviderCredentialOperationView> {
         self.storage()
             .attest_provider_credential_predecessor_durability_repaired(operation_id, plan_sha256)
+            .map(project_provider_credential_operation)
     }
 
     pub fn list_unresolved_provider_credential_operations(
         &self,
-    ) -> CoreResult<Vec<StoredProviderCredentialOperation>> {
+    ) -> CoreResult<Vec<ProviderCredentialOperationView>> {
         self.storage()
             .list_unresolved_provider_credential_operations()
+            .map(|operations| {
+                operations
+                    .into_iter()
+                    .map(project_provider_credential_operation)
+                    .collect()
+            })
     }
 
     pub fn list_provider_credential_slot_garbage(
