@@ -88,7 +88,7 @@ describe('portable runtime model budget', () => {
         });
     });
 
-    it('keeps the conservative reservation for positive cached read or write usage', () => {
+    it('conservatively charges positive cached read or write usage', () => {
         for (const [scope, cachedReadTokens, cachedWriteTokens] of [
             ['cached-read', 30_000, null],
             ['cached-write', null, 30_000],
@@ -105,7 +105,8 @@ describe('portable runtime model budget', () => {
                 tool_tokens: null,
             });
 
-            expect(snapshot.chargedTokens).toBe(admitted.lease.reservedTokens);
+            expect(snapshot.chargedTokens).toBe(30_020);
+            expect(snapshot.chargedTokens).toBeGreaterThan(admitted.lease.reservedTokens);
         }
     });
 
