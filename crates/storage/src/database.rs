@@ -17204,11 +17204,26 @@ mod tests {
             .path()
             .join("assets")
             .join(content_relative_path(&asset_hash).expect("asset path"));
-        fs::write(&cas_path, b"\x89PNG\r\n\x1a\nchanged").expect("tamper CAS");
-        let error = storage
-            .resolve_approved_asset_by_sha256(&asset_digest)
-            .expect_err("tampered CAS must fail closed");
-        assert_eq!(error.code, CoreErrorCode::StorageCorrupted);
+        #[cfg(windows)]
+        {
+            // Windows deliberately opens verified assets without write sharing,
+            // so the live cache lease must be closed before an external mutation.
+            drop(storage);
+            fs::write(&cas_path, b"\x89PNG\r\n\x1a\nchanged").expect("tamper CAS");
+            let reopened = Storage::open(root.path()).expect("reopen tampered storage");
+            let error = reopened
+                .resolve_approved_asset_by_sha256(&asset_digest)
+                .expect_err("tampered CAS must fail closed after reopen");
+            assert_eq!(error.code, CoreErrorCode::StorageCorrupted);
+        }
+        #[cfg(not(windows))]
+        {
+            fs::write(&cas_path, b"\x89PNG\r\n\x1a\nchanged").expect("tamper CAS");
+            let error = storage
+                .resolve_approved_asset_by_sha256(&asset_digest)
+                .expect_err("tampered CAS must fail closed");
+            assert_eq!(error.code, CoreErrorCode::StorageCorrupted);
+        }
     }
 
     #[test]
