@@ -7634,6 +7634,30 @@ mod policy_tests {
         root.join(relative)
     }
 
+    fn open_core_after_drop(
+        data_root: &std::path::Path,
+        recovery_owner: crate::DiscoveryRecoveryOwner,
+    ) -> crate::Core {
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            match crate::Core::open_with_discovery_recovery_owner(
+                crate::CoreConfig::new(data_root),
+                recovery_owner,
+            ) {
+                Ok(core) => return core,
+                Err(error)
+                    if error.code == CoreErrorCode::StorageUnavailable
+                        && error.message
+                            == "data root is already owned by another LorePia process"
+                        && std::time::Instant::now() < deadline =>
+                {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Err(error) => panic!("open Core after prior owner drop: {error:?}"),
+            }
+        }
+    }
+
     fn checkpoint_test_database(database: &std::path::Path) {
         let connection = rusqlite::Connection::open(database).expect("open test database");
         let _: (i64, i64, i64) = connection
@@ -8344,7 +8368,7 @@ mod policy_tests {
         );
 
         drop(core);
-        let core = crate::Core::open(crate::CoreConfig::new(root.path())).expect("reopen Core");
+        let core = open_core_after_drop(root.path(), crate::DiscoveryRecoveryOwner::Core);
         assert_eq!(
             core.get_provider_discovery_credential_lease_context(&reviewed.session.id)
                 .expect("reopened review credential lease context"),
@@ -9189,11 +9213,10 @@ mod policy_tests {
         );
         drop(upgraded);
 
-        let reopened = crate::Core::open_with_discovery_recovery_owner(
-            crate::CoreConfig::new(upgraded_root.path()),
+        let reopened = open_core_after_drop(
+            upgraded_root.path(),
             crate::DiscoveryRecoveryOwner::NativePlatform,
-        )
-        .expect("reopen migrated legacy recovery");
+        );
         assert_eq!(
             reopened
                 .get_provider_discovery(&committing.session.id)
@@ -9239,21 +9262,14 @@ mod policy_tests {
         let prepared_backup = root.path().join("prepared-credential-rollback.sqlite3");
         std::fs::copy(&database, &prepared_backup).expect("snapshot prepared test database");
 
-        let core = crate::Core::open_with_discovery_recovery_owner(
-            crate::CoreConfig::new(root.path()),
-            crate::DiscoveryRecoveryOwner::NativePlatform,
-        )
-        .expect("reopen prepared credential commit");
+        let core = open_core_after_drop(root.path(), crate::DiscoveryRecoveryOwner::NativePlatform);
         let execution_a = reserve_and_start_credential_install(&core, &prepared);
         let confirmation_a = credential_commit_confirmation(&execution_a);
         drop(core);
 
         restore_test_database(&database, &prepared_backup);
-        let rolled_back = crate::Core::open_with_discovery_recovery_owner(
-            crate::CoreConfig::new(root.path()),
-            crate::DiscoveryRecoveryOwner::NativePlatform,
-        )
-        .expect("open rolled-back prepared credential commit");
+        let rolled_back =
+            open_core_after_drop(root.path(), crate::DiscoveryRecoveryOwner::NativePlatform);
         let restored_prepared = rolled_back
             .get_provider_discovery_credential_install_context(&committing.session.id)
             .expect("reload restored prepared context");
@@ -9319,8 +9335,7 @@ mod policy_tests {
         );
         drop(rolled_back);
 
-        let reopened = crate::Core::open(crate::CoreConfig::new(root.path()))
-            .expect("reopen execution B no-effect result");
+        let reopened = open_core_after_drop(root.path(), crate::DiscoveryRecoveryOwner::Core);
         assert_eq!(
             reopened
                 .get_provider_discovery(&committing.session.id)
@@ -9365,11 +9380,8 @@ mod policy_tests {
         drop(core);
 
         restore_test_database(&database, &reserved_backup);
-        let reopened = crate::Core::open_with_discovery_recovery_owner(
-            crate::CoreConfig::new(root.path()),
-            crate::DiscoveryRecoveryOwner::NativePlatform,
-        )
-        .expect("open rolled-back reservation");
+        let reopened =
+            open_core_after_drop(root.path(), crate::DiscoveryRecoveryOwner::NativePlatform);
         let rolled_back = reopened
             .get_provider_discovery_credential_install_context(&committing.session.id)
             .expect("load rolled-back reserved context");
@@ -9423,8 +9435,8 @@ mod policy_tests {
         assert_eq!(interrupted.session.state, DiscoveryState::Interrupted);
         drop(reopened);
 
-        let reopened_after_recovery = crate::Core::open(crate::CoreConfig::new(root.path()))
-            .expect("reopen terminalized rolled-back reservation");
+        let reopened_after_recovery =
+            open_core_after_drop(root.path(), crate::DiscoveryRecoveryOwner::Core);
         let interrupted = reopened_after_recovery
             .get_provider_discovery(&committing.session.id)
             .expect("reload interrupted rolled-back reservation");
@@ -9574,11 +9586,8 @@ mod policy_tests {
         assert!(cancelling.session.revision > reserved.session_revision);
         drop(core);
 
-        let reopened = crate::Core::open_with_discovery_recovery_owner(
-            crate::CoreConfig::new(root.path()),
-            crate::DiscoveryRecoveryOwner::NativePlatform,
-        )
-        .expect("reopen unsettled prepared cancellation");
+        let reopened =
+            open_core_after_drop(root.path(), crate::DiscoveryRecoveryOwner::NativePlatform);
         reopened
             .get_provider_discovery_credential_install_context(&committing.session.id)
             .expect_err("normal install context must reject cancellation-pending reservation");
@@ -9646,11 +9655,8 @@ mod policy_tests {
         assert!(cancelling.session.revision > started.session_revision);
         drop(core);
 
-        let reopened = crate::Core::open_with_discovery_recovery_owner(
-            crate::CoreConfig::new(root.path()),
-            crate::DiscoveryRecoveryOwner::NativePlatform,
-        )
-        .expect("reopen unsettled Started cancellation");
+        let reopened =
+            open_core_after_drop(root.path(), crate::DiscoveryRecoveryOwner::NativePlatform);
         reopened
             .get_provider_discovery_credential_install_context(&committing.session.id)
             .expect_err("normal install context must reject cancellation-pending Started WAL");
@@ -9693,11 +9699,8 @@ mod policy_tests {
         );
         drop(reopened);
 
-        let reopened = crate::Core::open_with_discovery_recovery_owner(
-            crate::CoreConfig::new(root.path()),
-            crate::DiscoveryRecoveryOwner::NativePlatform,
-        )
-        .expect("reopen Started cancellation compensation");
+        let reopened =
+            open_core_after_drop(root.path(), crate::DiscoveryRecoveryOwner::NativePlatform);
         assert_eq!(
             reopened
                 .get_provider_discovery_credential_compensation_authority(&committing.session.id)
@@ -9729,11 +9732,10 @@ mod policy_tests {
             1
         );
         drop(revision_connection);
-        let revision_core = crate::Core::open_with_discovery_recovery_owner(
-            crate::CoreConfig::new(revision_root.path()),
+        let revision_core = open_core_after_drop(
+            revision_root.path(),
             crate::DiscoveryRecoveryOwner::NativePlatform,
-        )
-        .expect("reopen revision-tamper Core");
+        );
         let revision_error = revision_core
             .get_provider_discovery_credential_install_recovery_context(&revision_session)
             .expect_err("unreceipted cancellation revision must not authorize recovery");
@@ -9762,11 +9764,10 @@ mod policy_tests {
             1
         );
         drop(receipt_connection);
-        let receipt_core = crate::Core::open_with_discovery_recovery_owner(
-            crate::CoreConfig::new(receipt_root.path()),
+        let receipt_core = open_core_after_drop(
+            receipt_root.path(),
             crate::DiscoveryRecoveryOwner::NativePlatform,
-        )
-        .expect("reopen receipt-tamper Core");
+        );
         let receipt_error = receipt_core
             .get_provider_discovery_credential_install_recovery_context(&receipt_session)
             .expect_err("forged cancellation receipt must not authorize recovery");
@@ -9902,8 +9903,7 @@ mod policy_tests {
         );
         drop(core);
 
-        let reopened = crate::Core::open(crate::CoreConfig::new(root.path()))
-            .expect("reopen twice-interrupted discovery");
+        let reopened = open_core_after_drop(root.path(), crate::DiscoveryRecoveryOwner::Core);
         assert_eq!(
             reopened
                 .get_provider_discovery(&committing.session.id)
@@ -9968,11 +9968,8 @@ mod policy_tests {
         );
         drop(core);
 
-        let reopened = crate::Core::open_with_discovery_recovery_owner(
-            crate::CoreConfig::new(root.path()),
-            crate::DiscoveryRecoveryOwner::NativePlatform,
-        )
-        .expect("reopen started retry with native recovery ownership");
+        let reopened =
+            open_core_after_drop(root.path(), crate::DiscoveryRecoveryOwner::NativePlatform);
         let reopened_retry = reopened
             .get_provider_discovery_credential_install_context(&restarted.session.id)
             .expect("reload exact started retry context");
@@ -10071,11 +10068,8 @@ mod policy_tests {
         );
         drop(core);
 
-        let reopened = crate::Core::open_with_discovery_recovery_owner(
-            crate::CoreConfig::new(root.path()),
-            crate::DiscoveryRecoveryOwner::NativePlatform,
-        )
-        .expect("reopen compensating retry");
+        let reopened =
+            open_core_after_drop(root.path(), crate::DiscoveryRecoveryOwner::NativePlatform);
         assert_eq!(
             reopened
                 .get_provider_discovery_credential_compensation_authority(&restarted.session.id)
@@ -10144,11 +10138,8 @@ mod policy_tests {
         );
         drop(core);
 
-        let reopened = crate::Core::open_with_discovery_recovery_owner(
-            crate::CoreConfig::new(root.path()),
-            crate::DiscoveryRecoveryOwner::NativePlatform,
-        )
-        .expect("reopen durability-unknown discovery");
+        let reopened =
+            open_core_after_drop(root.path(), crate::DiscoveryRecoveryOwner::NativePlatform);
         reopened
             .recover_provider_discovery(Utc::now())
             .expect("generic recovery preserves explicit unknown outcome");
@@ -10207,11 +10198,8 @@ mod policy_tests {
             }
             drop(core);
 
-            let reopened = crate::Core::open_with_discovery_recovery_owner(
-                crate::CoreConfig::new(root.path()),
-                crate::DiscoveryRecoveryOwner::NativePlatform,
-            )
-            .expect("reopen with native recovery ownership");
+            let reopened =
+                open_core_after_drop(root.path(), crate::DiscoveryRecoveryOwner::NativePlatform);
             let preserved = reopened
                 .get_provider_discovery(&committing.session.id)
                 .expect("load preserved credential commit");
@@ -10310,7 +10298,7 @@ mod policy_tests {
             drop(reopened);
 
             let final_reopen =
-                crate::Core::open(crate::CoreConfig::new(root.path())).expect("final Core reopen");
+                open_core_after_drop(root.path(), crate::DiscoveryRecoveryOwner::Core);
             assert_eq!(
                 final_reopen
                     .get_provider_discovery(&committing.session.id)
@@ -10356,8 +10344,7 @@ mod policy_tests {
         );
         drop(core);
 
-        let reopened =
-            crate::Core::open(crate::CoreConfig::new(root.path())).expect("reopen default Core");
+        let reopened = open_core_after_drop(root.path(), crate::DiscoveryRecoveryOwner::Core);
         let recovered = reopened
             .get_provider_discovery(&committing.session.id)
             .expect("load conservatively recovered discovery");
@@ -11386,7 +11373,7 @@ mod policy_tests {
             .expect("commit exact OpenRouter graph");
         drop(core);
 
-        let reopened = crate::Core::open(crate::CoreConfig::new(root.path())).expect("reopen Core");
+        let reopened = open_core_after_drop(root.path(), crate::DiscoveryRecoveryOwner::Core);
         reopened
             .storage()
             .ensure_provider_credential_access_settled(&connection_id)
@@ -11447,7 +11434,8 @@ mod policy_tests {
         let ready_root = tempdir().unwrap();
         let (ready_core, ready_id) = seed_ready_assistant(ready_root.path());
         drop(ready_core);
-        let ready_core = crate::Core::open(crate::CoreConfig::new(ready_root.path())).unwrap();
+        let ready_core =
+            open_core_after_drop(ready_root.path(), crate::DiscoveryRecoveryOwner::Core);
         assert_eq!(
             ready_core
                 .get_provider_discovery_assistant_resume_boundary(&ready_id)
@@ -11471,7 +11459,8 @@ mod policy_tests {
             )
             .unwrap();
         drop(pending_core);
-        let pending_core = crate::Core::open(crate::CoreConfig::new(pending_root.path())).unwrap();
+        let pending_core =
+            open_core_after_drop(pending_root.path(), crate::DiscoveryRecoveryOwner::Core);
         let pending = pending_core.get_provider_discovery(&pending_id).unwrap();
         assert_eq!(pending.session.state, DiscoveryState::UnknownOutcome);
         assert_eq!(
@@ -11509,7 +11498,7 @@ mod policy_tests {
             ));
         }
         drop(tool_core);
-        let tool_core = crate::Core::open(crate::CoreConfig::new(tool_root.path())).unwrap();
+        let tool_core = open_core_after_drop(tool_root.path(), crate::DiscoveryRecoveryOwner::Core);
         assert_eq!(
             tool_core
                 .get_provider_discovery_assistant_resume_boundary(&tool_id)
@@ -11580,7 +11569,8 @@ mod policy_tests {
             ));
         }
         drop(draft_core);
-        let draft_core = crate::Core::open(crate::CoreConfig::new(draft_root.path())).unwrap();
+        let draft_core =
+            open_core_after_drop(draft_root.path(), crate::DiscoveryRecoveryOwner::Core);
         let boundary = draft_core
             .get_provider_discovery_assistant_resume_boundary(&draft_id)
             .unwrap()
@@ -11727,8 +11717,7 @@ mod policy_tests {
         );
         drop(core);
 
-        let recovered = crate::Core::open(crate::CoreConfig::new(root.path()))
-            .expect("reopen Core and classify the started retry");
+        let recovered = open_core_after_drop(root.path(), crate::DiscoveryRecoveryOwner::Core);
         let unknown = recovered
             .get_provider_discovery(&restarted.session.id)
             .expect("load unknown retry outcome");
@@ -11794,8 +11783,7 @@ mod policy_tests {
             .expect_err("an uncommitted graph cannot grant credential access");
         drop(recovered);
 
-        let reopened = crate::Core::open(crate::CoreConfig::new(root.path()))
-            .expect("reopen rejected unknown outcome");
+        let reopened = open_core_after_drop(root.path(), crate::DiscoveryRecoveryOwner::Core);
         assert_eq!(
             reopened
                 .get_provider_discovery(&unknown.session.id)

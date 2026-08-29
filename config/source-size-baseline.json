@@ -25,7 +25,7 @@
     "crates/core/src/module_orchestration.rs": {"bytes": 88197, "lines": 2104},
     "crates/core/src/orchestration.rs": {"bytes": 241875, "lines": 6043},
     "crates/core/src/orchestration_runtime.rs": {"bytes": 302113, "lines": 7484},
-    "crates/core/src/provider_discovery.rs": {"bytes": 491502, "lines": 11811},
+    "crates/core/src/provider_discovery.rs": {"bytes": 490623, "lines": 11799},
     "crates/core/src/provider_discovery_deterministic.rs": {"bytes": 85850, "lines": 2201},
     "crates/domain/src/discovery.rs": {"bytes": 175109, "lines": 4422},
     "crates/domain/src/orchestration.rs": {"bytes": 167139, "lines": 4840},
