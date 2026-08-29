@@ -1,6 +1,25 @@
 //! Typed row hydration and low-level repository query helpers.
 
-use super::*;
+use super::{
+    Connection, CoreErrorCode, CoreResult, CredentialRef, DateTime, DiscoveryActionId,
+    DiscoveryApprovalBinding, DiscoveryApprovalGrant, DiscoveryApprovalId, DiscoveryApprovalRecord,
+    DiscoveryCandidate, DiscoveryCandidateId, DiscoveryCommitAttemptId,
+    DiscoveryCommitAttemptRecord, DiscoveryCommitPlan, DiscoveryCompensationRecord,
+    DiscoveryCompensationStatus, DiscoveryCompensationStep, DiscoveryEvidenceKind,
+    DiscoveryEvidenceRecord, DiscoveryNativeCredentialExecutionRecord, DiscoveryOperationId,
+    DiscoveryOperationKind, DiscoveryOperationRecord, DiscoveryOperationStatus,
+    DiscoveryOutboxEvent, DiscoveryRecoveryCheckpoint, DiscoveryReviewDiff, DiscoverySessionId,
+    DiscoverySessionSnapshot, DiscoverySideEffectClass, DiscoveryState, DomainCompensationStatus,
+    EvidenceId, HttpUrl, OptionalExtension, ProviderConnectionId, ProviderDiscoveryEvent,
+    ProviderDiscoverySession, SanitizedDiscoveryInput, StoredDiscoveryCandidate, Transaction, Utc,
+    Uuid, Value, approval_kind, candidate_kind, contract_error, corrupted, database_error,
+    decode_redacted_json, encode_approval_grant, enum_wire_result, load_commit_attempt, params,
+    parse_approval_decision, parse_discovery_state, parse_operation_kind, parse_side_effect_class,
+    parse_timestamp, sha256_hex, validate_capability_probe_grant, validate_discovery_evidence,
+    validate_identifier, validate_legacy_unbound_started_credential_execution,
+    validate_pre_store_native_credential_interruption, validate_review_evidence_references,
+    validate_sanitized_input, validate_session_evidence_ids, validate_sha256,
+};
 
 pub(super) type CompensationRow = (
     String,

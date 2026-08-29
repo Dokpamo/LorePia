@@ -1,6 +1,6 @@
 //! Error translation for the typed discovery repository boundary.
 
-use lorepia_domain::{CoreError, CoreErrorCode, DiscoveryContractError};
+use lorepia_domain::{CoreError, CoreErrorCode, discovery::DiscoveryContractError};
 
 use crate::discovery::DiscoveryStorageError;
 

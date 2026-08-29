@@ -857,7 +857,7 @@ fn persona_keyset_pages_recover_all_records_and_honor_the_id_tie_breaker() {
 }
 
 fn prompt_context_test_preset(now: DateTime<Utc>) -> PromptPreset {
-    let mut preset = built_in_compatibility_preset(false);
+    let mut preset = built_in_prompt_presets()[0].clone();
     preset.id = PromptPresetId::from("prompt-context-append-preset");
     preset.name = "Prompt context append preset".to_owned();
     preset.metadata = PresetMetadata {

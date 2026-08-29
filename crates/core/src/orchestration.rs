@@ -2025,42 +2025,10 @@ impl Core {
             .map(|revision| revision.value.clone())
             .collect::<Vec<_>>();
         append_exact_module_transform_sets(&mut transform_sets, &module_overlay.transform_sets)?;
-        let mut approved_import_source_ids = module_overlay.approved_import_source_ids.clone();
-        if let Some(character_transform) = self.character_runtime_transform_set(input)? {
-            let revision_id = character_transform.revision_id.clone().ok_or_else(|| {
-                CoreError::new(
-                    lorepia_domain::CoreErrorCode::StorageCorrupted,
-                    "character transform set is missing its immutable revision identity",
-                    false,
-                )
-            })?;
-            if transform_set_revisions
-                .insert(character_transform.value.id.clone(), revision_id)
-                .is_some()
-                || transform_sets
-                    .iter()
-                    .any(|set| set.id == character_transform.value.id)
-            {
-                return Err(CoreError::invalid(
-                    "character and prompt select the same transform set ambiguously",
-                ));
-            }
-            if matches!(
-                character_transform.value.provenance.source_kind,
-                SourceKind::ImportedPackage | SourceKind::ImportedStandard
-            ) {
-                let source_id = character_transform
-                    .value
-                    .provenance
-                    .source_id
-                    .clone()
-                    .ok_or_else(|| {
-                        CoreError::invalid("imported character transform set has no source ID")
-                    })?;
-                approved_import_source_ids.insert(source_id);
-            }
-            transform_sets.push(character_transform.value);
-        }
+        // Imported character-card transforms are session-granted display behavior.
+        // Core has no revision-bound portable-runtime grant, so it must not add the
+        // stored native projection to canonical generation transforms implicitly.
+        let approved_import_source_ids = module_overlay.approved_import_source_ids.clone();
         let supported_capabilities = if let Some(authority) = input.prompt_selection_authority {
             authority.supported_capabilities.clone()
         } else {
@@ -2084,29 +2052,6 @@ impl Core {
             supported_capabilities,
             transformed_latest,
         })
-    }
-
-    fn character_runtime_transform_set(
-        &self,
-        input: &GenerationPlanInput<'_>,
-    ) -> CoreResult<Option<Revisioned<TransformSet>>> {
-        let transform_set_id = if let Some(authority) = input.prompt_selection_authority {
-            authority
-                .character_content
-                .as_ref()
-                .and_then(|content| content.value.runtime.transform_set_id.as_ref())
-                .cloned()
-        } else {
-            match self.storage().get_character_content(&input.character.id) {
-                Ok(content) => content.value.runtime.transform_set_id,
-                Err(error) if error.code == lorepia_domain::CoreErrorCode::NotFound => None,
-                Err(error) => return Err(error),
-            }
-        };
-        transform_set_id
-            .as_ref()
-            .map(|id| self.get_transform_set(id))
-            .transpose()
     }
 
     fn prepare_prompt_conversation(

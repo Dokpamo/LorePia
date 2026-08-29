@@ -1,4 +1,33 @@
-use super::*;
+use std::collections::BTreeSet;
+
+use chrono::{DateTime, Utc};
+use lorepia_domain::{
+    ConversationBranchId, ConversationId, CoreError, CoreResult, InteractionEffect,
+};
+use rusqlite::{Connection, OptionalExtension, Row, params};
+use sha2::{Digest, Sha256};
+
+use super::{
+    InteractionChoiceEffectStatus, InteractionEffectHistoryCursor, MAX_EVENT_JSON_BYTES,
+    StoredInteractionEffect, StoredInteractionEffectHistory, decode_interaction_policy,
+    decode_json, i64_from_u64, parse_datetime, revision_conflict, storage_corrupted, u64_from_i64,
+    validate_nonempty_id, validate_stored_interaction_policy_rule_sets,
+};
+use crate::database::storage_db_error;
+
+pub(super) fn effect_outbox_kind(effect: &InteractionEffect) -> Option<&'static str> {
+    match effect {
+        InteractionEffect::AssetShown { .. } => Some("asset_shown"),
+        InteractionEffect::AudioRequested { .. } => Some("audio_requested"),
+        InteractionEffect::ChoicesPresented { .. } => Some("choices_presented"),
+        InteractionEffect::VisibleSystemEvent { .. } => Some("visible_system_event"),
+        InteractionEffect::DiceRolled { .. } => Some("dice_rolled"),
+        InteractionEffect::ApprovalRequested { .. } => Some("approval_requested"),
+        InteractionEffect::VariableSet { .. } | InteractionEffect::KnowledgeActivated { .. } => {
+            None
+        }
+    }
+}
 
 #[derive(Debug)]
 struct RawEffectHistoryRow {

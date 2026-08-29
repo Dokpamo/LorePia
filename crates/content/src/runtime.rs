@@ -81,8 +81,13 @@ pub(crate) fn decode_runtime_document(
     let embedded_assets = parse_embedded_assets(module.get("assets"), embedded_asset_bytes)?;
     let source_id = format!("card-runtime:{source_sha256}");
     let required_capabilities = parse_runtime_capabilities(module)?;
+    let module_elevated_access = module.get("lowLevelAccess").map_or(Ok(false), |value| {
+        value
+            .as_bool()
+            .ok_or_else(|| unsupported("runtime module lowLevelAccess must be a boolean"))
+    })?;
     let transforms = parse_transforms(module.get("regex"), &source_id)?;
-    let scripts = parse_scripts(module.get("trigger"), &source_id)?;
+    let scripts = parse_scripts(module.get("trigger"), &source_id, module_elevated_access)?;
     let knowledge_entries = module.get("lorebook").cloned();
     let mut metadata = BTreeMap::new();
     for key in [
@@ -274,7 +279,11 @@ fn parse_transforms(
         .collect()
 }
 
-fn parse_scripts(value: Option<&Value>, source_id: &str) -> CoreResult<Vec<PortableRuntimeScript>> {
+fn parse_scripts(
+    value: Option<&Value>,
+    source_id: &str,
+    module_elevated_access: bool,
+) -> CoreResult<Vec<PortableRuntimeScript>> {
     let Some(Value::Array(triggers)) = value else {
         return Ok(Vec::new());
     };
@@ -288,10 +297,12 @@ fn parse_scripts(value: Option<&Value>, source_id: &str) -> CoreResult<Vec<Porta
             .and_then(Value::as_str)
             .unwrap_or("start")
             .to_owned();
-        let elevated_access = trigger
-            .get("lowLevelAccess")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
+        let trigger_elevated_access = trigger.get("lowLevelAccess").map_or(Ok(false), |value| {
+            value
+                .as_bool()
+                .ok_or_else(|| unsupported("runtime trigger lowLevelAccess must be a boolean"))
+        })?;
+        let elevated_access = module_elevated_access || trigger_elevated_access;
         let effects = trigger
             .get("effect")
             .and_then(Value::as_array)
@@ -448,6 +459,150 @@ mod tests {
             let error = decode_runtime_document(&document, &"c".repeat(64))
                 .err()
                 .expect("explicit null capability declaration must fail");
+            assert_eq!(error.code, CoreErrorCode::UnsupportedContent);
+        }
+    }
+
+    #[test]
+    fn module_low_level_access_must_be_a_boolean() {
+        for malformed in [
+            Value::Null,
+            Value::String("true".to_owned()),
+            Value::from(1),
+            serde_json::json!({}),
+        ] {
+            let document = runtime_document(serde_json::json!({
+                "lowLevelAccess": malformed
+            }));
+            let error = decode_runtime_document(&document, &"f".repeat(64))
+                .err()
+                .expect("malformed module elevation must fail");
+            assert_eq!(error.code, CoreErrorCode::UnsupportedContent);
+        }
+    }
+
+    #[test]
+    fn trigger_low_level_access_must_be_a_boolean_even_when_module_access_is_true() {
+        for module_elevated_access in [None, Some(true)] {
+            for malformed in [
+                Value::Null,
+                Value::String("true".to_owned()),
+                Value::from(1),
+                serde_json::json!({}),
+            ] {
+                let mut module = serde_json::json!({
+                    "requiredCapabilities": ["runtime:callbacks", "elevated"],
+                    "trigger": [{
+                        "lowLevelAccess": malformed,
+                        "effect": [{ "type": "script", "code": "return true" }]
+                    }]
+                });
+                if let Some(module_elevated_access) = module_elevated_access {
+                    module.as_object_mut().expect("module object").insert(
+                        "lowLevelAccess".to_owned(),
+                        Value::Bool(module_elevated_access),
+                    );
+                }
+                let document = runtime_document(module);
+                let error = decode_runtime_document(&document, &"3".repeat(64))
+                    .err()
+                    .expect("malformed trigger elevation must fail");
+                assert_eq!(error.code, CoreErrorCode::UnsupportedContent);
+                assert_eq!(
+                    error.message,
+                    "runtime trigger lowLevelAccess must be a boolean"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn trigger_low_level_access_defaults_false_and_ors_with_module_access() {
+        let document = runtime_document(serde_json::json!({
+            "lowLevelAccess": false,
+            "requiredCapabilities": ["runtime:callbacks", "elevated"],
+            "trigger": [
+                {
+                    "effect": [{ "type": "script", "code": "return 0" }]
+                },
+                {
+                    "lowLevelAccess": false,
+                    "effect": [{ "type": "script", "code": "return 1" }]
+                },
+                {
+                    "lowLevelAccess": true,
+                    "effect": [{ "type": "script", "code": "return 2" }]
+                }
+            ]
+        }));
+        let decoded = decode_runtime_document(&document, &"4".repeat(64))
+            .expect("valid trigger elevation flags");
+        assert_eq!(
+            decoded
+                .profile
+                .scripts
+                .iter()
+                .map(|script| script.elevated_access)
+                .collect::<Vec<_>>(),
+            vec![false, false, true]
+        );
+    }
+
+    #[test]
+    fn module_low_level_access_elevates_every_emitted_script() {
+        let document = runtime_document(serde_json::json!({
+            "lowLevelAccess": true,
+            "requiredCapabilities": ["runtime:callbacks", "elevated"],
+            "trigger": [
+                {
+                    "type": "load",
+                    "effect": [
+                        { "type": "script", "code": "return true" },
+                        { "type": "risuaiLua", "code": "return 1" }
+                    ]
+                },
+                {
+                    "type": "output",
+                    "lowLevelAccess": false,
+                    "effect": [{ "type": "script", "code": "return false" }]
+                }
+            ]
+        }));
+        let decoded =
+            decode_runtime_document(&document, &"1".repeat(64)).expect("declared module elevation");
+        assert_eq!(decoded.profile.scripts.len(), 3);
+        assert!(
+            decoded
+                .profile
+                .scripts
+                .iter()
+                .all(|script| script.elevated_access),
+            "module elevation must override omitted or false trigger flags"
+        );
+    }
+
+    #[test]
+    fn module_low_level_access_requires_an_explicit_elevated_capability() {
+        let trigger = serde_json::json!([{
+            "type": "load",
+            "lowLevelAccess": false,
+            "effect": [{ "type": "script", "code": "return true" }]
+        }]);
+        for capabilities in [None, Some(serde_json::json!(["runtime:callbacks"]))] {
+            let mut module = serde_json::json!({
+                "lowLevelAccess": true,
+                "trigger": trigger.clone()
+            });
+            if let Some(capabilities) = capabilities {
+                module
+                    .as_object_mut()
+                    .expect("module object")
+                    .insert("requiredCapabilities".to_owned(), capabilities);
+            }
+            let document = runtime_document(module);
+            let error = decode_runtime_document(&document, &"2".repeat(64))
+                .err()
+                .expect("undeclared module elevation must fail");
             assert_eq!(error.code, CoreErrorCode::UnsupportedContent);
         }
     }

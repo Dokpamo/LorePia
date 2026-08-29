@@ -2464,7 +2464,7 @@ struct NoModuleReviewFixture {
     branch_id: lorepia_core::ConversationBranchId,
     request: PromptPlanRequest,
     generation_id: GenerationId,
-    ordinary_proposal: lorepia_storage::StoredInteractionProposal,
+    ordinary_proposal: lorepia_core::InteractionProposalView,
     sealed_local_user_id_sha256: String,
     drifted_local_user_id: LocalUserId,
 }
@@ -2472,7 +2472,7 @@ struct NoModuleReviewFixture {
 struct NoModuleGateRoom {
     conversation_id: lorepia_core::ConversationId,
     branch_id: lorepia_core::ConversationBranchId,
-    ordinary_proposal: lorepia_storage::StoredInteractionProposal,
+    ordinary_proposal: lorepia_core::InteractionProposalView,
 }
 
 fn create_no_module_gate_room(core: &Core, character_id: &str) -> NoModuleGateRoom {

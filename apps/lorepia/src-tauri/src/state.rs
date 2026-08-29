@@ -80,7 +80,7 @@ struct TicketStore<T> {
 
 /// Rust-only binding for one process-local discovery credential.
 ///
-/// It intentionally has no serde surface. The stable approval and connection
+/// It has no serde surface. The stable approval and connection
 /// hashes are issued by Core, so a renderer-selected session identifier cannot
 /// move a credential to another origin, auth scheme, or connection draft.
 #[derive(Clone, PartialEq, Eq)]

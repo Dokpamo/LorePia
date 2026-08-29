@@ -30,7 +30,7 @@ pub(super) struct CompletedPackageCasFile {
 }
 
 /// A completed package authority whose exact CAS bytes were verified without
-/// holding the repository-wide SQLite mutex.
+/// holding the repository-wide `SQLite` mutex.
 ///
 /// Transaction-local consumers must still reload and compare the complete DB
 /// snapshot before using it. Fields remain private so no caller can construct
@@ -56,7 +56,7 @@ impl Storage {
         self.verify_completed_package_authority_with(
             approval_id,
             |connection, approval_id| {
-                self.get_completed_package_authority_by_approval_id_in_connection(
+                Self::get_completed_package_authority_by_approval_id_in_connection(
                     connection,
                     approval_id,
                 )
@@ -82,7 +82,7 @@ impl Storage {
                 self.verify_completed_package_authority_with(
                     &approval_id,
                     |connection, approval_id| {
-                        self.get_completed_package_authority_by_approval_id_in_connection(
+                        Self::get_completed_package_authority_by_approval_id_in_connection(
                             connection,
                             approval_id,
                         )
@@ -146,12 +146,11 @@ impl Storage {
     }
 
     pub(super) fn revalidate_completed_package_authority_in_connection(
-        &self,
         connection: &Connection,
         approval_id: &str,
         verified: &VerifiedCompletedPackageAuthority,
     ) -> CoreResult<CompletedPackageAuthority> {
-        let current = self.get_completed_package_authority_by_approval_id_in_connection(
+        let current = Self::get_completed_package_authority_by_approval_id_in_connection(
             connection,
             approval_id,
         )?;
@@ -240,6 +239,15 @@ fn verify_owned_cas_file(
             )));
         }
     }
+    capture_and_hash_owned_cas_file(file, namespace, sha256, expected_size)
+}
+
+fn capture_and_hash_owned_cas_file(
+    file: File,
+    namespace: &str,
+    sha256: &str,
+    expected_size: u64,
+) -> CoreResult<AssetFileSnapshot> {
     let mut file = AssetFileSnapshot::capture(file).map_err(|error| {
         CoreError::new(
             CoreErrorCode::StorageUnavailable,

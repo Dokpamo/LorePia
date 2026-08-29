@@ -151,13 +151,10 @@ impl RuntimeGenerationRegistry {
 
 impl RuntimeGenerationRegistryState {
     fn take_cancellation_tombstone(&mut self, request_id: &str) -> Option<watch::Sender<bool>> {
-        let Some(position) = self
+        let position = self
             .cancellation_tombstones
             .iter()
-            .position(|candidate| candidate.request_id == request_id)
-        else {
-            return None;
-        };
+            .position(|candidate| candidate.request_id == request_id)?;
         self.cancellation_tombstones
             .remove(position)
             .map(|tombstone| tombstone.terminal)

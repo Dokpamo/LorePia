@@ -218,7 +218,7 @@ fn validate_exact_object_fields(
     fields: &[&str],
 ) -> ShellResult<()> {
     if object.len() != fields.len() || fields.iter().any(|field| !object.contains_key(*field)) {
-        return invalid_payload(format!("{label} does not have the exact supported fields",));
+        return invalid_payload(format!("{label} does not have the exact supported fields"));
     }
     Ok(())
 }
@@ -256,7 +256,7 @@ fn validate_record_keys(label: &str, object: &serde_json::Map<String, Value>) ->
             || javascript_string_length(key) > MAX_PORTABLE_RUNTIME_KEY_CHARS
             || matches!(key.as_str(), "__proto__" | "constructor" | "prototype")
         {
-            return invalid_payload(format!("{label} contains an invalid portable runtime key",));
+            return invalid_payload(format!("{label} contains an invalid portable runtime key"));
         }
     }
     Ok(())

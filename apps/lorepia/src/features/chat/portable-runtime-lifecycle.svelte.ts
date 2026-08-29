@@ -14,6 +14,7 @@ import {
     requiredPortableRuntimeCapabilities,
     type PortableRuntimeCapability,
     type PortableRuntimeGrant,
+    type PortableRuntimeModelCancellationResult,
     type PortableRuntimeModelCallStatus,
     type PortableRuntimePersistenceStatus,
 } from './portable-runtime';
@@ -307,8 +308,8 @@ export class PortableRuntimeLifecycle {
         this.#resetEpoch += 1;
     }
 
-    async cancelActiveModelCall(): Promise<boolean> {
-        return (await this.runtime?.cancelActiveModelCall()) ?? false;
+    async cancelActiveModelCall(): Promise<PortableRuntimeModelCancellationResult> {
+        return (await this.runtime?.cancelActiveModelCall()) ?? 'not_found';
     }
 
     async prepareInput(content: string): Promise<{

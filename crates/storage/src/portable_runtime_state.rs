@@ -815,59 +815,7 @@ fn enforce_quota_with_limits(
         return Ok((0, 0));
     }
 
-    let mut statement = transaction
-        .prepare(
-            "SELECT character_id, character_content_revision_id,
-                    conversation_id, branch_id, payload_bytes
-             FROM portable_runtime_states
-             WHERE NOT (
-                 character_id = ?1
-                 AND character_content_revision_id IS ?2
-                 AND conversation_id = ?3
-                 AND branch_id = ?4
-             )
-             ORDER BY access_sequence,
-                      character_id,
-                      character_content_revision_key,
-                      conversation_id,
-                      branch_id",
-        )
-        .map_err(storage_db_error)?;
-    let candidates = statement
-        .query_map(
-            params![
-                protected_scope.character_id,
-                protected_scope.character_content_revision_id,
-                protected_scope.conversation_id,
-                protected_scope.branch_id,
-            ],
-            |row| {
-                Ok((
-                    PortableRuntimeStateScope {
-                        character_id: row.get(0)?,
-                        character_content_revision_id: row.get(1)?,
-                        conversation_id: row.get(2)?,
-                        branch_id: row.get(3)?,
-                    },
-                    row.get::<_, i64>(4)?,
-                ))
-            },
-        )
-        .map_err(storage_db_error)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(storage_db_error)?
-        .into_iter()
-        .map(|(scope, payload_bytes)| {
-            Ok(EvictionCandidate {
-                scope,
-                payload_bytes: from_nonnegative_i64(
-                    "portable runtime eviction payload bytes",
-                    payload_bytes,
-                )?,
-            })
-        })
-        .collect::<CoreResult<Vec<_>>>()?;
-    drop(statement);
+    let candidates = load_eviction_candidates(transaction, protected_scope)?;
 
     let mut evicted_rows = 0_u32;
     let mut evicted_bytes = 0_u64;
@@ -914,6 +862,64 @@ fn enforce_quota_with_limits(
         ));
     }
     Ok((evicted_rows, evicted_bytes))
+}
+
+fn load_eviction_candidates(
+    transaction: &Transaction<'_>,
+    protected_scope: &PortableRuntimeStateScope,
+) -> CoreResult<Vec<EvictionCandidate>> {
+    let mut statement = transaction
+        .prepare(
+            "SELECT character_id, character_content_revision_id,
+                    conversation_id, branch_id, payload_bytes
+             FROM portable_runtime_states
+             WHERE NOT (
+                 character_id = ?1
+                 AND character_content_revision_id IS ?2
+                 AND conversation_id = ?3
+                 AND branch_id = ?4
+             )
+             ORDER BY access_sequence,
+                      character_id,
+                      character_content_revision_key,
+                      conversation_id,
+                      branch_id",
+        )
+        .map_err(storage_db_error)?;
+    statement
+        .query_map(
+            params![
+                protected_scope.character_id,
+                protected_scope.character_content_revision_id,
+                protected_scope.conversation_id,
+                protected_scope.branch_id,
+            ],
+            |row| {
+                Ok((
+                    PortableRuntimeStateScope {
+                        character_id: row.get(0)?,
+                        character_content_revision_id: row.get(1)?,
+                        conversation_id: row.get(2)?,
+                        branch_id: row.get(3)?,
+                    },
+                    row.get::<_, i64>(4)?,
+                ))
+            },
+        )
+        .map_err(storage_db_error)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(storage_db_error)?
+        .into_iter()
+        .map(|(scope, payload_bytes)| {
+            Ok(EvictionCandidate {
+                scope,
+                payload_bytes: from_nonnegative_i64(
+                    "portable runtime eviction payload bytes",
+                    payload_bytes,
+                )?,
+            })
+        })
+        .collect::<CoreResult<Vec<_>>>()
 }
 
 fn validate_safe_integer(label: &str, value: u64) -> CoreResult<()> {
@@ -973,7 +979,7 @@ mod tests {
     const SOURCE_HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
     struct Fixture {
-        _root: TempDir,
+        root: TempDir,
         storage: Storage,
     }
 
@@ -982,10 +988,7 @@ mod tests {
             let root = tempfile::tempdir().expect("temporary portable runtime state root");
             let storage = Storage::open(root.path()).expect("open portable runtime state storage");
             seed_character(&storage, "character-a");
-            Self {
-                _root: root,
-                storage,
-            }
+            Self { root, storage }
         }
 
         fn scope(&self, suffix: &str) -> PortableRuntimeStateScope {
@@ -1032,7 +1035,7 @@ mod tests {
         assert_eq!(record.revision, 2);
         assert_eq!(record.payload.value["state"]["visited"], false);
 
-        let root = fixture._root.path().to_path_buf();
+        let root = fixture.root.path().to_path_buf();
         drop(fixture.storage);
         let reopened = Storage::open(root).expect("reopen portable runtime state storage");
         let record = reopened
@@ -1046,7 +1049,10 @@ mod tests {
 
     #[test]
     fn concurrent_writes_with_the_same_revision_save_exactly_once() {
-        let Fixture { _root, storage } = Fixture::open();
+        let Fixture {
+            root: _root,
+            storage,
+        } = Fixture::open();
         let scope = seed_scope(&storage, "character-a", "concurrent-cas");
         storage
             .put_portable_runtime_state(write(&scope, 0, None, json!({"winner": "seed"})))
@@ -1653,6 +1659,14 @@ mod tests {
                 params![branch_id, conversation_id, NOW],
             )
             .expect("seed branch");
+        connection
+            .execute(
+                "INSERT INTO conversation_state
+                 (conversation_id, active_branch_id, selected_mode, updated_at)
+                 VALUES (?1, ?2, 'chat', ?3)",
+                params![conversation_id, branch_id, NOW],
+            )
+            .expect("seed conversation state");
         drop(connection);
         PortableRuntimeStateScope {
             character_id: character_id.to_owned(),

@@ -10,7 +10,7 @@ use std::{
 use lorepia_domain::{CoreError, CoreErrorCode, CoreResult};
 use rusqlite::Connection;
 
-/// Process-local observations for the repository-wide SQLite connection lock.
+/// Process-local observations for the repository-wide `SQLite` connection lock.
 ///
 /// Durations are cumulative or maximum monotonic-clock nanoseconds. Counters
 /// saturate instead of wrapping so long-lived sessions remain diagnosable.

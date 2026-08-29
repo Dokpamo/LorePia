@@ -31,6 +31,7 @@
         MemoryRecordSourceNavigationDto,
         MessageDto,
     } from '../../lib/ipc/contracts';
+    import { t, tr } from '../../lib/i18n';
     import MemoryQueryRetryPanel from '../orchestration/MemoryQueryRetryPanel.svelte';
     import OrchestrationQuickDrawer from '../orchestration/OrchestrationQuickDrawer.svelte';
     import type {
@@ -495,9 +496,6 @@
                 });
                 return;
             }
-            // Keep the final bubble above the floating field in the same layout
-            // frame. Waiting for the next frame lets the padding change mark the
-            // transcript as no longer near the bottom and clips its last line.
             applyProgrammaticScrollPosition(scroller, scroller.scrollHeight);
             if (overlayScrollFrame !== null) cancelAnimationFrame(overlayScrollFrame);
             overlayScrollFrame = requestAnimationFrame(() => {
@@ -1460,10 +1458,13 @@
     }
 
     async function cancelPortableRuntimeModelCall(): Promise<void> {
-        const requested = await portableRuntimeLifecycle.cancelActiveModelCall();
-        copyNotice = requested
-            ? '캐릭터 모델 호출 중지를 요청했습니다.'
-            : '중지할 캐릭터 모델 호출이 없습니다.';
+        const cancellation = await portableRuntimeLifecycle.cancelActiveModelCall();
+        copyNotice =
+            cancellation === 'unconfirmed'
+                ? t('chat.runtime.cancel.unconfirmed')
+                : cancellation === 'confirmed'
+                  ? '캐릭터 모델 호출 중지를 요청했습니다.'
+                  : '중지할 캐릭터 모델 호출이 없습니다.';
     }
 
     async function setPortableRuntimeOption(key: string, value: string): Promise<void> {
@@ -1522,7 +1523,7 @@
             }
             attemptApprovalRefreshEpoch += 1;
         } catch (error) {
-            copyNotice = portableRuntimeLifecycle.fail(error, '캐릭터 기능을 실행하지 못했습니다.');
+            copyNotice = portableRuntimeLifecycle.fail(error, t('chat.runtime.execution_failed'));
         } finally {
             sending = false;
         }
@@ -2132,7 +2133,6 @@
                                     </time>
                                 </article>
                             {:else}
-                                <!-- The focusable bubble replaces the removed three-dot disclosure on touch and keyboard. -->
                                 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
                                 <article
                                     class="message-body"
@@ -2214,8 +2214,8 @@
                                         <button
                                             class="danger"
                                             type="button"
-                                            aria-label="제거 확인"
-                                            title="제거 확인"
+                                            aria-label={$tr('chat.message.remove_confirm')}
+                                            title={$tr('chat.message.remove_confirm')}
                                             onclick={() => {
                                                 pendingRemoveId = null;
                                                 void removeMessageAndResetRuntime(message.id);
@@ -2234,8 +2234,8 @@
                                     {:else}
                                         <button
                                             type="button"
-                                            aria-label="여기부터 제거"
-                                            title="여기부터 제거"
+                                            aria-label={$tr('chat.message.remove_from_here')}
+                                            title={$tr('chat.message.remove_from_here')}
                                             disabled={appState.chat.active_generation_id !== null}
                                             onclick={() => (pendingRemoveId = message.id)}
                                         >

@@ -135,10 +135,8 @@ pub(crate) fn open_database(root: &Path, canonical_path: &Path) -> CoreResult<Co
     let source_version = read_pre_migration_schema_version(&source)?;
     validate_cutover_source(&source, source_version)?;
     let source_tables = capture_table_snapshots(&source, true)?;
-    // Older migration cutpoints can contain intentional repair transforms.
-    // Their migration-specific regressions validate those transforms; the
-    // exact frozen baseline and a no-op current-schema publication preserve
-    // every existing row exactly.
+    // Frozen baselines preserve migration repair transforms; current-schema
+    // publication is a no-op that preserves every existing row exactly.
     let exact_snapshot =
         source_version == FROZEN_NATIVE_SCHEMA_VERSION || source_version == SCHEMA_VERSION;
     let semantic_snapshot = if exact_snapshot {
@@ -366,7 +364,9 @@ pub(crate) fn register_integrity_functions(connection: &Connection) -> CoreResul
             flags,
             |context| {
                 let value = context.get::<String>(0)?;
-                Ok(crate::discovery_repository::canonical_discovery_commit_plan_sha256(&value))
+                Ok(crate::discovery_repository::contract_codec::canonical_discovery_commit_plan_sha256(
+                    &value,
+                ))
             },
         )
         .map_err(storage_db_error)?;

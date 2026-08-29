@@ -1,8 +1,6 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    fs,
-    path::PathBuf,
-};
+use std::collections::{BTreeMap, BTreeSet};
+#[cfg(test)]
+use std::{fs, path::PathBuf};
 
 mod completed_authority;
 
@@ -1194,7 +1192,6 @@ impl Storage {
 
     #[allow(clippy::too_many_lines)] // Every immutable approval and commit seam is revalidated.
     fn get_completed_package_authority_by_approval_id_in_connection(
-        &self,
         connection: &Connection,
         approval_id: &str,
     ) -> CoreResult<CompletedPackageAuthoritySnapshot> {
@@ -1546,7 +1543,7 @@ impl Storage {
         let verified = self.verify_completed_package_authority_with(
             approval_id,
             |connection, approval_id| {
-                self.get_completed_package_authority_by_approval_id_in_connection(
+                Self::get_completed_package_authority_by_approval_id_in_connection(
                     connection,
                     approval_id,
                 )
@@ -1554,7 +1551,7 @@ impl Storage {
             || {},
         )?;
         let connection = self.connection()?;
-        let authority = self.revalidate_completed_package_authority_in_connection(
+        let authority = Self::revalidate_completed_package_authority_in_connection(
             &connection,
             approval_id,
             &verified,
@@ -1628,7 +1625,7 @@ impl Storage {
                 let verified = verified.get(&approval_id).ok_or_else(|| {
                     storage_corrupted("completed module authority was not CAS-verified")
                 })?;
-                let authority = self.revalidate_completed_package_authority_in_connection(
+                let authority = Self::revalidate_completed_package_authority_in_connection(
                     &connection,
                     &approval_id,
                     verified,
@@ -1641,7 +1638,6 @@ impl Storage {
     /// Transaction-local variant used while package-backed module activation
     /// is re-reviewed under the same database snapshot as its bindings.
     pub(crate) fn get_module_import_approval_evidence_in_transaction(
-        &self,
         transaction: &Transaction<'_>,
         approval_id: &str,
         stored: &ActiveContentModuleRevision,
@@ -1654,7 +1650,7 @@ impl Storage {
                 "module package approval changed after CAS authority preverification",
             )
         })?;
-        let authority = self.revalidate_completed_package_authority_in_connection(
+        let authority = Self::revalidate_completed_package_authority_in_connection(
             transaction,
             approval_id,
             verified,

@@ -33,12 +33,11 @@ pub(crate) fn verify_module_import_authorities(
                  ORDER BY package_import_approval_id",
             )
             .map_err(storage_db_error)?;
-        let approval_ids = statement
+        statement
             .query_map([], |row| row.get::<_, String>(0))
             .map_err(storage_db_error)?
             .collect::<Result<BTreeSet<_>, _>>()
-            .map_err(storage_db_error)?;
-        approval_ids
+            .map_err(storage_db_error)?
     };
     approval_ids.extend(
         reviewed_bindings
@@ -49,7 +48,7 @@ pub(crate) fn verify_module_import_authorities(
 }
 
 pub(super) fn module_activation_snapshots(
-    storage: &Storage,
+    _storage: &Storage,
     transaction: &Transaction<'_>,
     bindings: &[ModuleBinding],
     verified_authorities: &VerifiedCompletedPackageAuthorities,
@@ -78,7 +77,7 @@ pub(super) fn module_activation_snapshots(
             .package_import_approval_id
             .as_deref()
             .map(|approval_id| {
-                storage.get_module_import_approval_evidence_in_transaction(
+                Storage::get_module_import_approval_evidence_in_transaction(
                     transaction,
                     approval_id,
                     &stored,
