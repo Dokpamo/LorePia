@@ -40,7 +40,7 @@ tokio = { version = "1.47", features = ["rt-multi-thread", "macros", "sync", "ti
 unicode-normalization = "0.1"
 url = "2.5"
 uuid = { version = "1.17", features = ["v4", "v5", "serde"] }
-zip = { version = "4.3", default-features = false, features = ["deflate"] }
+zip = { version = "8.6", default-features = false, features = ["deflate"] }
 zeroize = "1.8"
 
 [workspace.lints.rust]
