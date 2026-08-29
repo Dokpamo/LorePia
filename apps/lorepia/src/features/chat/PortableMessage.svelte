@@ -12,8 +12,27 @@
     import {
         applyPortableTransforms,
         hasPortableDisplayTransform,
+        type PortableRegexDiagnostic,
         renderPortableDisplay,
     } from './portable-display';
+    import { sanitizePortableCss, sanitizePortableTree } from './portable-renderer-policy';
+    import {
+        isPortableRendererMessage,
+        MAX_PORTABLE_RENDERER_HEIGHT,
+        MIN_PORTABLE_RENDERER_HEIGHT,
+        PORTABLE_RENDERER_CHANNEL,
+    } from './portable-renderer-protocol';
+
+    const MAX_PORTABLE_SOURCE_CHARS = 262_144;
+    const MAX_PORTABLE_MARKUP_TAGS = 4_096;
+    const MAX_PORTABLE_ASSET_REFERENCES = 128;
+    const MAX_PORTABLE_ASSET_ALIASES = 32_768;
+    const MAX_PORTABLE_ASSET_CONCURRENCY = 8;
+
+    interface IndexedAssetAlias {
+        asset: CharacterRenderAssetDto;
+        alias: string;
+    }
 
     interface Props {
         text: string;
@@ -33,24 +52,48 @@
         client,
         profile,
         enabled = true,
-        messageIndex = 0,
-        lastMessageId = 0,
+        messageIndex,
+        lastMessageId,
         variables,
         backgroundMarkup,
         lastCharacterMessage = '',
         onAction,
     }: Props = $props();
-    let host = $state<HTMLDivElement | null>(null);
+    let frame = $state<HTMLIFrameElement | null>(null);
     let normalizedText = $state('');
+    let regexWarning = $state<string | null>(null);
+
+    function reportRegexDiagnostic(diagnostic: PortableRegexDiagnostic): void {
+        const rule = diagnostic.ruleIndex + 1;
+        regexWarning =
+            diagnostic.reason === 'execution_timeout'
+                ? t('chat.portable.regex.timeout', { rule })
+                : diagnostic.reason === 'invalid_pattern'
+                  ? t('chat.portable.regex.invalid', { rule })
+                  : t('chat.portable.regex.unavailable', { rule });
+    }
+
     $effect(() => {
         const source = text;
         const activeProfile = profile;
         const active = enabled;
         let cancelled = false;
-        normalizedText = source;
-        if (activeProfile !== null && active) {
-            void applyPortableTransforms(source, activeProfile.output_transforms).then((result) => {
-                if (!cancelled) normalizedText = result;
+        const exceedsLimit =
+            active && activeProfile !== null && source.length > MAX_PORTABLE_SOURCE_CHARS;
+        normalizedText = exceedsLimit ? t('chat.portable.content_too_large') : source;
+        regexWarning = null;
+        if (activeProfile !== null && active && !exceedsLimit) {
+            const ruleScope = `${activeProfile.character_id}:${activeProfile.character_content_revision_id ?? 'legacy'}`;
+            void applyPortableTransforms(source, activeProfile.output_transforms, {
+                phase: 'provider_output',
+                ruleScope,
+                onRegexDiagnostic: reportRegexDiagnostic,
+            }).then((result) => {
+                if (!cancelled)
+                    normalizedText =
+                        result.length > MAX_PORTABLE_SOURCE_CHARS
+                            ? t('chat.portable.content_too_large')
+                            : result;
             });
         }
         return () => {
@@ -67,7 +110,7 @@
     );
 
     $effect(() => {
-        const target = host;
+        const target = frame;
         const activeProfile = profile;
         const activeClient = client;
         const source = normalizedText;
@@ -81,34 +124,25 @@
             return;
         }
         let cancelled = false;
-        const wasCancelled = (): boolean => cancelled;
-        let activeShadow: ShadowRoot | null = null;
-        const deferredMedia = new SvelteSet<HTMLMediaElement>();
-        const resumeDeferredMedia = (): void => {
-            const media = [...deferredMedia];
-            deferredMedia.clear();
-            document.removeEventListener('pointerdown', resumeDeferredMedia, true);
-            for (const item of media) void item.play().catch(() => undefined);
+        const isCancelled = (): boolean => cancelled;
+        const runtimeId = globalThis.crypto.randomUUID();
+        const handleMessage = (event: MessageEvent<unknown>): void => {
+            if (
+                cancelled ||
+                event.origin !== 'null' ||
+                target.contentWindow === null ||
+                event.source !== target.contentWindow ||
+                !isPortableRendererMessage(event.data, runtimeId)
+            ) {
+                return;
+            }
+            if (event.data.type === 'portable_action') {
+                actionHandler?.(event.data.action);
+                return;
+            }
+            target.style.height = `${String(event.data.height)}px`;
         };
-        const playPortableMedia = (media: HTMLMediaElement): void => {
-            void media.play().catch(() => {
-                if (cancelled) return;
-                deferredMedia.add(media);
-                document.addEventListener('pointerdown', resumeDeferredMedia, {
-                    capture: true,
-                    once: true,
-                });
-            });
-        };
-        const handleClick = (event: Event): void => {
-            const element = event.target instanceof Element ? event.target : null;
-            const actionElement = element?.closest('[data-portable-action]');
-            const action =
-                actionElement instanceof HTMLElement
-                    ? actionElement.dataset.portableAction?.trim()
-                    : undefined;
-            if (action !== undefined && action !== '') actionHandler?.(action);
-        };
+        globalThis.addEventListener('message', handleMessage);
         void buildPortableDocument(
             source,
             activeProfile,
@@ -117,39 +151,34 @@
             activeLastMessageId,
             activeVariables,
         ).then(async (rendered) => {
-            if (wasCancelled()) return;
-            const shadow = target.shadowRoot ?? target.attachShadow({ mode: 'open' });
-            const baseStyle = document.createElement('style');
-            baseStyle.textContent = BASE_STYLE;
-            const importedStyle = document.createElement('style');
-            importedStyle.textContent = extractStyleText(
-                await renderPortableDisplay(activeBackgroundMarkup, [], {
-                    variables: activeVariables,
-                    chatIndex: activeMessageIndex,
-                    lastMessageId: activeLastMessageId,
-                    lastCharacterMessage,
-                }),
+            if (isCancelled()) return;
+            const importedStyle = extractStyleText(
+                await renderPortableDisplay(
+                    activeBackgroundMarkup.length > MAX_PORTABLE_SOURCE_CHARS
+                        ? ''
+                        : activeBackgroundMarkup,
+                    [],
+                    {
+                        variables: activeVariables,
+                        chatIndex: activeMessageIndex,
+                        lastMessageId: activeLastMessageId,
+                        lastCharacterMessage,
+                    },
+                ),
             );
-            if (wasCancelled()) return;
-            shadow.replaceChildren(importedStyle, baseStyle, rendered);
-            activeShadow = shadow;
-            shadow.addEventListener('click', handleClick);
-            for (const media of shadow.querySelectorAll<HTMLMediaElement>(
-                '[data-portable-autoplay]',
-            )) {
-                playPortableMedia(media);
-            }
+            if (isCancelled()) return;
+            target.style.height = `${String(MIN_PORTABLE_RENDERER_HEIGHT)}px`;
+            target.srcdoc = portableFrameDocument(rendered, importedStyle, runtimeId);
         });
         return () => {
             cancelled = true;
-            activeShadow?.removeEventListener('click', handleClick);
-            document.removeEventListener('pointerdown', resumeDeferredMedia, true);
-            deferredMedia.clear();
+            globalThis.removeEventListener('message', handleMessage);
+            target.removeAttribute('srcdoc');
         };
     });
 
     const BASE_STYLE = `
-        :host { display: block; min-width: 0; max-width: 100%; color: inherit;
+        html, body { display: block; min-width: 0; max-width: 100%; margin: 0; color: inherit;
             position: relative; contain: layout paint style; isolation: isolate; overflow: hidden; }
         .portable-message { max-width: 100%; white-space: pre-wrap; overflow: hidden;
             overflow-wrap: anywhere; }
@@ -166,10 +195,11 @@
         source: string,
         activeProfile: CharacterRenderProfileDto,
         activeClient: LorepiaClient,
-        activeMessageIndex: number,
-        activeLastMessageId: number,
+        activeMessageIndex: number | undefined,
+        activeLastMessageId: number | undefined,
         activeVariables: Record<string, string>,
-    ): Promise<HTMLElement> {
+    ): Promise<string> {
+        if (source.length > MAX_PORTABLE_SOURCE_CHARS) return portableLimitMarkup();
         const displaySource = await renderPortableDisplay(
             source,
             activeProfile.display_transforms,
@@ -178,31 +208,45 @@
                 chatIndex: activeMessageIndex,
                 lastMessageId: activeLastMessageId,
                 lastCharacterMessage,
+                onRegexDiagnostic: reportRegexDiagnostic,
+                regexRuleScope: `${activeProfile.character_id}:${activeProfile.character_content_revision_id ?? 'legacy'}`,
             },
         );
+        if (
+            displaySource.length > MAX_PORTABLE_SOURCE_CHARS ||
+            markupTagCount(displaySource) > MAX_PORTABLE_MARKUP_TAGS
+        ) {
+            return portableLimitMarkup();
+        }
         const references = collectAssetReferences(displaySource);
+        if (references === null) return portableLimitMarkup();
         const resolved = new SvelteMap<string, string | null>();
-        await Promise.all(
-            [...references].map(async (reference) => {
-                const asset = selectAsset(activeProfile.assets, reference, displaySource);
-                if (asset === null) {
-                    resolved.set(reference, null);
-                    return;
-                }
-                try {
-                    const delivery = await activeClient.resolveAssetDelivery({
-                        selector: { kind: 'asset_id', asset_id: asset.asset_id },
-                    });
-                    if (delivery.asset_id !== asset.asset_id) {
-                        resolved.set(reference, null);
-                        return;
-                    }
-                    resolved.set(reference, rendererAssetUrl(delivery.sha256));
-                } catch {
-                    resolved.set(reference, null);
-                }
-            }),
-        );
+        const aliases = indexAssetAliases(activeProfile.assets);
+        for (let offset = 0; offset < references.length; offset += MAX_PORTABLE_ASSET_CONCURRENCY) {
+            await Promise.all(
+                references
+                    .slice(offset, offset + MAX_PORTABLE_ASSET_CONCURRENCY)
+                    .map(async (reference) => {
+                        const asset = selectAsset(aliases, reference, displaySource);
+                        if (asset === null) {
+                            resolved.set(reference, null);
+                            return;
+                        }
+                        try {
+                            const delivery = await activeClient.resolveAssetDelivery({
+                                selector: { kind: 'asset_id', asset_id: asset.asset_id },
+                            });
+                            if (delivery.asset_id !== asset.asset_id) {
+                                resolved.set(reference, null);
+                                return;
+                            }
+                            resolved.set(reference, rendererAssetUrl(delivery.sha256));
+                        } catch {
+                            resolved.set(reference, null);
+                        }
+                    }),
+            );
+        }
 
         let html = displaySource.replace(
             /<img\s*=\s*(?:"([^"]+)"|'([^']+)'|([^>\s]+))\s*\/?\s*>/gi,
@@ -216,7 +260,7 @@
                 const url = resolved.get(reference);
                 return url === undefined || url === null
                     ? `<span class="portable-asset-missing">${escapeHtml(reference)}</span>`
-                    : `<span class="portable-asset-frame"><img src="${escapeHtml(url)}" alt="${escapeHtml(reference)}" data-portable-media="1" loading="lazy" decoding="async"></span>`;
+                    : `<span class="portable-asset-frame"><img src="${escapeHtml(url)}" alt="${escapeHtml(reference)}" loading="lazy" decoding="async"></span>`;
             },
         );
         html = html.replace(/\{\{raw::([^{}]+)}}/gi, (_match, rawReference: string) => {
@@ -230,7 +274,7 @@
                 const url = resolved.get(reference);
                 return url === undefined || url === null
                     ? `<span class="portable-asset-missing">${escapeHtml(reference)}</span>`
-                    : `<audio class="portable-audio" src="${escapeHtml(url)}" data-portable-media="1" data-portable-autoplay="1" autoplay loop preload="auto" aria-label="${escapeHtml(kind === 'bgm' ? t('chat.portable.audio.background') : t('chat.portable.audio.clip'))}"></audio>`;
+                    : `<audio class="portable-audio" src="${escapeHtml(url)}" autoplay loop preload="auto" aria-label="${escapeHtml(kind === 'bgm' ? t('chat.portable.audio.background') : t('chat.portable.audio.clip'))}"></audio>`;
             },
         );
 
@@ -241,37 +285,117 @@
             const fallback = document.createElement('div');
             fallback.className = 'portable-message';
             fallback.textContent = displaySource;
-            return fallback;
+            return fallback.outerHTML;
+        }
+        if (root.querySelectorAll('*').length > MAX_PORTABLE_MARKUP_TAGS) {
+            return portableLimitMarkup();
         }
         sanitizePortableTree(root, new SvelteSet([...resolved.values()].filter(isString)));
-        return document.importNode(root, true);
+        return root.outerHTML;
     }
 
-    function collectAssetReferences(source: string): Set<string> {
+    function portableFrameDocument(
+        content: string,
+        importedStyle: string,
+        runtimeId: string,
+    ): string {
+        const nonce = globalThis.crypto.randomUUID().replaceAll('-', '');
+        const scriptClose = '</scr' + 'ipt>';
+        const mediaSources =
+            'lorepia-asset: http://lorepia-asset.localhost https://lorepia-asset.localhost';
+        const csp = [
+            "default-src 'none'",
+            `script-src 'nonce-${nonce}'`,
+            "style-src 'unsafe-inline'",
+            `img-src ${mediaSources}`,
+            `media-src ${mediaSources}`,
+            "connect-src 'none'",
+            "font-src 'none'",
+            "object-src 'none'",
+            "base-uri 'none'",
+            "form-action 'none'",
+            "frame-src 'none'",
+            "frame-ancestors 'none'",
+        ].join('; ');
+        return [
+            '<!doctype html><html><head><meta charset="utf-8">',
+            `<meta http-equiv="Content-Security-Policy" content="${escapeHtml(csp)}">`,
+            '<meta name="referrer" content="no-referrer">',
+            `<style>${BASE_STYLE}${importedStyle}</style>`,
+            '</head><body>',
+            content,
+            `<script nonce="${nonce}">${portableFrameBridge(runtimeId)}${scriptClose}`,
+            '</body></html>',
+        ].join('');
+    }
+
+    function portableFrameBridge(runtimeId: string): string {
+        const channel = JSON.stringify(PORTABLE_RENDERER_CHANNEL);
+        const id = JSON.stringify(runtimeId);
+        return String.raw`(() => {
+            'use strict';
+            const channel = ${channel};
+            const runtimeId = ${id};
+            const actionPattern = /^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,511}$/;
+            const publish = (message) => parent.postMessage({ channel, runtimeId, ...message }, '*');
+            const reportHeight = () => {
+                const raw = Math.ceil(Math.max(
+                    document.documentElement?.scrollHeight || 0,
+                    document.body?.scrollHeight || 0,
+                    ${String(MIN_PORTABLE_RENDERER_HEIGHT)}
+                ));
+                publish({
+                    type: 'portable_resize',
+                    height: Math.min(${String(MAX_PORTABLE_RENDERER_HEIGHT)}, Math.max(${String(MIN_PORTABLE_RENDERER_HEIGHT)}, raw))
+                });
+            };
+            const playMedia = () => {
+                for (const media of document.querySelectorAll('audio[autoplay]')) {
+                    if (media instanceof HTMLMediaElement) void media.play().catch(() => undefined);
+                }
+            };
+            document.addEventListener('click', (event) => {
+                if (event.isTrusted !== true || !(event.target instanceof Element)) return;
+                const control = event.target.closest('[data-portable-action]');
+                if (!(control instanceof HTMLButtonElement) && !(control instanceof HTMLInputElement)) return;
+                const action = control.getAttribute('data-portable-action')?.trim() || '';
+                if (!actionPattern.test(action)) return;
+                event.preventDefault();
+                publish({ type: 'portable_action', action });
+            }, true);
+            document.addEventListener('pointerdown', playMedia, { once: true, capture: true });
+            if (typeof ResizeObserver === 'function') {
+                new ResizeObserver(reportHeight).observe(document.documentElement);
+            }
+            globalThis.addEventListener('load', () => { playMedia(); reportHeight(); }, { once: true });
+            reportHeight();
+        })();`;
+    }
+
+    function collectAssetReferences(source: string): string[] | null {
         const references = new SvelteSet<string>();
         for (const match of source.matchAll(
             /<img\s*=\s*(?:"([^"]+)"|'([^']+)'|([^>\s]+))\s*\/?\s*>/gi,
         )) {
             const reference = (match[1] ?? match[2] ?? match[3] ?? '').trim();
             if (reference !== '') references.add(reference);
+            if (references.size > MAX_PORTABLE_ASSET_REFERENCES) return null;
         }
         for (const match of source.matchAll(/\{\{(?:raw|audio|bgm)::([^{}]+)}}/gi)) {
             const reference = (match[1] ?? '').trim();
             if (reference !== '') references.add(reference);
+            if (references.size > MAX_PORTABLE_ASSET_REFERENCES) return null;
         }
-        return references;
+        return [...references];
     }
 
     function selectAsset(
-        assets: CharacterRenderAssetDto[],
+        aliases: readonly IndexedAssetAlias[],
         reference: string,
         source: string,
     ): CharacterRenderAssetDto | null {
         const wanted = normalizedAlias(reference);
         if (wanted === '') return null;
-        const aliases = assets.flatMap((asset) =>
-            asset.aliases.map((alias) => ({ asset, alias: normalizedAlias(alias) })),
-        );
         let ranked = aliases.filter(
             ({ alias }) =>
                 alias === wanted ||
@@ -294,6 +418,30 @@
         const exact = ranked.filter(({ alias }) => alias === wanted);
         const candidates = exact.length > 0 ? exact : ranked;
         return candidates[stableIndex(`${source}\0${reference}`, candidates.length)]?.asset ?? null;
+    }
+
+    function indexAssetAliases(assets: readonly CharacterRenderAssetDto[]): IndexedAssetAlias[] {
+        const aliases: IndexedAssetAlias[] = [];
+        for (const asset of assets) {
+            for (const sourceAlias of asset.aliases) {
+                const alias = normalizedAlias(sourceAlias);
+                if (alias !== '') aliases.push({ asset, alias });
+                if (aliases.length >= MAX_PORTABLE_ASSET_ALIASES) return aliases;
+            }
+        }
+        return aliases;
+    }
+
+    function markupTagCount(value: string): number {
+        let count = 0;
+        for (const character of value) {
+            if (character === '<' && ++count > MAX_PORTABLE_MARKUP_TAGS) break;
+        }
+        return count;
+    }
+
+    function portableLimitMarkup(): string {
+        return `<div class="portable-message">${escapeHtml(t('chat.portable.content_too_large'))}</div>`;
     }
 
     function normalizedAlias(value: string): string {
@@ -352,110 +500,6 @@
         );
     }
 
-    function sanitizePortableCss(value: string): string {
-        const withoutComments = value.replace(/\/\*[\s\S]*?\*\//g, '');
-        const withoutImports = withoutComments.replace(/@import\s+[^;]+;?/gi, '');
-        if (
-            withoutImports.includes('\\') ||
-            withoutImports.includes('@') ||
-            /:host(?:-context)?\b|::picker\b|appearance\s*:\s*base-select\b/i.test(withoutImports)
-        ) {
-            return '';
-        }
-        return withoutImports
-            .replace(/url\s*\([^)]*\)/gi, 'none')
-            .replace(/position\s*:\s*(?:fixed|sticky)\s*;?/gi, 'position: static;')
-            .replace(/(?:^|[;{])\s*(?:inset|z-index)\s*:[^;}]*;?/gi, ';')
-            .slice(0, 262_144);
-    }
-
-    function sanitizePortableTree(root: HTMLElement, mediaUrls: ReadonlySet<string>): void {
-        const forbidden = new Set([
-            'SCRIPT',
-            'IFRAME',
-            'OBJECT',
-            'EMBED',
-            'LINK',
-            'META',
-            'BASE',
-            'FORM',
-            'SVG',
-            'MATH',
-            'FOREIGNOBJECT',
-            'PICTURE',
-            'SOURCE',
-            'TRACK',
-            'DIALOG',
-            'SELECT',
-            'OPTION',
-            'OPTGROUP',
-        ]);
-        const elements = [root, ...root.querySelectorAll('*')];
-        for (const element of elements) {
-            if (forbidden.has(element.tagName.toUpperCase())) {
-                element.remove();
-                continue;
-            }
-            if (element instanceof HTMLStyleElement) {
-                element.textContent = sanitizePortableCss(element.textContent);
-            }
-            for (const attribute of [...element.attributes]) {
-                const name = attribute.name.toLowerCase();
-                if (
-                    name.startsWith('on') ||
-                    name === 'srcdoc' ||
-                    name === 'srcset' ||
-                    name === 'poster' ||
-                    name === 'href' ||
-                    name === 'xlink:href' ||
-                    name === 'formaction' ||
-                    name === 'action' ||
-                    name === 'background' ||
-                    name === 'cite' ||
-                    name === 'data' ||
-                    name === 'longdesc' ||
-                    name === 'ping' ||
-                    name === 'usemap' ||
-                    name === 'popover' ||
-                    name === 'popovertarget' ||
-                    name === 'popovertargetaction' ||
-                    name === 'command' ||
-                    name === 'commandfor' ||
-                    name === 'data-portable-action'
-                ) {
-                    element.removeAttribute(attribute.name);
-                } else if (name.endsWith('-btn')) {
-                    element.setAttribute('data-portable-action', attribute.value.slice(0, 512));
-                    element.removeAttribute(attribute.name);
-                } else if (name === 'style') {
-                    const style = sanitizePortableCss(attribute.value);
-                    if (style.trim() === '') element.removeAttribute(attribute.name);
-                    else element.setAttribute('style', style);
-                } else if (
-                    name === 'src' &&
-                    !(element instanceof HTMLImageElement) &&
-                    !(element instanceof HTMLMediaElement)
-                ) {
-                    element.removeAttribute(attribute.name);
-                }
-            }
-            if (element instanceof HTMLImageElement || element instanceof HTMLMediaElement) {
-                const source = element.getAttribute('src');
-                if (source === null || !mediaUrls.has(source)) element.removeAttribute('src');
-            }
-            if (element instanceof HTMLAnchorElement) {
-                element.rel = 'noreferrer noopener';
-                element.removeAttribute('target');
-            }
-            if (element instanceof HTMLInputElement) {
-                const type = element.type.toLowerCase();
-                if (!['button', 'checkbox', 'radio'].includes(type)) element.type = 'button';
-                element.removeAttribute('form');
-                element.removeAttribute('name');
-            }
-        }
-    }
-
     function escapeHtml(value: string): string {
         return value
             .replaceAll('&', '&amp;')
@@ -472,10 +516,20 @@
 
 {#if usesPortableMarkup && client !== undefined}
     <div class="portable-boundary">
-        <div class="portable-host" bind:this={host}></div>
+        <iframe
+            class="portable-frame"
+            bind:this={frame}
+            title="카드 콘텐츠"
+            sandbox="allow-scripts"
+            referrerpolicy="no-referrer"
+            allow="autoplay"
+        ></iframe>
     </div>
 {:else}
     <MarkdownText text={normalizedText} />
+{/if}
+{#if regexWarning !== null}
+    <p class="portable-regex-warning" role="status">{regexWarning}</p>
 {/if}
 
 <style>
@@ -489,10 +543,19 @@
         overflow: auto;
     }
 
-    .portable-host {
+    .portable-frame {
         display: block;
+        width: 100%;
+        height: 32px;
         min-width: 0;
         max-width: 100%;
+        border: 0;
         overflow: hidden;
+    }
+
+    .portable-regex-warning {
+        margin: 6px 0 0;
+        color: var(--color-text-muted, currentColor);
+        font-size: 0.78rem;
     }
 </style>

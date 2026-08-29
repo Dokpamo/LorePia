@@ -43,6 +43,7 @@ def main() -> int:
         ".github/workflows/ci.yml": [
             "python3 scripts/check_github_workflow_security.py",
             "python3 scripts/check_source_architecture.py",
+            "check_i18n_literal_baseline.py --base-ref",
             "npm audit --omit=dev --audit-level=high",
         ],
         ".github/workflows/security.yml": [
@@ -54,7 +55,12 @@ def main() -> int:
         ".github/workflows/release.yml": [
             "if: github.event_name == 'workflow_dispatch'",
             "lorepia-UNSIGNED-candidate-",
+            "anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610",
+            "actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6",
             "python scripts/write_release_checksums.py target/release/bundle",
+            "subject-checksums: target/release/bundle/SHA256SUMS",
+            "Release dependency gate",
+            "npm audit --omit=dev --audit-level=high",
             "Reject unsigned official release",
         ],
     }

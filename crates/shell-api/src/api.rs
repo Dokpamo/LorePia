@@ -4,7 +4,8 @@ use lorepia_core::{
     CORE_API_VERSION, ConnectionBoundCredential, ConversationBranchId, ConversationId,
     ConversationMode, Core, CoreConfig, CoreError, DiscoveryRecoveryOwner, GenerationId,
     GenerationOperationContext, GenerationTarget, InspectionId, MessageId, MessageRole,
-    ProviderConnectionId, ProviderCredentialAccessAuthority, RuntimePromptMessage, VariableMap,
+    ProviderConnectionId, ProviderCredentialAccessAuthority, RuntimeGenerationAuditContext,
+    RuntimeGenerationCapability, RuntimePromptMessage, VariableMap,
 };
 use serde::{Deserialize, Serialize};
 
@@ -12,7 +13,7 @@ use crate::{
     BootstrapDto, CharacterDto, CharacterGreetingCatalogDto, CharacterRenderProfileDto,
     ChatEventStream, ConversationBranchDto, ConversationDto, ConversationModeDto,
     ConversationStateDto, GenerationCredential, GenerationStartedDto, GenerationTargetDto,
-    HealthDto, ImportInspectionDto, MessageActionGenerationDto, MessageDto,
+    GenerationUsageDto, HealthDto, ImportInspectionDto, MessageActionGenerationDto, MessageDto,
     ProviderCredentialAccessAuthorityContext, SecretCredential, ShellError, ShellResult,
     StagedImportFile, TaskCredentialLease, TaskCredentialReader,
     orchestration::ShellTaskCredentialBroker, sensitive::GenerationCredentialKind,
@@ -81,9 +82,37 @@ pub struct RuntimePromptMessageInput {
     pub content: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RuntimeGenerationCapabilityInput {
+    #[serde(rename = "model:primary")]
+    Primary,
+    #[serde(rename = "model:auxiliary")]
+    Auxiliary,
+}
+
+impl From<RuntimeGenerationCapabilityInput> for RuntimeGenerationCapability {
+    fn from(value: RuntimeGenerationCapabilityInput) -> Self {
+        match value {
+            RuntimeGenerationCapabilityInput::Primary => Self::Primary,
+            RuntimeGenerationCapabilityInput::Auxiliary => Self::Auxiliary,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeGenerationAuditInput {
+    pub character_id: String,
+    pub character_content_revision_id: Option<String>,
+    pub capability: RuntimeGenerationCapabilityInput,
+    pub grant_sha256: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GenerateRuntimeTextInput {
+    pub request_id: String,
+    pub audit: RuntimeGenerationAuditInput,
     pub selection: GenerationSelectionInput,
     pub messages: Vec<RuntimePromptMessageInput>,
 }
@@ -91,7 +120,9 @@ pub struct GenerateRuntimeTextInput {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RuntimeTextGenerationDto {
+    pub request_id: String,
     pub result: String,
+    pub usage: GenerationUsageDto,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -519,7 +550,17 @@ impl ShellApi {
         &self,
         input: GenerateRuntimeTextInput,
         credential: GenerationCredential,
+        cancelled: tokio::sync::watch::Receiver<bool>,
     ) -> ShellResult<RuntimeTextGenerationDto> {
+        validate_identifier("request_id", &input.request_id)?;
+        let request_id = input.request_id.clone();
+        let audit = RuntimeGenerationAuditContext {
+            request_id: request_id.clone(),
+            character_id: input.audit.character_id,
+            character_content_revision_id: input.audit.character_content_revision_id,
+            capability: input.audit.capability.into(),
+            grant_sha256: input.audit.grant_sha256,
+        };
         validate_selection(&input.selection)?;
         let messages = input
             .messages
@@ -545,6 +586,8 @@ impl ShellApi {
                         &provider_profile_id,
                         &messages,
                         credential.map(crate::SecretCredential::into_core_value),
+                        cancelled.clone(),
+                        audit,
                     )
                     .await
             }
@@ -568,6 +611,8 @@ impl ShellApi {
                             access_authority,
                             dispatch_lease,
                         ),
+                        cancelled,
+                        audit,
                     )
                     .await
             }
@@ -576,7 +621,12 @@ impl ShellApi {
             )),
         }
         .map_err(ShellError::from)?;
-        Ok(RuntimeTextGenerationDto { result })
+        let (result, usage) = result;
+        Ok(RuntimeTextGenerationDto {
+            request_id,
+            result,
+            usage: usage.into(),
+        })
     }
 
     pub fn send_message_to_branch(

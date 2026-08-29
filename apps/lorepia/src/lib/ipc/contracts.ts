@@ -1,3 +1,14 @@
+import type { ImportInspectionDto, ImportTicketDto } from './import-contracts';
+
+export type {
+    ImportDynamicContentReviewDto,
+    ImportImagePreviewDto,
+    ImportInspectionDto,
+    ImportIssueDto,
+    ImportRegexRuleReviewDto,
+    ImportTicketDto,
+} from './import-contracts';
+
 export const SUPPORTED_SHELL_API_VERSION = 2;
 export const SUPPORTED_CORE_API_VERSION = 9;
 export const SUPPORTED_CHAT_EVENT_VERSION = 4;
@@ -435,39 +446,6 @@ export interface GenerationAttemptApprovalClientApi {
     ): Promise<GenerationAttemptProposalDecisionReceiptDto>;
 }
 
-export interface ImportTicketDto {
-    ticket_id: string;
-    display_name: string;
-    size_bytes: number;
-}
-
-export interface ImportIssueDto {
-    code: string;
-    message: string;
-}
-
-export interface ImportImagePreviewDto {
-    logical_asset_id: string;
-    media_type: string;
-    size_bytes: number;
-}
-
-export interface ImportInspectionDto {
-    inspection_id: string;
-    kind: 'character_card_v3' | 'character_card_png' | 'charx_package';
-    display_name: string;
-    description: string;
-    source_sha256: string;
-    source_size: number;
-    estimated_stored_size: number;
-    asset_count: number;
-    representative_image: ImportImagePreviewDto | null;
-    warnings: ImportIssueDto[];
-    blocked_reasons: string[];
-    unsupported_optional_fields: string[];
-    allowed: boolean;
-}
-
 export interface ConversationDto {
     id: string;
     character_id: string;
@@ -614,12 +592,21 @@ export interface RuntimePromptMessageInput {
 }
 
 export interface GenerateRuntimeTextInput {
+    request_id: string;
+    audit: {
+        character_id: string;
+        character_content_revision_id: string | null;
+        capability: 'model:primary' | 'model:auxiliary';
+        grant_sha256: string;
+    };
     selection: GenerationSelectionInput;
     messages: RuntimePromptMessageInput[];
 }
 
 export interface RuntimeTextGenerationDto {
+    request_id: string;
     result: string;
+    usage: GenerationUsageDto;
 }
 
 export interface SendMessageInput {
@@ -3892,6 +3879,7 @@ export interface LorepiaClient {
     listBranchMessages(branchId: string): Promise<MessageDto[]>;
     listMessages(conversationId: string): Promise<MessageDto[]>;
     generateRuntimeText?(input: GenerateRuntimeTextInput): Promise<RuntimeTextGenerationDto>;
+    cancelRuntimeText?(requestId: string): Promise<boolean>;
     listInterruptedMemoryJobs(
         input: ListInterruptedMemoryJobsInput,
     ): Promise<InterruptedMemoryJobDto[]>;

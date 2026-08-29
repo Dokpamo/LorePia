@@ -1,7 +1,7 @@
 use lorepia_shell_api::{ChatEventKindDto, ChatEventStream, ChatStreamItem, ReconcileReason};
 use tauri::ipc::Channel;
 
-use crate::state::ChatStreamRegistration;
+use crate::chat_stream_registry::ChatStreamRegistration;
 
 pub fn forward_chat_stream(
     mut stream: ChatEventStream,

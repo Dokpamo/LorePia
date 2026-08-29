@@ -32,7 +32,7 @@ pub struct AssetDeliveryDescriptor {
     pub duration_ms: Option<u64>,
 }
 
-/// One Rust-only bounded range from a freshly revalidated CAS object.
+/// One Rust-only bounded range from a short-lived, identity-checked CAS handle.
 ///
 /// This type is not registered as a Tauri command result. The native custom
 /// protocol consumes it directly and hands the body to the webview decoder.

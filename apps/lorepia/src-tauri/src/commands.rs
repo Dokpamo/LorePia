@@ -20,6 +20,7 @@ use tauri_plugin_lorepia_platform::{
 };
 use uuid::Uuid;
 
+use crate::runtime_contract::RuntimeGenerationRequest;
 use crate::{
     channels::forward_chat_stream,
     contract::{
@@ -357,14 +358,23 @@ pub async fn generate_runtime_text(
     state: State<'_, AppState>,
     input: GenerateRuntimeTextInput,
 ) -> CommandResult<RuntimeTextGenerationDto> {
+    let registration = state.register_runtime_generation(&input.request_id)?;
     let shell = state.shell()?;
     let dispatch_lease = generation_dispatch_lease(&state, &input.selection).await;
     let credential =
         credential_for_selection(&app, &state, &shell, &input.selection, dispatch_lease).await?;
     shell
-        .generate_runtime_text(input, credential)
+        .generate_runtime_text(input, credential, registration.cancelled())
         .await
         .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn cancel_runtime_text(
+    state: State<'_, AppState>,
+    request: RuntimeGenerationRequest,
+) -> CommandResult<bool> {
+    state.cancel_runtime_generation(&request.request_id)
 }
 
 #[tauri::command]

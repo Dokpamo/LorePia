@@ -1,162 +1,58 @@
-import { LuaFactory, LuaMultiReturn, type LuaEngine } from 'wasmoon';
-import wasmUrl from 'wasmoon/dist/glue.wasm?url';
-
 import type {
     CharacterRenderProfileDto,
     CharacterRuntimeKnowledgeDto,
+    GenerationUsageDto,
     GenerationSelectionInput,
     LorepiaClient,
     MessageDto,
     RuntimePromptMessageInput,
 } from '../../lib/ipc/contracts';
+import { normalizeClientError } from '../../lib/ipc/errors';
 import { t } from '../../lib/i18n';
-import { renderPortableMacros } from './portable-display';
-import LUA_SANDBOX_HARDENING from './portable-runtime-sandbox.lua?raw';
-import { runPortableRegex } from './portable-regex';
+import {
+    type PortableRuntimeCapability,
+    type PortableRuntimeChatMessage,
+    type PortableRuntimeGrant,
+    type PortableRuntimeHostCallMessage,
+    type PortableRuntimePersistedState,
+    type PortableRuntimeWorkerContext,
+    type PortableRuntimeWorkerOperation,
+    type PortableRuntimeWorkerResult,
+    type PortableRuntimeWorkerSnapshot,
+    type PortableRuntimeWorkerValue,
+} from './portable-runtime-protocol';
+import {
+    MAX_PERSISTED_RUNTIME_BYTES,
+    MAX_RUNTIME_RECORD_KEYS,
+    cloneSelection,
+    defaultPortableRuntimeState,
+    normalizePortableRuntimeState,
+    safePortableText,
+    serializePortableRuntimeState,
+    updatePortableStringRecord,
+    validSelection,
+} from './portable-runtime-state';
+import {
+    PortableRuntimeWorkerClient,
+    PortableRuntimeWorkerError,
+    type PortableRuntimeWorkerFactory,
+} from './portable-runtime-worker-client';
+import { portableRegexRuleKey, runPortableRegex } from './portable-regex';
+import {
+    beginPortableRuntimeModelCall,
+    portableRuntimeModelBudgetSnapshot,
+    type PortableRuntimeModelCallLease,
+    type PortableRuntimeModelBudgetSnapshot,
+} from './portable-runtime-model-policy';
 
-const TRIGGER_ID = 'character-runtime';
-const MAX_PERSISTED_RUNTIME_BYTES = 4 * 1024 * 1024;
-const MAX_RUNTIME_NOTICE_CHARS = 4_096;
-const MAX_RUNTIME_MODEL_CALLS = 8;
+export type { PortableRuntimeCapability, PortableRuntimeGrant } from './portable-runtime-protocol';
+
 const MAX_RUNTIME_MODEL_PROMPT_CHARS = 64 * 1024;
-const MAX_RUNTIME_LUA_SLICE_MS = 100;
-const MAX_RUNTIME_LUA_MEMORY_BYTES = 32 * 1024 * 1024;
 const MAX_RUNTIME_EVENT_MS = 30_000;
-const MAX_RUNTIME_RECORD_KEYS = 256;
-const MAX_RUNTIME_STATE_VALUE_BYTES = 64 * 1024;
-const MAX_RUNTIME_STATE_VALUE_NODES = 2_048;
-const MAX_RUNTIME_MESSAGE_OVERRIDE_CHARS = 262_144;
-const MAX_RUNTIME_BACKGROUND_CHARS = 1024 * 1024;
 const MAX_RUNTIME_LORE_ENTRIES = 512;
 const MAX_RUNTIME_LORE_KEY_TESTS = 1_024;
 const MAX_RUNTIME_LORE_REGEX_TESTS = 64;
 const MAX_RUNTIME_LORE_SOURCE_CHARS = 262_144;
-// Capture the intrinsic before imported Lua runs so prototype substitution cannot replace it.
-// eslint-disable-next-line @typescript-eslint/unbound-method
-const NATIVE_PROMISE_THEN = Promise.prototype.then;
-const IGNORE_PROMISE_SETTLEMENT = () => undefined;
-
-function isNativePromise(value: unknown): boolean {
-    if (value === null || (typeof value !== 'object' && typeof value !== 'function')) {
-        return false;
-    }
-    try {
-        void Reflect.apply(NATIVE_PROMISE_THEN, value, [
-            IGNORE_PROMISE_SETTLEMENT,
-            IGNORE_PROMISE_SETTLEMENT,
-        ]);
-        return true;
-    } catch {
-        return false;
-    }
-}
-
-const LUA_ASYNC_BRIDGE = String.raw`
-local runtime_promise_create = Promise.create
-local runtime_promise_methods = debug.getmetatable(Promise.resolve(nil)).__index
-local runtime_promise_await = runtime_promise_methods.await
-local runtime_promise_catch = runtime_promise_methods.catch
-local runtime_promise_finally = runtime_promise_methods.finally
-local runtime_error = error
-local runtime_is_promise = __hostIsRuntimePromise
-local runtime_schedule_turn = __hostRuntimeYield
-local runtime_type = type
-
-runtime_promise_methods.next = nil
-runtime_promise_methods.catch = nil
-runtime_promise_methods.finally = nil
-runtime_promise_methods.await = function(self)
-    if not runtime_is_promise(self) then
-        runtime_error("await requires a native runtime Promise", 0)
-    end
-    return runtime_promise_await(self)
-end
-
-local function runtime_safe_result(value)
-    local kind = runtime_type(value)
-    if kind == "nil" or kind == "boolean" or kind == "number" or kind == "string" then
-        return value
-    end
-    return nil
-end
-
-function async(callback)
-    return function(...)
-        local co = coroutine.create(callback)
-        local safe, result = coroutine.resume(co, ...)
-
-        return runtime_promise_create(function(resolve, reject)
-            local step
-
-            local function reject_continuation(error)
-                return reject(error)
-            end
-
-            local function after_turn(next_step)
-                local scheduled = runtime_schedule_turn()
-                local continuation = runtime_promise_finally(scheduled, next_step)
-                runtime_promise_catch(continuation, reject_continuation)
-            end
-
-            local function continue_after_result()
-                after_turn(step)
-            end
-
-            step = function()
-                if coroutine.status(co) == "dead" then
-                    if safe then
-                        return resolve(runtime_safe_result(result))
-                    end
-                    return reject(result)
-                end
-
-                safe, result = coroutine.resume(co)
-                if safe and runtime_is_promise(result) then
-                    local continuation = runtime_promise_finally(result, continue_after_result)
-                    runtime_promise_catch(continuation, reject_continuation)
-                else
-                    after_turn(step)
-                end
-            end
-
-            if safe and runtime_is_promise(result) then
-                local continuation = runtime_promise_finally(result, continue_after_result)
-                runtime_promise_catch(continuation, reject_continuation)
-            else
-                after_turn(step)
-            end
-        end)
-    end
-end
-
-`;
-
-const LUA_MODEL_BRIDGE = String.raw`
-function LLM(triggerId, messages, useTools, options)
-    return __hostMainGeneration(messages):await()
-end
-
-function axLLM(triggerId, messages, useTools, options)
-    return __hostAuxGeneration(messages):await()
-end
-`;
-
-export type PortableRuntimeCapability =
-    | 'runtime:callbacks'
-    | 'chat:read'
-    | 'chat:write'
-    | 'state:readwrite'
-    | 'profile:read'
-    | 'lore:read'
-    | 'ui:write'
-    | 'model:generate'
-    | 'elevated';
-
-export interface PortableRuntimeGrant {
-    version: number;
-    manifestSha256: string;
-    capabilities: PortableRuntimeCapability[];
-}
 
 const PORTABLE_RUNTIME_CAPABILITIES: readonly PortableRuntimeCapability[] = [
     'runtime:callbacks',
@@ -166,7 +62,8 @@ const PORTABLE_RUNTIME_CAPABILITIES: readonly PortableRuntimeCapability[] = [
     'profile:read',
     'lore:read',
     'ui:write',
-    'model:generate',
+    'model:primary',
+    'model:auxiliary',
 ];
 
 export function requiredPortableRuntimeCapabilities(
@@ -212,13 +109,11 @@ async function portableRuntimeManifestSha256(
     profile: CharacterRenderProfileDto,
     capabilities: readonly PortableRuntimeCapability[],
 ): Promise<string> {
-    const subtle = globalThis.crypto.subtle;
-    const manifest = JSON.stringify({
-        version: 1,
-        profile,
-        capabilities,
-    });
-    const digest = await subtle.digest('SHA-256', new TextEncoder().encode(manifest));
+    const manifest = JSON.stringify({ version: 1, profile, capabilities });
+    const digest = await globalThis.crypto.subtle.digest(
+        'SHA-256',
+        new TextEncoder().encode(manifest),
+    );
     return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
@@ -252,10 +147,19 @@ export interface PortableRuntimeOptions {
     primarySelection: () => GenerationSelectionInput | null;
     onChanged: () => void;
     onNotice: (message: string, error: boolean) => void;
+    onModelCallStatus?: (status: PortableRuntimeModelCallStatus | null) => void;
     storage?: Storage;
-    luaFactory?: LuaFactory;
+    /** Worker constructor override used by bounded tests; imported content cannot set this. */
+    workerFactory?: PortableRuntimeWorkerFactory;
     /** Host policy override used by bounded tests; imported content cannot set this. */
     eventTimeoutMs?: number;
+}
+
+export interface PortableRuntimeModelCallStatus {
+    requestId: string;
+    target: 'primary' | 'auxiliary';
+    characterName: string;
+    startedAt: number;
 }
 
 export interface PreparedPortableInput {
@@ -263,29 +167,10 @@ export interface PreparedPortableInput {
     shouldSend: boolean;
 }
 
-interface RuntimeChatMessage {
-    id: string;
-    role: 'user' | 'char' | 'system';
-    data: string;
-    time: number;
-    virtual: boolean;
-}
-
-interface PersistedRuntimeState {
-    options: Record<string, string>;
-    chatVars: Record<string, unknown>;
-    state: Record<string, unknown>;
-    messageOverrides: Record<string, string>;
-    background: string;
-    auxiliarySelection: GenerationSelectionInput | null;
-}
-
 interface LoreWorkBudget {
     keyTestsRemaining: number;
     regexTestsRemaining: number;
 }
-
-type EditCallback = (...values: unknown[]) => unknown;
 
 export class PortableCharacterRuntime {
     readonly toggles: PortableRuntimeToggle[];
@@ -295,36 +180,42 @@ export class PortableCharacterRuntime {
     private readonly primarySelection: () => GenerationSelectionInput | null;
     private readonly onChanged: () => void;
     private readonly onNotice: (message: string, error: boolean) => void;
+    private readonly onModelCallStatus: (status: PortableRuntimeModelCallStatus | null) => void;
     private readonly storage: Storage | undefined;
     private readonly storageKey: string;
     private readonly characterName: string;
     private readonly characterDescription: string;
     private readonly personaName: string;
     private readonly personaDescription: string;
-    private readonly luaFactory: LuaFactory;
-    private readonly capabilities: ReadonlySet<PortableRuntimeCapability>;
+    private readonly workerFactory: PortableRuntimeWorkerFactory | undefined;
+    private readonly capabilities: PortableRuntimeCapability[];
+    private readonly grantSha256: string;
     private readonly eventTimeoutMs: number;
-    private readonly editCallbacks = new Map<string, EditCallback[]>();
-    private readonly displayCache = new Map<string, string>();
-    private readonly sleepTimeouts = new Set<ReturnType<typeof globalThis.setTimeout>>();
+    private readonly regexRuleScope: string;
+    private readonly modelBudgetScope: string;
     private activeLoreEntries: CharacterRuntimeKnowledgeDto[] = [];
-
-    private engine: LuaEngine | null = null;
     private messages: MessageDto[] = [];
-    private virtualMessage: RuntimeChatMessage | null = null;
-    private stopped = false;
+    private virtualMessage: PortableRuntimeChatMessage | null = null;
+    private displayCache = new Map<string, string>();
+    private worker: PortableRuntimeWorkerClient | null = null;
+    private workerVersion = 0;
+    private workerStopped = false;
+    private recoveryPromise: Promise<void> | null = null;
+    private operationQueue: Promise<void> = Promise.resolve();
     private closed = false;
     private changedQueued = false;
-    private modelCallCount = 0;
-    private persisted: PersistedRuntimeState;
+    private activeModelRequestId: string | null = null;
+    private persisted: PortableRuntimePersistedState;
 
     private constructor(options: PortableRuntimeOptions) {
         this.profile = options.profile;
-        this.capabilities = new Set(options.grant.capabilities);
+        this.capabilities = canonicalCapabilities(options.grant.capabilities);
+        this.grantSha256 = options.grant.manifestSha256;
         this.client = options.client;
         this.primarySelection = options.primarySelection;
         this.onChanged = options.onChanged;
         this.onNotice = options.onNotice;
+        this.onModelCallStatus = options.onModelCallStatus ?? (() => undefined);
         this.storage = options.storage ?? browserStorage();
         this.characterName = options.characterName;
         this.characterDescription = options.characterDescription;
@@ -334,11 +225,13 @@ export class PortableCharacterRuntime {
                 ? t('chat.runtime.persona.default')
                 : personaName;
         this.personaDescription = options.personaDescription ?? '';
-        this.luaFactory = options.luaFactory ?? new LuaFactory(wasmUrl);
+        this.workerFactory = options.workerFactory;
         this.eventTimeoutMs = Math.min(
             MAX_RUNTIME_EVENT_MS,
             Math.max(25, options.eventTimeoutMs ?? MAX_RUNTIME_EVENT_MS),
         );
+        this.regexRuleScope = `${options.profile.character_id}:${options.profile.character_content_revision_id ?? 'legacy'}`;
+        this.modelBudgetScope = this.regexRuleScope;
         this.storageKey = [
             'lorepia.character-runtime.v1',
             options.profile.character_id,
@@ -356,7 +249,7 @@ export class PortableCharacterRuntime {
         }
         const runtime = new PortableCharacterRuntime(options);
         try {
-            await runtime.runWithEventDeadline(() => runtime.initialize());
+            await runtime.initializeWithDeadline();
             return runtime;
         } catch (error) {
             runtime.close();
@@ -370,13 +263,15 @@ export class PortableCharacterRuntime {
 
     get variables(): Record<string, string> {
         return {
-            ...this.generationVariables,
-            ...Object.fromEntries(
-                Object.entries(this.persisted.chatVars).map(([key, value]) => [
-                    key,
-                    safeText(value),
-                ]),
-            ),
+            ...(this.capabilities.includes('profile:read') ? this.generationVariables : {}),
+            ...(this.capabilities.includes('state:readwrite')
+                ? Object.fromEntries(
+                      Object.entries(this.persisted.chatVars).map(([key, value]) => [
+                          key,
+                          safePortableText(value),
+                      ]),
+                  )
+                : {}),
         };
     }
 
@@ -385,7 +280,13 @@ export class PortableCharacterRuntime {
     }
 
     get auxiliarySelection(): GenerationSelectionInput | null {
-        return cloneSelection(this.persisted.auxiliarySelection);
+        return validSelection(this.persisted.auxiliarySelection)
+            ? cloneSelection(this.persisted.auxiliarySelection)
+            : null;
+    }
+
+    get modelBudget(): PortableRuntimeModelBudgetSnapshot {
+        return portableRuntimeModelBudgetSnapshot(this.modelBudgetScope);
     }
 
     setMessages(messages: MessageDto[]): void {
@@ -416,8 +317,8 @@ export class PortableCharacterRuntime {
 
     async setOption(key: string, value: string): Promise<void> {
         if (!this.toggles.some((toggle) => toggle.key === key)) return;
-        await this.runWithEventDeadline(async () => {
-            const options = updateStringRecord(
+        await this.runWithEventDeadline(async (workerVersion) => {
+            const options = updatePortableStringRecord(
                 this.persisted.options,
                 key,
                 value,
@@ -425,7 +326,7 @@ export class PortableCharacterRuntime {
                 16_384,
             );
             if (options === null || !this.commitPersisted({ ...this.persisted, options })) return;
-            await this.refreshDisplay();
+            await this.refreshDisplayInWorker(workerVersion);
             this.notifyChanged();
         });
     }
@@ -443,15 +344,14 @@ export class PortableCharacterRuntime {
 
     async prepareInput(text: string): Promise<PreparedPortableInput> {
         this.assertOpen();
-        return await this.runWithEventDeadline(async () => {
-            this.stopped = false;
-            let edited: unknown = text;
-            for (const callback of this.editCallbacks.get('editInput') ?? []) {
-                edited = await Promise.resolve(
-                    callback(TRIGGER_ID, typeof edited === 'string' ? edited : text),
-                );
-            }
-            const prepared = typeof edited === 'string' ? edited : text;
+        return await this.runWithEventDeadline(async (workerVersion) => {
+            this.workerStopped = false;
+            const edited = await this.requestWorker(
+                { type: 'edit-input', text, context: this.workerContext() },
+                workerVersion,
+            );
+            if (edited.type !== 'edited-input') throw protocolResultError();
+            const prepared = edited.text;
             this.virtualMessage = {
                 id: '__runtime_pending_user__',
                 role: 'user',
@@ -459,16 +359,26 @@ export class PortableCharacterRuntime {
                 time: Math.floor(Date.now() / 1_000),
                 virtual: true,
             };
-            let result: unknown;
+            let result: PortableRuntimeWorkerValue;
             try {
                 await this.refreshActiveLore();
-                result = await this.invokeGlobal('onStart', TRIGGER_ID);
+                const invoked = await this.requestWorker(
+                    {
+                        type: 'invoke',
+                        name: 'onStart',
+                        values: ['character-runtime'],
+                        context: this.workerContext(),
+                    },
+                    workerVersion,
+                );
+                if (invoked.type !== 'invoked') throw protocolResultError();
+                result = invoked.value;
             } finally {
                 this.virtualMessage = null;
             }
-            const startAllowed = typeof result !== 'boolean' || result;
-            const shouldSend = !this.chatStopped() && startAllowed && prepared.trim() !== '';
-            await this.refreshDisplay();
+            const startAllowed = result !== false;
+            const shouldSend = this.canSendPreparedInput(startAllowed, prepared);
+            await this.refreshDisplayInWorker(workerVersion);
             this.notifyChanged();
             return { text: prepared, shouldSend };
         });
@@ -476,11 +386,20 @@ export class PortableCharacterRuntime {
 
     async afterOutput(messages: MessageDto[]): Promise<void> {
         this.assertOpen();
-        await this.runWithEventDeadline(async () => {
+        await this.runWithEventDeadline(async (workerVersion) => {
             this.setMessages(messages);
             await this.refreshActiveLore();
-            await this.invokeGlobal('onOutput', TRIGGER_ID);
-            await this.refreshDisplay();
+            const result = await this.requestWorker(
+                {
+                    type: 'invoke',
+                    name: 'onOutput',
+                    values: ['character-runtime'],
+                    context: this.workerContext(),
+                },
+                workerVersion,
+            );
+            if (result.type !== 'invoked') throw protocolResultError();
+            await this.refreshDisplayInWorker(workerVersion);
             this.notifyChanged();
         });
     }
@@ -488,251 +407,186 @@ export class PortableCharacterRuntime {
     async handleAction(action: string): Promise<void> {
         if (action.length === 0 || action.length > 512) return;
         this.assertOpen();
-        await this.runWithEventDeadline(async () => {
+        await this.runWithEventDeadline(async (workerVersion) => {
             await this.refreshActiveLore();
-            await this.invokeGlobal('onButtonClick', TRIGGER_ID, action);
-            await this.refreshDisplay();
+            const result = await this.requestWorker(
+                {
+                    type: 'invoke',
+                    name: 'onButtonClick',
+                    values: ['character-runtime', action],
+                    context: this.workerContext(),
+                },
+                workerVersion,
+            );
+            if (result.type !== 'invoked') throw protocolResultError();
+            await this.refreshDisplayInWorker(workerVersion);
             this.notifyChanged();
         });
     }
 
     async refreshDisplay(): Promise<void> {
         this.assertOpen();
-        await this.runWithEventDeadline(async () => {
-            const callbacks = this.editCallbacks.get('editDisplay') ?? [];
-            this.displayCache.clear();
-            if (callbacks.length === 0) return;
-            const messages = this.runtimeMessages();
-            for (let index = 0; index < messages.length; index += 1) {
-                const runtimeMessage = messages[index];
-                const sourceMessage = this.messages.find(
-                    (message) => message.id === runtimeMessage?.id,
-                );
-                if (runtimeMessage === undefined || sourceMessage === undefined) continue;
-                let display: unknown = runtimeMessage.data;
-                for (const callback of callbacks) {
-                    display = await Promise.resolve(
-                        callback(
-                            TRIGGER_ID,
-                            typeof display === 'string' ? display : runtimeMessage.data,
-                            { index },
-                        ),
-                    );
-                }
-                this.displayCache.set(
-                    sourceMessage.id,
-                    typeof display === 'string' ? display : runtimeMessage.data,
-                );
-            }
-        });
+        await this.runWithEventDeadline((workerVersion) =>
+            this.refreshDisplayInWorker(workerVersion),
+        );
     }
 
     close(): void {
         if (this.closed) return;
         this.closed = true;
-        for (const timeout of this.sleepTimeouts) globalThis.clearTimeout(timeout);
-        this.sleepTimeouts.clear();
-        const engine = this.engine;
-        this.engine = null;
-        try {
-            engine?.global.close();
-        } catch {
-            // Closing is best-effort after the runtime has already been made unreachable.
-        }
-        this.editCallbacks.clear();
+        void this.cancelActiveModelCall();
+        this.workerVersion += 1;
+        const worker = this.worker;
+        this.worker = null;
+        worker?.close();
         this.displayCache.clear();
     }
 
-    private async initialize(): Promise<void> {
-        const engine = await this.luaFactory.createEngine({
-            injectObjects: true,
-            enableProxy: false,
-            traceAllocations: true,
-            functionTimeout: MAX_RUNTIME_LUA_SLICE_MS,
-        });
-        engine.global.setMemoryMax(MAX_RUNTIME_LUA_MEMORY_BYTES);
-        this.engine = engine;
-        this.installHostFunctions(engine);
-        await executeLuaSource(engine, LUA_ASYNC_BRIDGE);
-        if (this.capabilities.has('model:generate')) {
-            await executeLuaSource(engine, LUA_MODEL_BRIDGE);
-        }
-        await executeLuaSource(engine, LUA_SANDBOX_HARDENING);
-        await this.refreshActiveLore();
-        for (const script of this.profile.runtime_scripts) {
-            if (script.language.trim().toLowerCase() !== 'lua' || script.source.trim() === '') {
-                continue;
-            }
-            await executeLuaSource(engine, script.source);
-        }
-        await this.refreshDisplay();
+    async cancelActiveModelCall(): Promise<boolean> {
+        const requestId = this.activeModelRequestId;
+        if (requestId === null || this.client.cancelRuntimeText === undefined) return false;
+        return await this.client.cancelRuntimeText(requestId).catch(() => false);
     }
 
-    private installHostFunctions(engine: LuaEngine): void {
-        const set = (name: string, value: unknown): void => engine.global.set(name, value);
-        set('__hostIsRuntimePromise', isNativePromise);
-        set(
-            '__hostRuntimeYield',
-            () =>
-                new Promise<void>((resolve) => {
-                    const timeout = globalThis.setTimeout(() => {
-                        this.sleepTimeouts.delete(timeout);
-                        if (!this.closed) resolve();
-                    }, 0);
-                    this.sleepTimeouts.add(timeout);
-                }),
+    private async initializeWithDeadline(): Promise<void> {
+        let timeout: ReturnType<typeof globalThis.setTimeout> | undefined;
+        const deadlineError = new PortableRuntimeWorkerError(
+            'execution-timeout',
+            t('chat.runtime.event_timeout'),
         );
-        if (this.capabilities.has('runtime:callbacks')) {
-            set('listenEdit', (kind: unknown, callback: unknown) => {
-                if (typeof kind !== 'string' || typeof callback !== 'function') return;
-                if (!['editInput', 'editDisplay'].includes(kind)) return;
-                const callbacks = this.editCallbacks.get(kind) ?? [];
-                if (callbacks.length >= 64) return;
-                callbacks.push(callback as EditCallback);
-                this.editCallbacks.set(kind, callbacks);
-            });
-            set('cbs', (first: unknown, second?: unknown) =>
-                this.expandMacros(typeof second === 'string' ? second : safeText(first)),
-            );
-            set('sleep', (first: unknown, second?: unknown) => {
-                const milliseconds = Number(second ?? first);
-                return new Promise<void>((resolve) => {
-                    const timeout = globalThis.setTimeout(
-                        () => {
-                            this.sleepTimeouts.delete(timeout);
-                            if (!this.closed) resolve();
-                        },
-                        Number.isFinite(milliseconds)
-                            ? Math.min(5_000, Math.max(0, milliseconds))
-                            : 0,
-                    );
-                    this.sleepTimeouts.add(timeout);
-                });
-            });
+        const deadline = new Promise<never>((_resolve, reject) => {
+            timeout = globalThis.setTimeout(() => {
+                this.detachWorker(deadlineError);
+                reject(deadlineError);
+            }, this.eventTimeoutMs);
+        });
+        try {
+            await Promise.race([this.initializeWorker(), deadline]);
+        } finally {
+            if (timeout !== undefined) globalThis.clearTimeout(timeout);
         }
-        if (this.capabilities.has('chat:read')) {
-            set('getChatLength', () => this.runtimeMessages().length);
-            set('getChat', (_triggerId: unknown, index: unknown) =>
-                luaNullable(this.runtimeChatAt(index)),
-            );
-            set('getFullChat', () => this.runtimeMessages().map(runtimeMessageValue));
-        }
-        if (this.capabilities.has('chat:write')) {
-            set('setChat', (_triggerId: unknown, index: unknown, content: unknown) => {
-                const message = this.runtimeMessageAt(index);
-                if (message === undefined || typeof content !== 'string') return false;
-                if (message.virtual) {
-                    if (content.length > MAX_RUNTIME_MESSAGE_OVERRIDE_CHARS) return false;
-                    if (this.virtualMessage !== null) this.virtualMessage.data = content;
-                } else {
-                    const messageOverrides = updateStringRecord(
-                        this.persisted.messageOverrides,
-                        message.id,
-                        content,
-                        MAX_RUNTIME_RECORD_KEYS,
-                        MAX_RUNTIME_MESSAGE_OVERRIDE_CHARS,
-                    );
-                    if (
-                        messageOverrides === null ||
-                        !this.commitPersisted({ ...this.persisted, messageOverrides })
-                    ) {
-                        return false;
-                    }
+    }
+
+    private async initializeWorker(): Promise<void> {
+        this.assertNotClosed();
+        await this.refreshActiveLore();
+        this.assertNotClosed();
+        const workerVersion = this.workerVersion + 1;
+        this.workerVersion = workerVersion;
+        const worker = new PortableRuntimeWorkerClient(this.workerFactory, {
+            onHostCall: async (call) => {
+                if (this.worker !== worker || this.workerVersion !== workerVersion) {
+                    throw new Error(t('chat.runtime.not_ready'));
                 }
-                this.notifyChanged();
-                return true;
-            });
-            set('removeChat', (_triggerId: unknown, index: unknown) => {
-                const messages = this.runtimeMessages();
-                const resolved = resolveRuntimeIndex(index, messages.length);
-                if (resolved === null) return false;
-                if (messages[resolved]?.virtual) {
-                    this.virtualMessage = null;
+                return await this.handleHostCall(call);
+            },
+            onState: (persisted) => {
+                if (this.worker !== worker || this.workerVersion !== workerVersion) return;
+                if (!this.acceptWorkerState(persisted)) {
+                    this.detachWorker(
+                        new PortableRuntimeWorkerError(
+                            'protocol-error',
+                            'portable runtime worker returned invalid state',
+                        ),
+                        worker,
+                    );
+                }
+            },
+            onChanged: () => {
+                if (this.worker === worker && this.workerVersion === workerVersion) {
                     this.notifyChanged();
-                    return true;
                 }
-                return false;
-            });
-            set('reloadChat', () => {
-                this.notifyChanged();
-                return true;
-            });
-            set('stopChat', () => {
-                this.stopped = true;
-                return true;
-            });
-        }
-        if (this.capabilities.has('state:readwrite')) {
-            set('getChatVar', (_triggerId: unknown, key: unknown) =>
-                luaNullable(typeof key === 'string' ? this.persisted.chatVars[key] : undefined),
-            );
-            set('setChatVar', (_triggerId: unknown, key: unknown, value: unknown) => {
-                if (typeof key !== 'string' || key.length === 0 || key.length > 512) return false;
-                const chatVars = updateUnknownRecord(this.persisted.chatVars, key, value);
-                if (chatVars === null || !this.commitPersisted({ ...this.persisted, chatVars })) {
-                    return false;
+            },
+            onNotice: (message, error) => {
+                if (this.worker === worker && this.workerVersion === workerVersion) {
+                    this.onNotice(message, error);
                 }
-                this.notifyChanged();
-                return true;
+            },
+        });
+        this.worker = worker;
+        try {
+            const response = await worker.request({
+                type: 'initialize',
+                value: {
+                    profile: this.profile,
+                    capabilities: this.capabilities,
+                    characterName: this.characterName,
+                    characterDescription: this.characterDescription,
+                    personaName: this.personaName,
+                    personaDescription: this.personaDescription,
+                    context: this.workerContext(),
+                },
             });
-            set('getState', (_triggerId: unknown, key: unknown) =>
-                luaNullable(typeof key === 'string' ? this.persisted.state[key] : undefined),
+            if (this.worker !== worker || this.workerVersion !== workerVersion) {
+                throw new PortableRuntimeWorkerError(
+                    'worker-terminated',
+                    t('chat.runtime.not_ready'),
+                );
+            }
+            this.applySnapshot(response.snapshot);
+            if (response.result.type !== 'initialized') throw protocolResultError();
+            await this.refreshDisplayInWorker(workerVersion);
+        } catch (error) {
+            this.detachWorker(
+                error instanceof Error ? error : new Error(t('chat.runtime.not_ready')),
+                worker,
             );
-            set('setState', (_triggerId: unknown, key: unknown, value: unknown) => {
-                if (typeof key !== 'string' || key.length === 0 || key.length > 512) return false;
-                const state = updateUnknownRecord(this.persisted.state, key, value);
-                return state !== null && this.commitPersisted({ ...this.persisted, state });
-            });
+            throw error;
         }
-        if (this.capabilities.has('profile:read')) {
-            set('getGlobalVar', (_triggerId: unknown, key: unknown) =>
-                luaNullable(typeof key === 'string' ? this.lookupVariable(key) : undefined),
-            );
-            set('getPersonaName', () => this.personaName);
-            set('getPersonaDescription', () => this.personaDescription);
-            set('getDescription', () => this.characterDescription);
+    }
+
+    private async refreshDisplayInWorker(workerVersion: number): Promise<void> {
+        const result = await this.requestWorker(
+            { type: 'refresh-display', context: this.workerContext() },
+            workerVersion,
+        );
+        if (result.type !== 'display') throw protocolResultError();
+        const displayCache = new Map<string, string>();
+        const retained = new Set(this.messages.map((message) => message.id));
+        for (const [id, text] of result.entries) {
+            if (retained.has(id)) displayCache.set(id, text);
         }
-        if (this.capabilities.has('lore:read')) {
-            set('getLoreBooks', (_triggerId: unknown, name: unknown) => this.loreBooks(name));
-            set('loadLoreBooks', () => this.activeLoreBooks());
+        this.displayCache = displayCache;
+    }
+
+    private async requestWorker(
+        operation: PortableRuntimeWorkerOperation,
+        workerVersion: number,
+    ): Promise<PortableRuntimeWorkerResult> {
+        const worker = this.worker;
+        if (worker === null || this.workerVersion !== workerVersion) {
+            throw new PortableRuntimeWorkerError('worker-terminated', t('chat.runtime.not_ready'));
         }
-        if (this.capabilities.has('ui:write')) {
-            set('getBackgroundEmbedding', () => this.persisted.background);
-            set('setBackgroundEmbedding', (_triggerId: unknown, value: unknown) => {
-                if (typeof value !== 'string' || value.length > MAX_RUNTIME_BACKGROUND_CHARS) {
-                    return false;
-                }
-                if (!this.commitPersisted({ ...this.persisted, background: value })) return false;
-                this.notifyChanged();
-                return true;
-            });
-            set('alertNormal', (_triggerId: unknown, message: unknown) => {
-                this.emitNotice(message, false);
-            });
-            set('alertError', (_triggerId: unknown, message: unknown) => {
-                this.emitNotice(message, true);
-            });
+        const response = await worker.request(operation);
+        if (this.worker !== worker || this.workerVersion !== workerVersion) {
+            throw new PortableRuntimeWorkerError('worker-terminated', t('chat.runtime.not_ready'));
         }
-        if (this.capabilities.has('model:generate')) {
-            set('__hostMainGeneration', (messages: unknown) =>
-                this.generate(this.primarySelection(), messages),
-            );
-            set('__hostAuxGeneration', (messages: unknown) =>
-                this.generate(
-                    this.persisted.auxiliarySelection ?? this.primarySelection(),
-                    messages,
-                ),
+        this.applySnapshot(response.snapshot);
+        return response.result;
+    }
+
+    private async handleHostCall(call: PortableRuntimeHostCallMessage): Promise<unknown> {
+        const requiredCapability: PortableRuntimeCapability =
+            call.target === 'primary' ? 'model:primary' : 'model:auxiliary';
+        if (!this.capabilities.includes(requiredCapability)) {
+            throw new PortableRuntimeWorkerError(
+                'protocol-error',
+                'portable runtime worker requested an ungranted host capability',
             );
         }
-        if (this.capabilities.has('elevated')) {
-            set('log', () => undefined);
-        }
+        const selection =
+            call.target === 'primary' ? this.primarySelection() : this.auxiliarySelection;
+        return await this.generate(call.target, selection, call.messages);
     }
 
     private async generate(
+        target: 'primary' | 'auxiliary',
         selection: GenerationSelectionInput | null,
         rawMessages: unknown,
     ): Promise<{ success: boolean; result: string }> {
+        let lease: PortableRuntimeModelCallLease | undefined;
+        let usage: GenerationUsageDto | null = null;
+        let callOutcome: 'completed' | 'known_failure' | 'unknown_outcome' = 'known_failure';
         try {
             if (selection === null) throw new Error(t('chat.runtime.generation.model_missing'));
             if (this.client.generateRuntimeText === undefined) {
@@ -743,42 +597,208 @@ export class PortableCharacterRuntime {
                 (total, message) => total + message.content.length,
                 0,
             );
-            if (
-                this.modelCallCount >= MAX_RUNTIME_MODEL_CALLS ||
-                promptChars > MAX_RUNTIME_MODEL_PROMPT_CHARS
-            ) {
+            if (promptChars > MAX_RUNTIME_MODEL_PROMPT_CHARS) {
                 throw new Error(t('chat.runtime.generation.budget_exhausted'));
             }
-            this.modelCallCount += 1;
-            const response = await this.client.generateRuntimeText({ selection, messages });
+            const promptByteLength = messages.reduce(
+                (total, message) => total + new TextEncoder().encode(message.content).byteLength,
+                0,
+            );
+            const admission = beginPortableRuntimeModelCall(
+                this.modelBudgetScope,
+                promptByteLength,
+            );
+            if (!admission.ok) {
+                throw new Error(t('chat.runtime.generation.budget_exhausted'));
+            }
+            lease = admission.lease;
+            this.activeModelRequestId = lease.requestId;
+            const generation = this.client.generateRuntimeText({
+                request_id: lease.requestId,
+                audit: {
+                    character_id: this.profile.character_id,
+                    character_content_revision_id:
+                        this.profile.character_content_revision_id ?? null,
+                    capability: target === 'primary' ? 'model:primary' : 'model:auxiliary',
+                    grant_sha256: this.grantSha256,
+                },
+                selection,
+                messages,
+            });
+            this.onModelCallStatus({
+                requestId: lease.requestId,
+                target,
+                characterName: this.characterName,
+                startedAt: Date.now(),
+            });
+            const response = await generation;
+            if (response.request_id !== lease.requestId) {
+                throw new PortableRuntimeWorkerError(
+                    'protocol-error',
+                    'runtime model response identity did not match the request',
+                );
+            }
+            usage = response.usage;
+            callOutcome = 'completed';
             return { success: true, result: response.result };
         } catch (error) {
-            const result = safeText(error);
-            return { success: false, result };
+            if (lease !== undefined) {
+                const clientError = normalizeClientError(error);
+                callOutcome =
+                    clientError.code === 'internal' || clientError.code === 'unexpected'
+                        ? 'unknown_outcome'
+                        : 'known_failure';
+            }
+            return { success: false, result: safePortableText(error) };
+        } finally {
+            if (lease !== undefined) {
+                lease.finish(usage, callOutcome);
+                if (this.activeModelRequestId === lease.requestId) {
+                    this.activeModelRequestId = null;
+                    this.onModelCallStatus(null);
+                }
+            }
         }
     }
 
-    private runtimeMessages(): RuntimeChatMessage[] {
-        const messages = this.messages.map((message) => ({
-            id: message.id,
-            role: runtimeRole(message.role),
-            data: this.effectiveText(message),
-            time: Math.floor(Date.parse(message.created_at) / 1_000) || 0,
-            virtual: false,
-        }));
-        if (this.virtualMessage !== null) messages.push(this.virtualMessage);
-        return messages;
+    private workerContext(): PortableRuntimeWorkerContext {
+        return {
+            persisted: this.persisted,
+            messages: this.messages.map((message) => ({
+                id: message.id,
+                role: runtimeRole(message.role),
+                data: this.effectiveText(message),
+                time: Math.floor(Date.parse(message.created_at) / 1_000) || 0,
+                virtual: false,
+            })),
+            virtualMessage: this.virtualMessage,
+            activeLoreEntries: this.activeLoreEntries,
+            stopped: this.workerStopped,
+        };
     }
 
-    private runtimeMessageAt(index: unknown): RuntimeChatMessage | undefined {
-        const messages = this.runtimeMessages();
-        const resolved = resolveRuntimeIndex(index, messages.length);
-        return resolved === null ? undefined : messages[resolved];
+    private canSendPreparedInput(startAllowed: boolean, text: string): boolean {
+        return !this.workerStopped && startAllowed && text.trim() !== '';
     }
 
-    private runtimeChatAt(index: unknown): ReturnType<typeof runtimeMessageValue> | undefined {
-        const message = this.runtimeMessageAt(index);
-        return message === undefined ? undefined : runtimeMessageValue(message);
+    private applySnapshot(snapshot: PortableRuntimeWorkerSnapshot): void {
+        if (!this.acceptWorkerState(snapshot.persisted)) {
+            throw new PortableRuntimeWorkerError(
+                'protocol-error',
+                'portable runtime worker returned invalid state',
+            );
+        }
+        this.virtualMessage = snapshot.virtualMessage;
+        this.workerStopped = snapshot.stopped;
+    }
+
+    private acceptWorkerState(value: unknown): boolean {
+        const normalized = normalizePortableRuntimeState(value, this.profile.background_markup);
+        return (
+            normalized !== null &&
+            this.commitPersisted({
+                ...normalized,
+                auxiliarySelection: this.auxiliarySelection,
+            })
+        );
+    }
+
+    private runWithEventDeadline<T>(operation: (workerVersion: number) => Promise<T>): Promise<T> {
+        const run = () => this.executeWithEventDeadline(operation);
+        const result = this.operationQueue.then(run, run);
+        this.operationQueue = result.then(
+            () => undefined,
+            () => undefined,
+        );
+        return result;
+    }
+
+    private async executeWithEventDeadline<T>(
+        operation: (workerVersion: number) => Promise<T>,
+    ): Promise<T> {
+        if (this.closed) throw new Error(t('chat.runtime.not_ready'));
+        const worker = this.worker;
+        const workerVersion = this.workerVersion;
+        if (worker === null) throw new Error(t('chat.runtime.not_ready'));
+        let timeout: ReturnType<typeof globalThis.setTimeout> | undefined;
+        const deadlineError = new PortableRuntimeWorkerError(
+            'execution-timeout',
+            t('chat.runtime.event_timeout'),
+        );
+        const deadline = new Promise<never>((_resolve, reject) => {
+            timeout = globalThis.setTimeout(() => {
+                this.detachWorker(deadlineError, worker);
+                reject(deadlineError);
+            }, this.eventTimeoutMs);
+        });
+        try {
+            return await Promise.race([operation(workerVersion), deadline]);
+        } catch (error) {
+            const workerFailure =
+                error instanceof PortableRuntimeWorkerError &&
+                (error.code === 'execution-timeout' ||
+                    error.code === 'protocol-error' ||
+                    error.code === 'worker-terminated');
+            if (workerFailure) this.detachWorker(error, worker);
+            if (workerFailure) {
+                try {
+                    await this.recoverWorker();
+                } catch {
+                    this.close();
+                }
+            }
+            if (error instanceof PortableRuntimeWorkerError && error.code === 'execution-timeout') {
+                throw new Error(t('chat.runtime.event_timeout'), { cause: error });
+            }
+            throw error;
+        } finally {
+            if (timeout !== undefined) globalThis.clearTimeout(timeout);
+        }
+    }
+
+    private async recoverWorker(): Promise<void> {
+        if (this.closed) throw new Error(t('chat.runtime.not_ready'));
+        if (this.recoveryPromise !== null) return await this.recoveryPromise;
+        this.recoveryPromise = this.initializeWithDeadline();
+        try {
+            await this.recoveryPromise;
+        } finally {
+            this.recoveryPromise = null;
+        }
+    }
+
+    private detachWorker(error: Error, expected?: PortableRuntimeWorkerClient): void {
+        const worker = this.worker;
+        if (worker === null || (expected !== undefined && worker !== expected)) return;
+        this.worker = null;
+        this.workerVersion += 1;
+        worker.close(error);
+    }
+
+    private async refreshActiveLore(): Promise<void> {
+        if (!this.capabilities.includes('lore:read')) {
+            this.activeLoreEntries = [];
+            return;
+        }
+        const mayReadChat = this.capabilities.includes('chat:read');
+        const sourceParts = mayReadChat
+            ? this.messages.map((message) => this.effectiveText(message))
+            : [];
+        if (mayReadChat && this.virtualMessage !== null) sourceParts.push(this.virtualMessage.data);
+        const source = sourceParts.join('\n').slice(-MAX_RUNTIME_LORE_SOURCE_CHARS);
+        const candidates = this.profile.runtime_knowledge
+            .filter((entry) => entry.enabled && !entry.folder && (mayReadChat || entry.constant))
+            .slice(0, MAX_RUNTIME_LORE_ENTRIES);
+        const budget: LoreWorkBudget = {
+            keyTestsRemaining: MAX_RUNTIME_LORE_KEY_TESTS,
+            regexTestsRemaining: MAX_RUNTIME_LORE_REGEX_TESTS,
+        };
+        const active: CharacterRuntimeKnowledgeDto[] = [];
+        for (const entry of candidates) {
+            if (await loreEntryActive(entry, source, budget, this.regexRuleScope))
+                active.push(entry);
+        }
+        this.activeLoreEntries = active;
     }
 
     private lookupVariable(requested: string): string | undefined {
@@ -792,141 +812,27 @@ export class PortableCharacterRuntime {
         );
     }
 
-    private loreBooks(name: unknown): { content: string; data: string; name: string }[] {
-        if (typeof name !== 'string') return [];
-        return this.profile.runtime_knowledge
-            .filter((entry) => entry.enabled && entry.name === name)
-            .slice(0, MAX_RUNTIME_LORE_ENTRIES)
-            .map((entry) => this.loreBookValue(entry));
-    }
-
-    private activeLoreBooks(): { content: string; data: string; name: string }[] {
-        return this.activeLoreEntries.map((entry) => this.loreBookValue(entry));
-    }
-
-    private async refreshActiveLore(): Promise<void> {
-        const source = this.runtimeMessages()
-            .map((message) => message.data)
-            .join('\n')
-            .slice(-MAX_RUNTIME_LORE_SOURCE_CHARS);
-        const candidates = this.profile.runtime_knowledge
-            .filter((entry) => entry.enabled)
-            .slice(0, MAX_RUNTIME_LORE_ENTRIES);
-        const budget: LoreWorkBudget = {
-            keyTestsRemaining: MAX_RUNTIME_LORE_KEY_TESTS,
-            regexTestsRemaining: MAX_RUNTIME_LORE_REGEX_TESTS,
-        };
-        const active: CharacterRuntimeKnowledgeDto[] = [];
-        for (const entry of candidates) {
-            if (await loreEntryActive(entry, source, budget)) active.push(entry);
-        }
-        this.activeLoreEntries = active;
-    }
-
-    private expandMacros(source: string): string {
-        const messages = this.runtimeMessages();
-        const lastCharacter = [...messages]
-            .reverse()
-            .find((message) => message.role === 'char')?.data;
-        const expanded = source
-            .replaceAll('{{char}}', this.characterName)
-            .replaceAll('{{user}}', this.personaName)
-            .replaceAll('{{description}}', this.characterDescription)
-            .replaceAll('{{lastcharmessage}}', lastCharacter ?? '')
-            .replace(
-                /\{\{getglobalvar::([^{}]+)}}/gi,
-                (_match, key: string) => this.lookupVariable(key.trim()) ?? '',
-            )
-            .replace(/\{\{getvar::([^{}]+)}}/gi, (_match, key: string) =>
-                safeText(this.persisted.chatVars[key.trim()]),
-            );
-        return renderPortableMacros(
-            expanded,
-            {
-                variables: this.variables,
-                chatIndex: Math.max(0, messages.length - 1),
-                lastMessageId: Math.max(0, messages.length - 1),
-                lastCharacterMessage: lastCharacter ?? '',
-                characterName: this.characterName,
-                userName: this.personaName,
-            },
-            expanded,
-        );
-    }
-
-    private loreBookValue(entry: CharacterRuntimeKnowledgeDto): {
-        content: string;
-        data: string;
-        name: string;
-    } {
-        const content = this.expandMacros(entry.content);
-        return { content, data: content, name: entry.name };
-    }
-
-    private async invokeGlobal(name: string, ...values: unknown[]): Promise<unknown> {
-        const engine = this.engine;
-        if (engine === null) return undefined;
-        const callback = engine.global.get(name) as unknown;
-        if (typeof callback !== 'function') return undefined;
-        return await Promise.resolve((callback as EditCallback)(...values));
-    }
-
-    private async runWithEventDeadline<T>(operation: () => Promise<T>): Promise<T> {
-        let timeout: ReturnType<typeof globalThis.setTimeout> | undefined;
-        const deadline = new Promise<never>((_resolve, reject) => {
-            timeout = globalThis.setTimeout(() => {
-                this.close();
-                reject(new Error(t('chat.runtime.event_timeout')));
-            }, this.eventTimeoutMs);
-        });
-        try {
-            return await Promise.race([Promise.resolve().then(operation), deadline]);
-        } finally {
-            if (timeout !== undefined) globalThis.clearTimeout(timeout);
-        }
-    }
-
-    private loadState(): PersistedRuntimeState {
-        const fallback: PersistedRuntimeState = {
-            options: {},
-            chatVars: {},
-            state: {},
-            messageOverrides: {},
-            background: this.profile.background_markup,
-            auxiliarySelection: null,
-        };
+    private loadState(): PortableRuntimePersistedState {
+        const fallback = defaultPortableRuntimeState(this.profile.background_markup);
         try {
             const serialized = this.storage?.getItem(this.storageKey);
             if (serialized === null || serialized === undefined) return fallback;
             if (new TextEncoder().encode(serialized).byteLength > MAX_PERSISTED_RUNTIME_BYTES) {
                 return fallback;
             }
-            const parsed = JSON.parse(serialized) as Partial<PersistedRuntimeState>;
-            const candidate: PersistedRuntimeState = {
-                options: boundedStringRecord(parsed.options, 16_384) ?? {},
-                chatVars: boundedUnknownRecord(parsed.chatVars) ?? {},
-                state: boundedUnknownRecord(parsed.state) ?? {},
-                messageOverrides:
-                    boundedStringRecord(
-                        parsed.messageOverrides,
-                        MAX_RUNTIME_MESSAGE_OVERRIDE_CHARS,
-                    ) ?? {},
-                background:
-                    typeof parsed.background === 'string'
-                        ? parsed.background.slice(0, MAX_RUNTIME_BACKGROUND_CHARS)
-                        : this.profile.background_markup.slice(0, MAX_RUNTIME_BACKGROUND_CHARS),
-                auxiliarySelection: validSelection(parsed.auxiliarySelection)
-                    ? cloneSelection(parsed.auxiliarySelection)
-                    : null,
-            };
-            return serializePersisted(candidate) === null ? fallback : candidate;
+            return (
+                normalizePortableRuntimeState(
+                    JSON.parse(serialized),
+                    this.profile.background_markup,
+                ) ?? fallback
+            );
         } catch {
             return fallback;
         }
     }
 
-    private commitPersisted(candidate: PersistedRuntimeState): boolean {
-        const serialized = serializePersisted(candidate);
+    private commitPersisted(candidate: PortableRuntimePersistedState): boolean {
+        const serialized = serializePortableRuntimeState(candidate);
         if (serialized === null) return false;
         this.persisted = candidate;
         try {
@@ -946,30 +852,12 @@ export class PortableCharacterRuntime {
         });
     }
 
-    private emitNotice(value: unknown, error: boolean): void {
-        const message = safeText(value).slice(0, MAX_RUNTIME_NOTICE_CHARS);
-        if (message !== '') this.onNotice(message, error);
-    }
-
-    private chatStopped(): boolean {
-        return this.stopped;
-    }
-
     private assertOpen(): void {
-        if (this.closed || this.engine === null) {
-            throw new Error(t('chat.runtime.not_ready'));
-        }
+        if (this.closed || this.worker === null) throw new Error(t('chat.runtime.not_ready'));
     }
-}
 
-async function executeLuaSource(engine: LuaEngine, source: string): Promise<void> {
-    const thread = engine.global.newThread();
-    const threadIndex = engine.global.getTop();
-    try {
-        thread.loadString(source);
-        await thread.run(0, { timeout: MAX_RUNTIME_LUA_SLICE_MS });
-    } finally {
-        engine.global.remove(threadIndex);
+    private assertNotClosed(): void {
+        if (this.closed) throw new Error(t('chat.runtime.not_ready'));
     }
 }
 
@@ -1032,52 +920,55 @@ function runtimePromptMessages(value: unknown): RuntimePromptMessageInput[] {
     return messages;
 }
 
-function runtimeRole(role: MessageDto['role']): RuntimeChatMessage['role'] {
+function runtimeRole(role: MessageDto['role']): PortableRuntimeChatMessage['role'] {
     if (role === 'assistant') return 'char';
     if (role === 'user') return 'user';
     return 'system';
-}
-
-function runtimeMessageValue(message: RuntimeChatMessage): {
-    role: RuntimeChatMessage['role'];
-    data: string;
-    time: number;
-} {
-    return { role: message.role, data: message.data, time: message.time };
-}
-
-function resolveRuntimeIndex(value: unknown, length: number): number | null {
-    const numeric = Number(value);
-    if (!Number.isInteger(numeric)) return null;
-    const resolved = numeric < 0 ? length + numeric : numeric;
-    return resolved >= 0 && resolved < length ? resolved : null;
 }
 
 async function loreEntryActive(
     entry: CharacterRuntimeKnowledgeDto,
     source: string,
     budget: LoreWorkBudget,
+    ruleScope: string,
 ): Promise<boolean> {
     if (entry.constant) return true;
-    const primary = entry.primary_keys;
-    if (primary.length === 0) return false;
-    const primaryMatch = await anyLoreKeyMatches(entry, primary, source, budget);
+    if (entry.primary_keys.length === 0) return false;
+    const primaryMatch = await anyLoreKeyMatches(
+        entry,
+        entry.primary_keys,
+        'primary',
+        source,
+        budget,
+        ruleScope,
+    );
     if (!primaryMatch) return false;
     return (
-        !entry.selective || (await anyLoreKeyMatches(entry, entry.secondary_keys, source, budget))
+        !entry.selective ||
+        (await anyLoreKeyMatches(
+            entry,
+            entry.secondary_keys,
+            'secondary',
+            source,
+            budget,
+            ruleScope,
+        ))
     );
 }
 
 async function anyLoreKeyMatches(
     entry: CharacterRuntimeKnowledgeDto,
     keys: readonly string[],
+    keyKind: 'primary' | 'secondary',
     source: string,
     budget: LoreWorkBudget,
+    ruleScope: string,
 ): Promise<boolean> {
-    for (const key of keys) {
+    for (const [keyIndex, key] of keys.entries()) {
         if (budget.keyTestsRemaining <= 0) return false;
         budget.keyTestsRemaining -= 1;
-        if (await loreKeyMatches(entry, key, source, budget)) return true;
+        if (await loreKeyMatches(entry, key, keyKind, keyIndex, source, budget, ruleScope))
+            return true;
     }
     return false;
 }
@@ -1085,19 +976,32 @@ async function anyLoreKeyMatches(
 async function loreKeyMatches(
     entry: CharacterRuntimeKnowledgeDto,
     key: string,
+    keyKind: 'primary' | 'secondary',
+    keyIndex: number,
     source: string,
     budget: LoreWorkBudget,
+    ruleScope: string,
 ): Promise<boolean> {
     if (key === '') return false;
     if (entry.use_regex) {
         if (budget.regexTestsRemaining <= 0) return false;
         budget.regexTestsRemaining -= 1;
-        const result = await runPortableRegex({
-            operation: 'test',
-            source,
-            pattern: key,
-            flags: entry.case_sensitive ? '' : 'i',
-        });
+        const result = await runPortableRegex(
+            {
+                operation: 'test',
+                source,
+                pattern: key,
+                flags: entry.case_sensitive ? '' : 'i',
+            },
+            {
+                ruleKey: portableRegexRuleKey(
+                    ruleScope,
+                    'lore',
+                    `${entry.id}:${keyKind}:${String(keyIndex)}`,
+                    keyIndex,
+                ),
+            },
+        );
         return result.ok && result.value === true;
     }
     const haystack = entry.case_sensitive ? source : source.toLocaleLowerCase();
@@ -1129,45 +1033,6 @@ function codePointAt(value: string, index: number): string {
     return point === undefined ? '' : String.fromCodePoint(point);
 }
 
-function boundedJsonValue(value: unknown): { ok: true; value: unknown } | { ok: false } {
-    let nodes = 0;
-    try {
-        const serialized: unknown = JSON.stringify(value, (_key, item: unknown) => {
-            nodes += 1;
-            if (nodes > MAX_RUNTIME_STATE_VALUE_NODES) throw new Error('node budget exceeded');
-            return item;
-        });
-        if (
-            typeof serialized !== 'string' ||
-            new TextEncoder().encode(serialized).byteLength > MAX_RUNTIME_STATE_VALUE_BYTES
-        ) {
-            return { ok: false };
-        }
-        return { ok: true, value: JSON.parse(serialized) as unknown };
-    } catch {
-        return { ok: false };
-    }
-}
-
-function safeText(value: unknown): string {
-    if (value === undefined || value === null) return '';
-    if (typeof value === 'string') return value;
-    if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
-        return String(value);
-    }
-    if (value instanceof Error) return value.message;
-    try {
-        const encoded: unknown = JSON.stringify(value);
-        return typeof encoded === 'string' ? encoded : '';
-    } catch {
-        return '';
-    }
-}
-
-function luaNullable(value: unknown): unknown {
-    return value === undefined ? LuaMultiReturn.of(undefined) : value;
-}
-
 function browserStorage(): Storage | undefined {
     try {
         return typeof window === 'undefined' ? undefined : window.localStorage;
@@ -1176,109 +1041,13 @@ function browserStorage(): Storage | undefined {
     }
 }
 
-function serializePersisted(value: PersistedRuntimeState): string | null {
-    try {
-        const serialized = JSON.stringify(value);
-        return new TextEncoder().encode(serialized).byteLength <= MAX_PERSISTED_RUNTIME_BYTES
-            ? serialized
-            : null;
-    } catch {
-        return null;
-    }
-}
-
-function updateStringRecord(
-    record: Record<string, string>,
-    key: string,
-    value: string,
-    maxKeys: number,
-    maxValueChars: number,
-): Record<string, string> | null {
-    if (
-        !validRuntimeKey(key) ||
-        value.length > maxValueChars ||
-        (!(key in record) && Object.keys(record).length >= maxKeys)
-    ) {
-        return null;
-    }
-    return Object.fromEntries([
-        ...Object.entries(record).filter(([name]) => name !== key),
-        [key, value],
-    ]);
-}
-
-function updateUnknownRecord(
-    record: Record<string, unknown>,
-    key: string,
-    value: unknown,
-): Record<string, unknown> | null {
-    if (!validRuntimeKey(key)) return null;
-    if (value === undefined || value === null) {
-        return Object.fromEntries(Object.entries(record).filter(([name]) => name !== key));
-    }
-    if (!(key in record) && Object.keys(record).length >= MAX_RUNTIME_RECORD_KEYS) return null;
-    const bounded = boundedJsonValue(value);
-    if (!bounded.ok) return null;
-    return Object.fromEntries([
-        ...Object.entries(record).filter(([name]) => name !== key),
-        [key, bounded.value],
-    ]);
-}
-
-function boundedStringRecord(value: unknown, maxValueChars: number): Record<string, string> | null {
-    if (!isRecord(value)) return {};
-    const entries = Object.entries(value);
-    if (entries.length > MAX_RUNTIME_RECORD_KEYS) return null;
-    if (
-        entries.some(
-            ([key, item]) =>
-                !validRuntimeKey(key) || typeof item !== 'string' || item.length > maxValueChars,
-        )
-    ) {
-        return null;
-    }
-    return Object.fromEntries(entries as [string, string][]);
-}
-
-function boundedUnknownRecord(value: unknown): Record<string, unknown> | null {
-    if (!isRecord(value)) return {};
-    const entries = Object.entries(value);
-    if (entries.length > MAX_RUNTIME_RECORD_KEYS) return null;
-    const result: [string, unknown][] = [];
-    for (const [key, item] of entries) {
-        if (!validRuntimeKey(key)) return null;
-        const bounded = boundedJsonValue(item);
-        if (!bounded.ok) return null;
-        result.push([key, bounded.value]);
-    }
-    return Object.fromEntries(result);
-}
-
-function validRuntimeKey(value: string): boolean {
-    return (
-        value.length > 0 &&
-        value.length <= 512 &&
-        !['__proto__', 'constructor', 'prototype'].includes(value)
+function protocolResultError(): PortableRuntimeWorkerError {
+    return new PortableRuntimeWorkerError(
+        'protocol-error',
+        'portable runtime worker returned an unexpected result',
     );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function validSelection(value: unknown): value is GenerationSelectionInput {
-    if (!isRecord(value)) return false;
-    if (value.kind === 'legacy_profile') return typeof value.provider_profile_id === 'string';
-    return (
-        value.kind === 'target' &&
-        isRecord(value.target) &&
-        typeof value.target.model_route_id === 'string' &&
-        typeof value.target.generation_preset_id === 'string'
-    );
-}
-
-function cloneSelection(
-    selection: GenerationSelectionInput | null,
-): GenerationSelectionInput | null {
-    return selection === null ? null : structuredClone(selection);
 }

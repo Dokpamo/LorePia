@@ -12,7 +12,7 @@ const hardening = await readFile(
     'utf8',
 );
 const runtimeSource = await readFile(
-    path.join(appRoot, 'src', 'features', 'chat', 'portable-runtime.ts'),
+    path.join(appRoot, 'src', 'features', 'chat', 'portable-runtime-kernel.ts'),
     'utf8',
 );
 const asyncBridgeMatch = runtimeSource.match(

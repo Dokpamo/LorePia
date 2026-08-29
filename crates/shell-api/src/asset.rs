@@ -115,7 +115,7 @@ impl ShellApi {
             .map_err(ShellError::from)
     }
 
-    /// Reads one bounded verified range for the native custom protocol. Raw
+    /// Reads one bounded range from a short-lived verified native handle. Raw
     /// bytes never cross the invoke serialization boundary.
     #[doc(hidden)]
     pub fn read_asset_protocol_range(

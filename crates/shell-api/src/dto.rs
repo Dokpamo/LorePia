@@ -139,76 +139,15 @@ impl CharacterRenderProfileDto {
         character_content_revision_id: Option<String>,
         content: CharacterContentV1,
     ) -> Self {
-        let assets = content
-            .assets
-            .iter()
-            .map(|asset| CharacterRenderAssetDto {
-                asset_id: asset.id.as_str().to_owned(),
-                aliases: character_asset_aliases(asset),
-            })
-            .collect();
-        let output_transforms = content
-            .runtime
-            .transforms
-            .iter()
-            .filter(|transform| {
-                transform.phase == lorepia_core::PortableTransformPhase::ProviderOutput
-            })
-            .map(|transform| CharacterDisplayTransformDto {
-                pattern: transform.pattern.clone(),
-                replacement: transform.replacement.clone(),
-                flags: transform.flags.clone(),
-            })
-            .collect();
-        let display_transforms = content
-            .runtime
-            .transforms
-            .iter()
-            .filter(|transform| transform.phase == lorepia_core::PortableTransformPhase::Display)
-            .map(|transform| CharacterDisplayTransformDto {
-                pattern: transform.pattern.clone(),
-                replacement: transform.replacement.clone(),
-                flags: transform.flags.clone(),
-            })
-            .collect();
-        let runtime_scripts = content
-            .runtime
-            .scripts
-            .iter()
-            .map(|script| CharacterRuntimeScriptDto {
-                id: script.id.clone(),
-                name: script.name.clone(),
-                event: script.event.clone(),
-                language: script.language.clone(),
-                source: script.source.clone(),
-                elevated_access: script.elevated_access,
-            })
-            .collect();
-        let runtime_knowledge = content
-            .knowledge_book
-            .as_ref()
-            .and_then(|book| book.embedded.as_ref())
-            .map(|book| {
-                book.entries
-                    .iter()
-                    .map(|entry| CharacterRuntimeKnowledgeDto {
-                        id: entry.id.clone(),
-                        name: entry.name.clone(),
-                        content: entry.content.clone(),
-                        enabled: entry.enabled,
-                        primary_keys: entry.primary_keys.clone(),
-                        secondary_keys: entry.secondary_keys.clone(),
-                        constant: entry.constant,
-                        selective: entry.selective,
-                        case_sensitive: entry.case_sensitive,
-                        whole_word: entry.whole_word,
-                        use_regex: entry.use_regex,
-                        probability_basis_points: entry.probability_basis_points,
-                        folder: entry.folder,
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
+        let assets = render_assets(&content);
+        let output_transforms = display_transforms(
+            &content,
+            lorepia_core::PortableTransformPhase::ProviderOutput,
+        );
+        let display_transforms =
+            display_transforms(&content, lorepia_core::PortableTransformPhase::Display);
+        let runtime_scripts = runtime_scripts(&content);
+        let runtime_knowledge = runtime_knowledge(&content);
         let runtime_script_count = u32::try_from(content.runtime.scripts.len()).unwrap_or(u32::MAX);
         Self {
             character_id,
@@ -224,6 +163,115 @@ impl CharacterRenderProfileDto {
             runtime_script_count,
         }
     }
+}
+
+fn render_assets(content: &CharacterContentV1) -> Vec<CharacterRenderAssetDto> {
+    content
+        .assets
+        .iter()
+        .map(|asset| CharacterRenderAssetDto {
+            asset_id: asset.id.as_str().to_owned(),
+            aliases: character_asset_aliases(asset),
+        })
+        .collect()
+}
+
+fn display_transforms(
+    content: &CharacterContentV1,
+    phase: lorepia_core::PortableTransformPhase,
+) -> Vec<CharacterDisplayTransformDto> {
+    content
+        .runtime
+        .transforms
+        .iter()
+        .filter(|transform| transform.enabled && transform.phase == phase)
+        .map(|transform| CharacterDisplayTransformDto {
+            pattern: transform.pattern.clone(),
+            replacement: transform.replacement.clone(),
+            flags: transform.flags.clone(),
+        })
+        .collect()
+}
+
+fn runtime_scripts(content: &CharacterContentV1) -> Vec<CharacterRuntimeScriptDto> {
+    content
+        .runtime
+        .scripts
+        .iter()
+        .map(|script| CharacterRuntimeScriptDto {
+            id: script.id.clone(),
+            name: script.name.clone(),
+            event: script.event.clone(),
+            language: script.language.clone(),
+            source: script.source.clone(),
+            elevated_access: script.elevated_access,
+        })
+        .collect()
+}
+
+fn runtime_knowledge(content: &CharacterContentV1) -> Vec<CharacterRuntimeKnowledgeDto> {
+    let mut remaining_lore_regex_rules = 128_usize;
+    content
+        .knowledge_book
+        .as_ref()
+        .and_then(|book| book.embedded.as_ref())
+        .map(|book| {
+            book.entries
+                .iter()
+                .filter(|entry| !entry.folder)
+                .map(|entry| {
+                    let mut enabled = entry.enabled;
+                    let mut primary_keys = entry.primary_keys.clone();
+                    let mut secondary_keys = entry.secondary_keys.clone();
+                    let use_regex = entry.use_regex && !entry.constant;
+                    if enabled && use_regex {
+                        primary_keys = take_reviewed_lore_regex_keys(
+                            &primary_keys,
+                            &mut remaining_lore_regex_rules,
+                        );
+                        secondary_keys = if entry.selective {
+                            take_reviewed_lore_regex_keys(
+                                &secondary_keys,
+                                &mut remaining_lore_regex_rules,
+                            )
+                        } else {
+                            Vec::new()
+                        };
+                        if primary_keys.is_empty() {
+                            enabled = false;
+                            secondary_keys.clear();
+                        }
+                    }
+                    CharacterRuntimeKnowledgeDto {
+                        id: entry.id.clone(),
+                        name: entry.name.clone(),
+                        content: entry.content.clone(),
+                        enabled,
+                        primary_keys,
+                        secondary_keys,
+                        constant: entry.constant,
+                        selective: entry.selective,
+                        case_sensitive: entry.case_sensitive,
+                        whole_word: entry.whole_word,
+                        use_regex,
+                        probability_basis_points: entry.probability_basis_points,
+                        folder: false,
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn take_reviewed_lore_regex_keys(keys: &[String], remaining: &mut usize) -> Vec<String> {
+    let values = keys
+        .iter()
+        .filter(|key| !key.is_empty())
+        .take(*remaining)
+        .cloned()
+        .collect::<Vec<_>>();
+    *remaining = remaining.saturating_sub(values.len());
+    values
 }
 
 fn character_asset_aliases(asset: &AssetDescriptor) -> Vec<String> {
@@ -359,6 +407,29 @@ pub struct ImportImagePreviewDto {
     pub size_bytes: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImportRegexRuleReviewDto {
+    pub id: String,
+    pub name: String,
+    pub phase: lorepia_core::ImportRegexRulePhase,
+    pub runtime_index: u32,
+    pub pattern: String,
+    pub flags: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImportDynamicContentReviewDto {
+    pub runtime_script_count: u32,
+    pub elevated_runtime_script_count: u32,
+    pub regex_rule_count: u32,
+    pub enabled_regex_rule_count: u32,
+    pub model_calls_possible: bool,
+    pub custom_markup_present: bool,
+    pub regex_rules: Vec<ImportRegexRuleReviewDto>,
+}
+
 impl From<ImportImagePreview> for ImportImagePreviewDto {
     fn from(value: ImportImagePreview) -> Self {
         Self {
@@ -381,6 +452,7 @@ pub struct ImportInspectionDto {
     pub source_size: u64,
     pub estimated_stored_size: u64,
     pub asset_count: u32,
+    pub dynamic_content: ImportDynamicContentReviewDto,
     pub warnings: Vec<ImportWarningDto>,
     pub blocked_reasons: Vec<String>,
     pub unsupported_optional_fields: Vec<String>,
@@ -400,6 +472,27 @@ impl From<ImportInspection> for ImportInspectionDto {
             source_size: value.source_size,
             estimated_stored_size: value.estimated_stored_size,
             asset_count: value.asset_count,
+            dynamic_content: ImportDynamicContentReviewDto {
+                runtime_script_count: value.dynamic_content.runtime_script_count,
+                elevated_runtime_script_count: value.dynamic_content.elevated_runtime_script_count,
+                regex_rule_count: value.dynamic_content.regex_rule_count,
+                enabled_regex_rule_count: value.dynamic_content.enabled_regex_rule_count,
+                model_calls_possible: value.dynamic_content.model_calls_possible,
+                custom_markup_present: value.dynamic_content.custom_markup_present,
+                regex_rules: value
+                    .dynamic_content
+                    .regex_rules
+                    .into_iter()
+                    .map(|rule| ImportRegexRuleReviewDto {
+                        id: rule.id,
+                        name: rule.name,
+                        phase: rule.phase,
+                        runtime_index: rule.runtime_index,
+                        pattern: rule.pattern,
+                        flags: rule.flags,
+                    })
+                    .collect(),
+            },
             warnings: value.warnings.into_iter().map(Into::into).collect(),
             blocked_reasons: value.blocked_reasons,
             unsupported_optional_fields: value.unsupported_optional_fields,
@@ -867,6 +960,30 @@ mod tests {
     #[test]
     fn character_render_profile_partitions_transforms_and_indexes_misleading_asset_names() {
         let content: CharacterContentV1 = serde_json::from_value(serde_json::json!({
+            "knowledge_book": {
+                "embedded": {
+                    "id": "book-1",
+                    "entries": [
+                        {
+                            "id": "regex-entry",
+                            "content": "runtime lore",
+                            "enabled": true,
+                            "primary_keys": (0..130)
+                                .map(|index| format!("rule-{index}"))
+                                .collect::<Vec<_>>(),
+                            "use_regex": true
+                        },
+                        {
+                            "id": "folder-entry",
+                            "content": "must not execute",
+                            "enabled": true,
+                            "primary_keys": ["(a+)+$"],
+                            "use_regex": true,
+                            "folder": true
+                        }
+                    ]
+                }
+            },
             "assets": [{
                 "id": "asset-expression-1",
                 "sha256": "a".repeat(64),
@@ -894,6 +1011,14 @@ mod tests {
                         "pattern": "<Status>",
                         "replacement": "<section>",
                         "flags": "i"
+                    },
+                    {
+                        "id": "disabled-display-rule",
+                        "phase": "display",
+                        "enabled": false,
+                        "pattern": "never-run",
+                        "replacement": "blocked",
+                        "flags": ""
                     }
                 ],
                 "scripts": [{
@@ -929,8 +1054,11 @@ mod tests {
         );
         assert_eq!(profile.output_transforms[0].pattern, "<lmg");
         assert_eq!(profile.display_transforms[0].pattern, "<Status>");
+        assert_eq!(profile.display_transforms.len(), 1);
         assert_eq!(profile.initial_variables["mode"], "0");
         assert_eq!(profile.runtime_script_count, 1);
+        assert_eq!(profile.runtime_knowledge.len(), 1);
+        assert_eq!(profile.runtime_knowledge[0].primary_keys.len(), 128);
     }
 
     #[test]

@@ -15,8 +15,10 @@ use std::{
 };
 
 use lorepia_domain::{
-    CharacterContentV1, ContentKind, CoreError, CoreErrorCode, CoreResult, ImportImagePreview,
-    ImportInspection, ImportLimits, ImportWarning, InspectionId,
+    CharacterContentV1, ContentKind, CoreError, CoreErrorCode, CoreResult,
+    ImportDynamicContentReview, ImportImagePreview, ImportInspection, ImportLimits,
+    ImportRegexRulePhase, ImportRegexRuleReview, ImportWarning, InspectionId,
+    PortableTransformPhase,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -92,6 +94,7 @@ pub fn inspect_character_file(
             .then_with(|| left.message.cmp(&right.message))
     });
     let character_content = source.metadata.content;
+    let dynamic_content = dynamic_content_review(&character_content);
     let inspection = ImportInspection {
         id: InspectionId::new(),
         kind: source.kind,
@@ -102,6 +105,7 @@ pub fn inspect_character_file(
         source_size: source_metadata.len(),
         estimated_stored_size: source.estimated_size,
         asset_count: source.asset_count,
+        dynamic_content,
         warnings: source.warnings,
         blocked_reasons: source.blocked_reasons,
         unsupported_optional_fields: source.metadata.unsupported_optional_fields,
@@ -112,6 +116,151 @@ pub fn inspect_character_file(
         character_content,
         plan_hash,
     })
+}
+
+const MAX_RUNTIME_RULES_PER_PHASE: usize = 128;
+
+fn runtime_regex_rule_reviews(content: &CharacterContentV1) -> Vec<ImportRegexRuleReview> {
+    let mut phase_counts = [0_usize; 3];
+    let mut regex_rules = Vec::new();
+    for transform in content
+        .runtime
+        .transforms
+        .iter()
+        .filter(|transform| transform.enabled)
+    {
+        let phase_index = match transform.phase {
+            PortableTransformPhase::RequestContext => 0,
+            PortableTransformPhase::ProviderOutput => 1,
+            PortableTransformPhase::Display => 2,
+        };
+        let runtime_index = phase_counts[phase_index];
+        phase_counts[phase_index] = runtime_index.saturating_add(1);
+        if runtime_index >= MAX_RUNTIME_RULES_PER_PHASE {
+            continue;
+        }
+        regex_rules.push(ImportRegexRuleReview {
+            id: transform.id.clone(),
+            name: transform.name.clone(),
+            phase: match transform.phase {
+                PortableTransformPhase::RequestContext => ImportRegexRulePhase::RequestContext,
+                PortableTransformPhase::ProviderOutput => ImportRegexRulePhase::ProviderOutput,
+                PortableTransformPhase::Display => ImportRegexRulePhase::Display,
+            },
+            runtime_index: u32::try_from(runtime_index).unwrap_or(u32::MAX),
+            pattern: transform.pattern.clone(),
+            flags: transform.flags.clone(),
+        });
+    }
+    regex_rules
+}
+
+fn lore_regex_rule_reviews(
+    content: &CharacterContentV1,
+) -> (usize, usize, Vec<ImportRegexRuleReview>) {
+    let mut lore_regex_rule_count = 0_usize;
+    let mut enabled_lore_regex_rule_count = 0_usize;
+    let mut lore_runtime_index = 0_usize;
+    let mut regex_rules = Vec::new();
+    if let Some(book) = content
+        .knowledge_book
+        .as_ref()
+        .and_then(|reference| reference.embedded.as_ref())
+    {
+        for entry in &book.entries {
+            if !entry.use_regex || entry.constant {
+                continue;
+            }
+            let secondary_keys = entry.selective.then_some(entry.secondary_keys.as_slice());
+            for (kind, keys) in [("primary", entry.primary_keys.as_slice())]
+                .into_iter()
+                .chain(secondary_keys.into_iter().map(|keys| ("secondary", keys)))
+            {
+                for (key_index, pattern) in keys.iter().enumerate() {
+                    if pattern.is_empty() {
+                        continue;
+                    }
+                    lore_regex_rule_count = lore_regex_rule_count.saturating_add(1);
+                    if !entry.enabled || entry.folder {
+                        continue;
+                    }
+                    let runtime_index = lore_runtime_index;
+                    lore_runtime_index = lore_runtime_index.saturating_add(1);
+                    if runtime_index >= MAX_RUNTIME_RULES_PER_PHASE {
+                        continue;
+                    }
+                    enabled_lore_regex_rule_count = enabled_lore_regex_rule_count.saturating_add(1);
+                    regex_rules.push(ImportRegexRuleReview {
+                        id: format!("{}:{kind}:{key_index}", entry.id),
+                        name: if entry.name.trim().is_empty() {
+                            format!("Lore {kind} key")
+                        } else {
+                            format!("{} {kind} key", entry.name)
+                        },
+                        phase: ImportRegexRulePhase::Lore,
+                        runtime_index: u32::try_from(runtime_index).unwrap_or(u32::MAX),
+                        pattern: pattern.clone(),
+                        flags: if entry.case_sensitive {
+                            String::new()
+                        } else {
+                            "i".to_owned()
+                        },
+                    });
+                }
+            }
+        }
+    }
+    (
+        lore_regex_rule_count,
+        enabled_lore_regex_rule_count,
+        regex_rules,
+    )
+}
+
+fn dynamic_content_review(content: &CharacterContentV1) -> ImportDynamicContentReview {
+    let mut regex_rules = runtime_regex_rule_reviews(content);
+    let (lore_regex_rule_count, enabled_lore_regex_rule_count, mut lore_regex_rules) =
+        lore_regex_rule_reviews(content);
+    regex_rules.append(&mut lore_regex_rules);
+    let runtime_script_count = u32::try_from(content.runtime.scripts.len()).unwrap_or(u32::MAX);
+    ImportDynamicContentReview {
+        runtime_script_count,
+        elevated_runtime_script_count: u32::try_from(
+            content
+                .runtime
+                .scripts
+                .iter()
+                .filter(|script| script.elevated_access)
+                .count(),
+        )
+        .unwrap_or(u32::MAX),
+        regex_rule_count: u32::try_from(
+            content
+                .runtime
+                .transforms
+                .len()
+                .saturating_add(lore_regex_rule_count),
+        )
+        .unwrap_or(u32::MAX),
+        enabled_regex_rule_count: u32::try_from(
+            content
+                .runtime
+                .transforms
+                .iter()
+                .filter(|transform| transform.enabled)
+                .count()
+                .saturating_add(enabled_lore_regex_rule_count),
+        )
+        .unwrap_or(u32::MAX),
+        model_calls_possible: runtime_script_count > 0,
+        custom_markup_present: !content.runtime.background_markup.trim().is_empty()
+            || content
+                .runtime
+                .transforms
+                .iter()
+                .any(|transform| transform.replacement.contains('<')),
+        regex_rules,
+    }
 }
 
 fn inspect_character_source(
@@ -388,6 +537,7 @@ fn character_plan_hash(
         source_size: u64,
         estimated_stored_size: u64,
         asset_count: u32,
+        dynamic_content: &'a ImportDynamicContentReview,
         warnings: &'a [ImportWarning],
         blocked_reasons: &'a [String],
         unsupported_optional_fields: &'a [String],
@@ -402,6 +552,7 @@ fn character_plan_hash(
         source_size: inspection.source_size,
         estimated_stored_size: inspection.estimated_stored_size,
         asset_count: inspection.asset_count,
+        dynamic_content: &inspection.dynamic_content,
         warnings: &inspection.warnings,
         blocked_reasons: &inspection.blocked_reasons,
         unsupported_optional_fields: &inspection.unsupported_optional_fields,
@@ -497,6 +648,80 @@ mod tests {
         assert_eq!(inspection.kind, ContentKind::CharacterCardV3);
         assert_eq!(inspection.display_name, "Segu");
         assert!(inspection.is_allowed());
+    }
+
+    #[test]
+    fn dynamic_review_exposes_only_runtime_reachable_rule_metadata() {
+        let content: CharacterContentV1 = serde_json::from_value(serde_json::json!({
+            "knowledge_book": {
+                "embedded": {
+                    "id": "book",
+                    "name": "Runtime lore",
+                    "entries": [
+                        {
+                            "id": "active-lore",
+                            "name": "Active lore",
+                            "content": "content",
+                            "enabled": true,
+                            "primary_keys": ["(?<=hero)\\s+"],
+                            "secondary_keys": ["(a+)+$"],
+                            "selective": true,
+                            "use_regex": true
+                        },
+                        {
+                            "id": "disabled-lore",
+                            "content": "content",
+                            "enabled": false,
+                            "primary_keys": ["disabled"],
+                            "use_regex": true
+                        }
+                    ]
+                }
+            },
+            "runtime": {
+                "transforms": [
+                    {
+                        "id": "active-display",
+                        "name": "Status",
+                        "phase": "display",
+                        "pattern": "(?<=Status:)\\s+",
+                        "replacement": " ",
+                        "flags": "gu"
+                    },
+                    {
+                        "id": "disabled-output",
+                        "phase": "provider_output",
+                        "enabled": false,
+                        "pattern": "(a+)+$",
+                        "replacement": "",
+                        "flags": ""
+                    }
+                ],
+                "scripts": [{
+                    "id": "script",
+                    "language": "lua",
+                    "source": "return",
+                    "elevated_access": true
+                }],
+                "background_markup": "<style>.card { color: red; }</style>"
+            }
+        }))
+        .expect("dynamic character content");
+
+        let review = dynamic_content_review(&content);
+
+        assert_eq!(review.runtime_script_count, 1);
+        assert_eq!(review.elevated_runtime_script_count, 1);
+        assert_eq!(review.regex_rule_count, 5);
+        assert_eq!(review.enabled_regex_rule_count, 3);
+        assert!(review.model_calls_possible);
+        assert!(review.custom_markup_present);
+        assert_eq!(review.regex_rules.len(), 3);
+        assert_eq!(review.regex_rules[0].id, "active-display");
+        assert_eq!(review.regex_rules[0].runtime_index, 0);
+        assert_eq!(review.regex_rules[1].id, "active-lore:primary:0");
+        assert_eq!(review.regex_rules[1].phase, ImportRegexRulePhase::Lore);
+        assert_eq!(review.regex_rules[2].id, "active-lore:secondary:0");
     }
 
     #[test]

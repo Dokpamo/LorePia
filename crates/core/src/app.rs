@@ -77,6 +77,15 @@ use crate::{
 };
 
 mod model_sync;
+mod runtime_generation;
+
+#[cfg(test)]
+use runtime_generation::{
+    RUNTIME_MAX_OUTPUT_TOKENS, runtime_generation_request, runtime_generation_result,
+};
+pub use runtime_generation::{
+    RuntimeGenerationAuditContext, RuntimeGenerationCapability, RuntimePromptMessage,
+};
 
 const CORE_MAX_OUTPUT_TOKENS: u32 = 4_096;
 // Admission belongs to Core rather than renderer stream registrations so a
@@ -754,13 +763,6 @@ pub(crate) struct ResolvedGenerationTarget {
 /// Runtime scripts can ask the native host for a secondary generation, but
 /// they cannot supply provider request JSON, credentials, URLs, or headers.
 /// Core rebuilds the request through the same provider adapters used by the
-/// ordinary chat path.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RuntimePromptMessage {
-    pub role: MessageRole,
-    pub content: String,
-}
-
 /// Bounded, Core-owned input for an auxiliary provider task.
 ///
 /// The task runner constructs this value from a trusted instruction and
@@ -7565,82 +7567,6 @@ impl Core {
         .await
     }
 
-    /// Runs a one-shot generation requested by an imported character runtime
-    /// against an exact catalog target.
-    ///
-    /// The runtime supplies only role/content messages. Provider selection,
-    /// credential ownership, request compilation, output bounds, and timeout
-    /// enforcement stay inside the native Core boundary.
-    pub async fn generate_runtime_text_with_connection_credential(
-        &self,
-        target: &GenerationTarget,
-        messages: &[RuntimePromptMessage],
-        credential: ConnectionBoundCredential,
-    ) -> CoreResult<String> {
-        preflight_generation_target_connection_credential(self, target, &credential)?;
-        let resolved = resolve_generation_target(self, target)?;
-        let request = runtime_generation_request(
-            resolved.model.clone(),
-            validate_runtime_prompt_messages(messages)?,
-            resolved.prompt_wire_contract.configured_max_output_tokens,
-            Some(GenerationProviderProvenance {
-                api_family: resolved.api_family,
-                model_route_id: target.model_route_id.clone(),
-                generation_preset_id: target.generation_preset_id.clone(),
-            }),
-        );
-        resolved.provider.snapshot_request(&request)?;
-        let (_cancel_sender, cancelled) = watch::channel(false);
-        runtime_generation_result(
-            dispatch_auxiliary_task_provider(
-                resolved.provider,
-                request,
-                credential,
-                RUNTIME_GENERATION_TIMEOUT_MS,
-                cancelled,
-            )
-            .await,
-        )
-    }
-
-    /// Runs a one-shot imported-runtime generation through a legacy provider
-    /// profile retained for workspace migration compatibility.
-    pub async fn generate_runtime_text_with_provider_profile(
-        &self,
-        provider_profile_id: &str,
-        messages: &[RuntimePromptMessage],
-        credential: Option<String>,
-    ) -> CoreResult<String> {
-        let profile = self
-            .inner
-            .storage
-            .get_provider_profile(provider_profile_id)?;
-        let timeout = Duration::from_secs(u64::from(profile.timeout_seconds.max(1)));
-        let provider: Arc<dyn Provider> =
-            Arc::new(OpenAiCompatibleProvider::new(&profile.base_url, timeout)?);
-        let request = runtime_generation_request(
-            profile.model,
-            validate_runtime_prompt_messages(messages)?,
-            Some(CORE_MAX_OUTPUT_TOKENS),
-            None,
-        );
-        provider.snapshot_request(&request)?;
-        let (_cancel_sender, cancelled) = watch::channel(false);
-        runtime_generation_result(
-            dispatch_auxiliary_task_provider(
-                provider,
-                request,
-                ConnectionBoundCredential::new(
-                    ProviderConnectionId::from(provider_profile_id.to_owned()),
-                    credential,
-                ),
-                u64::from(profile.timeout_seconds.max(1)).saturating_mul(1_000),
-                cancelled,
-            )
-            .await,
-        )
-    }
-
     fn validate_task_profile_dispatch(
         &self,
         task_profile: &StoredRevision<TaskProfile>,
@@ -7928,86 +7854,6 @@ fn auxiliary_task_generation_request(
     }
 }
 
-fn validate_runtime_prompt_messages(
-    messages: &[RuntimePromptMessage],
-) -> CoreResult<Vec<RuntimePromptMessage>> {
-    if messages.is_empty() || messages.len() > MAX_RUNTIME_PROMPT_MESSAGES {
-        return Err(CoreError::invalid(
-            "runtime generation prompt must contain between 1 and 128 messages",
-        ));
-    }
-    let mut total_bytes = 0_usize;
-    let mut total_chars = 0_usize;
-    for message in messages {
-        if message.content.trim().is_empty() || message.content.contains('\0') {
-            return Err(CoreError::invalid(
-                "runtime generation messages must contain non-empty text",
-            ));
-        }
-        total_bytes = total_bytes
-            .checked_add(message.content.len())
-            .ok_or_else(|| CoreError::invalid("runtime generation prompt size overflowed"))?;
-        total_chars = total_chars
-            .checked_add(message.content.chars().count())
-            .ok_or_else(|| CoreError::invalid("runtime generation prompt size overflowed"))?;
-    }
-    if total_bytes > MAX_TASK_PROMPT_BYTES || total_chars > MAX_TASK_PROMPT_CHARS {
-        return Err(CoreError::invalid(
-            "runtime generation prompt exceeds its size limit",
-        ));
-    }
-    Ok(messages.to_vec())
-}
-
-fn runtime_generation_request(
-    model: String,
-    messages: Vec<RuntimePromptMessage>,
-    max_output_tokens: Option<u32>,
-    provider_provenance: Option<GenerationProviderProvenance>,
-) -> GenerationRequest {
-    let conversation_id = ConversationId::new();
-    let created_at = Utc::now();
-    let mut parent_id = None;
-    let messages = messages
-        .into_iter()
-        .map(|runtime_message| {
-            let id = MessageId::new();
-            let message = Message {
-                id: id.clone(),
-                conversation_id: conversation_id.clone(),
-                parent_id: parent_id.clone(),
-                role: runtime_message.role,
-                content: runtime_message.content,
-                status: MessageStatus::Complete,
-                generation_id: None,
-                created_at,
-            };
-            parent_id = Some(id);
-            message
-        })
-        .collect();
-    GenerationRequest {
-        generation_id: GenerationId::new(),
-        conversation_id,
-        model,
-        messages,
-        resolved_prompt_plan: None,
-        provider_execution_plan_hash: None,
-        temperature: None,
-        max_output_tokens,
-        provider_provenance,
-        preserve_opaque_reasoning_state: false,
-        opaque_reasoning_context: Vec::new(),
-    }
-}
-
-fn runtime_generation_result(outcome: TaskExecutionOutcome) -> CoreResult<String> {
-    match outcome {
-        TaskExecutionOutcome::Completed { canonical_text, .. } => Ok(canonical_text),
-        TaskExecutionOutcome::Failed { error, .. } => Err(error),
-    }
-}
-
 async fn dispatch_auxiliary_task_provider(
     provider: Arc<dyn Provider>,
     request: GenerationRequest,
@@ -8015,6 +7861,16 @@ async fn dispatch_auxiliary_task_provider(
     timeout_ms: u64,
     mut cancelled: watch::Receiver<bool>,
 ) -> TaskExecutionOutcome {
+    if *cancelled.borrow() {
+        return TaskExecutionOutcome::Failed {
+            classification: TaskDispatchClassification::KnownNoSideEffect,
+            error: CoreError::new(
+                CoreErrorCode::Cancelled,
+                "auxiliary task was cancelled before provider dispatch",
+                true,
+            ),
+        };
+    }
     let (event_sender, event_receiver) = mpsc::channel(128);
     let (attempt_cancel_sender, attempt_cancel_receiver) = watch::channel(false);
     let provider_attempt = async {
@@ -8060,7 +7916,7 @@ async fn dispatch_auxiliary_task_provider(
 fn unknown_task_outcome(message: &'static str) -> TaskExecutionOutcome {
     TaskExecutionOutcome::Failed {
         classification: TaskDispatchClassification::UnknownOutcome,
-        error: CoreError::new(CoreErrorCode::Cancelled, message, true),
+        error: CoreError::new(CoreErrorCode::Cancelled, message, false),
     }
 }
 
@@ -12424,6 +12280,63 @@ mod tests {
             Arc::clone(&operation_lock).try_lock_owned().is_ok(),
             "cancellation must drop and zeroize the credential carrier before mutation resumes"
         );
+    }
+
+    #[tokio::test]
+    async fn pre_cancelled_runtime_dispatch_never_enters_the_provider() {
+        let (provider, captured) = CapturingProvider::new("must not be emitted");
+        let request = runtime_generation_request(
+            "runtime-model".to_owned(),
+            vec![RuntimePromptMessage {
+                role: MessageRole::User,
+                content: "bounded prompt".to_owned(),
+            }],
+            Some(u32::MAX),
+            None,
+        );
+        assert_eq!(request.max_output_tokens, Some(RUNTIME_MAX_OUTPUT_TOKENS));
+        let (cancel_sender, cancelled) = watch::channel(false);
+        cancel_sender
+            .send(true)
+            .expect("mark request cancelled before dispatch");
+
+        let outcome = dispatch_auxiliary_task_provider(
+            provider,
+            request,
+            ConnectionBoundCredential::new(
+                ProviderConnectionId::from("pre-cancelled-runtime-connection"),
+                Some("synthetic-pre-cancelled-secret".to_owned()),
+            ),
+            5_000,
+            cancelled,
+        )
+        .await;
+
+        assert!(matches!(
+            outcome,
+            TaskExecutionOutcome::Failed {
+                classification: TaskDispatchClassification::KnownNoSideEffect,
+                error: CoreError {
+                    code: CoreErrorCode::Cancelled,
+                    ..
+                },
+            }
+        ));
+        assert!(
+            captured.recv_timeout(Duration::from_millis(50)).is_err(),
+            "pre-cancelled runtime request reached the provider"
+        );
+    }
+
+    #[test]
+    fn runtime_unknown_provider_outcome_is_non_recoverable() {
+        let error =
+            runtime_generation_result(unknown_task_outcome("synthetic post-dispatch cancellation"))
+                .expect_err("unknown provider outcome must not become a successful runtime result");
+
+        assert_eq!(error.code, CoreErrorCode::Internal);
+        assert!(!error.recoverable);
+        assert!(error.message.contains("outcome is unknown after dispatch"));
     }
 
     #[test]

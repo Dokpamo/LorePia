@@ -7248,6 +7248,10 @@ mod policy_tests {
 
     use super::*;
 
+    mod schema_fixture {
+        include!("provider_discovery/schema_fixture.rs");
+    }
+
     struct ConstrainedAssistantCaptureProvider {
         plain_generate_called: Arc<AtomicBool>,
         captured_bodies: Arc<Mutex<Vec<(ApiFamily, Value)>>>,
@@ -7692,38 +7696,16 @@ mod policy_tests {
 
         const MIGRATION_0038: &str =
             include_str!("../../storage/migrations/0038_conversation_speakers.sql");
+        const MIGRATION_0039: &str =
+            include_str!("../../storage/migrations/0039_runtime_model_audit.sql");
 
-        let connection = rusqlite::Connection::open(database).expect("open schema-37 database");
+        let connection = rusqlite::Connection::open(database).expect("open current database");
         connection
             .execute_batch("PRAGMA foreign_keys = OFF; BEGIN IMMEDIATE;")
             .expect("begin exact schema-37 inverse");
-        // Schema 38 sits above 37, so it is removed first to reach 36.
-        for (object_type, name) in MIGRATION_0038
-            .lines()
-            .filter_map(|line| {
-                let mut tokens = line.split_ascii_whitespace();
-                (tokens.next() == Some("CREATE")).then_some(())?;
-                let object_type = tokens.next()?;
-                let (object_type, name) = if object_type == "UNIQUE" {
-                    (tokens.next()?, tokens.next()?)
-                } else {
-                    (object_type, tokens.next()?)
-                };
-                Some((object_type, name.trim_end_matches(';')))
-            })
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-        {
-            connection
-                .execute(&format!("DROP {object_type} \"{name}\""), [])
-                .unwrap_or_else(|error| panic!("drop schema-38 {object_type} {name}: {error}"));
-        }
-        assert_eq!(
-            connection
-                .execute("DELETE FROM schema_migrations WHERE version = 38", [])
-                .expect("remove schema-38 migration registry row"),
-            1
+        schema_fixture::drop_additive_migrations(
+            &connection,
+            &[(39, MIGRATION_0039), (38, MIGRATION_0038)],
         );
         for trigger_name in [
             "provider_discovery_native_no_effect_attestation_binding",
@@ -9081,7 +9063,7 @@ mod policy_tests {
         .expect("upgrade genuine schema-36 Started cancellation");
         assert_eq!(
             upgraded.storage().schema_version().expect("schema version"),
-            38
+            39
         );
         upgraded
             .get_provider_discovery_credential_install_context(&committing.session.id)

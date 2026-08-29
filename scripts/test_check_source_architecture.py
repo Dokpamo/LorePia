@@ -144,6 +144,38 @@ class SourceArchitectureTests(unittest.TestCase):
             self.assertEqual(len(failures), 7)
             self.assertTrue(all("excluded test source" in failure for failure in failures))
 
+    def test_portable_regex_evaluator_is_worker_only_in_production(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source_root = root / "apps" / "lorepia" / "src" / "features" / "chat"
+            source_root.mkdir(parents=True)
+            operation = source_root / "portable-regex-operation.ts"
+            operation.write_text("export function evaluate() {}\n", encoding="utf-8")
+            worker = source_root / "portable-regex.worker.ts"
+            worker.write_text(
+                "import { evaluate } from './portable-regex-operation';\n",
+                encoding="utf-8",
+            )
+            renderer = source_root / "portable-display.ts"
+            renderer.write_text(
+                "import { evaluate } from './portable-regex-operation';\n",
+                encoding="utf-8",
+            )
+            config = write_config(root, baselines={})
+
+            failures, _ = evaluate_source_sizes(root, config)
+
+            boundary_failures = [
+                failure for failure in failures if "Worker-only portable regex" in failure
+            ]
+            self.assertEqual(
+                boundary_failures,
+                [
+                    "apps/lorepia/src/features/chat/portable-display.ts imports the "
+                    "Worker-only portable regex evaluator"
+                ],
+            )
+
     def test_base_revision_prevents_cap_increases_and_new_exceptions(self) -> None:
         base = {
             "version": 1,

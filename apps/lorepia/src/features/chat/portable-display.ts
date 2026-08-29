@@ -1,17 +1,34 @@
 import type { CharacterDisplayTransformDto } from '../../lib/ipc/contracts';
 import { t } from '../../lib/i18n';
-import { runPortableRegex } from './portable-regex';
+import { portableRegexRuleKey, runPortableRegex } from './portable-regex';
 
 const MAX_PASSES = 256;
 const MAX_OUTPUT_CHARS = 262_144;
 
 export interface PortableDisplayContext {
     variables: Readonly<Record<string, string>>;
-    chatIndex: number;
-    lastMessageId: number;
+    /** Split views let an imported runtime enforce local/global read grants. */
+    globalVariables?: Readonly<Record<string, string>>;
+    localVariables?: Readonly<Record<string, string>>;
+    chatIndex?: number;
+    lastMessageId?: number;
     lastCharacterMessage?: string;
     characterName?: string;
     userName?: string;
+    onRegexDiagnostic?: (diagnostic: PortableRegexDiagnostic) => void;
+    regexRuleScope?: string;
+}
+
+export interface PortableRegexDiagnostic {
+    ruleIndex: number;
+    reason: 'invalid_pattern' | 'execution_timeout' | 'unavailable';
+}
+
+interface PortableTransformOptions {
+    skipAssetTransforms?: boolean;
+    onRegexDiagnostic?: (diagnostic: PortableRegexDiagnostic) => void;
+    ruleScope?: string;
+    phase: 'provider_output' | 'display';
 }
 
 export function hasPortableDisplayTransform(
@@ -27,7 +44,12 @@ export async function renderPortableDisplay(
     context: PortableDisplayContext,
 ): Promise<string> {
     return renderPortableMacros(
-        await applyPortableTransforms(source, transforms, true),
+        await applyPortableTransforms(source, transforms, {
+            skipAssetTransforms: true,
+            onRegexDiagnostic: context.onRegexDiagnostic,
+            ruleScope: context.regexRuleScope,
+            phase: 'display',
+        }),
         context,
         source,
     );
@@ -36,20 +58,44 @@ export async function renderPortableDisplay(
 export async function applyPortableTransforms(
     source: string,
     transforms: readonly CharacterDisplayTransformDto[],
-    skipAssetTransforms = false,
+    options: PortableTransformOptions,
 ): Promise<string> {
     let output = source;
-    for (const transform of transforms.slice(0, 128)) {
-        if ((skipAssetTransforms && isAssetTransform(transform)) || transform.pattern.length > 4096)
+    for (const [index, transform] of transforms.slice(0, 128).entries()) {
+        if (
+            (options.skipAssetTransforms && isAssetTransform(transform)) ||
+            transform.pattern.length > 4096
+        )
             continue;
-        const result = await runPortableRegex({
-            operation: 'replace',
-            source: output,
-            pattern: transform.pattern,
-            flags: safeFlags(transform.flags, true),
-            replacement: transform.replacement,
-        });
-        if (!result.ok || typeof result.value !== 'string') continue;
+        const result = await runPortableRegex(
+            {
+                operation: 'replace',
+                source: output,
+                pattern: transform.pattern,
+                flags: safeFlags(transform.flags, true),
+                replacement: transform.replacement,
+            },
+            {
+                ruleKey: portableRegexRuleKey(
+                    options.ruleScope ?? 'unscoped-portable-display',
+                    options.phase,
+                    String(index),
+                    index,
+                ),
+            },
+        );
+        if (!result.ok) {
+            const reason = result.reason === 'disabled' ? result.disabledReason : result.reason;
+            options.onRegexDiagnostic?.({
+                ruleIndex: index,
+                reason:
+                    reason === 'invalid_pattern' || reason === 'execution_timeout'
+                        ? reason
+                        : 'unavailable',
+            });
+            continue;
+        }
+        if (typeof result.value !== 'string') continue;
         if (Array.from(result.value).length > MAX_OUTPUT_CHARS) return source;
         output = result.value;
     }
@@ -198,8 +244,11 @@ function evaluateToken(
     const name = rawName.toLocaleLowerCase();
     switch (name) {
         case 'getvar':
+            return variableValue(context.localVariables ?? context.variables, args[0] ?? '') ?? '0';
         case 'getglobalvar':
-            return variableValue(context.variables, args[0] ?? '') ?? '0';
+            return (
+                variableValue(context.globalVariables ?? context.variables, args[0] ?? '') ?? '0'
+            );
         case 'equal':
             return booleanText(compare(args[0], args[1]) === 0);
         case 'notequal':
@@ -225,9 +274,9 @@ function evaluateToken(
         case 'startswith':
             return booleanText((args[0] ?? '').startsWith(args[1] ?? ''));
         case 'lastmessageid':
-            return String(context.lastMessageId);
+            return context.lastMessageId === undefined ? '' : String(context.lastMessageId);
         case 'chat_index':
-            return String(context.chatIndex);
+            return context.chatIndex === undefined ? '' : String(context.chatIndex);
         case 'lastcharmessage':
             return context.lastCharacterMessage ?? '';
         case 'char':

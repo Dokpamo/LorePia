@@ -47,7 +47,12 @@ pub(crate) fn handle(state: State<'_, AppState>, request: Request<Vec<u8>>) -> R
 trait AssetProtocolBackend {
     fn resolve_descriptor(&self, sha256: &str) -> Result<AssetDeliveryDto, ShellErrorCode>;
 
-    fn read_verified_full(&self, sha256: &str) -> Result<AssetProtocolRange, ShellErrorCode>;
+    fn read_verified_range(
+        &self,
+        sha256: &str,
+        start: u64,
+        requested_bytes: u64,
+    ) -> Result<AssetProtocolRange, ShellErrorCode>;
 }
 
 impl AssetProtocolBackend for ShellApi {
@@ -56,42 +61,15 @@ impl AssetProtocolBackend for ShellApi {
             .map_err(|error| error.code)
     }
 
-    fn read_verified_full(&self, sha256: &str) -> Result<AssetProtocolRange, ShellErrorCode> {
-        // The range reader hashes the complete CAS object and reads from the
-        // same verified handle. Reading it once avoids the old resolve/hash +
-        // range/hash pair while the admission budget bounds retained bytes.
-        self.read_asset_protocol_range(sha256, 0, MAX_RENDERABLE_ASSET_BYTES)
+    fn read_verified_range(
+        &self,
+        sha256: &str,
+        start: u64,
+        requested_bytes: u64,
+    ) -> Result<AssetProtocolRange, ShellErrorCode> {
+        self.read_asset_protocol_range(sha256, start, requested_bytes)
             .map_err(|error| error.code)
     }
-}
-
-fn load_verified_delivery(
-    backend: &impl AssetProtocolBackend,
-    method: &Method,
-    sha256: &str,
-) -> Result<(AssetDeliveryDto, Option<Vec<u8>>), StatusCode> {
-    if method == Method::HEAD {
-        return backend
-            .resolve_descriptor(sha256)
-            .map(|descriptor| (descriptor, None))
-            .map_err(status_for_shell_error);
-    }
-
-    let verified = backend
-        .read_verified_full(sha256)
-        .map_err(status_for_shell_error)?;
-    let actual_length =
-        u64::try_from(verified.bytes.len()).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    if verified.start != 0 || verified.descriptor.sha256 != sha256 {
-        return Err(StatusCode::INTERNAL_SERVER_ERROR);
-    }
-    if !delivery_size_is_allowed(&verified.descriptor) {
-        return Err(StatusCode::PAYLOAD_TOO_LARGE);
-    }
-    if actual_length != verified.descriptor.size_bytes {
-        return Err(StatusCode::INTERNAL_SERVER_ERROR);
-    }
-    Ok((verified.descriptor, Some(verified.bytes)))
 }
 
 fn handle_with_backend(
@@ -105,9 +83,9 @@ fn handle_with_backend(
         return empty(StatusCode::BAD_REQUEST);
     };
 
-    let (descriptor, full_body) = match load_verified_delivery(backend, request.method(), sha256) {
-        Ok(delivery) => delivery,
-        Err(status) => return empty(status),
+    let descriptor = match backend.resolve_descriptor(sha256) {
+        Ok(descriptor) => descriptor,
+        Err(error) => return empty(status_for_shell_error(error)),
     };
     if descriptor.sha256 != sha256 {
         return empty(StatusCode::INTERNAL_SERVER_ERROR);
@@ -155,27 +133,15 @@ fn handle_with_backend(
     if request.method() == Method::HEAD {
         return finish(builder, Vec::new());
     }
-    let Some(full_body) = full_body else {
+    let verified =
+        match backend.read_verified_range(sha256, response_range.start, response_range.length) {
+            Ok(verified) => verified,
+            Err(error) => return empty(status_for_shell_error(error)),
+        };
+    if verified.descriptor != descriptor || verified.start != response_range.start {
         return empty(StatusCode::INTERNAL_SERVER_ERROR);
-    };
-    let body = if range.is_some() {
-        let Ok(start) = usize::try_from(response_range.start) else {
-            return empty(StatusCode::INTERNAL_SERVER_ERROR);
-        };
-        let Some(end) = response_range
-            .start
-            .checked_add(response_range.length)
-            .and_then(|end| usize::try_from(end).ok())
-        else {
-            return empty(StatusCode::INTERNAL_SERVER_ERROR);
-        };
-        let Some(bytes) = full_body.get(start..end) else {
-            return empty(StatusCode::INTERNAL_SERVER_ERROR);
-        };
-        bytes.to_vec()
-    } else {
-        full_body
-    };
+    }
+    let body = verified.bytes;
     let Ok(actual_length) = u64::try_from(body.len()) else {
         return empty(StatusCode::INTERNAL_SERVER_ERROR);
     };
@@ -468,6 +434,8 @@ mod tests {
         bytes: Vec<u8>,
         resolve_calls: Cell<usize>,
         read_calls: Cell<usize>,
+        last_read_start: Cell<Option<u64>>,
+        last_read_length: Cell<Option<u64>>,
     }
 
     impl CountingBackend {
@@ -488,6 +456,8 @@ mod tests {
                 bytes: (0_u8..8).collect(),
                 resolve_calls: Cell::new(0),
                 read_calls: Cell::new(0),
+                last_read_start: Cell::new(None),
+                last_read_length: Cell::new(None),
             }
         }
     }
@@ -498,15 +468,23 @@ mod tests {
             Ok(self.descriptor.clone())
         }
 
-        fn read_verified_full(
+        fn read_verified_range(
             &self,
             _sha256: &str,
+            start: u64,
+            requested_bytes: u64,
         ) -> Result<lorepia_shell_api::AssetProtocolRange, ShellErrorCode> {
             self.read_calls.set(self.read_calls.get() + 1);
+            self.last_read_start.set(Some(start));
+            self.last_read_length.set(Some(requested_bytes));
+            let start = usize::try_from(start).map_err(|_| ShellErrorCode::Internal)?;
+            let length = usize::try_from(requested_bytes).map_err(|_| ShellErrorCode::Internal)?;
+            let end = start.checked_add(length).ok_or(ShellErrorCode::Internal)?;
+            let bytes = self.bytes.get(start..end).ok_or(ShellErrorCode::Internal)?;
             Ok(lorepia_shell_api::AssetProtocolRange {
                 descriptor: self.descriptor.clone(),
-                start: 0,
-                bytes: self.bytes.clone(),
+                start: u64::try_from(start).map_err(|_| ShellErrorCode::Internal)?,
+                bytes: bytes.to_vec(),
             })
         }
     }
@@ -588,7 +566,7 @@ mod tests {
     }
 
     #[test]
-    fn get_uses_one_verified_read_while_head_uses_one_descriptor_resolution() {
+    fn get_reads_only_the_requested_verified_range_while_head_reads_no_body() {
         let digest = "ab".repeat(32);
         let get_backend = CountingBackend::new();
         let get = Request::builder()
@@ -603,8 +581,10 @@ mod tests {
         assert_eq!(response.headers()[CONTENT_RANGE], "bytes 2-4/8");
         assert_eq!(response.headers()[CONTENT_TYPE], "image/png");
         assert_eq!(response.body(), &[2, 3, 4]);
-        assert_eq!(get_backend.resolve_calls.get(), 0);
+        assert_eq!(get_backend.resolve_calls.get(), 1);
         assert_eq!(get_backend.read_calls.get(), 1);
+        assert_eq!(get_backend.last_read_start.get(), Some(2));
+        assert_eq!(get_backend.last_read_length.get(), Some(3));
 
         let head_backend = CountingBackend::new();
         let head = Request::builder()
