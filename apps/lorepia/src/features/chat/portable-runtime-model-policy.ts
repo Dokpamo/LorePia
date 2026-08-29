@@ -122,15 +122,20 @@ function completeUsageTokens(usage: GenerationUsageDto | null): number | null {
     const outputTokens = usage?.output_tokens ?? null;
     const reasoningTokens = usage?.reasoning_tokens ?? 0;
     const toolTokens = usage?.tool_tokens ?? 0;
-    // Cache counters may overlap with or supplement input_tokens across the
-    // provider-neutral DTO. Keep the reservation instead of double-counting or
-    // undercounting them.
-    if (cachedReadTokens > 0 || cachedWriteTokens > 0) return null;
     if (inputTokens === null || outputTokens === null) return null;
-    return [inputTokens, outputTokens, reasoningTokens, toolTokens].reduce(
-        (total, value) => total + Math.max(0, value),
-        0,
-    );
+    // Provider cache counters may overlap with input_tokens or represent
+    // external cached context that was absent from the local reservation.
+    // Summing every reported counter is intentionally conservative: budget
+    // enforcement may overcharge ambiguous usage, but it must never let a
+    // cache-heavy provider call bypass the session ceiling.
+    return [
+        inputTokens,
+        cachedReadTokens,
+        cachedWriteTokens,
+        outputTokens,
+        reasoningTokens,
+        toolTokens,
+    ].reduce((total, value) => total + Math.max(0, value), 0);
 }
 
 function budgetSnapshot(
