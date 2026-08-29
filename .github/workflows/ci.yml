@@ -33,7 +33,11 @@ jobs:
         run: python3 -m unittest scripts/test_prepare_tauri_android_gradle.py
 
       - name: Verify GitHub workflow trust boundaries
-        run: python3 scripts/check_github_workflow_security.py
+        run: |
+          python3 scripts/check_github_workflow_security.py
+          python3 -m unittest \
+            scripts/test_stage_release_candidate.py \
+            scripts/test_write_release_checksums.py
 
       - name: Verify committed Gradle integrity controls
         run: python3 scripts/check_android_dependency_integrity.py
