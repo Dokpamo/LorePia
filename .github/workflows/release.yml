@@ -94,7 +94,7 @@ jobs:
 
       - name: Bundle
         working-directory: apps/lorepia
-        run: npm run tauri build -- --config tauri.release.conf.json
+        run: npm run tauri build -- --config src-tauri/tauri.release.conf.json
 
       - name: Generate SPDX SBOM
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
