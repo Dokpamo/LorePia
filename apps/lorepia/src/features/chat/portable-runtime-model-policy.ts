@@ -117,9 +117,15 @@ export function portableRuntimeModelBudgetSnapshot(
 
 function completeUsageTokens(usage: GenerationUsageDto | null): number | null {
     const inputTokens = usage?.input_tokens ?? null;
+    const cachedReadTokens = usage?.cached_read_tokens ?? 0;
+    const cachedWriteTokens = usage?.cached_write_tokens ?? 0;
     const outputTokens = usage?.output_tokens ?? null;
     const reasoningTokens = usage?.reasoning_tokens ?? 0;
     const toolTokens = usage?.tool_tokens ?? 0;
+    // Cache counters may overlap with or supplement input_tokens across the
+    // provider-neutral DTO. Keep the reservation instead of double-counting or
+    // undercounting them.
+    if (cachedReadTokens > 0 || cachedWriteTokens > 0) return null;
     if (inputTokens === null || outputTokens === null) return null;
     return [inputTokens, outputTokens, reasoningTokens, toolTokens].reduce(
         (total, value) => total + Math.max(0, value),
