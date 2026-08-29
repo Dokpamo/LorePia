@@ -339,7 +339,7 @@ mod interrupted_memory_job_retry_contract_tests {
     use super::RetryInterruptedMemoryJobInput;
 
     const INVOKE_REGISTRY_SOURCE: &str = include_str!("lib.rs");
-    const BUILD_MANIFEST_SOURCE: &str = include_str!("../build.rs");
+    const APP_COMMANDS: &str = include_str!("../generated/app_commands.rs");
     const DEVELOPMENT_CAPABILITY: &str = include_str!("../capabilities/main-development.json");
     const RELEASE_CAPABILITY: &str = include_str!("../capabilities/main-release.json");
     const GENERATED_PERMISSION: &str =
@@ -391,7 +391,7 @@ mod interrupted_memory_job_retry_contract_tests {
             1
         );
         assert_eq!(
-            BUILD_MANIFEST_SOURCE
+            APP_COMMANDS
                 .matches("\"retry_interrupted_memory_job\"")
                 .count(),
             1
@@ -871,7 +871,7 @@ mod content_module_lifecycle_contract_tests {
 
     const COMMAND_SOURCE: &str = include_str!("module_lifecycle_commands.rs");
     const INVOKE_REGISTRY_SOURCE: &str = include_str!("lib.rs");
-    const BUILD_MANIFEST_SOURCE: &str = include_str!("../build.rs");
+    const APP_COMMANDS: &str = include_str!("../generated/app_commands.rs");
     const DEVELOPMENT_CAPABILITY: &str = include_str!("../capabilities/main-development.json");
     const RELEASE_CAPABILITY: &str = include_str!("../capabilities/main-release.json");
     const TIMESTAMP: &str = "2026-08-09T00:00:00Z";
@@ -1088,9 +1088,7 @@ mod content_module_lifecycle_contract_tests {
                 "{command} must be registered exactly once in the invoke handler"
             );
             assert_eq!(
-                BUILD_MANIFEST_SOURCE
-                    .matches(&format!("\"{command}\""))
-                    .count(),
+                APP_COMMANDS.matches(&format!("\"{command}\"")).count(),
                 1,
                 "{command} must be registered exactly once in the Tauri command manifest"
             );
@@ -1579,7 +1577,7 @@ mod content_source_export_contract_tests {
 
     const COMMAND_SOURCE: &str = include_str!("package_commands.rs");
     const INVOKE_REGISTRY_SOURCE: &str = include_str!("lib.rs");
-    const BUILD_MANIFEST_SOURCE: &str = include_str!("../build.rs");
+    const APP_COMMANDS: &str = include_str!("../generated/app_commands.rs");
     const DEVELOPMENT_CAPABILITY: &str = include_str!("../capabilities/main-development.json");
     const RELEASE_CAPABILITY: &str = include_str!("../capabilities/main-release.json");
     const MACOS_ENTITLEMENTS_SOURCE: &str = include_str!("../Entitlements.plist");
@@ -1595,12 +1593,7 @@ mod content_source_export_contract_tests {
                 .count(),
             1
         );
-        assert_eq!(
-            BUILD_MANIFEST_SOURCE
-                .matches("\"export_content_source\"")
-                .count(),
-            1
-        );
+        assert_eq!(APP_COMMANDS.matches("\"export_content_source\"").count(), 1);
         assert!(COMMAND_SOURCE.contains("pub async fn export_content_source("));
         assert!(COMMAND_SOURCE.contains("request: shell::ContentSourceExportInput"));
         assert!(
@@ -1662,7 +1655,7 @@ mod content_source_export_contract_tests {
             1
         );
         assert_eq!(
-            BUILD_MANIFEST_SOURCE
+            APP_COMMANDS
                 .matches("\"list_completed_content_package_exports\"")
                 .count(),
             1
