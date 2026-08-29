@@ -44,6 +44,10 @@ import {
     type PortableRuntimeModelCallLease,
     type PortableRuntimeModelBudgetSnapshot,
 } from './portable-runtime-model-policy';
+import {
+    boundedPortableRuntimeChatContext,
+    portableRuntimeChatContextSource,
+} from './portable-runtime-context';
 
 export type { PortableRuntimeCapability, PortableRuntimeGrant } from './portable-runtime-protocol';
 
@@ -662,16 +666,14 @@ export class PortableCharacterRuntime {
     }
 
     private workerContext(): PortableRuntimeWorkerContext {
+        const chatContext = boundedPortableRuntimeChatContext(
+            this.messages,
+            this.virtualMessage,
+            (message) => this.effectiveText(message),
+        );
         return {
             persisted: this.persisted,
-            messages: this.messages.map((message) => ({
-                id: message.id,
-                role: runtimeRole(message.role),
-                data: this.effectiveText(message),
-                time: Math.floor(Date.parse(message.created_at) / 1_000) || 0,
-                virtual: false,
-            })),
-            virtualMessage: this.virtualMessage,
+            ...chatContext,
             activeLoreEntries: this.activeLoreEntries,
             stopped: this.workerStopped,
         };
@@ -781,11 +783,14 @@ export class PortableCharacterRuntime {
             return;
         }
         const mayReadChat = this.capabilities.includes('chat:read');
-        const sourceParts = mayReadChat
-            ? this.messages.map((message) => this.effectiveText(message))
-            : [];
-        if (mayReadChat && this.virtualMessage !== null) sourceParts.push(this.virtualMessage.data);
-        const source = sourceParts.join('\n').slice(-MAX_RUNTIME_LORE_SOURCE_CHARS);
+        const source = mayReadChat
+            ? portableRuntimeChatContextSource(
+                  boundedPortableRuntimeChatContext(this.messages, this.virtualMessage, (message) =>
+                      this.effectiveText(message),
+                  ),
+                  MAX_RUNTIME_LORE_SOURCE_CHARS,
+              )
+            : '';
         const candidates = this.profile.runtime_knowledge
             .filter((entry) => entry.enabled && !entry.folder && (mayReadChat || entry.constant))
             .slice(0, MAX_RUNTIME_LORE_ENTRIES);
@@ -918,12 +923,6 @@ function runtimePromptMessages(value: unknown): RuntimePromptMessageInput[] {
     }
     if (messages.length === 0) throw new Error(t('chat.runtime.prompt.empty'));
     return messages;
-}
-
-function runtimeRole(role: MessageDto['role']): PortableRuntimeChatMessage['role'] {
-    if (role === 'assistant') return 'char';
-    if (role === 'user') return 'user';
-    return 'system';
 }
 
 async function loreEntryActive(

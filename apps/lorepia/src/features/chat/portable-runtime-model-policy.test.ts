@@ -56,8 +56,8 @@ describe('portable runtime model budget', () => {
         if (!first.ok) throw new Error('first call should be admitted');
         first.lease.finish({
             input_tokens: 12,
-            cached_read_tokens: null,
-            cached_write_tokens: null,
+            cached_read_tokens: 0,
+            cached_write_tokens: 0,
             output_tokens: 8,
             reasoning_tokens: 4,
             tool_tokens: 2,
@@ -86,6 +86,27 @@ describe('portable runtime model budget', () => {
             ok: false,
             reason: 'call_budget',
         });
+    });
+
+    it('keeps the conservative reservation for positive cached read or write usage', () => {
+        for (const [scope, cachedReadTokens, cachedWriteTokens] of [
+            ['cached-read', 30_000, null],
+            ['cached-write', null, 30_000],
+        ] as const) {
+            const admitted = beginPortableRuntimeModelCall(scope, 1_000, 1_000);
+            if (!admitted.ok) throw new Error('call should be admitted');
+
+            const snapshot = admitted.lease.finish({
+                input_tokens: 12,
+                cached_read_tokens: cachedReadTokens,
+                cached_write_tokens: cachedWriteTokens,
+                output_tokens: 8,
+                reasoning_tokens: null,
+                tool_tokens: null,
+            });
+
+            expect(snapshot.chargedTokens).toBe(admitted.lease.reservedTokens);
+        }
     });
 
     it('quarantines a card revision after an outcome-unknown provider call', () => {
