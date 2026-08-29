@@ -479,7 +479,7 @@ pub enum PackageCommitDocument {
     ContentModule(ContentModule),
     CharacterContent {
         character_id: String,
-        content: CharacterContentV1,
+        content: Box<CharacterContentV1>,
     },
 }
 
@@ -511,7 +511,7 @@ pub struct MemoryInvalidationResult {
 }
 
 /// Storage-only counters used to prove orchestration transaction atomicity
-/// without exposing raw `SQLite` access through application or FFI surfaces.
+/// without exposing raw `SQLite` access through app or FFI surfaces.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OrchestrationDatabaseStats {

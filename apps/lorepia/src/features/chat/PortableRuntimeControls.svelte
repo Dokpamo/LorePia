@@ -2,7 +2,7 @@
     import ChoicePopover from '../../components/ChoicePopover.svelte';
     import ToggleSwitch from '../../components/ToggleSwitch.svelte';
     import type { GenerationSelectionInput } from '../../lib/ipc/contracts';
-    import { t } from '../../lib/i18n';
+    import { tr } from '../../lib/i18n';
     import type {
         PortableCharacterRuntime,
         PortableRuntimeCapability,
@@ -60,16 +60,16 @@
 
     function capabilityLabel(capability: PortableRuntimeCapability): string {
         const labels: Record<PortableRuntimeCapability, string> = {
-            'runtime:callbacks': '카드 콜백 실행',
-            'chat:read': '현재 대화 읽기',
-            'chat:write': '표시 메시지와 전송 흐름 변경',
-            'state:readwrite': '카드별 상태 저장',
-            'profile:read': '캐릭터·페르소나 정보 읽기',
-            'lore:read': '활성 로어북 읽기',
-            'ui:write': '카드 UI·배경·알림 표시',
-            'model:primary': '현재 기본 모델 호출',
-            'model:auxiliary': '선택한 보조 모델 호출',
-            elevated: '고급 카드 권한',
+            'runtime:callbacks': $tr('chat.runtime.capability.callbacks'),
+            'chat:read': $tr('chat.runtime.capability.chat_read'),
+            'chat:write': $tr('chat.runtime.capability.chat_write'),
+            'state:readwrite': $tr('chat.runtime.capability.state_readwrite'),
+            'profile:read': $tr('chat.runtime.capability.profile_read'),
+            'lore:read': $tr('chat.runtime.capability.lore_read'),
+            'ui:write': $tr('chat.runtime.capability.ui_write'),
+            'model:primary': $tr('chat.runtime.capability.model_primary'),
+            'model:auxiliary': $tr('chat.runtime.capability.model_auxiliary'),
+            elevated: $tr('chat.runtime.capability.elevated'),
         };
         return labels[capability];
     }
@@ -101,7 +101,7 @@
         <div class="portable-runtime-approval">
             <p>아래 권한은 현재 카드 리비전·스크립트 해시에만 이번 세션 동안 허용됩니다.</p>
             <p class="portable-runtime-sensitive-note">
-                대화 변경·모델 호출·고급 권한은 사용자가 직접 선택해야 합니다.
+                {$tr('chat.runtime.permissions.sensitive')}
             </p>
             <ul aria-label="요청한 캐릭터 기능 권한">
                 {#each capabilities as capability (capability)}
@@ -119,7 +119,7 @@
                 {/each}
             </ul>
             <button type="button" onclick={() => void onApprove()}>
-                선택한 기능만 이번 세션에서 허용
+                {$tr('chat.runtime.permissions.approve_selected')}
             </button>
         </div>
     {:else}
@@ -128,7 +128,7 @@
         </button>
         {#if persistenceStatus?.mode === 'memory-only'}
             <p class="portable-runtime-persistence-warning" role="status" aria-live="polite">
-                {t('chat.runtime.persistence.memory_only')}
+                {$tr('chat.runtime.persistence.memory_only')}
             </p>
         {/if}
         {#if runtime !== null}

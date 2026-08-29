@@ -38,7 +38,13 @@ use crate::{
     interaction_evaluation_seal_sha256, memory_records_at_head_snapshot_sha256,
 };
 
-use effect_history::*;
+use effect_history::{
+    decode_choice_effect_lifecycle, effect_outbox_kind, interaction_effect_id, read_effect_history,
+    read_effect_history_page, read_latest_region_effects, read_older_reopen_effect_history,
+    read_pending_choice_effect_history, read_pending_effects, read_recent_reopen_effect_history,
+    require_pending_choice, require_pending_choice_effect, validate_effect_delivery_token,
+    validate_effect_poll_limit, validate_proposal_list_limit, validate_stored_effect_identity,
+};
 
 const MAX_STATE_JSON_BYTES: usize = 8 * 1_024 * 1_024;
 const MAX_EVENT_JSON_BYTES: usize = 1_024 * 1_024;
@@ -12486,20 +12492,6 @@ fn action_result_status(status: InteractionActionResultStatus) -> &'static str {
         InteractionActionResultStatus::Applied => "applied",
         InteractionActionResultStatus::Skipped => "skipped",
         InteractionActionResultStatus::Failed => "failed",
-    }
-}
-
-fn effect_outbox_kind(effect: &InteractionEffect) -> Option<&'static str> {
-    match effect {
-        InteractionEffect::AssetShown { .. } => Some("asset_shown"),
-        InteractionEffect::AudioRequested { .. } => Some("audio_requested"),
-        InteractionEffect::ChoicesPresented { .. } => Some("choices_presented"),
-        InteractionEffect::VisibleSystemEvent { .. } => Some("visible_system_event"),
-        InteractionEffect::DiceRolled { .. } => Some("dice_rolled"),
-        InteractionEffect::ApprovalRequested { .. } => Some("approval_requested"),
-        InteractionEffect::VariableSet { .. } | InteractionEffect::KnowledgeActivated { .. } => {
-            None
-        }
     }
 }
 

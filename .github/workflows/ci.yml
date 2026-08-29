@@ -147,10 +147,57 @@ jobs:
       - name: Initialize Tauri iOS dependencies
         run: npm run tauri -- ios init --ci --skip-targets-install
 
-      - name: Build unsigned iOS simulator app
-        run: >-
-          npm run tauri -- ios build --ci --debug --target aarch64-sim --no-sign
-          --config src-tauri/tauri.release.conf.json
+      # Tauri's generated Xcode build phase calls `tauri ios xcode-script`,
+      # which reads build options from a server owned by the parent CLI. Keep
+      # that context alive, but let xcodebuild perform a non-archive simulator
+      # build so CI never enters the distribution-signing path.
+      - name: Build unsigned iOS simulator app with Xcode
+        run: |
+          set -euo pipefail
+
+          context_log="$RUNNER_TEMP/tauri-ios-xcode-context.log"
+          shim_dir="$RUNNER_TEMP/tauri-ios-ci-bin"
+          mkdir -p "$shim_dir"
+          ln -s /usr/bin/true "$shim_dir/open"
+
+          PATH="$shim_dir:$PATH" npm run tauri -- ios build --open --ci --debug -v \
+            --target aarch64-sim --no-sign \
+            --config src-tauri/tauri.release.conf.json \
+            >"$context_log" 2>&1 &
+          context_pid=$!
+          cleanup() {
+            kill "$context_pid" 2>/dev/null || true
+            wait "$context_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT INT TERM
+
+          context_ready=false
+          for _ in {1..60}; do
+            if grep -q "Opening Xcode" "$context_log"; then
+              context_ready=true
+              break
+            fi
+            if ! kill -0 "$context_pid" 2>/dev/null; then
+              cat "$context_log"
+              wait "$context_pid"
+            fi
+            sleep 1
+          done
+          if [[ "$context_ready" != true ]]; then
+            cat "$context_log"
+            echo "Tauri Xcode build context did not become ready" >&2
+            exit 1
+          fi
+
+          xcodebuild \
+            -project src-tauri/gen/apple/lorepia-tauri.xcodeproj \
+            -scheme lorepia-tauri_iOS \
+            -configuration debug \
+            -sdk iphonesimulator \
+            -destination "generic/platform=iOS Simulator" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build
 
   rust:
     name: Rust (${{ matrix.os }})

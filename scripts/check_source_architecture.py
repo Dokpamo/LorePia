@@ -63,6 +63,21 @@ PORTABLE_REGEX_OPERATION = Path(
     "apps/lorepia/src/features/chat/portable-regex-operation.ts"
 )
 PORTABLE_REGEX_WORKER = Path("apps/lorepia/src/features/chat/portable-regex.worker.ts")
+CORE_SOURCE_ROOT = Path("crates/core/src")
+CHARACTER_RUNTIME_NATIVE_TRANSFORM_RE = re.compile(
+    r"\.\s*runtime\s*\.\s*transform_set_id\b"
+)
+CHARACTER_RUNTIME_ALIAS_RE = re.compile(
+    r"\blet\s+(?:mut\s+)?(?P<alias>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*"
+    r"[^;]{0,2048}\.\s*runtime\s*;",
+    re.DOTALL,
+)
+CHARACTER_RUNTIME_TRANSFORM_DESTRUCTURE_RE = re.compile(
+    r"\blet\s+(?:mut\s+)?(?:[A-Za-z_][A-Za-z0-9_]*\s*)?"
+    r"\{[^{};]{0,2048}\btransform_set_id\b[^{};]{0,2048}\}\s*=\s*"
+    r"[^;]{0,2048}\.\s*runtime\b",
+    re.DOTALL,
+)
 CORE_STORAGE_REEXPORT_RE = re.compile(
     r"\bpub\s+use\s+lorepia_storage::(?P<body>[^;]+);", re.DOTALL
 )
@@ -280,6 +295,42 @@ def evaluate_portable_regex_boundary(root: Path, sources: list[Path]) -> list[st
     return failures
 
 
+def evaluate_character_runtime_transform_boundary(root: Path) -> list[str]:
+    """Keep imported card transforms behind the frontend's session grant."""
+
+    core_source_root = root / CORE_SOURCE_ROOT
+    if not core_source_root.is_dir():
+        return []
+    failures: list[str] = []
+    for source in sorted(core_source_root.rglob("*.rs")):
+        relative = source.relative_to(root)
+        try:
+            stripped = strip_rust_comments_and_strings(source.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError) as error:
+            failures.append(
+                f"cannot inspect character runtime transform boundary in "
+                f"{relative.as_posix()}: {error}"
+            )
+            continue
+        consumes_native_projection = (
+            "character_runtime_transform_set" in stripped
+            or CHARACTER_RUNTIME_NATIVE_TRANSFORM_RE.search(stripped) is not None
+            or CHARACTER_RUNTIME_TRANSFORM_DESTRUCTURE_RE.search(stripped) is not None
+        )
+        if not consumes_native_projection:
+            for alias_match in CHARACTER_RUNTIME_ALIAS_RE.finditer(stripped):
+                alias = re.escape(alias_match.group("alias"))
+                if re.search(rf"\b{alias}\s*\.\s*transform_set_id\b", stripped):
+                    consumes_native_projection = True
+                    break
+        if consumes_native_projection:
+            failures.append(
+                f"{relative.as_posix()} must not implicitly consume the "
+                "character runtime native transform projection without a revision-bound grant"
+            )
+    return failures
+
+
 def load_config(config_path: Path) -> dict[str, Any]:
     try:
         config = json.loads(config_path.read_text(encoding="utf-8"))
@@ -445,6 +496,7 @@ def evaluate_source_sizes(
     source_names = {source.as_posix() for source in sources}
     failures.extend(evaluate_frontend_test_imports(root, sources))
     failures.extend(evaluate_portable_regex_boundary(root, sources))
+    failures.extend(evaluate_character_runtime_transform_boundary(root))
 
     for baseline_path, baseline in sorted(baselines.items()):
         if not isinstance(baseline_path, str) or not isinstance(baseline, dict):

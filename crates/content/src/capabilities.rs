@@ -115,7 +115,7 @@ fn runtime_profile_is_contributor(profile: &CharacterRuntimeProfile) -> bool {
 }
 
 fn canonicalize_runtime_capabilities(
-    capabilities: &mut Vec<PortableRuntimeCapability>,
+    capabilities: &mut [PortableRuntimeCapability],
 ) -> CoreResult<()> {
     capabilities.sort_unstable();
     if capabilities.windows(2).any(|pair| pair[0] == pair[1]) {

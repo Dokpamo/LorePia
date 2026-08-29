@@ -10,6 +10,7 @@ import type {
     LorepiaClient,
     MessageDto,
 } from '../../lib/ipc/contracts';
+import { t } from '../../lib/i18n';
 import {
     INITIAL_APP_STATE,
     LorepiaAppController,
@@ -21,7 +22,7 @@ import {
     OrchestrationController,
 } from '../orchestration/orchestration-controller';
 import ChatPane from './ChatPane.svelte';
-import { PortableCharacterRuntime } from './portable-runtime';
+import { PortableCharacterRuntime, type PortableRuntimeOptions } from './portable-runtime';
 
 class ControlledResizeObserver implements ResizeObserver {
     static instances: ControlledResizeObserver[] = [];
@@ -161,6 +162,7 @@ function portableRuntimeStub(close: () => void = vi.fn()): PortableCharacterRunt
         prepareInput: vi.fn((text: string) => Promise.resolve({ text, shouldSend: true })),
         afterOutput: vi.fn().mockResolvedValue(undefined),
         handleAction: vi.fn().mockResolvedValue(undefined),
+        cancelActiveModelCall: vi.fn().mockResolvedValue('not_found'),
         displayText: (message: MessageDto) => message.content,
         effectiveText: (message: MessageDto) => message.content,
         close,
@@ -348,7 +350,7 @@ describe('ChatPane transcript chrome', () => {
         expect(screen.queryByRole('radiogroup', { name: '대화 모드' })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '새 생성 작업' })).not.toBeInTheDocument();
 
-        await fireEvent.click(screen.getByRole('button', { name: '대화 설정' }));
+        await fireEvent.click(screen.getByRole('button', { name: t('quick.toggle') }));
         const settings = screen.getByRole('dialog', { name: '대화 설정' });
         const settingsUi = within(settings);
 
@@ -1230,6 +1232,80 @@ describe('ChatPane live response', () => {
 });
 
 describe('ChatPane composer', () => {
+    it('labels an unconfirmed runtime model cancellation as retryable', async () => {
+        const profile: CharacterRenderProfileDto = {
+            character_id: 'character-1',
+            character_content_revision_id: 'revision-1',
+            assets: [],
+            background_markup: '',
+            toggle_schema: '',
+            initial_variables: {},
+            output_transforms: [],
+            display_transforms: [],
+            runtime_scripts: [
+                {
+                    id: 'script-1',
+                    name: 'Runtime',
+                    event: 'load',
+                    language: 'lua',
+                    source: '-- no-op',
+                    elevated_access: false,
+                },
+            ],
+            required_runtime_capabilities: [],
+            runtime_capabilities_declared: false,
+            runtime_knowledge: [],
+            runtime_script_count: 1,
+        };
+        const runtime = portableRuntimeStub();
+        const cancelActiveModelCall = vi
+            .spyOn(runtime, 'cancelActiveModelCall')
+            .mockResolvedValue('unconfirmed');
+        let reportModelCall: NonNullable<PortableRuntimeOptions['onModelCallStatus']> = () =>
+            undefined;
+        const createRuntime = vi
+            .spyOn(PortableCharacterRuntime, 'create')
+            .mockImplementation((options) => {
+                reportModelCall = options.onModelCallStatus ?? (() => undefined);
+                return Promise.resolve(runtime);
+            });
+        const client = {
+            getCharacterRenderProfile: vi.fn().mockResolvedValue(profile),
+        } as unknown as LorepiaClient;
+        const { controller, orchestrationController } = renderChatWithSettings(
+            chatReadyState(),
+            client,
+        );
+
+        await fireEvent.click(screen.getByRole('button', { name: t('quick.toggle') }));
+        await fireEvent.click(
+            await screen.findByRole('button', {
+                name: t('chat.runtime.permissions.approve_selected'),
+            }),
+        );
+        await waitFor(() => expect(createRuntime).toHaveBeenCalledOnce());
+        reportModelCall({
+            requestId: '00000000-0000-4000-8000-000000000020',
+            target: 'primary',
+            characterName: 'Character',
+            startedAt: Date.now(),
+        });
+        await tick();
+
+        const stop = document.querySelector<HTMLButtonElement>(
+            '.portable-runtime-model-call button',
+        );
+        if (stop === null) throw new Error('runtime model stop action is missing');
+        await fireEvent.click(stop);
+        await waitFor(() =>
+            expect(screen.getByText(t('chat.runtime.cancel.unconfirmed'))).toBeInTheDocument(),
+        );
+        expect(cancelActiveModelCall).toHaveBeenCalledOnce();
+
+        controller.destroy();
+        orchestrationController.destroy();
+    });
+
     it('discards a pending runtime approval when the selected character changes', async () => {
         const profileA: CharacterRenderProfileDto = {
             character_id: 'character-1',
@@ -1411,6 +1487,166 @@ describe('ChatPane composer', () => {
         orchestrationController.destroy();
     });
 
+    it('applies imported message transforms only for an active reviewed grant', async () => {
+        const profile: CharacterRenderProfileDto = {
+            character_id: 'character-1',
+            character_content_revision_id: 'revision-1',
+            assets: [],
+            background_markup: '',
+            toggle_schema: '',
+            initial_variables: {},
+            output_transforms: [
+                {
+                    pattern: '^RAW-CARD-OUTPUT$',
+                    replacement: 'REVIEWED-CARD-OUTPUT',
+                    flags: '',
+                },
+            ],
+            display_transforms: [
+                {
+                    pattern: '^REVIEWED-CARD-OUTPUT$',
+                    replacement: '<div data-reviewed="true">APPROVED-CARD-DISPLAY</div>',
+                    flags: '',
+                },
+            ],
+            runtime_scripts: [],
+            required_runtime_capabilities: ['chat:read', 'profile:read', 'ui:write'],
+            runtime_capabilities_declared: true,
+            runtime_knowledge: [],
+            runtime_script_count: 0,
+        };
+        const appState = chatReadyState();
+        appState.messages.items = [
+            {
+                id: 'message-card-output',
+                conversation_id: 'conversation-1',
+                parent_id: null,
+                role: 'assistant',
+                content: 'RAW-CARD-OUTPUT',
+                status: 'complete',
+                generation_id: 'generation-card-output',
+                created_at: '2026-08-02T00:00:00Z',
+            },
+        ];
+        const client = {
+            getCharacterRenderProfile: vi.fn().mockResolvedValue(profile),
+            resolveAssetDelivery: vi.fn(),
+        } as unknown as LorepiaClient;
+        const { controller, orchestrationController } = renderChatWithSettings(appState, client);
+
+        await fireEvent.click(screen.getByRole('button', { name: t('quick.toggle') }));
+        const approve = await screen.findByRole('button', {
+            name: t('chat.runtime.permissions.approve_selected'),
+        });
+        expect(screen.getByText('RAW-CARD-OUTPUT')).toBeInTheDocument();
+        expect(document.querySelector('.portable-frame')).toBeNull();
+
+        // The default grant deliberately withholds chat/profile read access.
+        await fireEvent.click(approve);
+        await waitFor(() =>
+            expect(document.querySelector('.portable-runtime-revoke')).not.toBeNull(),
+        );
+        expect(screen.getByText('RAW-CARD-OUTPUT')).toBeInTheDocument();
+        expect(document.querySelector('.portable-frame')).toBeNull();
+
+        const deniedGrantRevoke = document.querySelector<HTMLButtonElement>(
+            '.portable-runtime-revoke',
+        );
+        if (deniedGrantRevoke === null) throw new Error('runtime revoke action is missing');
+        await fireEvent.click(deniedGrantRevoke);
+        const chatRead = await screen.findByRole('checkbox', {
+            name: t('chat.runtime.capability.chat_read'),
+        });
+        const profileRead = screen.getByRole('checkbox', {
+            name: t('chat.runtime.capability.profile_read'),
+        });
+        await fireEvent.click(chatRead);
+        await fireEvent.click(profileRead);
+        await fireEvent.click(
+            screen.getByRole('button', {
+                name: t('chat.runtime.permissions.approve_selected'),
+            }),
+        );
+
+        await waitFor(() => {
+            const frame = document.querySelector<HTMLIFrameElement>('.portable-frame');
+            expect(frame?.srcdoc).toContain('APPROVED-CARD-DISPLAY');
+        });
+        expect(screen.queryByText('RAW-CARD-OUTPUT')).toBeNull();
+
+        const reviewedGrantRevoke = document.querySelector<HTMLButtonElement>(
+            '.portable-runtime-revoke',
+        );
+        if (reviewedGrantRevoke === null) throw new Error('runtime revoke action is missing');
+        await fireEvent.click(reviewedGrantRevoke);
+        await waitFor(() => expect(document.querySelector('.portable-frame')).toBeNull());
+        expect(screen.getByText('RAW-CARD-OUTPUT')).toBeInTheDocument();
+
+        controller.destroy();
+        orchestrationController.destroy();
+    });
+
+    it('keeps imported transforms inert for an explicit empty capability declaration', async () => {
+        const profile: CharacterRenderProfileDto = {
+            character_id: 'character-1',
+            character_content_revision_id: 'revision-explicit-empty',
+            assets: [],
+            background_markup: '',
+            toggle_schema: '',
+            initial_variables: {},
+            output_transforms: [
+                {
+                    pattern: '^EXPLICIT-EMPTY-OUTPUT$',
+                    replacement: '<div>SHOULD-NOT-RENDER</div>',
+                    flags: '',
+                },
+            ],
+            display_transforms: [],
+            runtime_scripts: [],
+            required_runtime_capabilities: [],
+            runtime_capabilities_declared: true,
+            runtime_knowledge: [],
+            runtime_script_count: 0,
+        };
+        const appState = chatReadyState();
+        appState.messages.items = [
+            {
+                id: 'message-explicit-empty',
+                conversation_id: 'conversation-1',
+                parent_id: null,
+                role: 'assistant',
+                content: 'EXPLICIT-EMPTY-OUTPUT',
+                status: 'complete',
+                generation_id: null,
+                created_at: '2026-08-02T00:00:00Z',
+            },
+        ];
+        const client = {
+            getCharacterRenderProfile: vi.fn().mockResolvedValue(profile),
+            resolveAssetDelivery: vi.fn(),
+        } as unknown as LorepiaClient;
+        const { controller, orchestrationController } = renderChatWithSettings(appState, client);
+
+        await fireEvent.click(screen.getByRole('button', { name: t('quick.toggle') }));
+        const approve = await screen.findByRole('button', {
+            name: t('chat.runtime.permissions.approve_selected'),
+        });
+        expect(
+            screen.queryByRole('checkbox', { name: t('chat.runtime.capability.chat_read') }),
+        ).toBeNull();
+        await fireEvent.click(approve);
+        await waitFor(() =>
+            expect(document.querySelector('.portable-runtime-revoke')).not.toBeNull(),
+        );
+
+        expect(screen.getByText('EXPLICIT-EMPTY-OUTPUT')).toBeInTheDocument();
+        expect(screen.queryByText('SHOULD-NOT-RENDER')).toBeNull();
+        expect(document.querySelector('.portable-frame')).toBeNull();
+
+        controller.destroy();
+        orchestrationController.destroy();
+    });
+
     it('keeps ordinary chat available while imported runtime code remains unapproved', async () => {
         const profile: CharacterRenderProfileDto = {
             character_id: 'character-1',
@@ -1449,10 +1685,18 @@ describe('ChatPane composer', () => {
         await screen.findByRole('button', {
             name: '선택한 기능만 이번 세션에서 허용',
         });
-        expect(screen.queryByRole('checkbox', { name: '현재 기본 모델 호출' })).toBeNull();
-        expect(screen.queryByRole('checkbox', { name: '선택한 보조 모델 호출' })).toBeNull();
-        expect(screen.getByRole('checkbox', { name: '카드 콜백 실행' })).toBeChecked();
-        expect(screen.getByRole('checkbox', { name: '카드 UI·배경·알림 표시' })).toBeChecked();
+        expect(
+            screen.queryByRole('checkbox', { name: t('chat.runtime.capability.model_primary') }),
+        ).toBeNull();
+        expect(
+            screen.queryByRole('checkbox', { name: t('chat.runtime.capability.model_auxiliary') }),
+        ).toBeNull();
+        expect(
+            screen.getByRole('checkbox', { name: t('chat.runtime.capability.callbacks') }),
+        ).toBeChecked();
+        expect(
+            screen.getByRole('checkbox', { name: t('chat.runtime.capability.ui_write') }),
+        ).toBeChecked();
         const composer = screen.getByRole('textbox', { name: '메시지' });
         await fireEvent.input(composer, { target: { value: '안전 모드 대화' } });
         await fireEvent.click(screen.getByRole('button', { name: '메시지 보내기' }));
@@ -1530,7 +1774,9 @@ describe('ChatPane composer', () => {
         expect(createRuntime).not.toHaveBeenCalled();
         expect(screen.queryByRole('switch', { name: '배경음악' })).not.toBeInTheDocument();
         await fireEvent.click(
-            await screen.findByRole('button', { name: '선택한 기능만 이번 세션에서 허용' }),
+            await screen.findByRole('button', {
+                name: t('chat.runtime.permissions.approve_selected'),
+            }),
         );
         const musicToggle = await screen.findByRole('switch', { name: '배경음악' });
         await fireEvent.click(musicToggle);
@@ -1571,7 +1817,7 @@ describe('ChatPane composer', () => {
                 conversation_id: 'conversation-1',
                 parent_id: null,
                 role: 'assistant',
-                content: '되감기 대상',
+                content: 'rewind target',
                 status: 'complete',
                 generation_id: 'generation-1',
                 created_at: '2026-08-29T00:00:00Z',
@@ -1622,8 +1868,12 @@ describe('ChatPane composer', () => {
         );
         await waitFor(() => expect(createRuntime).toHaveBeenCalledTimes(1));
 
-        await fireEvent.click(screen.getByRole('button', { name: '여기부터 제거' }));
-        await fireEvent.click(screen.getByRole('button', { name: '제거 확인' }));
+        await fireEvent.click(
+            screen.getByRole('button', { name: t('chat.message.remove_from_here') }),
+        );
+        await fireEvent.click(
+            screen.getByRole('button', { name: t('chat.message.remove_confirm') }),
+        );
 
         await waitFor(() => expect(removeMessage).toHaveBeenCalledWith('assistant-1'));
         await waitFor(() => expect(createRuntime).toHaveBeenCalledTimes(2));

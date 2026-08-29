@@ -224,6 +224,8 @@ export interface PortableRuntimeModelCallStatus {
     startedAt: number;
 }
 
+export type PortableRuntimeModelCancellationResult = 'confirmed' | 'not_found' | 'unconfirmed';
+
 export interface PreparedPortableInput {
     text: string;
     shouldSend: boolean;
@@ -272,7 +274,7 @@ export class PortableCharacterRuntime {
     private activeModelRequestId: string | null = null;
     private activeModelCancellation: {
         requestId: string;
-        result: Promise<boolean>;
+        result: Promise<PortableRuntimeModelCancellationResult>;
     } | null = null;
     private persistenceStatus: PortableRuntimePersistenceStatus | null = null;
     private sqlitePersistence = false;
@@ -335,7 +337,7 @@ export class PortableCharacterRuntime {
         ];
         this.legacyStorageKey =
             this.stateScope.character_content_revision_id === 'legacy' ||
-            legacyScopeParts.some((value) => value.includes(':'))
+            legacyScopeParts.slice(0, 3).some((value) => value.includes(':'))
                 ? null
                 : ['lorepia.character-runtime.v1', ...legacyScopeParts].join(':');
         this.toggles = parsePortableRuntimeToggles(options.profile.toggle_schema);
@@ -551,15 +553,35 @@ export class PortableCharacterRuntime {
         this.displayCache.clear();
     }
 
-    async cancelActiveModelCall(): Promise<boolean> {
+    async cancelActiveModelCall(): Promise<PortableRuntimeModelCancellationResult> {
         const requestId = this.activeModelRequestId;
-        if (requestId === null || this.client.cancelRuntimeText === undefined) return false;
+        if (requestId === null) return 'not_found';
+        const cancelRuntimeText = this.client.cancelRuntimeText?.bind(this.client);
+        if (cancelRuntimeText === undefined) return 'unconfirmed';
         if (this.activeModelCancellation?.requestId === requestId) {
             return await this.activeModelCancellation.result;
         }
-        const result = this.client.cancelRuntimeText(requestId).catch(() => false);
-        this.activeModelCancellation = { requestId, result };
-        return await result;
+        const result = (async (): Promise<PortableRuntimeModelCancellationResult> => {
+            try {
+                return (await cancelRuntimeText(requestId)) ? 'confirmed' : 'unconfirmed';
+            } catch {
+                return 'unconfirmed';
+            }
+        })();
+        const activeCancellation = { requestId, result };
+        this.activeModelCancellation = activeCancellation;
+        const cancellation = await result;
+        if (
+            cancellation !== 'confirmed' &&
+            this.activeModelRequestId === requestId &&
+            this.activeModelCancellation === activeCancellation
+        ) {
+            // A false native response can mean terminal acknowledgement timed
+            // out, and a transport error is equally inconclusive. Keep only a
+            // confirmed terminal result settled so Stop can retry this request.
+            this.activeModelCancellation = null;
+        }
+        return cancellation;
     }
 
     private async initializeWithDeadline(): Promise<void> {
@@ -1086,7 +1108,7 @@ export class PortableCharacterRuntime {
             return;
         }
 
-        const record = this.acceptSqliteWriteResult(result, legacy.serialized);
+        const record = this.acceptSqliteWriteResult(result, legacy.serialized, false);
         if (record === null) return;
 
         if (
@@ -1121,7 +1143,7 @@ export class PortableCharacterRuntime {
             verified === null ||
             readback.scope_epoch !== record.scope_epoch ||
             readback.record?.revision !== record.revision ||
-            verified.serialized !== serialized
+            !serializedJsonSemanticallyEquals(verified.serialized, serialized)
         ) {
             this.updatePersistenceStatus({ mode: 'memory-only', reason: 'read-failed' });
             return false;
@@ -1163,6 +1185,7 @@ export class PortableCharacterRuntime {
     private acceptSqliteWriteResult(
         result: PutPortableRuntimeStateResultDto,
         expectedSerialized: string,
+        commitAcceptedState = true,
     ): PortableRuntimeStateRecordDto | null {
         if (result.status === 'scope_invalidated') {
             if (isSafeNonNegativeInteger(result.current_scope_epoch)) {
@@ -1178,7 +1201,8 @@ export class PortableCharacterRuntime {
         const decoded = record === null ? null : this.decodeSqliteRecord(record);
         if (
             record === null ||
-            decoded?.serialized !== expectedSerialized ||
+            decoded === null ||
+            !serializedJsonSemanticallyEquals(decoded.serialized, expectedSerialized) ||
             record.scope_epoch !== this.sqliteScopeEpoch
         ) {
             if (result.status === 'revision_conflict') {
@@ -1191,9 +1215,11 @@ export class PortableCharacterRuntime {
             return null;
         }
 
-        this.sqliteScopeEpoch = record.scope_epoch;
-        this.sqliteRevision = record.revision;
-        this.durableSerializedState = expectedSerialized;
+        if (commitAcceptedState) {
+            this.sqliteScopeEpoch = record.scope_epoch;
+            this.sqliteRevision = record.revision;
+            this.durableSerializedState = expectedSerialized;
+        }
         return record;
     }
 
@@ -1239,10 +1265,15 @@ export class PortableCharacterRuntime {
                 continue;
             }
 
-            const record = this.acceptSqliteWriteResult(result, pending.serialized);
+            const requiresLegacyVerification = this.legacyMigrationPending;
+            const record = this.acceptSqliteWriteResult(
+                result,
+                pending.serialized,
+                !requiresLegacyVerification,
+            );
             if (record === null) continue;
             if (
-                this.legacyMigrationPending &&
+                requiresLegacyVerification &&
                 !(await this.verifySqliteWriteAndRemoveLegacy(
                     record,
                     pending.serialized,
@@ -1524,6 +1555,31 @@ function runtimeStateScopeEquals(
         left.conversation_id === right.conversation_id &&
         left.branch_id === right.branch_id
     );
+}
+
+function serializedJsonSemanticallyEquals(left: string, right: string): boolean {
+    if (left === right) return true;
+    const canonicalLeft = canonicalJsonString(left);
+    return canonicalLeft !== null && canonicalLeft === canonicalJsonString(right);
+}
+
+function canonicalJsonString(serialized: string): string | null {
+    try {
+        const canonical: unknown = JSON.stringify(
+            JSON.parse(serialized) as unknown,
+            (_key, value: unknown) =>
+                isRecord(value)
+                    ? Object.fromEntries(
+                          Object.entries(value).sort(([left], [right]) =>
+                              left < right ? -1 : left > right ? 1 : 0,
+                          ),
+                      )
+                    : value,
+        );
+        return typeof canonical === 'string' ? canonical : null;
+    } catch {
+        return null;
+    }
 }
 
 function isSafeNonNegativeInteger(value: number): boolean {

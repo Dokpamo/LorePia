@@ -91,9 +91,11 @@ use generation_events::{
     GenerationDeliveryPhase, GenerationProviderAdmissionKey, GenerationRegistry,
     generation_subscription_unavailable,
 };
+use generation_workflow::execute_generation_task;
+#[cfg(test)]
 use generation_workflow::{
-    apply_generation_output_transforms, apply_generation_result, execute_generation_task,
-    partial_checkpoint_due, transform_content_sha256,
+    apply_generation_output_transforms, apply_generation_result, partial_checkpoint_due,
+    transform_content_sha256,
 };
 use runtime_control::RuntimeControl;
 
@@ -7489,10 +7491,8 @@ async fn dispatch_auxiliary_task_provider(
         result = &mut provider_attempt => result,
         () = &mut cancellation => {
             let _ = attempt_cancel_sender.send(true);
-            // Built-in adapters observe this exact signal and tear down their
-            // in-flight transport. Give the local provider future and event
-            // collector a bounded opportunity to confirm that teardown before
-            // dropping them; the remote provider outcome remains unknown.
+            // Built-in adapters tear down in-flight transport on this signal; briefly await
+            // local confirmation before dropping futures. The remote outcome remains unknown.
             let _ = time::timeout(
                 AUXILIARY_PROVIDER_TEARDOWN_GRACE,
                 &mut provider_attempt,

@@ -349,7 +349,6 @@ fn downgrade_and_seed_populated_v31(fixture: &FixtureIds, vector_blob: &[u8], ve
 }
 
 fn remove_schema40_objects(transaction: &Transaction<'_>) {
-    let objects = created_objects(MIGRATION_0040);
     const EXPECTED_SCHEMA_40_OBJECTS: &[(&str, &str)] = &[
         ("TRIGGER", "portable_runtime_branch_epoch_on_branch_insert"),
         ("TRIGGER", "portable_runtime_state_scope_guard_insert"),
@@ -359,6 +358,7 @@ fn remove_schema40_objects(transaction: &Transaction<'_>) {
         ("TABLE", "portable_runtime_state_sequence"),
         ("TABLE", "portable_runtime_states"),
     ];
+    let objects = created_objects(MIGRATION_0040);
     assert_eq!(
         objects.as_slice(),
         EXPECTED_SCHEMA_40_OBJECTS,

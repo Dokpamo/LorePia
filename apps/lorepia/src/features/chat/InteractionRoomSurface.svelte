@@ -1,6 +1,7 @@
 <script lang="ts">
     import { SvelteSet } from 'svelte/reactivity';
 
+    import { tr } from '../../lib/i18n';
     import TrustedAsset from '../assets/TrustedAsset.svelte';
     import type {
         InteractionRoomCapableClient,
@@ -39,7 +40,7 @@
 </script>
 
 {#if state.phase === 'loading'}
-    <div class="interaction-status" role="status">대화 상호작용을 복원하는 중입니다.</div>
+    <div class="interaction-status" role="status">{$tr('interaction.surface.loading')}</div>
 {:else if state.error === null && state.announcement !== ''}
     <div class="interaction-status" role="status" aria-live="polite">
         {state.announcement}
@@ -49,15 +50,14 @@
 {#if state.has_more_expired_proposals}
     <div class="interaction-status error" role="alert">
         <span>
-            만료된 승인 제안이 더 남아 있습니다. 최신 상태를 모두 정리하기 전에는 다른 제안을 결정할
-            수 없습니다.
+            {$tr('interaction.surface.expired_more')}
         </span>
         <button
             type="button"
             disabled={state.phase === 'loading'}
             onclick={() => void controller.reload()}
         >
-            만료 제안 계속 정리
+            {$tr('interaction.surface.expired_more_action')}
         </button>
     </div>
 {/if}
@@ -65,8 +65,12 @@
 {#if displayEffects.length > 0 || state.pending_proposals.length > 0}
     <section class="interaction-surface" aria-labelledby="room-interaction-title">
         <header>
-            <h3 id="room-interaction-title">대화 상호작용</h3>
-            <span>상태 revision {state.current_state_revision}</span>
+            <h3 id="room-interaction-title">{$tr('interaction.surface.title')}</h3>
+            <span>
+                {$tr('interaction.surface.revision', {
+                    revision: state.current_state_revision,
+                })}
+            </span>
         </header>
 
         {#if displayEffects.length > 0}
@@ -75,7 +79,9 @@
                     <li>
                         {#if interactionEffect.effect.kind === 'show_asset'}
                             <p class="interaction-label">
-                                {interactionEffect.effect.region} 미디어
+                                {$tr('interaction.surface.asset_label', {
+                                    region: interactionEffect.effect.region,
+                                })}
                             </p>
                             <div class="interaction-media">
                                 <TrustedAsset
@@ -85,12 +91,14 @@
                                         asset_id: interactionEffect.effect.asset.asset_id,
                                     }}
                                     expectedKind={interactionEffect.effect.asset.kind}
-                                    alt={`${interactionEffect.effect.region} 상호작용 미디어`}
+                                    alt={$tr('interaction.surface.asset_alt', {
+                                        region: interactionEffect.effect.region,
+                                    })}
                                     showMetadata
                                 />
                             </div>
                         {:else if interactionEffect.effect.kind === 'play_audio'}
-                            <p class="interaction-label">상호작용 오디오</p>
+                            <p class="interaction-label">{$tr('interaction.surface.audio')}</p>
                             <div class="interaction-audio">
                                 <TrustedAsset
                                     {client}
@@ -99,13 +107,13 @@
                                         asset_id: interactionEffect.effect.asset.asset_id,
                                     }}
                                     expectedKind="audio"
-                                    alt="상호작용 오디오"
+                                    alt={$tr('interaction.surface.audio')}
                                     showMetadata
                                 />
                             </div>
                         {:else if interactionEffect.effect.kind === 'present_choices'}
                             <fieldset>
-                                <legend>선택지</legend>
+                                <legend>{$tr('interaction.surface.choices')}</legend>
                                 <div class="interaction-actions">
                                     {#each interactionEffect.effect.choices as choice (choice.id)}
                                         <button
@@ -128,24 +136,29 @@
                                 </div>
                                 {#if interactionEffect.choice_status === 'consumed'}
                                     <p class="interaction-label">
-                                        선택 반영됨:
-                                        {interactionEffect.selected_choice_id ?? '알 수 없음'}
+                                        {$tr('interaction.surface.choice_selected', {
+                                            choice:
+                                                interactionEffect.selected_choice_id ??
+                                                $tr('interaction.surface.unknown'),
+                                        })}
                                     </p>
                                 {:else if interactionEffect.choice_status === 'expired'}
-                                    <p class="interaction-label">이 선택지는 만료되었습니다.</p>
+                                    <p class="interaction-label">
+                                        {$tr('interaction.surface.choice_expired')}
+                                    </p>
                                 {/if}
                             </fieldset>
                         {:else if interactionEffect.effect.kind === 'visible_system_event'}
                             <p>{interactionEffect.effect.text}</p>
                         {:else if interactionEffect.effect.kind === 'dice_rolled'}
                             <p>
-                                주사위 {interactionEffect.effect.count}d{interactionEffect.effect
-                                    .sides}
-                                {interactionEffect.effect.modifier >= 0
-                                    ? '+'
-                                    : ''}{interactionEffect.effect.modifier} →
-                                {interactionEffect.effect.rolls.join(', ')} · 합계
-                                {interactionEffect.effect.total}
+                                {$tr('interaction.surface.dice', {
+                                    count: interactionEffect.effect.count,
+                                    sides: interactionEffect.effect.sides,
+                                    modifier: `${interactionEffect.effect.modifier >= 0 ? '+' : ''}${String(interactionEffect.effect.modifier)}`,
+                                    rolls: interactionEffect.effect.rolls.join(', '),
+                                    total: interactionEffect.effect.total,
+                                })}
                             </p>
                         {:else if interactionEffect.effect.kind === 'approval_pending'}
                             <article>
@@ -153,17 +166,19 @@
                                 <p>{interactionEffect.effect.body}</p>
                                 {#if interactionEffect.effect.expires_after_seconds !== null}
                                     <small>
-                                        {interactionEffect.effect.expires_after_seconds}초 안에 결정
+                                        {$tr('interaction.surface.approval_expires', {
+                                            seconds: interactionEffect.effect.expires_after_seconds,
+                                        })}
                                     </small>
                                 {/if}
                             </article>
                         {:else if interactionEffect.effect.kind === 'projection_rejected'}
                             <p class="interaction-label" role="status">
                                 {interactionEffect.effect.reason === 'asset_unavailable'
-                                    ? '저장된 미디어 효과를 현재 사용할 수 없어 숨겼습니다.'
+                                    ? $tr('interaction.surface.projection.asset_unavailable')
                                     : interactionEffect.effect.reason === 'unsafe_native_text'
-                                      ? '안전한 표시 범위를 벗어난 저장 효과를 숨겼습니다.'
-                                      : '호환되지 않는 저장 효과를 숨겼습니다.'}
+                                      ? $tr('interaction.surface.projection.unsafe_text')
+                                      : $tr('interaction.surface.projection.incompatible')}
                             </p>
                         {/if}
                     </li>
@@ -173,16 +188,13 @@
 
         {#if state.pending_proposals.length > 0}
             <section aria-labelledby="interaction-proposals-title">
-                <h4 id="interaction-proposals-title">승인 대기 제안</h4>
+                <h4 id="interaction-proposals-title">{$tr('interaction.surface.proposals')}</h4>
                 <ul class="interaction-proposals">
                     {#each state.pending_proposals as item (item.proposal.id)}
                         <li>
                             {#if item.proposal.projection_rejection_reason === 'unsafe_native_text'}
-                                <strong>저장 제안 내용을 표시할 수 없음</strong>
-                                <p>
-                                    안전한 표시 범위를 벗어난 원문은 숨겼습니다. 이 제안은 거절만 할
-                                    수 있습니다.
-                                </p>
+                                <strong>{$tr('attempt_approval.unrenderable.title')}</strong>
+                                <p>{$tr('attempt_approval.unrenderable.hint')}</p>
                             {:else}
                                 <strong>{item.proposal.title}</strong>
                                 <p>{item.proposal.body}</p>
@@ -195,7 +207,7 @@
                                     onclick={() =>
                                         void controller.decideProposal(item.proposal.id, 'reject')}
                                 >
-                                    거절
+                                    {$tr('attempt_approval.reject')}
                                 </button>
                                 <button
                                     class="primary"
@@ -207,7 +219,7 @@
                                     onclick={() =>
                                         void controller.decideProposal(item.proposal.id, 'approve')}
                                 >
-                                    승인
+                                    {$tr('attempt_approval.approve')}
                                 </button>
                             </div>
                         </li>
@@ -218,7 +230,7 @@
 
         {#if state.has_older_effects}
             <p class="interaction-label">
-                이전 상호작용 기록은 전문가 기록 화면에서 확인할 수 있습니다.
+                {$tr('interaction.surface.older_effects')}
             </p>
         {/if}
     </section>

@@ -1,6 +1,15 @@
 //! Bounded value validation, canonical encoding, and audit persistence helpers.
 
-use super::*;
+use super::{
+    BTreeSet, Connection, CoreError, CoreErrorCode, CoreResult, DateTime, Digest,
+    DiscoveryApprovalDecision, DiscoveryApprovalGrant, DiscoveryApprovalRecord, DiscoveryCandidate,
+    DiscoveryCommitPlan, DiscoveryEvidenceRecord, DiscoveryOperationKind, DiscoveryProbeBudget,
+    DiscoveryReviewDiff, DiscoverySessionId, DiscoverySideEffectClass, DiscoveryState, EvidenceId,
+    MAX_DISCOVERY_JSON_BYTES, MAX_DISCOVERY_JSON_CHARS, MAX_DISCOVERY_JSON_DEPTH,
+    MAX_DISCOVERY_JSON_NODES, MAX_DISCOVERY_ROWS, OptionalExtension, SanitizedDiscoveryInput,
+    Sha256, StoredDiscoveryCandidate, Transaction, Utc, Value, contract_error, corrupted,
+    database_error, params,
+};
 
 pub(super) fn validate_limit(limit: u32) -> CoreResult<()> {
     if limit == 0 || limit > MAX_DISCOVERY_ROWS {

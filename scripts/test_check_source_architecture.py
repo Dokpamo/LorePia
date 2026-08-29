@@ -10,6 +10,7 @@ if str(SCRIPT_DIRECTORY) not in sys.path:
 
 from check_source_architecture import (
     evaluate_baseline_changes,
+    evaluate_character_runtime_transform_boundary,
     evaluate_core_storage_api_baseline_changes,
     evaluate_core_storage_public_reexports,
     evaluate_source_sizes,
@@ -33,6 +34,57 @@ def write_config(root: Path, *, baselines: dict[str, dict[str, int]]) -> Path:
 
 
 class SourceArchitectureTests(unittest.TestCase):
+    def test_core_cannot_implicitly_apply_character_runtime_native_transforms(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "crates" / "core" / "src" / "orchestration.rs"
+            source.parent.mkdir(parents=True)
+            source.write_text(
+                "fn unsafe_projection(content: CharacterContent) {\n"
+                "    let _ = content.runtime.transform_set_id;\n"
+                "}\n",
+                encoding="utf-8",
+            )
+
+            failures = evaluate_character_runtime_transform_boundary(root)
+
+            self.assertEqual(len(failures), 1)
+            self.assertIn("revision-bound grant", failures[0])
+
+            source.write_text(
+                "// content.runtime.transform_set_id stays on the frontend grant path.\n"
+                "fn safe_prompt_transforms() {}\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(evaluate_character_runtime_transform_boundary(root), [])
+
+    def test_core_transform_boundary_scans_moved_alias_and_destructuring_access(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "crates" / "core" / "src" / "app.rs"
+            source.parent.mkdir(parents=True)
+            source.write_text(
+                "fn unsafe_alias(content: CharacterContent) {\n"
+                "    let runtime = content.runtime;\n"
+                "    let _ = runtime.transform_set_id;\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            failures = evaluate_character_runtime_transform_boundary(root)
+            self.assertEqual(len(failures), 1)
+            self.assertIn("crates/core/src/app.rs", failures[0])
+
+            source.write_text(
+                "fn unsafe_destructure(content: CharacterContent) {\n"
+                "    let CharacterRuntime { transform_set_id, .. } = content.runtime;\n"
+                "    drop(transform_set_id);\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            failures = evaluate_character_runtime_transform_boundary(root)
+            self.assertEqual(len(failures), 1)
+            self.assertIn("crates/core/src/app.rs", failures[0])
+
     def test_core_cannot_add_storage_persistence_row_reexports(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

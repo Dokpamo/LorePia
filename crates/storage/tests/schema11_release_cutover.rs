@@ -1143,6 +1143,15 @@ fn checkpoint_and_close(connection: Connection) {
 fn downgrade_latest_schema_by_one(path: &Path, current_schema: u32) {
     const LATEST_MIGRATION: &str = include_str!("../migrations/0040_portable_runtime_state.sql");
     const LATEST_SCHEMA: u32 = 40;
+    const EXPECTED_SCHEMA_40_OBJECTS: &[(&str, &str)] = &[
+        ("TABLE", "portable_runtime_branch_epochs"),
+        ("TRIGGER", "portable_runtime_branch_epoch_on_branch_insert"),
+        ("TABLE", "portable_runtime_state_sequence"),
+        ("TABLE", "portable_runtime_states"),
+        ("INDEX", "portable_runtime_states_lru"),
+        ("TRIGGER", "portable_runtime_state_scope_guard_insert"),
+        ("TRIGGER", "portable_runtime_state_scope_guard_update"),
+    ];
 
     assert_eq!(
         current_schema, LATEST_SCHEMA,
@@ -1165,15 +1174,6 @@ fn downgrade_latest_schema_by_one(path: &Path, current_schema: u32) {
             Some((object_type, name.trim_end_matches(';')))
         })
         .collect::<Vec<_>>();
-    const EXPECTED_SCHEMA_40_OBJECTS: &[(&str, &str)] = &[
-        ("TABLE", "portable_runtime_branch_epochs"),
-        ("TRIGGER", "portable_runtime_branch_epoch_on_branch_insert"),
-        ("TABLE", "portable_runtime_state_sequence"),
-        ("TABLE", "portable_runtime_states"),
-        ("INDEX", "portable_runtime_states_lru"),
-        ("TRIGGER", "portable_runtime_state_scope_guard_insert"),
-        ("TRIGGER", "portable_runtime_state_scope_guard_update"),
-    ];
     assert_eq!(
         created_objects.as_slice(),
         EXPECTED_SCHEMA_40_OBJECTS,

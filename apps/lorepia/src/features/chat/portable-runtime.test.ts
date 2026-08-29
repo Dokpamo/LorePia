@@ -45,6 +45,13 @@ const AUXILIARY_SELECTION: GenerationSelectionInput = {
     kind: 'legacy_profile',
     provider_profile_id: 'auxiliary',
 };
+const TARGET_SELECTION: GenerationSelectionInput = {
+    kind: 'target',
+    target: {
+        model_route_id: 'route',
+        generation_preset_id: 'preset',
+    },
+};
 const TEST_WASM_PATH = decodeURIComponent(
     new URL('../../../node_modules/wasmoon/dist/glue.wasm', import.meta.url).pathname,
 );
@@ -225,6 +232,71 @@ function inProcessWorkerFactory(): PortableRuntimeWorkerEndpoint {
         },
     };
     return endpoint;
+}
+
+async function startCancellableRuntime(
+    cancelRuntimeText: (requestId: string) => Promise<boolean>,
+): Promise<{
+    runtime: PortableCharacterRuntime;
+    requestId: string;
+    settle: () => Promise<void>;
+}> {
+    const cancellableProfile = profile();
+    const baseScript = cancellableProfile.runtime_scripts[0];
+    if (baseScript === undefined) throw new Error('runtime fixture script is missing');
+    cancellableProfile.runtime_scripts = [
+        {
+            ...baseScript,
+            source: String.raw`
+onButtonClick = async(function(triggerId)
+    LLM(triggerId, {{ role = "user", content = "cancel me" }}, false, {{}})
+end)
+`,
+        },
+    ];
+    let rejectGeneration: ((reason: Error) => void) | undefined;
+    let startedGeneration: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+        startedGeneration = resolve;
+    });
+    const generateRuntimeText = vi.fn(
+        (input: GenerateRuntimeTextInput) =>
+            new Promise<RuntimeTextGenerationDto>((_resolve, reject) => {
+                void input;
+                rejectGeneration = reject;
+                startedGeneration?.();
+            }),
+    );
+    const runtime = await PortableCharacterRuntime.create({
+        profile: cancellableProfile,
+        grant: await createPortableRuntimeGrant(cancellableProfile, [
+            'runtime:callbacks',
+            'model:primary',
+        ]),
+        conversationId: 'conversation',
+        branchId: 'branch',
+        characterName: 'Character',
+        characterDescription: 'Description',
+        client: { generateRuntimeText, cancelRuntimeText } as unknown as LorepiaClient,
+        primarySelection: () => PRIMARY_SELECTION,
+        onChanged: vi.fn(),
+        onNotice: vi.fn(),
+        storage: memoryStorage(),
+        workerFactory: inProcessWorkerFactory,
+    });
+    const action = runtime.handleAction('cancel');
+    await started;
+    const requestId = generateRuntimeText.mock.calls[0]?.[0]?.request_id;
+    if (requestId === undefined) throw new Error('runtime model request did not start');
+    return {
+        runtime,
+        requestId,
+        settle: async () => {
+            rejectGeneration?.(new Error('cancelled'));
+            await action;
+            runtime.close();
+        },
+    };
 }
 
 describe('portable runtime', () => {
@@ -732,7 +804,7 @@ end)
             messages: [{ role: 'user', content: 'must not run' }],
         })) as { success: boolean; result: string };
         expect(unsupportedResult.success).toBe(false);
-        expect(unsupportedResult.result).toMatch(/지원|support/i);
+        expect(unsupportedResult.result).toBe(t('chat.runtime.generation.unsupported'));
         expect(generateRuntimeText).not.toHaveBeenCalled();
         runtime.close();
     });
@@ -864,13 +936,59 @@ end)
         expect(onModelCallStatus).toHaveBeenLastCalledWith(
             expect.objectContaining({ requestId: request?.request_id, target: 'primary' }),
         );
-        await expect(runtime.cancelActiveModelCall()).resolves.toBe(true);
+        await expect(runtime.cancelActiveModelCall()).resolves.toBe('confirmed');
         expect(cancelRuntimeText).toHaveBeenCalledWith(request?.request_id);
 
         rejectGeneration?.(new Error('cancelled'));
         await action;
         expect(onModelCallStatus).toHaveBeenLastCalledWith(null);
         runtime.close();
+    });
+
+    it('retries cancellation after an unconfirmed native response', async () => {
+        const cancelRuntimeText = vi
+            .fn<(requestId: string) => Promise<boolean>>()
+            .mockResolvedValueOnce(false)
+            .mockResolvedValueOnce(true);
+        const { runtime, requestId, settle } = await startCancellableRuntime(cancelRuntimeText);
+
+        await expect(runtime.cancelActiveModelCall()).resolves.toBe('unconfirmed');
+        await expect(runtime.cancelActiveModelCall()).resolves.toBe('confirmed');
+        expect(cancelRuntimeText).toHaveBeenCalledTimes(2);
+        expect(cancelRuntimeText).toHaveBeenNthCalledWith(1, requestId);
+        expect(cancelRuntimeText).toHaveBeenNthCalledWith(2, requestId);
+
+        await settle();
+    });
+
+    it('retries cancellation after a transport error', async () => {
+        const cancelRuntimeText = vi
+            .fn<(requestId: string) => Promise<boolean>>()
+            .mockRejectedValueOnce(new Error('transport unavailable'))
+            .mockResolvedValueOnce(true);
+        const { runtime, requestId, settle } = await startCancellableRuntime(cancelRuntimeText);
+
+        await expect(runtime.cancelActiveModelCall()).resolves.toBe('unconfirmed');
+        await expect(runtime.cancelActiveModelCall()).resolves.toBe('confirmed');
+        expect(cancelRuntimeText).toHaveBeenCalledTimes(2);
+        expect(cancelRuntimeText).toHaveBeenNthCalledWith(1, requestId);
+        expect(cancelRuntimeText).toHaveBeenNthCalledWith(2, requestId);
+
+        await settle();
+    });
+
+    it('suppresses duplicate cancellation after native terminal confirmation', async () => {
+        const cancelRuntimeText = vi
+            .fn<(requestId: string) => Promise<boolean>>()
+            .mockResolvedValue(true);
+        const { runtime, requestId, settle } = await startCancellableRuntime(cancelRuntimeText);
+
+        await expect(runtime.cancelActiveModelCall()).resolves.toBe('confirmed');
+        await expect(runtime.cancelActiveModelCall()).resolves.toBe('confirmed');
+        expect(cancelRuntimeText).toHaveBeenCalledOnce();
+        expect(cancelRuntimeText).toHaveBeenCalledWith(requestId);
+
+        await settle();
     });
 
     it('cancels the exact active model request once when an event deadline detaches its worker', async () => {
@@ -920,12 +1038,12 @@ end)
 
         const action = runtime.handleAction('timeout');
         await started;
-        await expect(action).rejects.toThrow(/시간|timeout/i);
+        await expect(action).rejects.toThrow(t('chat.runtime.event_timeout'));
         const requestId = generateRuntimeText.mock.calls[0]?.[0]?.request_id;
         expect(cancelRuntimeText).toHaveBeenCalledTimes(1);
         expect(cancelRuntimeText).toHaveBeenCalledWith(requestId);
 
-        await runtime.cancelActiveModelCall();
+        await expect(runtime.cancelActiveModelCall()).resolves.toBe('confirmed');
         runtime.close();
         expect(cancelRuntimeText).toHaveBeenCalledTimes(1);
     });
@@ -1407,6 +1525,150 @@ end)
         runtime.close();
     });
 
+    it('migrates the exact v1 state key for a generated branch id containing a colon', async () => {
+        const storage = memoryStorage();
+        const scope: PortableRuntimeStateScopeInput = {
+            character_id: 'character',
+            character_content_revision_id: 'revision',
+            conversation_id: 'conversation',
+            branch_id: 'branch:conversation',
+        };
+        const legacyKey = [
+            'lorepia.character-runtime.v1',
+            scope.character_id,
+            scope.character_content_revision_id,
+            scope.conversation_id,
+            scope.branch_id,
+        ].join(':');
+        const adjacentKey = `${legacyKey}:adjacent`;
+        const legacyState = persistedState({ music: 'legacy-branch' });
+        storage.setItem(legacyKey, JSON.stringify(legacyState));
+        storage.setItem(adjacentKey, 'must-remain');
+        let savedRecord: PortableRuntimeStateRecordDto | null = null;
+        const getPortableRuntimeState = vi
+            .fn()
+            .mockResolvedValueOnce({ scope_epoch: 0, record: null })
+            .mockImplementationOnce(() => Promise.resolve({ scope_epoch: 0, record: savedRecord }));
+        const putPortableRuntimeState = vi.fn((input: PutPortableRuntimeStateInput) => {
+            savedRecord = sqliteRecord(scope, input.payload.value, 1);
+            return Promise.resolve({
+                status: 'saved' as const,
+                record: savedRecord,
+                evicted_rows: 0,
+                evicted_bytes: 0,
+            });
+        });
+        const stateProfile = profile();
+        const stateScript = stateProfile.runtime_scripts[0];
+        if (stateScript === undefined) throw new Error('runtime fixture script is missing');
+        stateProfile.runtime_scripts = [{ ...stateScript, source: 'return' }];
+
+        const runtime = await PortableCharacterRuntime.create({
+            profile: stateProfile,
+            grant: await createPortableRuntimeGrant(stateProfile, ['runtime:callbacks']),
+            conversationId: scope.conversation_id,
+            branchId: scope.branch_id,
+            characterName: 'Character',
+            characterDescription: 'Description',
+            client: {
+                getPortableRuntimeState,
+                putPortableRuntimeState,
+            } as unknown as LorepiaClient,
+            primarySelection: () => PRIMARY_SELECTION,
+            onChanged: vi.fn(),
+            onNotice: vi.fn(),
+            storage,
+            workerFactory: inProcessWorkerFactory,
+        });
+
+        expect(runtime.optionValue('music')).toBe('legacy-branch');
+        expect(putPortableRuntimeState).toHaveBeenCalledOnce();
+        expect(getPortableRuntimeState).toHaveBeenCalledTimes(2);
+        expect(storage.getItem(legacyKey)).toBeNull();
+        expect(storage.getItem(adjacentKey)).toBe('must-remain');
+        runtime.close();
+    });
+
+    it('does not advance durability or CAS when migration readback changes array order', async () => {
+        const storage = memoryStorage();
+        const scope: PortableRuntimeStateScopeInput = {
+            character_id: 'character',
+            character_content_revision_id: 'revision',
+            conversation_id: 'conversation',
+            branch_id: 'branch',
+        };
+        const legacyKey = 'lorepia.character-runtime.v1:character:revision:conversation:branch';
+        const legacyState: PortableRuntimePersistedState = {
+            ...persistedState({ music: 'legacy' }),
+            state: { steps: ['first', 'second'] },
+        };
+        storage.setItem(legacyKey, JSON.stringify(legacyState));
+        const savedRecord = sqliteRecord(scope, legacyState, 1);
+        const mismatchedReadback = sqliteRecord(
+            scope,
+            { ...legacyState, state: { steps: ['second', 'first'] } },
+            1,
+        );
+        const getPortableRuntimeState = vi
+            .fn()
+            .mockResolvedValueOnce({ scope_epoch: 0, record: null })
+            .mockResolvedValueOnce({ scope_epoch: 0, record: mismatchedReadback });
+        const putPortableRuntimeState = vi
+            .fn<(input: PutPortableRuntimeStateInput) => Promise<unknown>>()
+            .mockResolvedValueOnce({
+                status: 'saved' as const,
+                record: savedRecord,
+                evicted_rows: 0,
+                evicted_bytes: 0,
+            })
+            .mockResolvedValueOnce({
+                status: 'revision_conflict' as const,
+                current: savedRecord,
+            });
+        const statuses: PortableRuntimePersistenceStatus[] = [];
+        const stateProfile = profile();
+        const stateScript = stateProfile.runtime_scripts[0];
+        if (stateScript === undefined) throw new Error('runtime fixture script is missing');
+        stateProfile.runtime_scripts = [{ ...stateScript, source: 'return' }];
+
+        const runtime = await PortableCharacterRuntime.create({
+            profile: stateProfile,
+            grant: await createPortableRuntimeGrant(stateProfile, ['runtime:callbacks']),
+            conversationId: scope.conversation_id,
+            branchId: scope.branch_id,
+            characterName: 'Character',
+            characterDescription: 'Description',
+            client: {
+                getPortableRuntimeState,
+                putPortableRuntimeState,
+            } as unknown as LorepiaClient,
+            primarySelection: () => PRIMARY_SELECTION,
+            onChanged: vi.fn(),
+            onNotice: vi.fn(),
+            onPersistenceStatus: (status) => statuses.push(status),
+            storage,
+            workerFactory: inProcessWorkerFactory,
+        });
+
+        expect(statuses.at(-1)).toEqual({ mode: 'memory-only', reason: 'read-failed' });
+        await expect(runtime.setOption('music', 'legacy')).resolves.toEqual({
+            applied: true,
+            durable: false,
+        });
+        await expect(runtime.setOption('music', '0')).resolves.toEqual({
+            applied: true,
+            durable: false,
+        });
+        expect(putPortableRuntimeState).toHaveBeenCalledTimes(2);
+        const retryCall = putPortableRuntimeState.mock.calls[1];
+        if (retryCall === undefined) throw new Error('expected SQLite retry');
+        const [retryInput] = retryCall;
+        expect(retryInput.expected_revision).toBeNull();
+        expect(statuses.at(-1)).toEqual({ mode: 'memory-only', reason: 'conflict' });
+        expect(storage.getItem(legacyKey)).not.toBeNull();
+        runtime.close();
+    });
+
     it('keeps legacy state in memory and never overwrites a conflicting SQLite record', async () => {
         const storage = memoryStorage();
         const scope: PortableRuntimeStateScopeInput = {
@@ -1547,6 +1809,164 @@ end)
             durable: true,
         });
         expect(putPortableRuntimeState).toHaveBeenCalledTimes(1);
+        runtime.close();
+    });
+
+    it('accepts Rust-ordered SQLite target readback and advances the next CAS revision', async () => {
+        const scope: PortableRuntimeStateScopeInput = {
+            character_id: 'character',
+            character_content_revision_id: 'revision',
+            conversation_id: 'conversation',
+            branch_id: 'branch',
+        };
+        let revision = 0;
+        const putPortableRuntimeState = vi.fn((input: PutPortableRuntimeStateInput) => {
+            expect(input.payload.value.auxiliarySelection).toEqual(TARGET_SELECTION);
+            revision += 1;
+            const rustOrderedValue: PortableRuntimePersistedState = {
+                ...input.payload.value,
+                auxiliarySelection: {
+                    kind: 'target',
+                    target: {
+                        generation_preset_id: 'preset',
+                        model_route_id: 'route',
+                    },
+                },
+            };
+            return Promise.resolve({
+                status: 'saved' as const,
+                record: sqliteRecord(scope, rustOrderedValue, revision),
+                evicted_rows: 0,
+                evicted_bytes: 0,
+            });
+        });
+        const stateProfile = profile();
+        const stateScript = stateProfile.runtime_scripts[0];
+        if (stateScript === undefined) throw new Error('runtime fixture script is missing');
+        stateProfile.runtime_scripts = [{ ...stateScript, source: 'return' }];
+        const runtime = await PortableCharacterRuntime.create({
+            profile: stateProfile,
+            grant: await createPortableRuntimeGrant(stateProfile, ['runtime:callbacks']),
+            conversationId: scope.conversation_id,
+            branchId: scope.branch_id,
+            characterName: 'Character',
+            characterDescription: 'Description',
+            client: {
+                getPortableRuntimeState: vi
+                    .fn()
+                    .mockResolvedValue({ scope_epoch: 0, record: null }),
+                putPortableRuntimeState,
+            } as unknown as LorepiaClient,
+            primarySelection: () => PRIMARY_SELECTION,
+            onChanged: vi.fn(),
+            onNotice: vi.fn(),
+            storage: memoryStorage(),
+            workerFactory: inProcessWorkerFactory,
+        });
+
+        expect(runtime.setAuxiliarySelection(TARGET_SELECTION)).toEqual({
+            applied: true,
+            durable: false,
+        });
+        await expect(runtime.setOption('music', '1')).resolves.toEqual({
+            applied: true,
+            durable: true,
+        });
+        expect(putPortableRuntimeState).toHaveBeenCalledTimes(2);
+        const firstCall = putPortableRuntimeState.mock.calls[0];
+        const secondCall = putPortableRuntimeState.mock.calls[1];
+        if (firstCall === undefined || secondCall === undefined) {
+            throw new Error('expected consecutive SQLite writes');
+        }
+        const [firstInput] = firstCall;
+        const [secondInput] = secondCall;
+        expect(firstInput.expected_revision).toBeNull();
+        expect(secondInput.expected_revision).toBe(1);
+        runtime.close();
+    });
+
+    it('rejects SQLite readback that changes JSON array order without advancing CAS', async () => {
+        const scope: PortableRuntimeStateScopeInput = {
+            character_id: 'character',
+            character_content_revision_id: 'revision',
+            conversation_id: 'conversation',
+            branch_id: 'branch',
+        };
+        const statuses: PortableRuntimePersistenceStatus[] = [];
+        const putPortableRuntimeState = vi.fn((input: PutPortableRuntimeStateInput) => {
+            const steps = input.payload.value.state.steps;
+            if (!Array.isArray(steps)) throw new Error('ordered state is missing');
+            return Promise.resolve({
+                status: 'saved' as const,
+                record: sqliteRecord(
+                    scope,
+                    {
+                        ...input.payload.value,
+                        state: {
+                            ...input.payload.value.state,
+                            steps: steps.map((step: unknown) => step).reverse(),
+                        },
+                    },
+                    1,
+                ),
+                evicted_rows: 0,
+                evicted_bytes: 0,
+            });
+        });
+        const stateProfile = profile();
+        const stateScript = stateProfile.runtime_scripts[0];
+        if (stateScript === undefined) throw new Error('runtime fixture script is missing');
+        stateProfile.runtime_capabilities_declared = true;
+        stateProfile.required_runtime_capabilities = ['runtime:callbacks', 'state:readwrite'];
+        stateProfile.runtime_scripts = [
+            {
+                ...stateScript,
+                source: String.raw`
+onButtonClick = async(function(triggerId)
+    assert(setState(triggerId, "steps", { "first", "second" }) == true)
+end)
+`,
+            },
+        ];
+        const runtime = await PortableCharacterRuntime.create({
+            profile: stateProfile,
+            grant: await createPortableRuntimeGrant(stateProfile, [
+                'runtime:callbacks',
+                'state:readwrite',
+            ]),
+            conversationId: scope.conversation_id,
+            branchId: scope.branch_id,
+            characterName: 'Character',
+            characterDescription: 'Description',
+            client: {
+                getPortableRuntimeState: vi
+                    .fn()
+                    .mockResolvedValue({ scope_epoch: 0, record: null }),
+                putPortableRuntimeState,
+            } as unknown as LorepiaClient,
+            primarySelection: () => PRIMARY_SELECTION,
+            onChanged: vi.fn(),
+            onNotice: vi.fn(),
+            onPersistenceStatus: (status) => statuses.push(status),
+            storage: memoryStorage(),
+            workerFactory: inProcessWorkerFactory,
+        });
+
+        await runtime.handleAction('ordered-state');
+        expect(putPortableRuntimeState).toHaveBeenCalledOnce();
+        const firstCall = putPortableRuntimeState.mock.calls[0];
+        if (firstCall === undefined) throw new Error('expected first SQLite write');
+        const [firstInput] = firstCall;
+        expect(firstInput.expected_revision).toBeNull();
+        expect(statuses.at(-1)).toEqual({ mode: 'memory-only', reason: 'write-failed' });
+        await expect(runtime.setOption('music', '1')).resolves.toEqual({
+            applied: true,
+            durable: false,
+        });
+        const secondCall = putPortableRuntimeState.mock.calls[1];
+        if (secondCall === undefined) throw new Error('expected second SQLite write');
+        const [secondInput] = secondCall;
+        expect(secondInput.expected_revision).toBeNull();
         runtime.close();
     });
 

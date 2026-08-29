@@ -19,7 +19,10 @@ use std::os::unix::fs::MetadataExt;
 // from turning into a second round of full-file hashes.
 const MAX_RENDERER_ASSET_FAN_OUT: usize = 128;
 const DEFAULT_MAX_HANDLES: usize = MAX_RENDERER_ASSET_FAN_OUT;
-const DEFAULT_LEASE_TTL: Duration = Duration::from_secs(30);
+// A cached handle must remain usable for at least as long as its verification
+// consumes the rolling hash budget; otherwise an expired full fan-out cannot
+// be reverified until the longer budget window elapses.
+const DEFAULT_LEASE_TTL: Duration = Duration::from_mins(1);
 // A cold full-fan-out render needs exactly one verification per distinct asset.
 // Cache hits do not consume this budget; a 129th cold hash remains rate-limited.
 const DEFAULT_MAX_VERIFICATIONS_PER_WINDOW: usize = MAX_RENDERER_ASSET_FAN_OUT;
@@ -446,6 +449,53 @@ mod tests {
             cache.contains_verified(&descriptor).expect("lookup"),
             CacheLookup::Miss
         ));
+    }
+
+    #[test]
+    fn aligned_lease_and_budget_windows_never_expire_into_a_blocked_gap() {
+        let mut source = NamedTempFile::new().expect("temp file");
+        source.write_all(b"data").expect("write");
+        source.flush().expect("flush");
+        let descriptor = descriptor(&"ce".repeat(32), 4);
+        let window = Duration::from_millis(60);
+        let mut cache = VerifiedAssetCache::with_limits(1, window, 1, window);
+        cache.begin_verification().expect("initial verification");
+        cache
+            .insert(
+                descriptor.clone(),
+                AssetFileSnapshot::capture(source.reopen().expect("reopen")).expect("snapshot"),
+            )
+            .expect("insert");
+
+        let within_window = Instant::now()
+            .checked_sub(Duration::from_millis(40))
+            .expect("monotonic clock supports test offset");
+        cache.entries.front_mut().expect("entry").verified_at = within_window;
+        cache.verification_started[0] = within_window;
+        assert!(matches!(
+            cache.contains_verified(&descriptor).expect("live lease"),
+            CacheLookup::Hit(())
+        ));
+        assert_eq!(
+            cache
+                .begin_verification()
+                .expect_err("live lease shares the still-consumed hash window")
+                .kind(),
+            io::ErrorKind::WouldBlock
+        );
+
+        let outside_window = Instant::now()
+            .checked_sub(Duration::from_millis(80))
+            .expect("monotonic clock supports test offset");
+        cache.entries.front_mut().expect("entry").verified_at = outside_window;
+        cache.verification_started[0] = outside_window;
+        assert!(matches!(
+            cache.contains_verified(&descriptor).expect("expired lease"),
+            CacheLookup::Miss
+        ));
+        cache
+            .begin_verification()
+            .expect("an expired lease can be reverified immediately");
     }
 
     #[test]
