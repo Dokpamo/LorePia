@@ -25,7 +25,6 @@
     import type { LorepiaAppController, LorepiaAppState } from '../../app/app-controller';
     import ChoicePopover from '../../components/ChoicePopover.svelte';
     import SegmentedControl from '../../components/SegmentedControl.svelte';
-    import ToggleSwitch from '../../components/ToggleSwitch.svelte';
     import type {
         CharacterRenderProfileDto,
         ConversationMode,
@@ -44,12 +43,14 @@
     import type { PersonaClientApi } from '../personas/persona-contracts';
     import { shouldSubmitComposer } from './composer';
     import GenerationAttemptApprovals from './GenerationAttemptApprovals.svelte';
+    import PortableRuntimeControls from './PortableRuntimeControls.svelte';
     import {
         PortableCharacterRuntime,
         createPortableRuntimeGrant,
         requiredPortableRuntimeCapabilities,
         type PortableRuntimeCapability,
         type PortableRuntimeGrant,
+        type PortableRuntimeModelCallStatus,
     } from './portable-runtime';
     import {
         INITIAL_INTERACTION_ROOM_STATE,
@@ -137,6 +138,10 @@
     let characterRenderProfile = $state<CharacterRenderProfileDto | null>(null);
     let portableRuntime = $state<PortableCharacterRuntime | null>(null);
     let portableRuntimeGrant = $state<PortableRuntimeGrant | null>(null);
+    let portableRuntimeGrantProfile = $state<CharacterRenderProfileDto | null>(null);
+    let portableRuntimeProfileEpoch = 0;
+    let selectedPortableRuntimeCapabilities = $state<PortableRuntimeCapability[]>([]);
+    let portableRuntimeModelCall = $state<PortableRuntimeModelCallStatus | null>(null);
     let portableRuntimePhase = $state<'idle' | 'blocked' | 'loading' | 'ready' | 'busy' | 'error'>(
         'idle',
     );
@@ -674,13 +679,26 @@
     const displayMessageItems = $derived(
         projectDisplayMessages(appState.messages.items, appState.chat.live_assistant_message_id),
     );
+    const activePortableRuntimeGrant = $derived(
+        portableRuntimeGrantProfile === characterRenderProfile ? portableRuntimeGrant : null,
+    );
     const portableRuntimeVariables = $derived.by(() => {
         void portableRuntimeRevision;
-        return portableRuntime?.variables ?? characterRenderProfile?.initial_variables ?? {};
+        if (portableRuntime !== null) return portableRuntime.variables;
+        if (!(activePortableRuntimeGrant?.capabilities.includes('profile:read') ?? false))
+            return {};
+        return characterRenderProfile?.initial_variables ?? {};
     });
+    const portableDisplayApproved = $derived(
+        activePortableRuntimeGrant?.capabilities.includes('ui:write') ?? false,
+    );
+    const portableRuntimeCanReadChat = $derived(
+        activePortableRuntimeGrant?.capabilities.includes('chat:read') ?? false,
+    );
     const portableRuntimeBackground = $derived.by(() => {
         void portableRuntimeRevision;
-        return portableRuntime?.backgroundMarkup ?? '';
+        if (!portableDisplayApproved) return '';
+        return portableRuntime?.backgroundMarkup ?? characterRenderProfile?.background_markup ?? '';
     });
     const portableRuntimeCapabilities = $derived(
         characterRenderProfile === null
@@ -689,6 +707,7 @@
     );
     const portableRuntimeLastCharacterMessage = $derived.by(() => {
         void portableRuntimeRevision;
+        if (!portableRuntimeCanReadChat) return '';
         const message = [...displayMessageItems]
             .reverse()
             .find((candidate) => candidate.role === 'assistant');
@@ -734,6 +753,10 @@
         return selection.kind === 'target'
             ? `target:${selection.target.generation_preset_id}`
             : `legacy:${selection.provider_profile_id}`;
+    });
+    const portableRuntimeModelBudget = $derived.by(() => {
+        void portableRuntimeRevision;
+        return portableRuntime?.modelBudget ?? null;
     });
     const messageCollection = $derived(snapshotMessageCollection(displayMessageItems));
     const virtualLayoutSnapshot = $derived({
@@ -1024,16 +1047,28 @@
     $effect(() => {
         const characterId = appState.selected_character?.id ?? null;
         const activeClient = client;
+        ++portableRuntimeProfileEpoch;
         const getCharacterRenderProfile =
             activeClient?.getCharacterRenderProfile?.bind(activeClient);
         let cancelled = false;
         characterRenderProfile = null;
         portableRuntimeGrant = null;
+        portableRuntimeGrantProfile = null;
+        selectedPortableRuntimeCapabilities = [];
+        portableRuntimeModelCall = null;
         if (characterId !== null && getCharacterRenderProfile !== undefined) {
             void getCharacterRenderProfile(characterId)
                 .then((profile) => {
                     if (!cancelled && profile.character_id === characterId) {
                         characterRenderProfile = profile;
+                        selectedPortableRuntimeCapabilities = requiredPortableRuntimeCapabilities(
+                            profile,
+                        ).filter(
+                            (capability) =>
+                                capability !== 'model:primary' &&
+                                capability !== 'model:auxiliary' &&
+                                capability !== 'elevated',
+                        );
                     }
                 })
                 .catch(() => {
@@ -1052,18 +1087,30 @@
         const conversationId = appState.selected_conversation?.id ?? null;
         const branchId = appState.conversation_state?.active_branch_id ?? null;
         const character = appState.selected_character;
-        const grant = portableRuntimeGrant;
+        const grant = activePortableRuntimeGrant;
         const hasLuaRuntime =
             profile?.runtime_scripts.some(
                 (script) => script.language.trim().toLowerCase() === 'lua',
             ) ?? false;
+        const hasDynamicProfile =
+            hasLuaRuntime ||
+            (profile?.output_transforms.length ?? 0) > 0 ||
+            (profile?.display_transforms.length ?? 0) > 0 ||
+            (profile?.background_markup.trim().length ?? 0) > 0;
         const creationEpoch = ++portableRuntimeCreationEpoch;
         let createdRuntime: PortableCharacterRuntime | null = null;
         portableRuntime = null;
         portableRuntimeError = null;
         portableRuntimeLastOutputKey = '';
         portableRuntimeActionCount = 0;
-        portableRuntimePhase = hasLuaRuntime ? (grant === null ? 'blocked' : 'loading') : 'idle';
+        portableRuntimeModelCall = null;
+        portableRuntimePhase = !hasDynamicProfile
+            ? 'idle'
+            : grant === null
+              ? 'blocked'
+              : hasLuaRuntime
+                ? 'loading'
+                : 'ready';
         if (
             !hasLuaRuntime ||
             grant === null ||
@@ -1094,6 +1141,12 @@
                     onNotice: (message, error) => {
                         copyNotice = message;
                         if (error) portableRuntimeError = message;
+                    },
+                    onModelCallStatus: (status) => {
+                        if (creationEpoch === portableRuntimeCreationEpoch) {
+                            portableRuntimeModelCall = status;
+                            portableRuntimeRevision += 1;
+                        }
                     },
                 }),
             )
@@ -1625,13 +1678,18 @@
     async function approvePortableRuntime(): Promise<void> {
         const profile = characterRenderProfile;
         if (profile === null) return;
+        const approvalEpoch = portableRuntimeProfileEpoch;
         portableRuntimePhase = 'loading';
         portableRuntimeError = null;
         try {
-            portableRuntimeGrant = await createPortableRuntimeGrant(
+            const grant = await createPortableRuntimeGrant(
                 profile,
-                portableRuntimeCapabilities,
+                selectedPortableRuntimeCapabilities,
             );
+            if (approvalEpoch !== portableRuntimeProfileEpoch || characterRenderProfile !== profile)
+                return;
+            portableRuntimeGrantProfile = profile;
+            portableRuntimeGrant = grant;
         } catch (error) {
             portableRuntimePhase = 'error';
             portableRuntimeError =
@@ -1641,26 +1699,22 @@
 
     function revokePortableRuntime(): void {
         portableRuntimeGrant = null;
+        portableRuntimeGrantProfile = null;
         portableRuntime?.close();
         portableRuntime = null;
+        portableRuntimeModelCall = null;
         portableRuntimePhase = 'blocked';
         portableRuntimeError = null;
         portableRuntimeRevision += 1;
     }
 
-    function portableRuntimeCapabilityLabel(capability: PortableRuntimeCapability): string {
-        const labels: Record<PortableRuntimeCapability, string> = {
-            'runtime:callbacks': '카드 콜백 실행',
-            'chat:read': '현재 대화 읽기',
-            'chat:write': '표시 메시지와 전송 흐름 변경',
-            'state:readwrite': '카드별 상태 저장',
-            'profile:read': '캐릭터·페르소나 정보 읽기',
-            'lore:read': '활성 로어북 읽기',
-            'ui:write': '카드 UI·배경·알림 표시',
-            'model:generate': '선택한 모델로 별도 생성 요청',
-            elevated: '고급 카드 권한',
-        };
-        return labels[capability];
+    async function cancelPortableRuntimeModelCall(): Promise<void> {
+        const runtime = portableRuntime;
+        if (runtime === null) return;
+        const requested = await runtime.cancelActiveModelCall();
+        copyNotice = requested
+            ? '캐릭터 모델 호출 중지를 요청했습니다.'
+            : '중지할 캐릭터 모델 호출이 없습니다.';
     }
 
     async function setPortableRuntimeOption(key: string, value: string): Promise<void> {
@@ -1736,7 +1790,7 @@
                 characterRenderProfile?.runtime_scripts.some(
                     (script) => script.language.trim().toLowerCase() === 'lua',
                 ) ?? false;
-            if (requiresRuntime && portableRuntimeGrant !== null && runtime === null) {
+            if (requiresRuntime && activePortableRuntimeGrant !== null && runtime === null) {
                 copyNotice =
                     portableRuntimeError ??
                     '캐릭터 기능을 준비하는 중입니다. 잠시 뒤 다시 보내세요.';
@@ -1997,100 +2051,24 @@
             />
         </div>
 
-        {#if (characterRenderProfile?.runtime_scripts.length ?? 0) > 0}
-            <section class="portable-runtime-controls" aria-label="캐릭터 기능 설정">
-                <header>
-                    <span class="chat-room-control-label">캐릭터 기능</span>
-                    <small
-                        >{portableRuntimePhase === 'loading'
-                            ? '준비 중'
-                            : portableRuntimePhase === 'blocked'
-                              ? '승인 필요'
-                              : portableRuntimePhase === 'busy'
-                                ? '실행 중'
-                                : portableRuntimePhase === 'error'
-                                  ? '오류'
-                                  : '사용 가능'}</small
-                    >
-                </header>
-
-                {#if portableRuntimeGrant === null}
-                    <div class="portable-runtime-approval">
-                        <p>
-                            아래 권한은 현재 카드 리비전·스크립트 해시에만 이번 세션 동안
-                            허용됩니다.
-                        </p>
-                        <ul aria-label="요청한 캐릭터 기능 권한">
-                            {#each portableRuntimeCapabilities as capability (capability)}
-                                <li>{portableRuntimeCapabilityLabel(capability)}</li>
-                            {/each}
-                        </ul>
-                        <button type="button" onclick={() => void approvePortableRuntime()}>
-                            이번 세션에서 캐릭터 기능 실행 허용
-                        </button>
-                    </div>
-                {:else if portableRuntime !== null}
-                    <button
-                        class="portable-runtime-revoke"
-                        type="button"
-                        onclick={revokePortableRuntime}
-                    >
-                        캐릭터 기능 권한 해제
-                    </button>
-                    <div class="portable-runtime-choice">
-                        <ChoicePopover
-                            id="portable-runtime-auxiliary-model"
-                            label="보조 생성 모델"
-                            value={selectedAuxiliaryRuntimeModel}
-                            options={auxiliaryRuntimeModelOptions}
-                            disabled={portableRuntimePhase === 'busy'}
-                            onSelect={setAuxiliaryRuntimeModel}
-                        />
-                    </div>
-
-                    {#each portableRuntime.toggles as toggle (toggle.key)}
-                        {#if toggle.kind === 'select'}
-                            <div class="portable-runtime-choice">
-                                <ChoicePopover
-                                    id={`portable-runtime-${toggle.key}`}
-                                    label={toggle.label}
-                                    value={portableOptionValue(toggle.key)}
-                                    options={toggle.choices.map((choice, index) => ({
-                                        value: String(index),
-                                        label: choice,
-                                    }))}
-                                    disabled={portableRuntimePhase === 'busy'}
-                                    onSelect={(value: string) =>
-                                        void setPortableRuntimeOption(toggle.key, value)}
-                                />
-                            </div>
-                        {:else if toggle.kind === 'toggle'}
-                            <ToggleSwitch
-                                label={toggle.label}
-                                checked={portableOptionValue(toggle.key) === '1'}
-                                disabled={portableRuntimePhase === 'busy'}
-                                showLabel
-                                onChange={(checked: boolean) =>
-                                    void setPortableRuntimeOption(toggle.key, checked ? '1' : '0')}
-                            />
-                        {:else}
-                            <label class="portable-runtime-field">
-                                <span>{toggle.label}</span>
-                                <input
-                                    type="text"
-                                    value={portableOptionValue(toggle.key)}
-                                    disabled={portableRuntimePhase === 'busy'}
-                                    onchange={(event) =>
-                                        void setPortableRuntimeOption(
-                                            toggle.key,
-                                            event.currentTarget.value,
-                                        )}
-                                />
-                            </label>
-                        {/if}
-                    {/each}
-                {/if}
-            </section>
+        {#if characterRenderProfile !== null && (characterRenderProfile.runtime_scripts.length > 0 || characterRenderProfile.output_transforms.length > 0 || characterRenderProfile.display_transforms.length > 0 || characterRenderProfile.background_markup.trim().length > 0)}
+            <PortableRuntimeControls
+                phase={portableRuntimePhase}
+                grant={activePortableRuntimeGrant}
+                capabilities={portableRuntimeCapabilities}
+                bind:selectedCapabilities={selectedPortableRuntimeCapabilities}
+                runtime={portableRuntime}
+                selectedAuxiliaryModel={selectedAuxiliaryRuntimeModel}
+                auxiliaryModelOptions={auxiliaryRuntimeModelOptions}
+                modelBudget={portableRuntimeModelBudget}
+                modelCall={portableRuntimeModelCall}
+                optionValue={portableOptionValue}
+                onApprove={approvePortableRuntime}
+                onRevoke={revokePortableRuntime}
+                onSelectAuxiliaryModel={setAuxiliaryRuntimeModel}
+                onSetOption={setPortableRuntimeOption}
+                onCancelModelCall={cancelPortableRuntimeModelCall}
+            />
         {/if}
 
         {#if appState.branches.length > 1}
@@ -2302,8 +2280,12 @@
                     variables={portableRuntimeVariables}
                     backgroundMarkup={portableRuntimeBackground}
                     lastCharacterMessage={portableRuntimeLastCharacterMessage}
-                    messageIndex={messageCollection.items.length}
-                    lastMessageId={Math.max(0, messageCollection.items.length - 1)}
+                    messageIndex={portableRuntimeCanReadChat
+                        ? messageCollection.items.length
+                        : undefined}
+                    lastMessageId={portableRuntimeCanReadChat
+                        ? Math.max(0, messageCollection.items.length - 1)
+                        : undefined}
                 />
             </div>
         {/if}
@@ -2652,13 +2634,18 @@
                                         text={portableMessageText(message)}
                                         {client}
                                         profile={characterRenderProfile}
-                                        enabled={portableRuntime !== null &&
+                                        enabled={portableDisplayApproved &&
+                                            portableRuntimeCanReadChat &&
                                             message.role === 'assistant'}
                                         variables={portableRuntimeVariables}
                                         backgroundMarkup={portableRuntimeBackground}
                                         lastCharacterMessage={portableRuntimeLastCharacterMessage}
-                                        messageIndex={globalIndex}
-                                        lastMessageId={messageCollection.items.length - 1}
+                                        messageIndex={portableRuntimeCanReadChat
+                                            ? globalIndex
+                                            : undefined}
+                                        lastMessageId={portableRuntimeCanReadChat
+                                            ? messageCollection.items.length - 1
+                                            : undefined}
                                         onAction={(action: string) =>
                                             void handlePortableRuntimeAction(action)}
                                     />
@@ -2773,12 +2760,17 @@
                                             text={appState.chat.streaming_text}
                                             {client}
                                             profile={characterRenderProfile}
-                                            enabled={portableRuntime !== null}
+                                            enabled={portableDisplayApproved &&
+                                                portableRuntimeCanReadChat}
                                             variables={portableRuntimeVariables}
                                             backgroundMarkup={portableRuntimeBackground}
                                             lastCharacterMessage={portableRuntimeLastCharacterMessage}
-                                            messageIndex={messageCollection.items.length}
-                                            lastMessageId={messageCollection.items.length}
+                                            messageIndex={portableRuntimeCanReadChat
+                                                ? messageCollection.items.length
+                                                : undefined}
+                                            lastMessageId={portableRuntimeCanReadChat
+                                                ? messageCollection.items.length
+                                                : undefined}
                                         />
                                     </section>
                                 {/if}
@@ -2990,85 +2982,6 @@
 
     .chat-room-branch :global(.choice-popover) {
         width: min(68%, 240px);
-    }
-
-    .portable-runtime-controls {
-        display: grid;
-        gap: 10px;
-        padding: 10px;
-        border: 1px solid var(--line);
-        border-radius: var(--radius-md);
-        background: var(--surface-sunken);
-    }
-
-    .portable-runtime-controls > header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 10px;
-    }
-
-    .portable-runtime-controls > header small,
-    .portable-runtime-field > span {
-        color: var(--ink-muted);
-        font-size: 0.72rem;
-    }
-
-    .portable-runtime-choice {
-        min-width: 0;
-        border-radius: var(--radius-md);
-        background: var(--surface-sunken);
-    }
-
-    .portable-runtime-approval {
-        display: grid;
-        gap: 8px;
-        padding: 10px;
-        border: 1px solid var(--status-warning-border);
-        border-radius: var(--radius-md);
-        background: var(--status-warning-bg);
-        color: var(--ink);
-        font-size: 0.78rem;
-        line-height: 1.45;
-    }
-
-    .portable-runtime-approval p,
-    .portable-runtime-approval ul {
-        margin: 0;
-    }
-
-    .portable-runtime-approval ul {
-        display: grid;
-        gap: 2px;
-        padding-left: 18px;
-        color: var(--ink-muted);
-    }
-
-    .portable-runtime-approval button,
-    .portable-runtime-revoke {
-        min-height: 36px;
-        border: 1px solid var(--line-strong);
-        border-radius: 9px;
-        background: var(--surface);
-        color: var(--ink);
-        font: inherit;
-        cursor: pointer;
-    }
-
-    .portable-runtime-field {
-        display: grid;
-        gap: 5px;
-    }
-
-    .portable-runtime-field input {
-        width: 100%;
-        min-height: 36px;
-        padding: 6px 9px;
-        border: 1px solid var(--line);
-        border-radius: 9px;
-        background: var(--surface);
-        color: var(--ink);
-        font: inherit;
     }
 
     .portable-runtime-background {

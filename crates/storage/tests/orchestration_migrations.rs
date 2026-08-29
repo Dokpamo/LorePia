@@ -56,6 +56,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0036_generation_attempt_derived_closure.sql"),
     include_str!("../migrations/0037_provider_credential_operations.sql"),
     include_str!("../migrations/0038_conversation_speakers.sql"),
+    include_str!("../migrations/0039_runtime_model_audit.sql"),
 ];
 
 fn expected_schema_version() -> u32 {

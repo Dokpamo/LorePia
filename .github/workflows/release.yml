@@ -12,6 +12,31 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  security-gate:
+    name: Release dependency gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: apps/lorepia/package-lock.json
+
+      - run: npm ci
+        working-directory: apps/lorepia
+
+      - name: Reject high or critical npm advisories
+        run: npm audit --omit=dev --audit-level=high
+        working-directory: apps/lorepia
+
   official-release-policy:
     name: Protected signing required
     if: github.ref_type == 'tag'
@@ -25,7 +50,13 @@ jobs:
   bundle:
     name: Unsigned candidate (${{ matrix.os }})
     if: github.event_name == 'workflow_dispatch'
+    needs: security-gate
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     strategy:
       fail-fast: false
       matrix:
@@ -65,8 +96,28 @@ jobs:
         working-directory: apps/lorepia
         run: npm run tauri build -- --config tauri.release.conf.json
 
+      - name: Generate SPDX SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          path: target/release/bundle
+          format: spdx-json
+          output-file: target/release/bundle/lorepia-${{ matrix.os }}.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
       - name: Write candidate checksums
         run: python scripts/write_release_checksums.py target/release/bundle
+
+      - name: Attest candidate provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-checksums: target/release/bundle/SHA256SUMS
+
+      - name: Attest candidate SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-checksums: target/release/bundle/SHA256SUMS
+          sbom-path: target/release/bundle/lorepia-${{ matrix.os }}.spdx.json
 
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:

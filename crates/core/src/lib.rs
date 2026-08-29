@@ -19,7 +19,8 @@ pub use app::{
     ConnectionBoundCredential, Core, EffectiveCapability, GenerationCredentialAdmissionLease,
     GenerationEventSubscription, GenerationOperationContext, MAX_GENERATION_OPERATION_NONCE_BYTES,
     MAX_GENERATION_OPERATION_NONCE_CHARS, ProviderModelRefreshProvenance,
-    ProviderModelRefreshResult, ProviderTemplateView, RuntimePromptMessage,
+    ProviderModelRefreshResult, ProviderTemplateView, RuntimeGenerationAuditContext,
+    RuntimeGenerationCapability, RuntimePromptMessage,
 };
 pub use asset_delivery::{AssetDeliveryDescriptor, AssetDeliveryKind, AssetDeliveryRange};
 pub use catalog::{
@@ -63,8 +64,8 @@ pub use lorepia_domain::{
     GenerationReasoningEffort, GenerationReasoningMode, GenerationReasoningSettings,
     GenerationReasoningSummary, GenerationRecord, GenerationStatus, GenerationTarget,
     GenerationUsage, HeaderName, HealthReport, HttpMethod, HttpUrl, ImportImagePreview,
-    ImportInspection, ImportWarning, InspectionId, ManifestSourceKind, Message,
-    MessageActionGeneration, MessageId, MessageRole, MessageStatus, ModelAvailability,
+    ImportInspection, ImportRegexRulePhase, ImportWarning, InspectionId, ManifestSourceKind,
+    Message, MessageActionGeneration, MessageId, MessageRole, MessageStatus, ModelAvailability,
     ModelMetadataSource, ModelRoute, ModelRouteConfig, ModelRouteId, ModelSyncDiff, ModelSyncEvent,
     ModelSyncFailure, ModelSyncJob, ModelSyncJobId, ModelSyncProgress, ModelSyncReview,
     ModelSyncSourceProvenance, ModelSyncState, ObservationId, ObservationSource, ParameterChoice,

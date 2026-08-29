@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/svelte';
+import { cleanup, render, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { CharacterRenderProfileDto, LorepiaClient } from '../../lib/ipc/contracts';
@@ -10,6 +10,7 @@ const tauriMocks = vi.hoisted(() => ({
 vi.mock('@tauri-apps/api/core', () => tauriMocks);
 
 import PortableMessage from './PortableMessage.svelte';
+import { PORTABLE_RENDERER_CHANNEL } from './portable-renderer-protocol';
 
 const SHA256 = 'cd'.repeat(32);
 const profile: CharacterRenderProfileDto = {
@@ -43,8 +44,73 @@ afterEach(() => {
     vi.restoreAllMocks();
 });
 
+async function portableFrame(container: HTMLElement): Promise<HTMLIFrameElement> {
+    await waitFor(() => {
+        const frame = container.querySelector<HTMLIFrameElement>('.portable-frame');
+        expect(frame).not.toBeNull();
+        expect(frame?.srcdoc).toContain('<!doctype html>');
+    });
+    const frame = container.querySelector<HTMLIFrameElement>('.portable-frame');
+    if (frame === null) throw new Error('portable frame was not rendered');
+    return frame;
+}
+
+function frameDocument(frame: HTMLIFrameElement): Document {
+    return new DOMParser().parseFromString(frame.srcdoc, 'text/html');
+}
+
+function runtimeId(frame: HTMLIFrameElement): string {
+    const script = frameDocument(frame).querySelector('script[nonce]')?.textContent ?? '';
+    const match = /const runtimeId = "([0-9a-f-]{36})";/.exec(script);
+    if (match?.[1] === undefined) throw new Error('portable runtime id is missing');
+    return match[1];
+}
+
 describe('PortableMessage', () => {
-    it('resolves a command prefix to one verified character asset', async () => {
+    it('refuses oversized portable source before parsing it as card markup', async () => {
+        const resolveAssetDelivery = vi.fn();
+        const client = { resolveAssetDelivery } as unknown as LorepiaClient;
+        const view = render(PortableMessage, {
+            text: `<div>${'x'.repeat(262_144)}</div>`,
+            client,
+            profile,
+        });
+
+        await waitFor(() =>
+            expect(view.container).toHaveTextContent(
+                '카드 콘텐츠가 안전 제한을 초과해 표시하지 않았습니다.',
+            ),
+        );
+        expect(view.container.querySelector('.portable-frame')).toBeNull();
+        expect(resolveAssetDelivery).not.toHaveBeenCalled();
+    });
+
+    it('bounds markup nodes and unique asset references before resolution', async () => {
+        const resolveAssetDelivery = vi.fn();
+        const client = { resolveAssetDelivery } as unknown as LorepiaClient;
+        const tooManyNodes = render(PortableMessage, {
+            text: `<div>${'<span>x</span>'.repeat(2_100)}</div>`,
+            client,
+            profile,
+        });
+        const nodeFrame = await portableFrame(tooManyNodes.container);
+        expect(frameDocument(nodeFrame).body.textContent).toContain(
+            '카드 콘텐츠가 안전 제한을 초과해 표시하지 않았습니다.',
+        );
+
+        const tooManyReferences = render(PortableMessage, {
+            text: `<div>${Array.from({ length: 129 }, (_, index) => `<img="ref-${String(index)}">`).join('')}</div>`,
+            client,
+            profile,
+        });
+        const referenceFrame = await portableFrame(tooManyReferences.container);
+        expect(frameDocument(referenceFrame).body.textContent).toContain(
+            '카드 콘텐츠가 안전 제한을 초과해 표시하지 않았습니다.',
+        );
+        expect(resolveAssetDelivery).not.toHaveBeenCalled();
+    });
+
+    it('resolves a command prefix to one verified character asset inside the sandbox', async () => {
         const resolveAssetDelivery = vi.fn().mockResolvedValue({
             asset_id: 'asset-expression',
             sha256: SHA256,
@@ -63,13 +129,10 @@ describe('PortableMessage', () => {
             profile,
         });
 
-        await waitFor(() => {
-            const shadow = view.container.querySelector('.portable-host')?.shadowRoot;
-            expect(shadow?.querySelector('img')).toHaveAttribute(
-                'src',
-                `http://lorepia-asset.localhost/sha256/${SHA256}`,
-            );
-        });
+        const frame = await portableFrame(view.container);
+        expect(frameDocument(frame).querySelector('img')?.getAttribute('src')).toBe(
+            `http://lorepia-asset.localhost/sha256/${SHA256}`,
+        );
         expect(resolveAssetDelivery).toHaveBeenCalledWith({
             selector: { kind: 'asset_id', asset_id: 'asset-expression' },
         });
@@ -97,14 +160,30 @@ describe('PortableMessage', () => {
             },
         });
 
+        const frame = await portableFrame(view.container);
+        expect(frameDocument(frame).querySelector('img')?.getAttribute('src')).toBe(
+            `http://lorepia-asset.localhost/sha256/${SHA256}`,
+        );
+    });
+
+    it('shows why one malformed card regex was disabled while preserving the message', async () => {
+        const view = render(PortableMessage, {
+            text: 'ordinary text',
+            profile: {
+                ...profile,
+                output_transforms: [{ pattern: '(', replacement: 'lost', flags: '' }],
+            },
+        });
+
         await waitFor(() => {
-            expect(
-                view.container.querySelector('.portable-host')?.shadowRoot?.querySelector('img'),
-            ).toHaveAttribute('src', `http://lorepia-asset.localhost/sha256/${SHA256}`);
+            expect(view.container).toHaveTextContent('ordinary text');
+            expect(view.container).toHaveTextContent(
+                '카드 정규식 규칙 1이 올바르지 않아 비활성화했습니다.',
+            );
         });
     });
 
-    it('keeps imported presentation styles isolated and removes executable markup', async () => {
+    it('keeps card markup out of the parent DOM and gives its frame no same-origin authority', async () => {
         const client = { resolveAssetDelivery: vi.fn() } as unknown as LorepiaClient;
         const view = render(PortableMessage, {
             text: '<details class="panel"><summary>Status</summary><script>bad()</script><span onclick="bad()">OK</span></details>',
@@ -112,38 +191,55 @@ describe('PortableMessage', () => {
             profile,
         });
 
-        await waitFor(() => {
-            const shadow = view.container.querySelector('.portable-host')?.shadowRoot;
-            expect(shadow?.querySelector('details')).not.toBeNull();
-            expect(shadow?.querySelector('script')).toBeNull();
-            expect(shadow?.querySelector('[onclick]')).toBeNull();
-            expect(shadow?.textContent).toContain('OK');
-            expect(shadow?.textContent).toContain('.panel { color: rgb(1, 2, 3); }');
-        });
+        const frame = await portableFrame(view.container);
+        const rendered = frameDocument(frame);
+        expect(view.container.querySelector('details')).toBeNull();
+        expect(frame).toHaveAttribute('sandbox', 'allow-scripts');
+        expect(frame.getAttribute('sandbox')).not.toContain('allow-same-origin');
+        expect(rendered.querySelector('details')).not.toBeNull();
+        expect(rendered.querySelectorAll('script')).toHaveLength(1);
+        expect(rendered.querySelector('script[nonce]')?.textContent).not.toContain('bad()');
+        expect(rendered.querySelector('[onclick]')).toBeNull();
+        expect(rendered.body.textContent).toContain('OK');
+        expect(rendered.querySelector('style')?.textContent).toContain(
+            '.panel{color:rgb(1, 2, 3);}',
+        );
+        expect(frame.srcdoc).not.toMatch(/__TAURI|invoke\s*\(|fetch\s*\(|XMLHttpRequest/i);
     });
 
-    it('contains fixed overlays and strips alternate network-loading surfaces', async () => {
+    it('blocks alternate network surfaces, CSS URLs, and viewport overlays', async () => {
         const client = { resolveAssetDelivery: vi.fn() } as unknown as LorepiaClient;
         const view = render(PortableMessage, {
             text: [
-                '<style>@import "https://evil.test/a.css"; .overlay { position: fixed; inset: 0; z-index: 999999; background: url(https://evil.test/pixel); }</style>',
+                '<style>@import "https://evil.test/a.css"; .overlay { position: fixed; inset: 0; z-index: 999999; width: 100vw; background: image-set(url(https://evil.test/pixel) 1x); pointer-events: all; color: red; }</style>',
                 '<svg><foreignObject><div>spoof</div></foreignObject></svg>',
                 '<picture><source srcset="https://evil.test/a.png"><img srcset="https://evil.test/b.png" poster="https://evil.test/p.png"></picture>',
+                '<form action="https://evil.test"><input autofocus formaction="https://evil.test"></form>',
+                '<a href="https://evil.test" ping="https://evil.test">remote</a>',
                 '<button data-portable-action="spoof">bad</button>',
             ].join(''),
             client,
             profile,
         });
 
-        await waitFor(() => {
-            const shadow = view.container.querySelector('.portable-host')?.shadowRoot;
-            expect(shadow).not.toBeNull();
-            expect(shadow?.querySelector('svg, foreignObject, picture, source')).toBeNull();
-            expect(shadow?.querySelector('[srcset], [poster]')).toBeNull();
-            expect(shadow?.querySelector('[data-portable-action]')).toBeNull();
-            expect(shadow?.textContent).not.toMatch(/@import|position\s*:\s*fixed|url\s*\(/i);
-            expect(shadow?.textContent).toContain('contain: layout paint style');
-        });
+        const frame = await portableFrame(view.container);
+        const rendered = frameDocument(frame);
+        expect(rendered.querySelector('svg, foreignObject, picture, source, form')).toBeNull();
+        expect(
+            rendered.querySelector('[srcset], [poster], [autofocus], [href], [ping]'),
+        ).toBeNull();
+        expect(rendered.querySelector('[data-portable-action]')).toBeNull();
+        const importedStyle = rendered.querySelector('.portable-message style')?.textContent ?? '';
+        expect(importedStyle).not.toMatch(
+            /@import|position\s*:\s*fixed|z-index|100vw|image-set|url\s*\(|pointer-events/i,
+        );
+        expect(importedStyle).toContain('color:red');
+        const csp = rendered
+            .querySelector('meta[http-equiv="Content-Security-Policy"]')
+            ?.getAttribute('content');
+        expect(csp).toContain("default-src 'none'");
+        expect(csp).toContain("connect-src 'none'");
+        expect(csp).toContain('img-src lorepia-asset: http://lorepia-asset.localhost');
     });
 
     it('strips browser top-layer primitives from imported markup', async () => {
@@ -151,7 +247,7 @@ describe('PortableMessage', () => {
         const view = render(PortableMessage, {
             text: [
                 '<style>select { appearance: base-select; } select::picker(select) { position: fixed; }</style>',
-                '<button popovertarget="spoof" popovertargetaction="show" command="show-popover" commandfor="spoof">Open</button>',
+                '<button popovertarget="spoof" command="show-popover" commandfor="spoof">Open</button>',
                 '<div id="spoof" popover>spoof</div>',
                 '<dialog open>trusted-looking dialog</dialog>',
                 '<select><option>trusted-looking picker</option></select>',
@@ -160,20 +256,17 @@ describe('PortableMessage', () => {
             profile,
         });
 
-        await waitFor(() => {
-            const shadow = view.container.querySelector('.portable-host')?.shadowRoot;
-            expect(shadow).not.toBeNull();
-            expect(shadow?.querySelector('dialog, select, option')).toBeNull();
-            expect(
-                shadow?.querySelector(
-                    '[popover], [popovertarget], [popovertargetaction], [command], [commandfor]',
-                ),
-            ).toBeNull();
-            expect(shadow?.textContent).not.toMatch(/base-select|::picker/i);
-        });
+        const rendered = frameDocument(await portableFrame(view.container));
+        expect(rendered.querySelector('dialog, select, option')).toBeNull();
+        expect(
+            rendered.querySelector('[popover], [popovertarget], [command], [commandfor]'),
+        ).toBeNull();
+        expect(rendered.querySelector('.portable-message style')?.textContent).not.toMatch(
+            /appearance|::picker/i,
+        );
     });
 
-    it('keeps escaped host selectors inside a trusted non-styleable paint boundary', async () => {
+    it('rejects escaped CSS policy bypasses and retains the parent paint boundary', async () => {
         const client = { resolveAssetDelivery: vi.fn() } as unknown as LorepiaClient;
         const view = render(PortableMessage, {
             text: String.raw`<style>
@@ -184,18 +277,15 @@ describe('PortableMessage', () => {
             profile,
         });
 
-        await waitFor(() => {
-            const boundary = view.container.querySelector('.portable-boundary');
-            const shadow = view.container.querySelector('.portable-host')?.shadowRoot;
-            expect(boundary).not.toBeNull();
-            expect(shadow).not.toBeNull();
-            if (boundary === null) throw new Error('portable boundary is missing');
-            expect(shadow?.querySelector('.portable-message style')?.textContent).not.toMatch(
-                /:host|\\|contain\s*:\s*none/i,
-            );
-            expect(getComputedStyle(boundary).contain).toContain('paint');
-            expect(getComputedStyle(boundary).overflow).not.toBe('visible');
-        });
+        const frame = await portableFrame(view.container);
+        const boundary = view.container.querySelector('.portable-boundary');
+        const importedStyle =
+            frameDocument(frame).querySelector('.portable-message style')?.textContent ?? '';
+        expect(boundary).not.toBeNull();
+        expect(importedStyle).toBe('');
+        if (boundary === null) throw new Error('portable boundary is missing');
+        expect(getComputedStyle(boundary).contain).toContain('paint');
+        expect(getComputedStyle(boundary).overflow).not.toBe('visible');
     });
 
     it('uses the ordinary markdown renderer when no portable markup is present', () => {
@@ -206,7 +296,7 @@ describe('PortableMessage', () => {
             profile,
         });
 
-        expect(view.container.querySelector('.portable-host')).toBeNull();
+        expect(view.container.querySelector('.portable-frame')).toBeNull();
         expect(view.container.querySelector('strong')).toHaveTextContent('ordinary');
     });
 
@@ -255,47 +345,99 @@ describe('PortableMessage', () => {
             },
         });
 
-        await waitFor(() => {
-            const disabledText =
-                disabled.container.querySelector('.portable-host')?.shadowRoot?.textContent;
-            const enabledText =
-                enabled.container.querySelector('.portable-host')?.shadowRoot?.textContent;
-            expect(disabledText).not.toContain('.compact');
-            expect(enabledText).toContain('.compact { width: 1px; }');
-        });
+        const disabledSource = (await portableFrame(disabled.container)).srcdoc;
+        const enabledSource = (await portableFrame(enabled.container)).srcdoc;
+        expect(disabledSource).not.toContain('.compact{width:1px;}');
+        expect(enabledSource).toContain('.compact{width:1px;}');
     });
 
-    it('maps portable button attributes to runtime actions', async () => {
+    it('accepts only validated actions from the exact active opaque-origin frame', async () => {
         const client = { resolveAssetDelivery: vi.fn() } as unknown as LorepiaClient;
         const onAction = vi.fn();
         const view = render(PortableMessage, {
-            text: '<div><input type="checkbox" card-btn="generate__radio__1"><span>Generate</span></div>',
+            text: [
+                '<input type="checkbox" card-btn="generate__radio__1">',
+                '<button evil-btn="forged">Forged</button>',
+                '<div card-btn="non_interactive">No</div>',
+            ].join(''),
             client,
             profile,
             onAction,
         });
 
-        await waitFor(() => {
-            const control =
-                view.container
-                    .querySelector('.portable-host')
-                    ?.shadowRoot?.querySelector<HTMLInputElement>('input') ?? null;
-            expect(control).not.toBeNull();
-            expect(control).toHaveAttribute('data-portable-action', 'generate__radio__1');
-            expect(control).not.toHaveAttribute('card-btn');
-        });
-        const control = view.container
-            .querySelector('.portable-host')
-            ?.shadowRoot?.querySelector<HTMLInputElement>('input');
-        if (!(control instanceof HTMLInputElement)) {
-            throw new Error('portable action control was not rendered');
-        }
-        await fireEvent.click(control);
+        const frame = await portableFrame(view.container);
+        const rendered = frameDocument(frame);
+        expect(rendered.querySelector('input')?.getAttribute('data-portable-action')).toBe(
+            'generate__radio__1',
+        );
+        expect(rendered.querySelector('[evil-btn]')).toBeNull();
+        expect(rendered.querySelector('div[data-portable-action]')).toBeNull();
+
+        const id = runtimeId(frame);
+        const send = (source: MessageEventSource | null, candidateId: string, action: string) => {
+            globalThis.dispatchEvent(
+                new MessageEvent('message', {
+                    origin: 'null',
+                    source,
+                    data: {
+                        channel: PORTABLE_RENDERER_CHANNEL,
+                        type: 'portable_action',
+                        runtimeId: candidateId,
+                        action,
+                    },
+                }),
+            );
+        };
+        send(window, id, 'generate__radio__1');
+        send(frame.contentWindow, '00000000-0000-4000-8000-000000000000', 'generate__radio__1');
+        send(frame.contentWindow, id, 'contains spaces');
+        expect(onAction).not.toHaveBeenCalled();
+
+        send(frame.contentWindow, id, 'generate__radio__1');
+        expect(onAction).toHaveBeenCalledOnce();
         expect(onAction).toHaveBeenCalledWith('generate__radio__1');
     });
 
-    it('resolves and starts embedded background audio', async () => {
-        const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue();
+    it('accepts bounded resize messages only from the exact frame', async () => {
+        const client = { resolveAssetDelivery: vi.fn() } as unknown as LorepiaClient;
+        const view = render(PortableMessage, {
+            text: '<details><summary>Status</summary></details>',
+            client,
+            profile,
+        });
+        const frame = await portableFrame(view.container);
+        const id = runtimeId(frame);
+
+        globalThis.dispatchEvent(
+            new MessageEvent('message', {
+                origin: 'null',
+                source: frame.contentWindow,
+                data: {
+                    channel: PORTABLE_RENDERER_CHANNEL,
+                    type: 'portable_resize',
+                    runtimeId: id,
+                    height: 200,
+                },
+            }),
+        );
+        expect(frame.style.height).toBe('200px');
+
+        globalThis.dispatchEvent(
+            new MessageEvent('message', {
+                origin: 'null',
+                source: frame.contentWindow,
+                data: {
+                    channel: PORTABLE_RENDERER_CHANNEL,
+                    type: 'portable_resize',
+                    runtimeId: id,
+                    height: 10_000,
+                },
+            }),
+        );
+        expect(frame.style.height).toBe('200px');
+    });
+
+    it('resolves embedded background audio without exposing a local path', async () => {
         const resolveAssetDelivery = vi.fn().mockResolvedValue({
             asset_id: 'asset-audio',
             sha256: SHA256,
@@ -305,15 +447,14 @@ describe('PortableMessage', () => {
             width: null,
             height: null,
             duration_ms: 1_000,
-            url: `lorepia-asset://sha256/${SHA256}`,
+            url: '/Users/private/original.mp3',
         });
         const client = { resolveAssetDelivery } as unknown as LorepiaClient;
         const view = render(PortableMessage, {
             text: [
-                '<style>.death-overlay { position: fixed; }</style>',
                 '{{#when::{{contains::{{lastcharmessage}}::Health: 0/}}}}',
                 '{{#when::toggle::music}}{{bgm::scene-track.mp3}}{{/when}}',
-                '<div class="death-overlay">GAME OVER</div>',
+                '<div>GAME OVER</div>',
                 '{{/when}}',
             ].join(''),
             client,
@@ -325,16 +466,14 @@ describe('PortableMessage', () => {
             lastCharacterMessage: '[Status]\nHealth: 0/100\n[/Status]',
         });
 
-        await waitFor(() => {
-            const audio =
-                view.container
-                    .querySelector('.portable-host')
-                    ?.shadowRoot?.querySelector<HTMLAudioElement>('audio') ?? null;
-            expect(audio).not.toBeNull();
-            expect(audio).toHaveAttribute('src', `http://lorepia-asset.localhost/sha256/${SHA256}`);
-            expect(audio?.loop).toBe(true);
-            expect(play).toHaveBeenCalled();
-            expect(audio?.closest('.portable-message')).toHaveTextContent('GAME OVER');
-        });
+        const frame = await portableFrame(view.container);
+        const rendered = frameDocument(frame);
+        expect(rendered.querySelector('audio')?.getAttribute('src')).toBe(
+            `http://lorepia-asset.localhost/sha256/${SHA256}`,
+        );
+        expect(rendered.querySelector('audio')?.hasAttribute('autoplay')).toBe(true);
+        expect(rendered.querySelector('audio')?.hasAttribute('loop')).toBe(true);
+        expect(rendered.body.textContent).toContain('GAME OVER');
+        expect(frame.srcdoc).not.toContain('/Users/private/original.mp3');
     });
 });

@@ -109,6 +109,7 @@ const APP_COMMANDS: &[&str] = &[
     "list_branch_messages",
     "list_messages",
     "generate_runtime_text",
+    "cancel_runtime_text",
     "send_message",
     "edit_user_message",
     "regenerate_assistant_message",

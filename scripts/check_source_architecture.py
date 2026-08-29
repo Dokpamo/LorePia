@@ -56,6 +56,10 @@ FRONTEND_INTERPOLATED_IMPORT_RE = re.compile(
     r"\bimport\s*\(\s*`((?:\\.|[^`\\])*)`\s*\)", re.DOTALL
 )
 FRONTEND_TEST_NAME_RE = re.compile(r"\.(?:test|spec)(?:\.[^.]+)?$")
+PORTABLE_REGEX_OPERATION = Path(
+    "apps/lorepia/src/features/chat/portable-regex-operation.ts"
+)
+PORTABLE_REGEX_WORKER = Path("apps/lorepia/src/features/chat/portable-regex.worker.ts")
 
 
 @dataclass(frozen=True)
@@ -243,6 +247,31 @@ def evaluate_frontend_test_imports(root: Path, sources: list[Path]) -> list[str]
     return failures
 
 
+def evaluate_portable_regex_boundary(root: Path, sources: list[Path]) -> list[str]:
+    """Keep attacker-controlled JavaScript RegExp construction inside its Worker."""
+
+    operation = (root / PORTABLE_REGEX_OPERATION).resolve().with_suffix("")
+    failures: list[str] = []
+    for relative in sources:
+        if relative.parts[:3] != ("apps", "lorepia", "src"):
+            continue
+        try:
+            text = (root / relative).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        for raw_specifier in frontend_import_specifiers(text):
+            specifier = decode_frontend_specifier(raw_specifier)
+            specifier = specifier.removeprefix("!").split("?", 1)[0].split("#", 1)[0]
+            if not specifier.startswith("."):
+                continue
+            target = (root / relative.parent / specifier).resolve().with_suffix("")
+            if target == operation and relative != PORTABLE_REGEX_WORKER:
+                failures.append(
+                    f"{relative.as_posix()} imports the Worker-only portable regex evaluator"
+                )
+    return failures
+
+
 def load_config(config_path: Path) -> dict[str, Any]:
     try:
         config = json.loads(config_path.read_text(encoding="utf-8"))
@@ -367,6 +396,7 @@ def evaluate_source_sizes(
     sources = production_sources(root)
     source_names = {source.as_posix() for source in sources}
     failures.extend(evaluate_frontend_test_imports(root, sources))
+    failures.extend(evaluate_portable_regex_boundary(root, sources))
 
     for baseline_path, baseline in sorted(baselines.items()):
         if not isinstance(baseline_path, str) or not isinstance(baseline, dict):

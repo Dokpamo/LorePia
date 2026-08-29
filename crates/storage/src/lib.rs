@@ -18,6 +18,8 @@ mod orchestration;
 mod package_repository;
 mod persona_repository;
 mod provider_credential_repository;
+mod runtime_model_audit;
+mod verified_asset_cache;
 
 pub use catalog::{
     CatalogActivationKind, CatalogActivationRecord, CatalogImportCommit, CatalogRollbackCommit,
@@ -140,4 +142,8 @@ pub use provider_credential_repository::{
     ProviderCredentialOperationStatus, ProviderCredentialOutcomeCode,
     ProviderCredentialSlotGarbage, ProviderCredentialSlotGarbageStatus,
     StoredProviderCredentialOperation, provider_credential_binding_sha256_for_connection,
+};
+pub use runtime_model_audit::{
+    RuntimeModelAuditFinish, RuntimeModelAuditStart, RuntimeModelAuditStatus,
+    RuntimeModelCapability, StoredRuntimeModelAudit,
 };

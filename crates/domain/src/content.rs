@@ -161,6 +161,41 @@ pub struct ImportWarning {
     pub message: String,
 }
 
+/// Bounded metadata used to review executable or presentation-active card content.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImportDynamicContentReview {
+    pub runtime_script_count: u32,
+    pub elevated_runtime_script_count: u32,
+    pub regex_rule_count: u32,
+    pub enabled_regex_rule_count: u32,
+    pub model_calls_possible: bool,
+    pub custom_markup_present: bool,
+    pub regex_rules: Vec<ImportRegexRuleReview>,
+}
+
+/// Where an imported JavaScript-compatible regular expression can execute.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportRegexRulePhase {
+    RequestContext,
+    ProviderOutput,
+    Display,
+    Lore,
+}
+
+/// One runtime-reachable JavaScript-compatible regular expression.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImportRegexRuleReview {
+    pub id: String,
+    pub name: String,
+    pub phase: ImportRegexRulePhase,
+    pub runtime_index: u32,
+    pub pattern: String,
+    pub flags: String,
+}
+
 /// Platform-neutral metadata for an image inside an inspected archive.
 ///
 /// `logical_asset_id` is the validated, normalized archive path. It is not a
@@ -183,6 +218,8 @@ pub struct ImportInspection {
     pub source_size: u64,
     pub estimated_stored_size: u64,
     pub asset_count: u32,
+    #[serde(default)]
+    pub dynamic_content: ImportDynamicContentReview,
     pub warnings: Vec<ImportWarning>,
     pub blocked_reasons: Vec<String>,
     pub unsupported_optional_fields: Vec<String>,
@@ -218,8 +255,8 @@ impl Default for ImportLimits {
 #[cfg(test)]
 mod tests {
     use super::{
-        AssetDescriptor, AssetRole, AssetSource, AssetSourceKind, ContentKind, ImportInspection,
-        ImportLimits, InspectionId, Sha256Digest,
+        AssetDescriptor, AssetRole, AssetSource, AssetSourceKind, ContentKind,
+        ImportDynamicContentReview, ImportInspection, ImportLimits, InspectionId, Sha256Digest,
     };
     use crate::orchestration::AssetId;
 
@@ -273,6 +310,7 @@ mod tests {
             source_size: 1,
             estimated_stored_size: 1,
             asset_count: 0,
+            dynamic_content: ImportDynamicContentReview::default(),
             warnings: Vec::new(),
             blocked_reasons: Vec::new(),
             unsupported_optional_fields: Vec::new(),

@@ -25,8 +25,9 @@ pub use character::{
     PortableTextTransform, PortableTransformPhase, UnknownExtensionEntry, UnknownExtensionIndex,
 };
 pub use content::{
-    AssetDescriptor, AssetRole, AssetSource, AssetSourceKind, ContentKind, ImportImagePreview,
-    ImportInspection, ImportLimits, ImportWarning, InspectionId, Sha256Digest,
+    AssetDescriptor, AssetRole, AssetSource, AssetSourceKind, ContentKind,
+    ImportDynamicContentReview, ImportImagePreview, ImportInspection, ImportLimits,
+    ImportRegexRulePhase, ImportRegexRuleReview, ImportWarning, InspectionId, Sha256Digest,
 };
 pub use conversation::{
     CharacterGreetingCatalog, CharacterGreetingKind, CharacterGreetingOption, Conversation,

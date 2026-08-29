@@ -1,3 +1,4 @@
+mod asset_delivery;
 mod private_path;
 
 use std::{
@@ -9,13 +10,18 @@ use std::{
     sync::{Mutex, MutexGuard},
 };
 
+#[cfg(test)]
+use std::sync::atomic::AtomicUsize;
+
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 
 use chrono::{DateTime, Utc};
+#[cfg(test)]
+use lorepia_domain::AssetId;
 use lorepia_domain::discovery::DiscoveryPreviousSelection;
 use lorepia_domain::{
-    ApiFamily, AppSettings, AssetDescriptor, AssetId, AuthBinding, BoundedJson, CanonicalOrigin,
+    ApiFamily, AppSettings, AssetDescriptor, AuthBinding, BoundedJson, CanonicalOrigin,
     CapabilityKey, CapabilityObservation, CapabilityValue, Character, CharacterContentV1,
     CharacterGreetingCatalog, CharacterGreetingKind, CharacterGreetingOption, Confidence,
     ConnectionConfig, ConnectionConfigEntry, ConnectionConfigValue, ConnectionFieldSpec,
@@ -46,8 +52,9 @@ use crate::interaction_repository::{
     interaction_state_key_for_branch, materialize_generation_attempt_interaction_for_append,
     validate_generation_attempt_identity_migration_legacy_rows,
 };
+use crate::verified_asset_cache::VerifiedAssetCache;
 
-pub(crate) const SCHEMA_VERSION: u32 = 38;
+pub(crate) const SCHEMA_VERSION: u32 = 39;
 const MIGRATION_0001: &str = include_str!("../migrations/0001_initial.sql");
 const MIGRATION_0002: &str = include_str!("../migrations/0002_import_asset_recovery.sql");
 const MIGRATION_0003: &str = include_str!("../migrations/0003_conversation_branches.sql");
@@ -109,6 +116,7 @@ const MIGRATION_0036: &str =
     include_str!("../migrations/0036_generation_attempt_derived_closure.sql");
 const MIGRATION_0037: &str = include_str!("../migrations/0037_provider_credential_operations.sql");
 const MIGRATION_0038: &str = include_str!("../migrations/0038_conversation_speakers.sql");
+const MIGRATION_0039: &str = include_str!("../migrations/0039_runtime_model_audit.sql");
 const LEGACY_PROVIDER_TEMPLATE_ID: &str = "custom-openai-chat-v1";
 const LEGACY_PROVIDER_TEMPLATE_VERSION: u32 = 1;
 const LEGACY_BASE_URL_CONFIG_KEY: &str = "api_base_url";
@@ -163,6 +171,9 @@ pub struct ApprovedAssetRange {
 pub struct Storage {
     root: PathBuf,
     pub(crate) connection: Mutex<Connection>,
+    verified_asset_cache: Mutex<VerifiedAssetCache>,
+    #[cfg(test)]
+    approved_asset_hash_verifications: AtomicUsize,
     _owner_lock: File,
 }
 
@@ -311,6 +322,9 @@ impl Storage {
         let storage = Self {
             root,
             connection: Mutex::new(connection),
+            verified_asset_cache: Mutex::new(VerifiedAssetCache::default()),
+            #[cfg(test)]
+            approved_asset_hash_verifications: AtomicUsize::new(0),
             _owner_lock: owner_lock,
         };
         // Running memory jobs have no trustworthy in-process worker after a
@@ -320,6 +334,7 @@ impl Storage {
         storage.recover_running_memory_query_embeddings(Utc::now())?;
         storage.recover_all_core_lifecycle_occurrence_leases(Utc::now())?;
         storage.recover_all_interaction_derived_event_leases(Utc::now())?;
+        storage.recover_started_runtime_model_audits(Utc::now())?;
         if recover_provider_discovery {
             storage.recover_unfinished_discovery_operations(Utc::now())?;
         }
@@ -333,201 +348,6 @@ impl Storage {
 
     pub fn staging_dir(&self) -> PathBuf {
         self.root.join("staging")
-    }
-
-    /// Resolves an immutable descriptor only when its CAS bytes still match
-    /// the exact database hash, size, media type, and safe renderer allowlist.
-    pub fn resolve_approved_asset_by_id(&self, asset_id: &AssetId) -> CoreResult<AssetDescriptor> {
-        let record = self.approved_asset_record(
-            "SELECT ad.payload_json, a.relative_path, a.media_type, a.size_bytes
-             FROM asset_descriptors ad
-             JOIN assets a ON a.sha256 = ad.asset_hash
-             WHERE ad.id = ?1",
-            asset_id.as_str(),
-        )?;
-        if &record.0.id != asset_id {
-            return Err(storage_corrupted(
-                "approved asset descriptor identity diverges from its row",
-            ));
-        }
-        self.verify_approved_asset(&record.0, &record.1)?;
-        Ok(record.0)
-    }
-
-    /// Resolves a digest only when at least one immutable approved descriptor
-    /// names the same exact CAS object.
-    pub fn resolve_approved_asset_by_sha256(
-        &self,
-        sha256: &Sha256Digest,
-    ) -> CoreResult<AssetDescriptor> {
-        let record = self.approved_asset_record(
-            "SELECT ad.payload_json, a.relative_path, a.media_type, a.size_bytes
-             FROM asset_descriptors ad
-             JOIN assets a ON a.sha256 = ad.asset_hash
-             WHERE ad.asset_hash = ?1
-             ORDER BY ad.id
-             LIMIT 1",
-            sha256.as_str(),
-        )?;
-        if &record.0.sha256 != sha256 {
-            return Err(storage_corrupted(
-                "approved asset descriptor digest diverges from its row",
-            ));
-        }
-        self.verify_approved_asset(&record.0, &record.1)?;
-        Ok(record.0)
-    }
-
-    /// Reads one bounded range after revalidating the complete CAS object.
-    ///
-    /// Hashing the complete file before every delivery intentionally favors a
-    /// fail-closed trust boundary over a path capability or stale metadata
-    /// cache. The returned bytes are read from the same verified file handle.
-    pub fn read_approved_asset_range(
-        &self,
-        sha256: &Sha256Digest,
-        start: u64,
-        requested_bytes: u64,
-    ) -> CoreResult<ApprovedAssetRange> {
-        if requested_bytes == 0 || requested_bytes > MAX_APPROVED_ASSET_READ_BYTES {
-            return Err(CoreError::invalid(
-                "approved asset range length is outside the bounded limit",
-            ));
-        }
-        let (descriptor, relative_path) = self.approved_asset_record(
-            "SELECT ad.payload_json, a.relative_path, a.media_type, a.size_bytes
-             FROM asset_descriptors ad
-             JOIN assets a ON a.sha256 = ad.asset_hash
-             WHERE ad.asset_hash = ?1
-             ORDER BY ad.id
-             LIMIT 1",
-            sha256.as_str(),
-        )?;
-        if &descriptor.sha256 != sha256 {
-            return Err(storage_corrupted(
-                "approved asset descriptor digest diverges from its row",
-            ));
-        }
-        let mut file = self.open_verified_approved_asset(&descriptor, &relative_path)?;
-        if start >= descriptor.size_bytes {
-            return Err(CoreError::invalid(
-                "approved asset range starts beyond the content length",
-            ));
-        }
-        let available = descriptor.size_bytes - start;
-        let length = requested_bytes.min(available);
-        let capacity = usize::try_from(length)
-            .map_err(|_| CoreError::invalid("approved asset range is too large"))?;
-        let mut bytes = Vec::with_capacity(capacity);
-        file.seek(std::io::SeekFrom::Start(start))
-            .map_err(storage_io_error)?;
-        (&mut file)
-            .take(length)
-            .read_to_end(&mut bytes)
-            .map_err(storage_io_error)?;
-        if bytes.len() != capacity {
-            return Err(storage_corrupted(
-                "approved asset changed while its range was being read",
-            ));
-        }
-        Ok(ApprovedAssetRange {
-            descriptor,
-            start,
-            bytes,
-        })
-    }
-
-    fn approved_asset_record(
-        &self,
-        query: &str,
-        key: &str,
-    ) -> CoreResult<(AssetDescriptor, String)> {
-        let row = self
-            .connection()?
-            .query_row(query, [key], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, i64>(3)?,
-                ))
-            })
-            .optional()
-            .map_err(storage_db_error)?
-            .ok_or_else(|| {
-                CoreError::new(
-                    CoreErrorCode::NotFound,
-                    "approved asset was not found",
-                    false,
-                )
-            })?;
-        let descriptor = serde_json::from_str::<AssetDescriptor>(&row.0).map_err(|error| {
-            storage_corrupted(format!(
-                "approved asset descriptor cannot be decoded: {error}"
-            ))
-        })?;
-        if descriptor.media_type != row.2
-            || descriptor.size_bytes != i64_to_u64("approved asset size", row.3)?
-        {
-            return Err(storage_corrupted(
-                "approved asset descriptor diverges from CAS metadata",
-            ));
-        }
-        validate_renderer_media_type(&descriptor.media_type)?;
-        Ok((descriptor, row.1))
-    }
-
-    fn verify_approved_asset(
-        &self,
-        descriptor: &AssetDescriptor,
-        relative_path: &str,
-    ) -> CoreResult<()> {
-        self.open_verified_approved_asset(descriptor, relative_path)
-            .map(drop)
-    }
-
-    fn open_verified_approved_asset(
-        &self,
-        descriptor: &AssetDescriptor,
-        relative_path: &str,
-    ) -> CoreResult<File> {
-        let expected = format!(
-            "assets/{}",
-            content_relative_path(descriptor.sha256.as_str())?
-        );
-        if relative_path != expected {
-            return Err(storage_corrupted(
-                "approved asset CAS path does not match its digest",
-            ));
-        }
-        let prefix = descriptor
-            .sha256
-            .as_str()
-            .get(..2)
-            .ok_or_else(|| storage_corrupted("approved asset digest is malformed"))?;
-        ensure_real_directory(&self.root.join("assets"))?;
-        ensure_real_directory(&self.root.join("assets/sha256"))?;
-        ensure_real_directory(&self.root.join("assets/sha256").join(prefix))?;
-
-        let path = self.root.join(relative_path);
-        ensure_regular_file(&path)?;
-        let mut file = File::open(&path).map_err(storage_io_error)?;
-        let metadata = file.metadata().map_err(storage_io_error)?;
-        if !metadata.is_file() || metadata.len() != descriptor.size_bytes {
-            return Err(storage_corrupted(
-                "approved asset file size does not match its descriptor",
-            ));
-        }
-        let (actual_sha256, actual_size) = hash_open_file(&mut file)?;
-        if actual_sha256 != descriptor.sha256.as_str() || actual_size != descriptor.size_bytes {
-            return Err(storage_corrupted(
-                "approved asset bytes do not match their descriptor digest",
-            ));
-        }
-        file.rewind().map_err(storage_io_error)?;
-        verify_open_file_media_type_signature(&mut file, &descriptor.media_type)?;
-        file.rewind().map_err(storage_io_error)?;
-        Ok(file)
     }
 
     /// Promotes an owned staged package snapshot into durable source CAS.
@@ -5422,6 +5242,13 @@ pub(crate) fn apply_migrations(connection: &mut Connection) -> CoreResult<()> {
         38,
         MIGRATION_0038,
         "conversation speaker roster and message attribution",
+    )?;
+    apply_checked_migration(
+        connection,
+        current_version,
+        39,
+        MIGRATION_0039,
+        "portable runtime model audit",
     )?;
     read_current_schema_version(connection)?;
     Ok(())
@@ -17349,6 +17176,8 @@ mod tests {
                 .expect("resolve by id"),
             descriptor
         );
+        let hash_verifications = storage.approved_asset_hash_verification_count();
+        assert_eq!(hash_verifications, 1);
         assert_eq!(
             storage
                 .resolve_approved_asset_by_sha256(&asset_digest)
@@ -17360,6 +17189,16 @@ mod tests {
             .expect("read exact range");
         assert_eq!(range.start, 1);
         assert_eq!(range.bytes, image_bytes[1..5]);
+        let second_range = storage
+            .read_approved_asset_range(&asset_digest, 8, 5)
+            .expect("read second range");
+        assert_eq!(second_range.start, 8);
+        assert_eq!(second_range.bytes, image_bytes[8..13]);
+        assert_eq!(
+            storage.approved_asset_hash_verification_count(),
+            hash_verifications,
+            "repeated ranges must reuse the verified handle"
+        );
 
         let cas_path = root
             .path()

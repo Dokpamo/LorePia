@@ -1141,8 +1141,8 @@ fn checkpoint_and_close(connection: Connection) {
 /// Update the migration constant and the expected version together whenever a
 /// migration is added; the assertion below is what forces that.
 fn downgrade_latest_schema_by_one(path: &Path, current_schema: u32) {
-    const LATEST_MIGRATION: &str = include_str!("../migrations/0038_conversation_speakers.sql");
-    const LATEST_SCHEMA: u32 = 38;
+    const LATEST_MIGRATION: &str = include_str!("../migrations/0039_runtime_model_audit.sql");
+    const LATEST_SCHEMA: u32 = 39;
 
     assert_eq!(
         current_schema, LATEST_SCHEMA,
@@ -1166,8 +1166,8 @@ fn downgrade_latest_schema_by_one(path: &Path, current_schema: u32) {
         })
         .collect::<Vec<_>>();
     assert!(
-        created_objects.contains(&("TABLE", "conversation_characters")),
-        "schema-38 inverse must track every additive speaker-roster object"
+        created_objects.contains(&("TABLE", "portable_runtime_model_audit")),
+        "schema-39 inverse must track every runtime-model audit object"
     );
     connection
         .execute_batch("PRAGMA foreign_keys = OFF;")
@@ -1180,7 +1180,7 @@ fn downgrade_latest_schema_by_one(path: &Path, current_schema: u32) {
         {
             connection
                 .execute(&format!("DROP {object_type} \"{name}\""), [])
-                .unwrap_or_else(|error| panic!("drop schema-38 {object_type} {name}: {error}"));
+                .unwrap_or_else(|error| panic!("drop schema-39 {object_type} {name}: {error}"));
         }
     }
     connection
@@ -1188,7 +1188,7 @@ fn downgrade_latest_schema_by_one(path: &Path, current_schema: u32) {
             "DELETE FROM schema_migrations WHERE version = ?1",
             [LATEST_SCHEMA],
         )
-        .expect("remove schema-38 migration registry row");
+        .expect("remove schema-39 migration registry row");
     connection
         .execute_batch("PRAGMA foreign_keys = ON;")
         .expect("reenable foreign keys after the previous-release fixture downgrade");

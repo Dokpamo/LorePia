@@ -19,22 +19,25 @@ use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_lorepia_platform::{CredentialStatus, NativeCredential, StagedImport};
 use tokio::sync::{
     Mutex as AsyncMutex, MutexGuard as AsyncMutexGuard, OwnedMutexGuard, OwnedRwLockReadGuard,
-    RwLock as AsyncRwLock, RwLockWriteGuard as AsyncRwLockWriteGuard, oneshot, watch,
+    RwLock as AsyncRwLock, RwLockWriteGuard as AsyncRwLockWriteGuard, watch,
 };
 use uuid::Uuid;
 
 use crate::{
+    chat_stream_registry::{ChatStreamRegistration, ChatStreamRegistry, MAXIMUM_CHAT_STREAMS},
     contract::{
         InteractionEffectEventDto, MemorySupervisorPhaseDto, MemorySupervisorStatusDto,
         SubscribeGenerationRequest,
     },
     error::{CommandError, CommandResult},
+    runtime_generation_registry::{
+        MAXIMUM_RUNTIME_GENERATIONS, RuntimeGenerationRegistration, RuntimeGenerationRegistry,
+    },
 };
 
 const MAXIMUM_IMPORT_TICKETS: usize = 16;
 const MAXIMUM_CATALOG_TICKETS: usize = 4;
 const MAXIMUM_DISCOVERY_CREDENTIAL_LEASES: usize = 16;
-const MAXIMUM_CHAT_STREAMS: usize = 32;
 const MEMORY_SUPERVISOR_IDLE_POLL: Duration = Duration::from_millis(500);
 const INTERACTION_SUPERVISOR_IDLE_POLL: Duration = Duration::from_millis(500);
 const LIFECYCLE_SUPERVISOR_IDLE_POLL: Duration = Duration::from_millis(500);
@@ -53,6 +56,7 @@ pub struct AppState {
     import_tickets: Arc<Mutex<TicketStore<StagedImport>>>,
     catalog_tickets: Mutex<TicketStore<CatalogImportTicket>>,
     chat_streams: Arc<ChatStreamRegistry>,
+    runtime_generations: Arc<RuntimeGenerationRegistry>,
     memory_supervisor_shutdown: Mutex<Option<watch::Sender<bool>>>,
     memory_supervisor_status: Arc<Mutex<MemorySupervisorStatusDto>>,
     interaction_supervisor_shutdown: Mutex<Option<watch::Sender<bool>>>,
@@ -102,16 +106,6 @@ pub(crate) struct TicketReservation<T> {
     ticket_id: String,
     value: Option<T>,
     store: Arc<Mutex<TicketStore<T>>>,
-}
-
-struct ChatStreamRegistry {
-    slots: Mutex<HashMap<String, ChatStreamSlot>>,
-    capacity: usize,
-}
-
-struct ChatStreamSlot {
-    marker: Arc<()>,
-    dispose: Option<oneshot::Sender<()>>,
 }
 
 pub(crate) struct PlatformTaskCredentialReader {
@@ -284,17 +278,6 @@ impl InteractionDeliveryRegistry {
     }
 }
 
-/// Owns one bounded renderer subscription without owning its Core generation.
-///
-/// Dropping this value unregisters only the forwarding receiver. Explicit Core
-/// cancellation remains a separate command.
-pub(crate) struct ChatStreamRegistration {
-    stream_id: String,
-    marker: Arc<()>,
-    dispose: oneshot::Receiver<()>,
-    registry: Arc<ChatStreamRegistry>,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TicketInsertError {
     Duplicate,
@@ -445,87 +428,6 @@ impl DiscoveryCredentialLeaseRegistry {
     }
 }
 
-impl ChatStreamRegistry {
-    fn new(capacity: usize) -> Self {
-        Self {
-            slots: Mutex::new(HashMap::new()),
-            capacity,
-        }
-    }
-
-    fn register(self: &Arc<Self>, stream_id: &str) -> CommandResult<ChatStreamRegistration> {
-        validate_stream_id(stream_id)?;
-        let mut slots = self.slots.lock().map_err(|_| CommandError::internal())?;
-        if slots.contains_key(stream_id) {
-            return Err(CommandError::invalid_input());
-        }
-        if slots.len() >= self.capacity {
-            return Err(CommandError::busy());
-        }
-
-        let marker = Arc::new(());
-        let (dispose, dispose_receiver) = oneshot::channel();
-        slots.insert(
-            stream_id.to_owned(),
-            ChatStreamSlot {
-                marker: Arc::clone(&marker),
-                dispose: Some(dispose),
-            },
-        );
-        Ok(ChatStreamRegistration {
-            stream_id: stream_id.to_owned(),
-            marker,
-            dispose: dispose_receiver,
-            registry: Arc::clone(self),
-        })
-    }
-
-    fn dispose(&self, stream_id: &str) -> CommandResult<bool> {
-        validate_stream_id(stream_id)?;
-        let mut slots = self.slots.lock().map_err(|_| CommandError::internal())?;
-        let Some(slot) = slots.get_mut(stream_id) else {
-            return Ok(false);
-        };
-        let Some(dispose) = slot.dispose.take() else {
-            return Ok(false);
-        };
-        let _ = dispose.send(());
-        Ok(true)
-    }
-
-    fn finish(&self, stream_id: &str, marker: &Arc<()>) {
-        let Ok(mut slots) = self.slots.lock() else {
-            return;
-        };
-        if slots
-            .get(stream_id)
-            .is_some_and(|slot| Arc::ptr_eq(&slot.marker, marker))
-        {
-            slots.remove(stream_id);
-        }
-    }
-}
-
-impl ChatStreamRegistration {
-    pub(crate) async fn disposed(&mut self) {
-        let _ = (&mut self.dispose).await;
-    }
-}
-
-impl Drop for ChatStreamRegistration {
-    fn drop(&mut self) {
-        self.registry.finish(&self.stream_id, &self.marker);
-    }
-}
-
-fn validate_stream_id(stream_id: &str) -> CommandResult<()> {
-    if Uuid::parse_str(stream_id).is_ok_and(|value| value.to_string() == stream_id) {
-        Ok(())
-    } else {
-        Err(CommandError::invalid_input())
-    }
-}
-
 fn validate_delivery_id(delivery_id: &str) -> CommandResult<()> {
     if Uuid::parse_str(delivery_id).is_ok_and(|value| value.to_string() == delivery_id) {
         Ok(())
@@ -596,6 +498,9 @@ impl AppState {
             import_tickets: Arc::new(Mutex::new(TicketStore::new(MAXIMUM_IMPORT_TICKETS))),
             catalog_tickets: Mutex::new(TicketStore::new(MAXIMUM_CATALOG_TICKETS)),
             chat_streams: Arc::new(ChatStreamRegistry::new(MAXIMUM_CHAT_STREAMS)),
+            runtime_generations: Arc::new(RuntimeGenerationRegistry::new(
+                MAXIMUM_RUNTIME_GENERATIONS,
+            )),
             memory_supervisor_shutdown: Mutex::new(None),
             memory_supervisor_status: Arc::new(Mutex::new(MemorySupervisorStatusDto {
                 sequence: 0,
@@ -1084,6 +989,17 @@ impl AppState {
 
     pub(crate) fn dispose_chat_stream(&self, stream_id: &str) -> CommandResult<bool> {
         self.chat_streams.dispose(stream_id)
+    }
+
+    pub(crate) fn register_runtime_generation(
+        &self,
+        request_id: &str,
+    ) -> CommandResult<RuntimeGenerationRegistration> {
+        self.runtime_generations.register(request_id)
+    }
+
+    pub(crate) fn cancel_runtime_generation(&self, request_id: &str) -> CommandResult<bool> {
+        self.runtime_generations.cancel(request_id)
     }
 
     pub fn insert_import_ticket(

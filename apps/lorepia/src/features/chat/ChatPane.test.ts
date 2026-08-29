@@ -1209,6 +1209,182 @@ describe('ChatPane live response', () => {
 });
 
 describe('ChatPane composer', () => {
+    it('discards a pending runtime approval when the selected character changes', async () => {
+        const profileA: CharacterRenderProfileDto = {
+            character_id: 'character-1',
+            character_content_revision_id: 'revision-a',
+            assets: [],
+            background_markup: '<div>PROFILE-A</div>',
+            toggle_schema: '',
+            initial_variables: {},
+            output_transforms: [],
+            display_transforms: [],
+            runtime_scripts: [],
+            runtime_knowledge: [],
+            runtime_script_count: 0,
+        };
+        const profileB: CharacterRenderProfileDto = {
+            ...profileA,
+            character_id: 'character-2',
+            character_content_revision_id: 'revision-b',
+            background_markup: '<div>PROFILE-B</div>',
+            runtime_scripts: [
+                {
+                    id: 'script-b',
+                    name: 'Runtime B',
+                    event: 'load',
+                    language: 'lua',
+                    source: '-- must remain blocked',
+                    elevated_access: true,
+                },
+            ],
+            runtime_script_count: 1,
+        };
+        const getCharacterRenderProfile = vi.fn((characterId: string) =>
+            Promise.resolve(characterId === 'character-1' ? profileA : profileB),
+        );
+        const client = { getCharacterRenderProfile } as unknown as LorepiaClient;
+        const controller = new LorepiaAppController({} as LorepiaClient);
+        const orchestrationController = new OrchestrationController({} as LorepiaClient);
+        const appStateA = chatReadyState();
+        const rendered = render(ChatPane, {
+            appState: appStateA,
+            controller,
+            client,
+            orchestrationState: {
+                ...structuredClone(INITIAL_ORCHESTRATION_STATE),
+                phase: 'ready',
+            },
+            orchestrationController,
+        });
+
+        await fireEvent.click(screen.getByRole('button', { name: '대화 설정' }));
+        const approve = await screen.findByRole('button', {
+            name: '선택한 기능만 이번 세션에서 허용',
+        });
+        let digestPending = false;
+        let finishDigest = (value: ArrayBuffer): void => {
+            throw new Error(
+                `runtime grant digest did not start (${String(value.byteLength)} bytes)`,
+            );
+        };
+        vi.spyOn(globalThis.crypto.subtle, 'digest').mockImplementation(
+            () =>
+                new Promise<ArrayBuffer>((resolve) => {
+                    digestPending = true;
+                    finishDigest = resolve;
+                }),
+        );
+        await fireEvent.click(approve);
+        await waitFor(() => expect(digestPending).toBe(true));
+
+        const appStateB = chatReadyState();
+        const conversationStateB = appStateB.conversation_state;
+        if (
+            appStateB.selected_character === null ||
+            appStateB.selected_conversation === null ||
+            conversationStateB === null
+        ) {
+            throw new Error('chat fixture is incomplete');
+        }
+        appStateB.selected_character = {
+            ...appStateB.selected_character,
+            id: 'character-2',
+            name: '마루',
+        };
+        appStateB.selected_conversation = {
+            ...appStateB.selected_conversation,
+            id: 'conversation-2',
+            character_id: 'character-2',
+        };
+        appStateB.conversation_state = {
+            ...conversationStateB,
+            conversation_id: 'conversation-2',
+        };
+        await rendered.rerender({ appState: appStateB });
+        await screen.findByRole('checkbox', { name: '고급 카드 권한' });
+
+        finishDigest(new Uint8Array(32).buffer);
+        await tick();
+        await waitFor(() =>
+            expect(
+                screen.getByRole('button', {
+                    name: '선택한 기능만 이번 세션에서 허용',
+                }),
+            ).toBeInTheDocument(),
+        );
+        expect(screen.queryByRole('button', { name: '캐릭터 기능 권한 해제' })).toBeNull();
+        expect(document.querySelector('.portable-runtime-background .portable-frame')).toBeNull();
+
+        controller.destroy();
+        orchestrationController.destroy();
+    });
+
+    it('does not expose chat text or indices to card UI when chat read is denied', async () => {
+        const profile: CharacterRenderProfileDto = {
+            character_id: 'character-1',
+            character_content_revision_id: 'revision-1',
+            assets: [],
+            background_markup:
+                '<button card-btn="safe{{lastcharmessage}}{{chat_index}}{{lastmessageid}}">Run</button>',
+            toggle_schema: '',
+            initial_variables: {},
+            output_transforms: [],
+            display_transforms: [
+                {
+                    pattern: '^(SECRET-CHAT-CONTENT)$',
+                    replacement: '<button card-btn="$1">Continue</button>',
+                    flags: '',
+                },
+            ],
+            runtime_scripts: [],
+            runtime_knowledge: [],
+            runtime_script_count: 0,
+        };
+        const appState = chatReadyState();
+        appState.messages.items = [
+            {
+                id: 'message-secret',
+                conversation_id: 'conversation-1',
+                parent_id: null,
+                role: 'assistant',
+                content: 'SECRET-CHAT-CONTENT',
+                status: 'complete',
+                generation_id: null,
+                created_at: '2026-08-02T00:00:00Z',
+            },
+        ];
+        const client = {
+            getCharacterRenderProfile: vi.fn().mockResolvedValue(profile),
+            resolveAssetDelivery: vi.fn(),
+        } as unknown as LorepiaClient;
+        const { controller, orchestrationController } = renderChatWithSettings(appState, client);
+
+        await fireEvent.click(screen.getByRole('button', { name: '대화 설정' }));
+        const chatRead = await screen.findByRole('checkbox', { name: '현재 대화 읽기' });
+        expect(chatRead).toBeChecked();
+        await fireEvent.click(chatRead);
+        await fireEvent.click(
+            screen.getByRole('button', { name: '선택한 기능만 이번 세션에서 허용' }),
+        );
+
+        await waitFor(() => {
+            const frame = document.querySelector<HTMLIFrameElement>(
+                '.portable-runtime-background .portable-frame',
+            );
+            expect(frame?.srcdoc).toContain('data-portable-action="safe"');
+        });
+        const frame = document.querySelector<HTMLIFrameElement>(
+            '.portable-runtime-background .portable-frame',
+        );
+        expect(frame?.srcdoc).not.toContain('SECRET-CHAT-CONTENT');
+        expect(frame?.srcdoc).not.toContain('data-portable-action="safe10"');
+        expect(document.querySelectorAll('.portable-frame')).toHaveLength(1);
+        expect(screen.getByText('SECRET-CHAT-CONTENT')).toBeInTheDocument();
+        controller.destroy();
+        orchestrationController.destroy();
+    });
+
     it('keeps ordinary chat available while imported runtime code remains unapproved', async () => {
         const profile: CharacterRenderProfileDto = {
             character_id: 'character-1',
@@ -1243,8 +1419,10 @@ describe('ChatPane composer', () => {
 
         await fireEvent.click(screen.getByRole('button', { name: '대화 설정' }));
         await screen.findByRole('button', {
-            name: '이번 세션에서 캐릭터 기능 실행 허용',
+            name: '선택한 기능만 이번 세션에서 허용',
         });
+        expect(screen.getByRole('checkbox', { name: '현재 기본 모델 호출' })).not.toBeChecked();
+        expect(screen.getByRole('checkbox', { name: '선택한 보조 모델 호출' })).not.toBeChecked();
         const composer = screen.getByRole('textbox', { name: '메시지' });
         await fireEvent.input(composer, { target: { value: '안전 모드 대화' } });
         await fireEvent.click(screen.getByRole('button', { name: '메시지 보내기' }));
@@ -1320,7 +1498,7 @@ describe('ChatPane composer', () => {
         expect(createRuntime).not.toHaveBeenCalled();
         expect(screen.queryByRole('switch', { name: '배경음악' })).not.toBeInTheDocument();
         await fireEvent.click(
-            await screen.findByRole('button', { name: '이번 세션에서 캐릭터 기능 실행 허용' }),
+            await screen.findByRole('button', { name: '선택한 기능만 이번 세션에서 허용' }),
         );
         const musicToggle = await screen.findByRole('switch', { name: '배경음악' });
         await fireEvent.click(musicToggle);

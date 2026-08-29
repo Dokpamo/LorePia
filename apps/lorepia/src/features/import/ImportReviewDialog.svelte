@@ -3,6 +3,10 @@
     import { onMount } from 'svelte';
 
     import type { LorepiaAppState, LorepiaAppController } from '../../app/app-controller';
+    import {
+        inspectPortableRegexRules,
+        type PortableRegexReviewResult,
+    } from '../chat/portable-regex';
     import { t, tr } from '../../lib/i18n';
     import type { ImportInspectionDto } from '../../lib/ipc/contracts';
 
@@ -11,8 +15,46 @@
         controller: LorepiaAppController;
     }
 
-    let { state, controller }: Props = $props();
+    let { state: appState, controller }: Props = $props();
     let dialog: HTMLDialogElement;
+    let regexReviewPhase = $state<'idle' | 'checking' | 'ready'>('idle');
+    let regexReviewResults = $state<PortableRegexReviewResult[]>([]);
+
+    $effect(() => {
+        const inspection = appState.import_flow.inspection;
+        const rules = inspection?.dynamic_content.regex_rules ?? [];
+        let cancelled = false;
+        regexReviewResults = [];
+        if (inspection === null || rules.length === 0) {
+            regexReviewPhase = 'idle';
+            return;
+        }
+        regexReviewPhase = 'checking';
+        void inspectPortableRegexRules(rules, `import:${inspection.inspection_id}`).then(
+            (results) => {
+                if (
+                    cancelled ||
+                    appState.import_flow.inspection?.inspection_id !== inspection.inspection_id
+                )
+                    return;
+                regexReviewResults = results;
+                regexReviewPhase = 'ready';
+            },
+        );
+        return () => {
+            cancelled = true;
+        };
+    });
+
+    const invalidRegexCount = $derived(
+        regexReviewResults.filter((result) => result.status === 'invalid').length,
+    );
+    const timedOutRegexCount = $derived(
+        regexReviewResults.filter((result) => result.status === 'timed_out').length,
+    );
+    const unavailableRegexCount = $derived(
+        regexReviewResults.filter((result) => result.status === 'unavailable').length,
+    );
 
     onMount(() => {
         const previousFocus =
@@ -75,17 +117,17 @@
             </button>
         </header>
 
-        {#if state.import_flow.phase === 'loading'}
+        {#if appState.import_flow.phase === 'loading'}
             <div class="state-panel" role="status">{$tr('import.inspecting')}</div>
-        {:else if state.import_flow.phase === 'error'}
+        {:else if appState.import_flow.phase === 'error'}
             <div class="state-panel error" role="alert">
-                <p>{state.import_flow.error}</p>
+                <p>{appState.import_flow.error}</p>
                 <button type="button" onclick={() => void controller.discardImport()}
                     >{$tr('import.close')}</button
                 >
             </div>
-        {:else if state.import_flow.inspection}
-            {@const inspection = state.import_flow.inspection}
+        {:else if appState.import_flow.inspection}
+            {@const inspection = appState.import_flow.inspection}
             <div class="review-summary">
                 <span class="review-avatar" aria-hidden="true"
                     >{inspection.display_name.slice(0, 1)}</span
@@ -118,6 +160,63 @@
                     </dd>
                 </div>
             </dl>
+
+            {#if inspection.dynamic_content.runtime_script_count > 0 || inspection.dynamic_content.regex_rule_count > 0 || inspection.dynamic_content.custom_markup_present}
+                <section class="issue-box warning" aria-labelledby="dynamic-content-title">
+                    <h3 id="dynamic-content-title">{$tr('import.dynamic.title')}</h3>
+                    <ul>
+                        {#if inspection.dynamic_content.runtime_script_count > 0}
+                            <li>
+                                {$tr('import.dynamic.lua', {
+                                    count: inspection.dynamic_content.runtime_script_count,
+                                })}
+                            </li>
+                        {/if}
+                        {#if inspection.dynamic_content.elevated_runtime_script_count > 0}
+                            <li>
+                                {$tr('import.dynamic.elevated', {
+                                    count: inspection.dynamic_content.elevated_runtime_script_count,
+                                })}
+                            </li>
+                        {/if}
+                        {#if inspection.dynamic_content.model_calls_possible}
+                            <li>{$tr('import.dynamic.model')}</li>
+                        {/if}
+                        {#if inspection.dynamic_content.custom_markup_present}
+                            <li>{$tr('import.dynamic.markup')}</li>
+                        {/if}
+                        {#if inspection.dynamic_content.regex_rule_count > 0}
+                            <li>
+                                {$tr('import.dynamic.regex', {
+                                    count: inspection.dynamic_content.regex_rule_count,
+                                })}
+                            </li>
+                        {/if}
+                    </ul>
+                    {#if regexReviewPhase === 'checking'}
+                        <p role="status">{$tr('import.regex.checking')}</p>
+                    {:else if regexReviewPhase === 'ready'}
+                        {#if invalidRegexCount + timedOutRegexCount > 0}
+                            <p role="alert">
+                                {$tr('import.regex.disabled', {
+                                    count: invalidRegexCount + timedOutRegexCount,
+                                })}
+                            </p>
+                        {:else}
+                            <p>{$tr('import.regex.valid')}</p>
+                        {/if}
+                        {#if unavailableRegexCount > 0}
+                            <p role="alert">
+                                {$tr('import.regex.unavailable', {
+                                    count: unavailableRegexCount,
+                                })}
+                            </p>
+                        {/if}
+                    {/if}
+                    <p>{$tr('import.dynamic.network')}</p>
+                    <p>{$tr('import.dynamic.safe_mode')}</p>
+                </section>
+            {/if}
 
             {#if inspection.blocked_reasons.length > 0}
                 <section class="issue-box blocked" aria-labelledby="blocked-title">
@@ -155,10 +254,14 @@
                 <button
                     class="primary"
                     type="button"
-                    disabled={!inspection.allowed}
+                    disabled={!inspection.allowed || regexReviewPhase === 'checking'}
                     onclick={() => void controller.commitImport()}
                 >
-                    {$tr('import.commit')}
+                    {#if inspection.dynamic_content.runtime_script_count > 0 || inspection.dynamic_content.regex_rule_count > 0 || inspection.dynamic_content.custom_markup_present}
+                        {$tr('import.commit.safe')}
+                    {:else}
+                        {$tr('import.commit')}
+                    {/if}
                 </button>
             </footer>
         {/if}

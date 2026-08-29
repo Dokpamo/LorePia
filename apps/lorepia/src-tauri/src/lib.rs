@@ -1,5 +1,6 @@
 mod asset_protocol;
 mod channels;
+mod chat_stream_registry;
 mod commands;
 pub mod contract;
 mod credential_operations;
@@ -9,6 +10,8 @@ mod orchestration_commands;
 mod package_commands;
 mod persona_commands;
 mod provider_commands;
+mod runtime_contract;
+mod runtime_generation_registry;
 mod state;
 
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -156,6 +159,7 @@ pub fn run() {
             commands::list_branch_messages,
             commands::list_messages,
             commands::generate_runtime_text,
+            commands::cancel_runtime_text,
             commands::send_message,
             commands::edit_user_message,
             commands::regenerate_assistant_message,
