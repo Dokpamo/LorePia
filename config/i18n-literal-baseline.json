@@ -10,7 +10,7 @@
     "src/app/app-controller.test.ts": { "hangul_lines": 107, "sha256": "3ad2aa675deaad7da89c2e2005deceb8b6ee9ea5287520610178d6e6e4f8df6a" },
     "src/features/assets/TrustedAsset.test.ts": { "hangul_lines": 14, "sha256": "cebefc1cbfdcd76e251e5b54bd7a562bc71c6d9a45fde3f790ba1314edc3c60b" },
     "src/features/chat/ChatPane.svelte": { "hangul_lines": 100, "sha256": "d3062c626fb78223c595cca3a9b15493096a55870b39ca2183f9d307a2b92f62" },
-    "src/features/chat/ChatPane.test.ts": { "hangul_lines": 242, "sha256": "dd5e9ffe4cd587c28a15f85314040207cecc952337c92cb49f1864e5b6846c7e" },
+    "src/features/chat/ChatPane.test.ts": { "hangul_lines": 240, "sha256": "297ac05afb6079209425fc37fdd154a463155785bf8f5617d2b0d077ff599485" },
     "src/features/chat/GenerationAttemptApprovals.test.ts": { "hangul_lines": 17, "sha256": "60bd1aad6785712b2bea4de65c55f344c76cb60759d0a7c60501edfdd88f55e7" },
     "src/features/chat/PortableMessage.svelte": { "hangul_lines": 1, "sha256": "c1b93b93db6d3c3d1191a0c2840ff4506290bccb36fa59d5ba05175bf2ec3fad" },
     "src/features/chat/PortableMessage.test.ts": { "hangul_lines": 4, "sha256": "7a2a05fb3b83ebf4a50750fa83d60dbf4110ac6c07e2c3ac3e9bf4faf1839d50" },

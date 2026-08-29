@@ -1683,7 +1683,9 @@
 
     async function removeMessageAndResetRuntime(messageId: string): Promise<void> {
         const result = await controller.removeMessage(messageId);
-        if (result.mutationCommitted) portableRuntimeLifecycle.resetScope();
+        if (result.mutationCommitted && branchKey === result.scopeKey) {
+            portableRuntimeLifecycle.resetScope();
+        }
     }
 
     async function commitEdit(messageId: string): Promise<void> {

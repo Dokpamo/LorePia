@@ -72,6 +72,7 @@ export { discoveryCredentialTarget } from './provider-credential';
 export interface RemoveMessageResult {
     mutationCommitted: boolean;
     messagesRefreshed: boolean;
+    scopeKey: string | null;
 }
 
 const GENERATION_REATTACHMENT_UNAVAILABLE_MESSAGE = t('app.error.stream_lost');
@@ -1308,9 +1309,10 @@ export class LorepiaAppController {
         const conversation = state.selected_conversation;
         const branchId = state.conversation_state?.active_branch_id;
         if (conversation === null || branchId === undefined) {
-            return { mutationCommitted: false, messagesRefreshed: false };
+            return { mutationCommitted: false, messagesRefreshed: false, scopeKey: null };
         }
         const conversationId = conversation.id;
+        const scopeKey = `${conversationId}:${branchId}`;
         const expectedHead = this.activeBranchHead(state);
         const epoch = this.conversationEpoch;
         const isCurrentBranchSnapshot = (current: LorepiaAppState): boolean =>
@@ -1329,15 +1331,15 @@ export class LorepiaAppController {
                 if (isCurrentBranchSnapshot(get(this.mutable))) {
                     this.announce(t('chat.notice.remove_mismatch'));
                 }
-                return { mutationCommitted: false, messagesRefreshed: false };
+                return { mutationCommitted: false, messagesRefreshed: false, scopeKey };
             }
             if (!isCurrentBranchSnapshot(get(this.mutable))) {
-                return { mutationCommitted: true, messagesRefreshed: false };
+                return { mutationCommitted: true, messagesRefreshed: false, scopeKey };
             }
             try {
                 const messages = await this.client.listBranchMessages(branchId);
                 if (!isCurrentBranchSnapshot(get(this.mutable))) {
-                    return { mutationCommitted: true, messagesRefreshed: false };
+                    return { mutationCommitted: true, messagesRefreshed: false, scopeKey };
                 }
                 this.update((current) => ({
                     ...current,
@@ -1347,7 +1349,7 @@ export class LorepiaAppController {
                     messages: { phase: 'ready', error: null, items: messages },
                 }));
                 this.announce(t('chat.notice.removed'));
-                return { mutationCommitted: true, messagesRefreshed: true };
+                return { mutationCommitted: true, messagesRefreshed: true, scopeKey };
             } catch (error: unknown) {
                 if (isCurrentBranchSnapshot(get(this.mutable))) {
                     const message = errorLabel(error);
@@ -1360,11 +1362,11 @@ export class LorepiaAppController {
                     }));
                     this.announce(message);
                 }
-                return { mutationCommitted: true, messagesRefreshed: false };
+                return { mutationCommitted: true, messagesRefreshed: false, scopeKey };
             }
         } catch (error: unknown) {
             if (isCurrentBranchSnapshot(get(this.mutable))) this.announce(errorLabel(error));
-            return { mutationCommitted: false, messagesRefreshed: false };
+            return { mutationCommitted: false, messagesRefreshed: false, scopeKey };
         }
     }
 

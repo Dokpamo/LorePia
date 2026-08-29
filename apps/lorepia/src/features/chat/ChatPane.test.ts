@@ -1803,11 +1803,19 @@ describe('ChatPane composer', () => {
     it.each([
         [
             'recreates the portable runtime after a refreshed same-branch rewind',
-            { mutationCommitted: true, messagesRefreshed: true },
+            {
+                mutationCommitted: true,
+                messagesRefreshed: true,
+                scopeKey: 'conversation-1:branch-1',
+            },
         ],
         [
             'recreates the portable runtime when rewind committed but readback failed',
-            { mutationCommitted: true, messagesRefreshed: false },
+            {
+                mutationCommitted: true,
+                messagesRefreshed: false,
+                scopeKey: 'conversation-1:branch-1',
+            },
         ],
     ] as const)('%s', async (_label, removalResult) => {
         const appState = chatReadyState();
@@ -1862,9 +1870,11 @@ describe('ChatPane composer', () => {
             .spyOn(controller, 'removeMessage')
             .mockResolvedValue(removalResult);
 
-        await fireEvent.click(screen.getByRole('button', { name: '대화 설정' }));
+        await fireEvent.click(screen.getByRole('button', { name: t('quick.toggle') }));
         await fireEvent.click(
-            await screen.findByRole('button', { name: '선택한 기능만 이번 세션에서 허용' }),
+            await screen.findByRole('button', {
+                name: t('chat.runtime.permissions.approve_selected'),
+            }),
         );
         await waitFor(() => expect(createRuntime).toHaveBeenCalledTimes(1));
 
@@ -1878,6 +1888,128 @@ describe('ChatPane composer', () => {
         await waitFor(() => expect(removeMessage).toHaveBeenCalledWith('assistant-1'));
         await waitFor(() => expect(createRuntime).toHaveBeenCalledTimes(2));
         expect(firstRuntimeClose).toHaveBeenCalledOnce();
+        controller.destroy();
+        orchestrationController.destroy();
+    });
+
+    it('does not reset the newly selected room runtime after a stale rewind receipt', async () => {
+        const appState = chatReadyState();
+        appState.messages.items = [
+            {
+                id: 'assistant-1',
+                conversation_id: 'conversation-1',
+                parent_id: null,
+                role: 'assistant',
+                content: 'rewind target',
+                status: 'complete',
+                generation_id: 'generation-1',
+                created_at: '2026-08-29T00:00:00Z',
+            },
+        ];
+        const profile: CharacterRenderProfileDto = {
+            character_id: 'character-1',
+            character_content_revision_id: 'revision-1',
+            assets: [],
+            background_markup: '',
+            toggle_schema: '',
+            initial_variables: {},
+            output_transforms: [],
+            display_transforms: [],
+            runtime_scripts: [
+                {
+                    id: 'script-1',
+                    name: 'Runtime',
+                    event: 'load',
+                    language: 'lua',
+                    source: '-- no-op',
+                    elevated_access: false,
+                },
+            ],
+            required_runtime_capabilities: [],
+            runtime_capabilities_declared: false,
+            runtime_knowledge: [],
+            runtime_script_count: 1,
+        };
+        const firstRuntimeClose = vi.fn();
+        const secondRuntimeClose = vi.fn();
+        const createRuntime = vi
+            .spyOn(PortableCharacterRuntime, 'create')
+            .mockResolvedValueOnce(portableRuntimeStub(firstRuntimeClose))
+            .mockResolvedValueOnce(portableRuntimeStub(secondRuntimeClose));
+        const client = {
+            getCharacterRenderProfile: vi.fn().mockResolvedValue(profile),
+        } as unknown as LorepiaClient;
+        const controller = new LorepiaAppController({} as LorepiaClient);
+        const orchestrationController = new OrchestrationController({} as LorepiaClient);
+        const rendered = render(ChatPane, {
+            appState,
+            controller,
+            client,
+            orchestrationState: {
+                ...structuredClone(INITIAL_ORCHESTRATION_STATE),
+                phase: 'ready',
+            },
+            orchestrationController,
+        });
+        const removalReceipt: { resolve: (() => void) | null } = { resolve: null };
+        const removeMessage = vi.spyOn(controller, 'removeMessage').mockImplementation(
+            () =>
+                new Promise((resolve) => {
+                    removalReceipt.resolve = () =>
+                        resolve({
+                            mutationCommitted: true,
+                            messagesRefreshed: false,
+                            scopeKey: 'conversation-1:branch-1',
+                        });
+                }),
+        );
+
+        await fireEvent.click(screen.getByRole('button', { name: t('quick.toggle') }));
+        await fireEvent.click(
+            await screen.findByRole('button', {
+                name: t('chat.runtime.permissions.approve_selected'),
+            }),
+        );
+        await waitFor(() => expect(createRuntime).toHaveBeenCalledTimes(1));
+
+        await fireEvent.click(
+            screen.getByRole('button', { name: t('chat.message.remove_from_here') }),
+        );
+        await fireEvent.click(
+            screen.getByRole('button', { name: t('chat.message.remove_confirm') }),
+        );
+        await waitFor(() => expect(removeMessage).toHaveBeenCalledWith('assistant-1'));
+
+        const nextAppState = structuredClone(appState);
+        if (
+            nextAppState.selected_conversation === null ||
+            nextAppState.conversation_state === null
+        ) {
+            throw new Error('chat fixture is incomplete');
+        }
+        nextAppState.selected_conversation.id = 'conversation-2';
+        nextAppState.conversation_state = {
+            ...nextAppState.conversation_state,
+            conversation_id: 'conversation-2',
+            active_branch_id: 'branch-2',
+        };
+        nextAppState.messages.items = [];
+        await rendered.rerender({ appState: nextAppState });
+        await fireEvent.click(
+            await screen.findByRole('button', {
+                name: t('chat.runtime.permissions.approve_selected'),
+            }),
+        );
+        await waitFor(() => expect(createRuntime).toHaveBeenCalledTimes(2));
+        expect(firstRuntimeClose).toHaveBeenCalledOnce();
+
+        const resolveRemoval = removalReceipt.resolve;
+        if (resolveRemoval === null) throw new Error('removal receipt was not requested');
+        resolveRemoval();
+        await tick();
+
+        expect(createRuntime).toHaveBeenCalledTimes(2);
+        expect(secondRuntimeClose).not.toHaveBeenCalled();
         controller.destroy();
         orchestrationController.destroy();
     });
@@ -3177,6 +3309,7 @@ describe('ChatPane composer', () => {
         const remove = vi.spyOn(controller, 'removeMessage').mockResolvedValue({
             mutationCommitted: true,
             messagesRefreshed: true,
+            scopeKey: 'conversation-1:branch-1',
         });
         const writeText = vi.fn().mockResolvedValue(undefined);
         Object.defineProperty(navigator, 'clipboard', {
