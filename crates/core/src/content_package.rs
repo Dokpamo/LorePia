@@ -5187,11 +5187,11 @@ mod tests {
             .resolve_approved_asset_by_id(&tampered_asset_id)
             .expect("approved descriptor");
         let asset_cas = content_cas_path(data_root.path(), "assets", descriptor.sha256.as_str());
+        drop(core);
         let mut tampered = fs::read(&asset_cas).expect("read asset CAS");
         let last = tampered.last_mut().expect("non-empty test asset");
         *last ^= 0x01;
         fs::write(&asset_cas, tampered).expect("tamper asset CAS");
-        drop(core);
 
         let reopened = Core::open(CoreConfig::new(data_root.path())).expect("reopen core");
         let error = reopened
