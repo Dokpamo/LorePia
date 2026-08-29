@@ -454,6 +454,7 @@ describe('LorepiaAppController message removal scope', () => {
         await expect(controller.removeMessage(messageOne.id)).resolves.toEqual({
             mutationCommitted: true,
             messagesRefreshed: true,
+            scopeKey: `${conversation.id}:${branch.id}`,
         });
         expect(get(controller.state)).toMatchObject({
             branches: [rewoundBranch],
@@ -481,6 +482,7 @@ describe('LorepiaAppController message removal scope', () => {
         await expect(controller.removeMessage(messageOne.id)).resolves.toEqual({
             mutationCommitted: true,
             messagesRefreshed: false,
+            scopeKey: `${conversation.id}:${branch.id}`,
         });
         const state = get(controller.state);
         expect(state.branches).toEqual([rewoundBranch]);
@@ -522,7 +524,11 @@ describe('LorepiaAppController message removal scope', () => {
         await controller.selectBranch(nextBranch.id);
         const currentAnnouncement = get(controller.state).announcement;
         receipt.resolve({ ...branch, head_message_id: null });
-        await pendingRemoval;
+        await expect(pendingRemoval).resolves.toEqual({
+            mutationCommitted: true,
+            messagesRefreshed: false,
+            scopeKey: `${conversation.id}:${branch.id}`,
+        });
 
         expect(get(controller.state)).toMatchObject({
             conversation_state: { active_branch_id: nextBranch.id },
@@ -724,6 +730,7 @@ describe('LorepiaAppController message removal scope', () => {
         await expect(controller.removeMessage(messageOne.id)).resolves.toEqual({
             mutationCommitted: false,
             messagesRefreshed: false,
+            scopeKey: `${conversation.id}:${branch.id}`,
         });
 
         expect(listBranchMessages).not.toHaveBeenCalled();
