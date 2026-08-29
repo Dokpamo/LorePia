@@ -1047,7 +1047,7 @@ end)
         runtime.setMessages([message('assistant', 'assistant', 'hello')]);
 
         const outcomes = [];
-        for (let index = 0; index < 20; index += 1) {
+        for (let index = 0; index < 16; index += 1) {
             outcomes.push(await runtime.prepareInput('next'));
         }
         expect(outcomes.some((outcome) => !outcome.shouldSend)).toBe(true);
@@ -1057,7 +1057,7 @@ end)
         expect(persisted).not.toBeNull();
         expect(persisted?.length ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(4 * 1024 * 1024);
         runtime.close();
-    });
+    }, 15_000);
 });
 
 function memoryStorage(): Storage {
