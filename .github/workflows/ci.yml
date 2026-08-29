@@ -108,6 +108,50 @@ jobs:
             --dependency-verification strict :tauri-android:dependencies \
             --configuration releaseRuntimeClasspath
 
+  ios-simulator:
+    name: iOS simulator
+    runs-on: macos-15
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: apps/lorepia
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: apps/lorepia/package-lock.json
+
+      - name: Verify Apple simulator toolchain
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphonesimulator --show-sdk-version
+          pod --version
+
+      # rust-toolchain.toml pins the compiler; this is the Apple Silicon
+      # simulator target used by GitHub's arm64 macOS runner.
+      - name: Install pinned Rust simulator target
+        run: |
+          rustc --version
+          rustup target add aarch64-apple-ios-sim
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+
+      - name: Install Tauri CLI dependencies
+        run: npm ci
+
+      - name: Initialize Tauri iOS dependencies
+        run: npm run tauri -- ios init --ci --skip-targets-install
+
+      - name: Build unsigned iOS simulator app
+        run: >-
+          npm run tauri -- ios build --ci --debug --target aarch64-sim --no-sign
+          --config src-tauri/tauri.release.conf.json
+
   rust:
     name: Rust (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -136,6 +180,12 @@ jobs:
       # rust-toolchain.toml pins the exact version and components.
       - name: Show toolchain
         run: rustc --version && cargo --version
+
+      - name: Verify generated IPC command registries
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          python3 -m unittest scripts/test_generate_ipc_commands.py
+          python3 scripts/generate_ipc_commands.py --check
 
       - name: Verify source-size and dependency architecture ratchets
         if: matrix.os == 'ubuntu-latest'

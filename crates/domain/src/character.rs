@@ -425,6 +425,49 @@ const fn default_true() -> bool {
     true
 }
 
+/// Host authority that a character runtime explicitly requests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum PortableRuntimeCapability {
+    #[serde(rename = "runtime:callbacks")]
+    RuntimeCallbacks,
+    #[serde(rename = "chat:read")]
+    ChatRead,
+    #[serde(rename = "chat:write")]
+    ChatWrite,
+    #[serde(rename = "state:readwrite")]
+    StateReadWrite,
+    #[serde(rename = "profile:read")]
+    ProfileRead,
+    #[serde(rename = "lore:read")]
+    LoreRead,
+    #[serde(rename = "ui:write")]
+    UiWrite,
+    #[serde(rename = "model:primary")]
+    ModelPrimary,
+    #[serde(rename = "model:auxiliary")]
+    ModelAuxiliary,
+    #[serde(rename = "elevated")]
+    Elevated,
+}
+
+impl PortableRuntimeCapability {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::RuntimeCallbacks => "runtime:callbacks",
+            Self::ChatRead => "chat:read",
+            Self::ChatWrite => "chat:write",
+            Self::StateReadWrite => "state:readwrite",
+            Self::ProfileRead => "profile:read",
+            Self::LoreRead => "lore:read",
+            Self::UiWrite => "ui:write",
+            Self::ModelPrimary => "model:primary",
+            Self::ModelAuxiliary => "model:auxiliary",
+            Self::Elevated => "elevated",
+        }
+    }
+}
+
 /// An event-driven runtime script carried by a character package.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -456,6 +499,10 @@ pub struct CharacterRuntimeProfile {
     pub transforms: Vec<PortableTextTransform>,
     #[serde(default)]
     pub scripts: Vec<PortableRuntimeScript>,
+    /// `None` is retained only for trusted legacy storage compatibility.
+    /// Untrusted runtime imports normalize missing declarations before use.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub required_capabilities: Option<Vec<PortableRuntimeCapability>>,
     #[serde(default)]
     pub background_markup: String,
     #[serde(default)]
@@ -1031,6 +1078,50 @@ mod tests {
         );
         assert_eq!(content.system_instruction, "Stay in character");
         assert_eq!(content.post_history_instruction, "Answer briefly");
+    }
+
+    #[test]
+    fn portable_runtime_capability_wire_values_and_legacy_absence_are_stable() {
+        let capabilities = [
+            (
+                PortableRuntimeCapability::RuntimeCallbacks,
+                "runtime:callbacks",
+            ),
+            (PortableRuntimeCapability::ChatRead, "chat:read"),
+            (PortableRuntimeCapability::ChatWrite, "chat:write"),
+            (PortableRuntimeCapability::StateReadWrite, "state:readwrite"),
+            (PortableRuntimeCapability::ProfileRead, "profile:read"),
+            (PortableRuntimeCapability::LoreRead, "lore:read"),
+            (PortableRuntimeCapability::UiWrite, "ui:write"),
+            (PortableRuntimeCapability::ModelPrimary, "model:primary"),
+            (PortableRuntimeCapability::ModelAuxiliary, "model:auxiliary"),
+            (PortableRuntimeCapability::Elevated, "elevated"),
+        ];
+        for (capability, wire) in capabilities {
+            assert_eq!(capability.as_str(), wire);
+            assert_eq!(
+                serde_json::to_value(capability).expect("serialize capability"),
+                serde_json::Value::String(wire.to_owned())
+            );
+            assert_eq!(
+                serde_json::from_value::<PortableRuntimeCapability>(serde_json::Value::String(
+                    wire.to_owned()
+                ))
+                .expect("deserialize capability"),
+                capability
+            );
+        }
+
+        let legacy: CharacterRuntimeProfile =
+            serde_json::from_str("{}").expect("legacy runtime profile");
+        assert_eq!(legacy.required_capabilities, None);
+        assert!(
+            serde_json::to_value(legacy)
+                .expect("serialize legacy profile")
+                .get("required_capabilities")
+                .is_none(),
+            "legacy absence must remain omitted from trusted stored wire data"
+        );
     }
 
     #[test]

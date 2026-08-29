@@ -998,8 +998,8 @@ impl AppState {
         self.runtime_generations.register(request_id)
     }
 
-    pub(crate) fn cancel_runtime_generation(&self, request_id: &str) -> CommandResult<bool> {
-        self.runtime_generations.cancel(request_id)
+    pub(crate) async fn cancel_runtime_generation(&self, request_id: &str) -> CommandResult<bool> {
+        self.runtime_generations.cancel(request_id).await
     }
 
     pub fn insert_import_ticket(

@@ -9,7 +9,7 @@ use lorepia_core::{
     ConversationId, ConversationPersonaClearRequest, ConversationPersonaSelectionRequest,
     ConversationPersonaSelectionState, CoreError, CoreErrorCode, ObjectRevision, Persona,
     PersonaCreateRequest, PersonaDeleteRequest, PersonaId, PersonaListCursor, PersonaListPage,
-    PersonaUpdateRequest, Sha256Digest, StoredRevision,
+    PersonaUpdateRequest, Revisioned, Sha256Digest,
 };
 use serde::{Deserialize, Serialize};
 
@@ -155,7 +155,7 @@ impl ShellApi {
                 description: input.description,
             })
             .map_err(ShellError::from)
-            .and_then(project_stored_persona)
+            .and_then(project_revisioned_persona)
     }
 
     pub fn update_persona(&self, input: UpdatePersonaInput) -> ShellResult<PersonaDto> {
@@ -168,7 +168,7 @@ impl ShellApi {
                 description: input.description,
             })
             .map_err(ShellError::from)
-            .and_then(project_stored_persona)
+            .and_then(project_revisioned_persona)
     }
 
     pub fn get_persona(&self, input: GetPersonaInput) -> ShellResult<PersonaDto> {
@@ -176,7 +176,7 @@ impl ShellApi {
         self.core
             .get_persona(&PersonaId::from(input.persona_id))
             .map_err(ShellError::from)
-            .and_then(project_stored_persona)
+            .and_then(project_revisioned_persona)
     }
 
     pub fn list_personas(&self, input: ListPersonasInput) -> ShellResult<Vec<PersonaDto>> {
@@ -233,7 +233,7 @@ impl ShellApi {
                 });
                 let items = items
                     .into_iter()
-                    .map(project_stored_persona)
+                    .map(project_revisioned_persona)
                     .collect::<ShellResult<Vec<_>>>()?;
                 Ok(PersonaListPageDto::Page {
                     catalog_revision: catalog_revision.into_inner(),
@@ -354,7 +354,7 @@ fn project_persona_document(value: Persona) -> PersonaDocumentDto {
     }
 }
 
-fn project_stored_persona(value: StoredRevision<Persona>) -> ShellResult<PersonaDto> {
+fn project_revisioned_persona(value: Revisioned<Persona>) -> ShellResult<PersonaDto> {
     if value.deleted_at.is_some() {
         return Err(storage_corrupted(
             "active persona projection unexpectedly contained a tombstone",

@@ -28,6 +28,8 @@ const profile: CharacterRenderProfileDto = {
     output_transforms: [],
     display_transforms: [],
     runtime_scripts: [],
+    required_runtime_capabilities: [],
+    runtime_capabilities_declared: false,
     runtime_knowledge: [],
     runtime_script_count: 0,
 };

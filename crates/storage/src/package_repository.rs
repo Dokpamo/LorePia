@@ -1,10 +1,10 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
-    fs::File,
-    io::Read,
     path::PathBuf,
 };
+
+mod completed_authority;
 
 use chrono::{DateTime, Utc};
 use lorepia_domain::{
@@ -30,6 +30,9 @@ use crate::orchestration::{
     PackageImportStatus, PackageSourceRecord, append_package_asset_descriptor,
     append_package_commit_document,
 };
+
+pub(crate) use completed_authority::VerifiedCompletedPackageAuthorities;
+use completed_authority::{CompletedPackageAuthoritySnapshot, CompletedPackageCasFile};
 
 const MAX_PACKAGE_JSON_BYTES: usize = 16 * 1024 * 1024;
 const MAX_PACKAGE_JSON_DEPTH: usize = 40;
@@ -372,7 +375,7 @@ pub struct CompletedPackageAssetAuthority {
 /// Callers can use this value to authorize imported module activation without
 /// trusting a caller-supplied approval string. Construction verifies the
 /// completed import, source, review, selection, approval, capability and
-/// per-component commit snapshots as one read.
+/// per-component commit snapshots before and after lock-free CAS hashing.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CompletedPackageAuthority {
@@ -1189,26 +1192,12 @@ impl Storage {
         Ok(record)
     }
 
-    /// Resolves a caller-supplied approval id into completed package authority.
-    ///
-    /// This intentionally refuses approved-but-uncommitted imports. Imported
-    /// module activation therefore depends on the immutable commit evidence,
-    /// not merely on possession of an approval-shaped string.
-    #[allow(clippy::too_many_lines)] // Every immutable approval and commit seam is revalidated.
-    pub fn get_completed_package_authority_by_approval_id(
-        &self,
-        approval_id: &str,
-    ) -> CoreResult<CompletedPackageAuthority> {
-        let connection = self.connection()?;
-        self.get_completed_package_authority_by_approval_id_in_connection(&connection, approval_id)
-    }
-
     #[allow(clippy::too_many_lines)] // Every immutable approval and commit seam is revalidated.
     fn get_completed_package_authority_by_approval_id_in_connection(
         &self,
         connection: &Connection,
         approval_id: &str,
-    ) -> CoreResult<CompletedPackageAuthority> {
+    ) -> CoreResult<CompletedPackageAuthoritySnapshot> {
         validate_identifier("package approval", approval_id)?;
         let approval_row = connection
             .query_row(
@@ -1260,18 +1249,26 @@ impl Storage {
         let source = read_package_source_by_id(connection, &current.package_source_id)?;
         validate_sha256("package source", &source.source_sha256)
             .map_err(|_| storage_corrupted("completed package source digest is invalid"))?;
-        let source_relative = format!(
-            "sources/sha256/{}/{}",
-            &source.source_sha256[..2],
-            &source.source_sha256[2..]
-        );
-        verify_owned_cas_file(
-            self,
-            "sources",
-            &source.source_sha256,
-            source.source_size_bytes,
-            &source_relative,
-        )?;
+        let source_cas = connection
+            .query_row(
+                "SELECT relative_path, size_bytes
+                 FROM content_sources
+                 WHERE sha256 = ?1",
+                [source.source_sha256.as_str()],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .map_err(storage_db_error)?;
+        if u64_from_i64("package source size", source_cas.1)? != source.source_size_bytes {
+            return Err(storage_corrupted(
+                "completed package source CAS metadata differs from its package record",
+            ));
+        }
+        let mut cas_files = vec![CompletedPackageCasFile {
+            namespace: "sources",
+            sha256: source.source_sha256.clone(),
+            size_bytes: source.source_size_bytes,
+            relative_path: source_cas.0,
+        }];
         let approval = read_approval_payload(connection, &approval_row.0)?;
         if approval.plan.approval_id != approval_id
             || approval.plan.review_sha256.as_str() != approval_row.1
@@ -1316,13 +1313,12 @@ impl Storage {
                     "completed package approval asset metadata differs from its descriptor",
                 ));
             }
-            verify_owned_cas_file(
-                self,
-                "assets",
-                asset.sha256.as_str(),
-                asset.size_bytes,
-                &stored.0,
-            )?;
+            cas_files.push(CompletedPackageCasFile {
+                namespace: "assets",
+                sha256: asset.sha256.as_str().to_owned(),
+                size_bytes: asset.size_bytes,
+                relative_path: stored.0,
+            });
             let expected_descriptor = encode_json("completed package asset descriptor", asset)?;
             if stored.3 != expected_descriptor {
                 return Err(storage_corrupted(
@@ -1518,21 +1514,24 @@ impl Storage {
                 }
             })
             .collect();
-        Ok(CompletedPackageAuthority {
-            approval_id: approval_id.to_owned(),
-            import_id: approval_row.0,
-            package_id: approval.plan.package_id,
-            status: current.record.status,
-            import_revision: current.record.revision,
-            source_sha256: source.source_sha256,
-            inspection_sha256: approval_row.1,
-            selection_sha256: approval_row.2,
-            capability_review_sha256: approval_row.3,
-            approval_sha256: approval.plan.approval_sha256.as_str().to_owned(),
-            required_capabilities: approval.plan.required_capabilities,
-            approved_capabilities: approval.approved_capabilities,
-            enabled_components,
-            committed_assets,
+        Ok(CompletedPackageAuthoritySnapshot {
+            authority: CompletedPackageAuthority {
+                approval_id: approval_id.to_owned(),
+                import_id: approval_row.0,
+                package_id: approval.plan.package_id,
+                status: current.record.status,
+                import_revision: current.record.revision,
+                source_sha256: source.source_sha256,
+                inspection_sha256: approval_row.1,
+                selection_sha256: approval_row.2,
+                capability_review_sha256: approval_row.3,
+                approval_sha256: approval.plan.approval_sha256.as_str().to_owned(),
+                required_capabilities: approval.plan.required_capabilities,
+                approved_capabilities: approval.approved_capabilities,
+                enabled_components,
+                committed_assets,
+            },
+            cas_files,
         })
     }
 
@@ -1544,10 +1543,21 @@ impl Storage {
         approval_id: &str,
         stored: &ActiveContentModuleRevision,
     ) -> CoreResult<ModuleImportApprovalEvidence> {
+        let verified = self.verify_completed_package_authority_with(
+            approval_id,
+            |connection, approval_id| {
+                self.get_completed_package_authority_by_approval_id_in_connection(
+                    connection,
+                    approval_id,
+                )
+            },
+            || {},
+        )?;
         let connection = self.connection()?;
-        let authority = self.get_completed_package_authority_by_approval_id_in_connection(
+        let authority = self.revalidate_completed_package_authority_in_connection(
             &connection,
             approval_id,
+            &verified,
         )?;
         build_module_import_approval_evidence_in_connection(&connection, stored, &authority)
     }
@@ -1563,10 +1573,10 @@ impl Storage {
         stored: &ActiveContentModuleRevision,
     ) -> CoreResult<Vec<ModuleImportApprovalEvidence>> {
         validate_completed_module_authority_target(stored)?;
-        let connection = self.connection()?;
         let candidate_limit = i64::try_from(MAX_COMPLETED_MODULE_AUTHORITIES + 1)
             .map_err(|_| CoreError::internal("completed module authority limit overflow"))?;
         let approval_ids = {
+            let connection = self.connection()?;
             let mut statement = connection
                 .prepare(
                     "SELECT DISTINCT approval.id, approval.approved_at
@@ -1609,12 +1619,19 @@ impl Storage {
                 "completed module authority candidates exceed the bounded recovery limit",
             ));
         }
+        let verified =
+            self.verify_completed_package_authorities(approval_ids.iter().map(String::as_str))?;
+        let connection = self.connection()?;
         approval_ids
             .into_iter()
             .map(|approval_id| {
-                let authority = self.get_completed_package_authority_by_approval_id_in_connection(
+                let verified = verified.get(&approval_id).ok_or_else(|| {
+                    storage_corrupted("completed module authority was not CAS-verified")
+                })?;
+                let authority = self.revalidate_completed_package_authority_in_connection(
                     &connection,
                     &approval_id,
+                    verified,
                 )?;
                 build_module_import_approval_evidence_in_connection(&connection, stored, &authority)
             })
@@ -1628,10 +1645,19 @@ impl Storage {
         transaction: &Transaction<'_>,
         approval_id: &str,
         stored: &ActiveContentModuleRevision,
+        verified_authorities: &VerifiedCompletedPackageAuthorities,
     ) -> CoreResult<ModuleImportApprovalEvidence> {
-        let authority = self.get_completed_package_authority_by_approval_id_in_connection(
+        // No CAS path is opened here. The transaction performs only an exact
+        // metadata/revision revalidation of the proof created before it began.
+        let verified = verified_authorities.get(approval_id).ok_or_else(|| {
+            CoreError::invalid(
+                "module package approval changed after CAS authority preverification",
+            )
+        })?;
+        let authority = self.revalidate_completed_package_authority_in_connection(
             transaction,
             approval_id,
+            verified,
         )?;
         build_module_import_approval_evidence_in_connection(transaction, stored, &authority)
     }
@@ -2109,95 +2135,6 @@ fn verify_source_cas(storage: &Storage, source: &PackageSourceRecord) -> CoreRes
     storage
         .package_source_path(&source.source_sha256, source.source_size_bytes)
         .map(|_| ())
-}
-
-fn verify_owned_cas_file(
-    storage: &Storage,
-    namespace: &str,
-    sha256: &str,
-    expected_size: u64,
-    stored_relative_path: &str,
-) -> CoreResult<PathBuf> {
-    validate_sha256("CAS", sha256)?;
-    let expected_relative = format!("{namespace}/sha256/{}/{}", &sha256[..2], &sha256[2..]);
-    if stored_relative_path != expected_relative {
-        return Err(storage_corrupted(format!(
-            "stored {namespace} CAS path is not canonical"
-        )));
-    }
-    let root = storage.data_root().join(namespace).join("sha256");
-    let path = storage.data_root().join(stored_relative_path);
-    let metadata = fs::symlink_metadata(&path).map_err(|error| {
-        CoreError::new(
-            CoreErrorCode::StorageUnavailable,
-            format!("cannot inspect durable {namespace} CAS file: {error}"),
-            true,
-        )
-    })?;
-    if !metadata.file_type().is_file() || metadata.len() != expected_size {
-        return Err(storage_corrupted(format!(
-            "durable {namespace} CAS file is missing or has the wrong size"
-        )));
-    }
-    let canonical_root = fs::canonicalize(root).map_err(|error| {
-        CoreError::new(
-            CoreErrorCode::StorageUnavailable,
-            format!("cannot resolve durable {namespace} CAS root: {error}"),
-            true,
-        )
-    })?;
-    let canonical_path = fs::canonicalize(path).map_err(|error| {
-        CoreError::new(
-            CoreErrorCode::StorageUnavailable,
-            format!("cannot resolve durable {namespace} CAS file: {error}"),
-            true,
-        )
-    })?;
-    if !canonical_path.starts_with(canonical_root) {
-        return Err(storage_corrupted(format!(
-            "durable {namespace} CAS file escapes its owned root"
-        )));
-    }
-    let mut file = File::open(&canonical_path).map_err(|error| {
-        CoreError::new(
-            CoreErrorCode::StorageUnavailable,
-            format!("cannot open durable {namespace} CAS file: {error}"),
-            true,
-        )
-    })?;
-    let mut digest = Sha256::new();
-    let mut observed_size = 0_u64;
-    let mut buffer = vec![0_u8; 64 * 1024];
-    loop {
-        let read = file.read(&mut buffer).map_err(|error| {
-            CoreError::new(
-                CoreErrorCode::StorageUnavailable,
-                format!("cannot read durable {namespace} CAS file: {error}"),
-                true,
-            )
-        })?;
-        if read == 0 {
-            break;
-        }
-        observed_size = observed_size
-            .checked_add(
-                u64::try_from(read)
-                    .map_err(|_| storage_corrupted("CAS read size is out of range"))?,
-            )
-            .ok_or_else(|| storage_corrupted("CAS file size overflow"))?;
-        if observed_size > expected_size {
-            return Err(storage_corrupted(format!(
-                "durable {namespace} CAS file grew during verification"
-            )));
-        }
-        digest.update(&buffer[..read]);
-    }
-    if observed_size != expected_size || hex::encode(digest.finalize()) != sha256 {
-        return Err(storage_corrupted(format!(
-            "durable {namespace} CAS bytes do not match their reviewed digest"
-        )));
-    }
-    Ok(canonical_path)
 }
 
 fn validate_source_record(source: &PackageSourceRecord) -> CoreResult<()> {

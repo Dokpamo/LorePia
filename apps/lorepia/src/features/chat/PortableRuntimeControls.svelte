@@ -2,11 +2,13 @@
     import ChoicePopover from '../../components/ChoicePopover.svelte';
     import ToggleSwitch from '../../components/ToggleSwitch.svelte';
     import type { GenerationSelectionInput } from '../../lib/ipc/contracts';
+    import { t } from '../../lib/i18n';
     import type {
         PortableCharacterRuntime,
         PortableRuntimeCapability,
         PortableRuntimeGrant,
         PortableRuntimeModelCallStatus,
+        PortableRuntimePersistenceStatus,
     } from './portable-runtime';
     import type { PortableRuntimeModelBudgetSnapshot } from './portable-runtime-model-policy';
 
@@ -28,6 +30,7 @@
         auxiliaryModelOptions: AuxiliaryModelOption[];
         modelBudget: PortableRuntimeModelBudgetSnapshot | null;
         modelCall: PortableRuntimeModelCallStatus | null;
+        persistenceStatus: PortableRuntimePersistenceStatus | null;
         optionValue: (key: string) => string;
         onApprove: () => void | Promise<void>;
         onRevoke: () => void;
@@ -46,6 +49,7 @@
         auxiliaryModelOptions,
         modelBudget,
         modelCall,
+        persistenceStatus,
         optionValue,
         onApprove,
         onRevoke,
@@ -97,7 +101,7 @@
         <div class="portable-runtime-approval">
             <p>아래 권한은 현재 카드 리비전·스크립트 해시에만 이번 세션 동안 허용됩니다.</p>
             <p class="portable-runtime-sensitive-note">
-                보조 모델 호출과 고급 카드 권한은 기본으로 꺼져 있습니다.
+                대화 변경·모델 호출·고급 권한은 사용자가 직접 선택해야 합니다.
             </p>
             <ul aria-label="요청한 캐릭터 기능 권한">
                 {#each capabilities as capability (capability)}
@@ -122,6 +126,11 @@
         <button class="portable-runtime-revoke" type="button" onclick={onRevoke}>
             캐릭터 기능 권한 해제
         </button>
+        {#if persistenceStatus?.mode === 'memory-only'}
+            <p class="portable-runtime-persistence-warning" role="status" aria-live="polite">
+                {t('chat.runtime.persistence.memory_only')}
+            </p>
+        {/if}
         {#if runtime !== null}
             {#if grant.capabilities.includes('model:auxiliary')}
                 <div class="portable-runtime-choice">
@@ -227,9 +236,19 @@
     header small,
     .portable-runtime-field > span,
     .portable-runtime-sensitive-note,
-    .portable-runtime-budget {
+    .portable-runtime-budget,
+    .portable-runtime-persistence-warning {
         color: var(--ink-muted);
         font-size: 0.72rem;
+    }
+
+    .portable-runtime-persistence-warning {
+        margin: 0;
+        padding: 8px;
+        border: 1px solid var(--status-warning-border);
+        border-radius: var(--radius-sm);
+        background: var(--status-warning-bg);
+        color: var(--ink);
     }
 
     .portable-runtime-choice {

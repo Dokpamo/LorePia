@@ -17,6 +17,7 @@ mod model_sync;
 mod orchestration;
 mod package_repository;
 mod persona_repository;
+mod portable_runtime_state;
 mod provider_credential_repository;
 mod runtime_model_audit;
 mod verified_asset_cache;
@@ -29,8 +30,8 @@ pub use catalog::{
 };
 pub use content_export::VerifiedContentSource;
 pub use database::{
-    ApprovedAssetRange, DatabaseStats, MessageGenerationAction, MessageGenerationActionContext,
-    StagedAssetImport, Storage,
+    ApprovedAssetRange, DatabaseConnectionMetrics, DatabaseStats, MessageGenerationAction,
+    MessageGenerationActionContext, StagedAssetImport, Storage,
 };
 pub use discovery::{DurableOperationOutcome, PersistDiscoveryTransition};
 pub use discovery_repository::{
@@ -136,6 +137,12 @@ pub use package_repository::{
     package_normalization_evidence_sha256, package_update_target_confirmations_sha256,
 };
 pub use persona_repository::ConversationPersonaSelectionState;
+pub use portable_runtime_state::{
+    MAX_PORTABLE_RUNTIME_STATE_BYTES, MAX_PORTABLE_RUNTIME_STATE_ROWS,
+    MAX_PORTABLE_RUNTIME_STATE_TOTAL_BYTES, PortableRuntimeStatePayload,
+    PortableRuntimeStateRecord, PortableRuntimeStateSaveResult, PortableRuntimeStateScope,
+    PortableRuntimeStateSnapshot, PortableRuntimeStateWrite,
+};
 pub use provider_credential_repository::{
     ProviderCredentialAccessAuthority, ProviderCredentialObservedStatus,
     ProviderCredentialOperationKind, ProviderCredentialOperationPlan,

@@ -3,7 +3,7 @@ use std::{fmt, str::FromStr};
 use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
 use uuid::Uuid;
 
-use crate::orchestration::AssetId;
+use crate::{character::PortableRuntimeCapability, orchestration::AssetId};
 
 /// The encoded length of a SHA-256 digest.
 pub const SHA256_HEX_LENGTH: usize = 64;
@@ -167,6 +167,8 @@ pub struct ImportWarning {
 pub struct ImportDynamicContentReview {
     pub runtime_script_count: u32,
     pub elevated_runtime_script_count: u32,
+    pub required_runtime_capabilities: Vec<PortableRuntimeCapability>,
+    pub runtime_capabilities_declared: bool,
     pub regex_rule_count: u32,
     pub enabled_regex_rule_count: u32,
     pub model_calls_possible: bool,

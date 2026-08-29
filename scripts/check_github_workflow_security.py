@@ -42,9 +42,16 @@ def main() -> int:
     required = {
         ".github/workflows/ci.yml": [
             "python3 scripts/check_github_workflow_security.py",
+            "python3 -m unittest scripts/test_generate_ipc_commands.py",
+            "python3 scripts/generate_ipc_commands.py --check",
             "python3 scripts/check_source_architecture.py",
             "check_i18n_literal_baseline.py --base-ref",
             "npm audit --omit=dev --audit-level=high",
+            "name: iOS simulator",
+            "rustup target add aarch64-apple-ios-sim",
+            "npm run tauri -- ios init --ci --skip-targets-install",
+            "npm run tauri -- ios build --ci --debug --target aarch64-sim --no-sign",
+            "--config src-tauri/tauri.release.conf.json",
         ],
         ".github/workflows/security.yml": [
             "actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294",
@@ -69,6 +76,8 @@ def main() -> int:
             "- name: Upload mode-preserving Linux candidate\n        if: matrix.os == 'ubuntu-latest'",
             "- name: Upload unsigned candidate\n        if: matrix.os != 'ubuntu-latest'",
             "Release dependency gate",
+            "python3 scripts/generate_ipc_commands.py --check",
+            "npm run tauri build -- --config src-tauri/tauri.release.conf.json",
             "npm audit --omit=dev --audit-level=high",
             "Reject unsigned official release",
         ],

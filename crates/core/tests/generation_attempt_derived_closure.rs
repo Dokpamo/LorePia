@@ -22,8 +22,8 @@ use lorepia_core::{
     ModelAvailability, ModelMetadataSource, ModelRoute, ModelRouteConfig, ModelRouteId,
     ModuleActivationApproval, ModuleMergeResolutionSet, ObjectRevision, ObservationId,
     ObservationSource, PersonaCreateRequest, PersonaUpdateRequest, PromptPlanRequest,
-    ProviderConnectionDraft, ProviderConnectionId, ProviderNetworkMode, RoomOrchestrationConfig,
-    RoomOrchestrationConfigPatch, StoredRevision, SupportStatus,
+    ProviderConnectionDraft, ProviderConnectionId, ProviderNetworkMode, Revisioned,
+    RoomOrchestrationConfig, RoomOrchestrationConfigPatch, SupportStatus,
 };
 use lorepia_domain::{
     ActivationRule, AuxiliaryTaskKind, BlockSource, BuiltInTemplateValue, CharacterContentV1,
@@ -46,7 +46,7 @@ use lorepia_storage::{
     InteractionDerivedEventWrite, InteractionEvaluationSeal, InteractionEventCommit,
     InteractionPolicySnapshot, MemoryRecordUserPatch, PromptResponseLength,
     ProviderCredentialAccessAuthority, ProviderCredentialObservedStatus,
-    ProviderCredentialOperationKind, Storage, StoredInteractionState,
+    ProviderCredentialOperationKind, Storage, StoredInteractionState, StoredRevision,
     generation_attempt_derived_closure_sha256, interaction_action_sha256,
     interaction_evaluation_seal_sha256, interaction_state_snapshot_sha256,
 };
@@ -1848,7 +1848,7 @@ fn authority_prompt_blocks() -> Vec<PromptBlock> {
 fn install_authority_prompt_preset(
     core: &Core,
     target: &GenerationTarget,
-) -> lorepia_core::StoredRevision<PromptPreset> {
+) -> Revisioned<PromptPreset> {
     let memory_profile_id = install_authority_memory_profile(core, target);
     let now = Utc::now();
     core.upsert_prompt_preset(
@@ -2882,8 +2882,8 @@ struct AuthorityBase {
     branch: ConversationBranch,
     sealed_local_user_id: LocalUserId,
     sealed_local_user_id_sha256: String,
-    sealed_character_content: StoredRevision<CharacterContentV1>,
-    sealed_character_knowledge: StoredRevision<KnowledgeBook>,
+    sealed_character_content: Revisioned<CharacterContentV1>,
+    sealed_character_knowledge: Revisioned<KnowledgeBook>,
     authority_preset_id: PromptPresetId,
     authority_source_start: MessageId,
     authority_head: MessageId,
@@ -2901,15 +2901,15 @@ struct AuthorityScenario {
     branch: ConversationBranch,
     sealed_local_user_id: LocalUserId,
     sealed_local_user_id_sha256: String,
-    sealed_character_content: StoredRevision<CharacterContentV1>,
-    sealed_character_knowledge: StoredRevision<KnowledgeBook>,
+    sealed_character_content: Revisioned<CharacterContentV1>,
+    sealed_character_knowledge: Revisioned<KnowledgeBook>,
     authority_source_start: MessageId,
     authority_head: MessageId,
     sealed_selected_memory: StoredRevision<MemoryRecord>,
     sealed_summary_memory: StoredRevision<MemoryRecord>,
-    sealed_persona: StoredRevision<Persona>,
+    sealed_persona: Revisioned<Persona>,
     sealed_persona_revision: ObjectRevision<Persona>,
-    drifted_persona: StoredRevision<Persona>,
+    drifted_persona: Revisioned<Persona>,
     sealed_persona_selection: ConversationPersonaSelectionState,
     fixture: ClosureFixture,
     sealed_room: RoomOrchestrationConfig,

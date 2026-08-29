@@ -28,6 +28,23 @@ transaction command와 hash helper가 함께 노출돼 있다. 현재 Core와 �
   repository에 있다.
 - schema migration과 frozen schema-11 검증은 커밋된 fixture와 별도 harness로 확인한다.
 
+## 진행 현황
+
+- Core 공개 API에 새 `lorepia_storage::Stored*` 재노출을 추가하지 못하도록 architecture
+  ratchet을 적용했다. allowlist는 비어 있으며 모든 `Stored*` 재노출을 거부한다.
+- 사용처가 없던 `StoredPromptMessage`, `StoredGenerationAttempt` 재노출을 제거했다.
+- discovery 후보 목록은 Core 소유 `ProviderDiscoveryCandidateView`를 반환하므로
+  `StoredDiscoveryCandidate`를 Core에서 재노출하지 않는다.
+- Storage의 discovery transaction API와 Core 내부 adapter는 여전히
+  `StoredDiscoveryCandidate`를 사용하므로 Storage 타입 자체는 아직 공개 상태다.
+- derived-event drain은 content-free `InteractionDerivedDrainReceipt`만 반환하므로
+  `StoredInteractionEvent`를 Core에서 재노출하지 않는다.
+- provider credential journal은 Core 소유 `ProviderCredentialOperationView`로 투영하므로
+  `StoredProviderCredentialOperation`을 Core와 Shell 공개 경계에서 제거했다.
+- interaction proposal/effect는 Core 소유 view/claim/history 타입으로 투영하므로 세 가지
+  persistence row를 Core와 Shell 공개 경계에서 제거했다.
+- 범용 `StoredRevision`의 Core 호환 재노출도 제거해 공개 `Stored*` 예외가 남지 않았다.
+
 ## 단계별 축소 계획
 
 1. Core가 실제로 읽는 필드만 가진 domain/use-case view를 정의한다.

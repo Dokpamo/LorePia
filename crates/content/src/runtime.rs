@@ -12,6 +12,8 @@ use lorepia_domain::{
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+use crate::capabilities::{normalize_runtime_profile_capabilities, parse_runtime_capabilities};
+
 const HEADER_BYTES: usize = 6;
 const MAGIC: u8 = 111;
 const VERSION: u8 = 0;
@@ -78,6 +80,7 @@ pub(crate) fn decode_runtime_document(
 
     let embedded_assets = parse_embedded_assets(module.get("assets"), embedded_asset_bytes)?;
     let source_id = format!("card-runtime:{source_sha256}");
+    let required_capabilities = parse_runtime_capabilities(module)?;
     let transforms = parse_transforms(module.get("regex"), &source_id)?;
     let scripts = parse_scripts(module.get("trigger"), &source_id)?;
     let knowledge_entries = module.get("lorebook").cloned();
@@ -96,26 +99,29 @@ pub(crate) fn decode_runtime_document(
             metadata.insert(key.to_owned(), canonical_json(value)?);
         }
     }
+    let mut profile = CharacterRuntimeProfile {
+        source_id: Some(source_id),
+        transform_set_id: None,
+        transforms,
+        scripts,
+        required_capabilities,
+        background_markup: module
+            .get("backgroundEmbedding")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+        additional_text: String::new(),
+        toggle_schema: module
+            .get("customModuleToggle")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+        initial_variables: BTreeMap::new(),
+        metadata,
+    };
+    normalize_runtime_profile_capabilities(&mut profile)?;
     Ok(DecodedRuntimeDocument {
-        profile: CharacterRuntimeProfile {
-            source_id: Some(source_id),
-            transform_set_id: None,
-            transforms,
-            scripts,
-            background_markup: module
-                .get("backgroundEmbedding")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_owned(),
-            additional_text: String::new(),
-            toggle_schema: module
-                .get("customModuleToggle")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_owned(),
-            initial_variables: BTreeMap::new(),
-            metadata,
-        },
+        profile,
         knowledge_entries,
         embedded_assets,
     })
@@ -347,6 +353,8 @@ fn unsupported(message: impl Into<String>) -> CoreError {
 
 #[cfg(test)]
 mod tests {
+    use lorepia_domain::PortableRuntimeCapability;
+
     use super::*;
 
     fn encode_substitution(bytes: &[u8]) -> Vec<u8> {
@@ -359,6 +367,20 @@ mod tests {
             .iter()
             .map(|byte| inverse[usize::from(*byte)])
             .collect()
+    }
+
+    fn runtime_document(module: Value) -> Vec<u8> {
+        let metadata =
+            serde_json::to_vec(&serde_json::json!({ "module": module })).expect("encode metadata");
+        let mut document = vec![MAGIC, VERSION];
+        document.extend_from_slice(
+            &u32::try_from(metadata.len())
+                .expect("metadata length")
+                .to_le_bytes(),
+        );
+        document.extend(encode_substitution(&metadata));
+        document.push(RECORD_END);
+        document
     }
 
     #[test]
@@ -398,5 +420,63 @@ mod tests {
         assert_eq!(decoded.embedded_assets.len(), 1);
         assert_eq!(decoded.embedded_assets[0].name, "portrait.png");
         assert_eq!(decoded.embedded_assets[0].bytes, asset);
+    }
+
+    #[test]
+    fn missing_capabilities_normalize_to_the_fixed_legacy_ceiling() {
+        let document = runtime_document(serde_json::json!({
+            "trigger": [{
+                "type": "load",
+                "effect": [{ "type": "script", "code": "return true" }]
+            }]
+        }));
+        let decoded =
+            decode_runtime_document(&document, &"b".repeat(64)).expect("legacy runtime document");
+        assert_eq!(
+            decoded.profile.required_capabilities,
+            Some(vec![
+                PortableRuntimeCapability::RuntimeCallbacks,
+                PortableRuntimeCapability::UiWrite,
+            ])
+        );
+    }
+
+    #[test]
+    fn explicit_null_capabilities_are_rejected_at_the_document_boundary() {
+        for field in ["requiredCapabilities", "required_capabilities"] {
+            let document = runtime_document(serde_json::json!({ (field): null }));
+            let error = decode_runtime_document(&document, &"c".repeat(64))
+                .err()
+                .expect("explicit null capability declaration must fail");
+            assert_eq!(error.code, CoreErrorCode::UnsupportedContent);
+        }
+    }
+
+    #[test]
+    fn elevated_scripts_require_an_actual_elevated_declaration() {
+        let elevated_trigger = serde_json::json!([{
+            "type": "load",
+            "lowLevelAccess": true,
+            "effect": [{ "type": "script", "code": "return true" }]
+        }]);
+        let legacy = runtime_document(serde_json::json!({ "trigger": elevated_trigger.clone() }));
+        let error = decode_runtime_document(&legacy, &"d".repeat(64))
+            .err()
+            .expect("legacy authority must not grant elevated access");
+        assert_eq!(error.code, CoreErrorCode::UnsupportedContent);
+
+        let declared = runtime_document(serde_json::json!({
+            "requiredCapabilities": ["runtime:callbacks", "elevated"],
+            "trigger": elevated_trigger
+        }));
+        let decoded = decode_runtime_document(&declared, &"e".repeat(64))
+            .expect("explicit elevated declaration");
+        assert_eq!(
+            decoded.profile.required_capabilities,
+            Some(vec![
+                PortableRuntimeCapability::RuntimeCallbacks,
+                PortableRuntimeCapability::Elevated,
+            ])
+        );
     }
 }

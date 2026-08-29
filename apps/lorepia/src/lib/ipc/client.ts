@@ -241,6 +241,12 @@ import type {
     DiscardContentPackageImportInput,
 } from './contracts';
 import { normalizeClientError } from './errors';
+import type {
+    GetPortableRuntimeStateDto,
+    PortableRuntimeStateScopeInput,
+    PutPortableRuntimeStateInput,
+    PutPortableRuntimeStateResultDto,
+} from './portable-runtime-state-contracts';
 
 import { LOREPIA_COMMANDS, LOREPIA_EVENTS } from './commands';
 
@@ -868,6 +874,18 @@ export class LiveLorepiaClient
         return this.call(LOREPIA_COMMANDS.cancelRuntimeText, {
             request: { request_id: requestId },
         });
+    }
+
+    getPortableRuntimeState(
+        scope: PortableRuntimeStateScopeInput,
+    ): Promise<GetPortableRuntimeStateDto> {
+        return this.call(LOREPIA_COMMANDS.getPortableRuntimeState, { request: { scope } });
+    }
+
+    putPortableRuntimeState(
+        input: PutPortableRuntimeStateInput,
+    ): Promise<PutPortableRuntimeStateResultDto> {
+        return this.call(LOREPIA_COMMANDS.putPortableRuntimeState, { request: input });
     }
 
     sendMessage(

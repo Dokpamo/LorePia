@@ -2,6 +2,7 @@
 
 mod adapters;
 mod archive;
+mod capabilities;
 mod hashing;
 mod package;
 mod path;
@@ -223,6 +224,12 @@ fn dynamic_content_review(content: &CharacterContentV1) -> ImportDynamicContentR
         lore_regex_rule_reviews(content);
     regex_rules.append(&mut lore_regex_rules);
     let runtime_script_count = u32::try_from(content.runtime.scripts.len()).unwrap_or(u32::MAX);
+    let runtime_capabilities_declared = content.runtime.required_capabilities.is_some();
+    let required_runtime_capabilities = content
+        .runtime
+        .required_capabilities
+        .clone()
+        .unwrap_or_default();
     ImportDynamicContentReview {
         runtime_script_count,
         elevated_runtime_script_count: u32::try_from(
@@ -234,6 +241,8 @@ fn dynamic_content_review(content: &CharacterContentV1) -> ImportDynamicContentR
                 .count(),
         )
         .unwrap_or(u32::MAX),
+        required_runtime_capabilities,
+        runtime_capabilities_declared,
         regex_rule_count: u32::try_from(
             content
                 .runtime
@@ -252,7 +261,18 @@ fn dynamic_content_review(content: &CharacterContentV1) -> ImportDynamicContentR
                 .saturating_add(enabled_lore_regex_rule_count),
         )
         .unwrap_or(u32::MAX),
-        model_calls_possible: runtime_script_count > 0,
+        model_calls_possible: content.runtime.required_capabilities.as_ref().map_or(
+            runtime_script_count > 0,
+            |capabilities| {
+                capabilities.iter().any(|capability| {
+                    matches!(
+                        capability,
+                        lorepia_domain::PortableRuntimeCapability::ModelPrimary
+                            | lorepia_domain::PortableRuntimeCapability::ModelAuxiliary
+                    )
+                })
+            },
+        ),
         custom_markup_present: !content.runtime.background_markup.trim().is_empty()
             || content
                 .runtime

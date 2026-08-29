@@ -7,7 +7,7 @@ use chrono::{Duration, TimeZone, Utc};
 use lorepia_core::{
     Core, CoreConfig, CoreErrorCode, InstructionAuthority, ModuleScope, PlacementZone,
     PresetMetadata, PromptPreset, PromptPresetBinding, PromptPresetId,
-    PromptPresetRollbackApplyRequest, Provenance, SafeTemplate, SourceKind, StoredRevision,
+    PromptPresetRollbackApplyRequest, Provenance, Revisioned, SafeTemplate, SourceKind,
     TemplatePart, VariableMap,
 };
 use lorepia_orchestration::default_prompt_preset;
@@ -112,7 +112,7 @@ fn app_binding(id: &str, preset_id: &PromptPresetId) -> PromptPresetBinding {
 fn seed_creator_revisions(
     core: &Core,
     preset_id: &PromptPresetId,
-) -> (StoredRevision<PromptPreset>, StoredRevision<PromptPreset>) {
+) -> (Revisioned<PromptPreset>, Revisioned<PromptPreset>) {
     let first = core
         .upsert_prompt_preset(&creator_preset(preset_id.as_str()), None)
         .expect("save first preset revision");
@@ -169,8 +169,8 @@ fn seed_creator_revisions(
 fn review_rollback_after_stale_checks(
     core: &Core,
     preset_id: &PromptPresetId,
-    first: &StoredRevision<PromptPreset>,
-    second: &StoredRevision<PromptPreset>,
+    first: &Revisioned<PromptPreset>,
+    second: &Revisioned<PromptPreset>,
 ) -> PromptPresetRollbackApplyRequest {
     let binding = app_binding("synthetic.reviewed-rollback.binding", preset_id);
     let stored_binding = core

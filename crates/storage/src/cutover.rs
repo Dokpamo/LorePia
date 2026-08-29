@@ -2096,7 +2096,7 @@ mod tests {
 
     fn simulated_previous_release(root: &Path) -> (PathBuf, u32) {
         assert_eq!(
-            SCHEMA_VERSION, 39,
+            SCHEMA_VERSION, 40,
             "update previous-release fixture for the latest migration"
         );
         let canonical_path = root.join(LEGACY_DATABASE_RELATIVE_PATH);
@@ -2119,7 +2119,7 @@ mod tests {
 
     fn reverse_latest_additive_migration(connection: &Connection) {
         const LATEST_ADDITIVE_MIGRATION: &str =
-            include_str!("../migrations/0039_runtime_model_audit.sql");
+            include_str!("../migrations/0040_portable_runtime_state.sql");
 
         let replaced_objects = LATEST_ADDITIVE_MIGRATION
             .lines()
@@ -2151,10 +2151,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        assert!(
-            created_objects.contains(&("TABLE", "portable_runtime_model_audit")),
-            "the simulated downgrade must track every object in the latest additive migration"
-        );
+        assert_eq!(created_objects.len(), 7, "schema-40 inverse object drift");
         connection
             .execute_batch("PRAGMA foreign_keys = OFF;")
             .expect("disable foreign keys for the simulated downgrade");
@@ -2166,11 +2163,11 @@ mod tests {
             {
                 connection
                     .execute(&format!("DROP {object_type} \"{name}\""), [])
-                    .unwrap_or_else(|error| panic!("drop schema-39 {object_type} {name}: {error}"));
+                    .unwrap_or_else(|error| panic!("drop schema-40 {object_type} {name}: {error}"));
             }
         }
         connection
-            .execute("DELETE FROM schema_migrations WHERE version = 39", [])
+            .execute("DELETE FROM schema_migrations WHERE version = 40", [])
             .expect("remove the simulated latest migration registry row");
         connection
             .execute_batch("PRAGMA foreign_keys = ON; PRAGMA wal_checkpoint(TRUNCATE);")

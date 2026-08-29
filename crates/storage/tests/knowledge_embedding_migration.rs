@@ -24,7 +24,7 @@ const EXACT_PROVIDER_VECTOR_SPACE: &str =
 const MODEL_ROUTE_ID: &str = "route:legacy-knowledge";
 const GENERATION_PRESET_ID: &str = "preset:legacy-knowledge";
 const ENTRY_ID: &str = "entry:legacy-knowledge";
-const LAST_INVERTED_SCHEMA_VERSION: u32 = 39;
+const LAST_INVERTED_SCHEMA_VERSION: u32 = 40;
 const MIGRATION_0019: &str = include_str!("../migrations/0019_lifecycle_outbox.sql");
 const MIGRATION_0024: &str = include_str!("../migrations/0024_generation_attempt_proposals.sql");
 const MIGRATION_0027: &str =
@@ -36,6 +36,7 @@ const MIGRATION_0029: &str =
 const MIGRATION_0037: &str = include_str!("../migrations/0037_provider_credential_operations.sql");
 const MIGRATION_0038: &str = include_str!("../migrations/0038_conversation_speakers.sql");
 const MIGRATION_0039: &str = include_str!("../migrations/0039_runtime_model_audit.sql");
+const MIGRATION_0040: &str = include_str!("../migrations/0040_portable_runtime_state.sql");
 
 #[derive(Debug)]
 struct FixtureIds {
@@ -335,6 +336,7 @@ fn downgrade_and_seed_populated_v31(fixture: &FixtureIds, vector_blob: &[u8], ve
     let transaction = connection
         .transaction()
         .expect("schema downgrade transaction");
+    remove_schema40_objects(&transaction);
     remove_schema39_objects(&transaction);
     remove_schema38_objects(&transaction);
     remove_schema37_objects(&transaction);
@@ -344,6 +346,35 @@ fn downgrade_and_seed_populated_v31(fixture: &FixtureIds, vector_blob: &[u8], ve
     insert_populated_v31_embedding(&transaction, fixture, vector_blob, vector_sha256);
     assert_schema31_fixture(&transaction);
     transaction.commit().expect("commit populated schema 31");
+}
+
+fn remove_schema40_objects(transaction: &Transaction<'_>) {
+    let objects = created_objects(MIGRATION_0040);
+    const EXPECTED_SCHEMA_40_OBJECTS: &[(&str, &str)] = &[
+        ("TRIGGER", "portable_runtime_branch_epoch_on_branch_insert"),
+        ("TRIGGER", "portable_runtime_state_scope_guard_insert"),
+        ("TRIGGER", "portable_runtime_state_scope_guard_update"),
+        ("INDEX", "portable_runtime_states_lru"),
+        ("TABLE", "portable_runtime_branch_epochs"),
+        ("TABLE", "portable_runtime_state_sequence"),
+        ("TABLE", "portable_runtime_states"),
+    ];
+    assert_eq!(
+        objects.as_slice(),
+        EXPECTED_SCHEMA_40_OBJECTS,
+        "schema-31 inverse must track every schema-40 additive object"
+    );
+    for object_type in ["VIEW", "TRIGGER", "INDEX", "TABLE"] {
+        for (_, name) in objects
+            .iter()
+            .rev()
+            .filter(|(candidate_type, _)| *candidate_type == object_type)
+        {
+            transaction
+                .execute(&format!("DROP {object_type} \"{name}\""), [])
+                .unwrap_or_else(|error| panic!("remove schema-40 {object_type} {name}: {error}"));
+        }
+    }
 }
 
 fn remove_schema39_objects(transaction: &Transaction<'_>) {

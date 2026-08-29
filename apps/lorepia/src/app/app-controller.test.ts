@@ -69,8 +69,8 @@ function mockClient(overrides: Partial<LorepiaClient>): LorepiaClient {
     const defaults: Partial<LorepiaClient> = {
         bootstrapSnapshot: () =>
             Promise.resolve({
-                shell_api_version: 2,
-                core_api_version: 9,
+                shell_api_version: 3,
+                core_api_version: 10,
                 chat_event_version: 4,
                 health: {
                     core_version: '0.1.0',
@@ -437,6 +437,59 @@ describe('LorepiaAppController message removal scope', () => {
         created_at: '2026-08-02T00:00:00Z',
     };
 
+    it('reports the committed mutation and applied message refresh separately', async () => {
+        let messageReads = 0;
+        const rewoundBranch: ConversationBranchDto = { ...branch, head_message_id: null };
+        const controller = new LorepiaAppController(
+            mockClient({
+                listBranchMessages: () => {
+                    messageReads += 1;
+                    return Promise.resolve(messageReads === 1 ? [messageOne] : []);
+                },
+                removeMessageFromBranch: () => Promise.resolve(rewoundBranch),
+            }),
+        );
+        await controller.selectConversation(conversation);
+
+        await expect(controller.removeMessage(messageOne.id)).resolves.toEqual({
+            mutationCommitted: true,
+            messagesRefreshed: true,
+        });
+        expect(get(controller.state)).toMatchObject({
+            branches: [rewoundBranch],
+            messages: { phase: 'ready', items: [] },
+        });
+        controller.destroy();
+    });
+
+    it('keeps a committed mutation receipt when the message readback fails', async () => {
+        let messageReads = 0;
+        const rewoundBranch: ConversationBranchDto = { ...branch, head_message_id: null };
+        const controller = new LorepiaAppController(
+            mockClient({
+                listBranchMessages: () => {
+                    messageReads += 1;
+                    return messageReads === 1
+                        ? Promise.resolve([messageOne])
+                        : Promise.reject(new Error('message readback failed'));
+                },
+                removeMessageFromBranch: () => Promise.resolve(rewoundBranch),
+            }),
+        );
+        await controller.selectConversation(conversation);
+
+        await expect(controller.removeMessage(messageOne.id)).resolves.toEqual({
+            mutationCommitted: true,
+            messagesRefreshed: false,
+        });
+        const state = get(controller.state);
+        expect(state.branches).toEqual([rewoundBranch]);
+        expect(state.messages.phase).toBe('error');
+        expect(state.messages.error).not.toBeNull();
+        expect(state.messages.items).toEqual([messageOne]);
+        controller.destroy();
+    });
+
     it('ignores a stale removal receipt after the active branch changes', async () => {
         const nextBranch: ConversationBranchDto = { ...branch, id: 'branch-2' };
         const nextState: ConversationStateDto = {
@@ -668,7 +721,10 @@ describe('LorepiaAppController message removal scope', () => {
         await controller.selectConversation(conversation);
         listBranchMessages.mockClear();
 
-        await controller.removeMessage(messageOne.id);
+        await expect(controller.removeMessage(messageOne.id)).resolves.toEqual({
+            mutationCommitted: false,
+            messagesRefreshed: false,
+        });
 
         expect(listBranchMessages).not.toHaveBeenCalled();
         expect(get(controller.state).messages.items).toEqual([messageOne]);

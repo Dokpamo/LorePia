@@ -14,6 +14,8 @@ const PROMPT_PLATFORM_GOLDEN_SHA256: &str =
     include_str!("contract/prompt-orchestration-platform-golden.sha256");
 const RECOVERY_COMPATIBILITY_CONTRACT: &str =
     include_str!("contract/recovery-compatibility-v1.json");
+const IPC_COMMAND_MANIFEST_PATH: &str = "../../../config/ipc-commands.json";
+const IPC_COMMAND_MANIFEST: &str = include_str!("../../../config/ipc-commands.json");
 const RESOLVED_PROMPT_PLAN_GOLDEN_SHA256: &str = include_str!(
     "../../../crates/orchestration/tests/fixtures/cross_platform_resolved_prompt_plan.sha256"
 );
@@ -65,215 +67,10 @@ const PROMPT_COMMAND_CONTRACTS: [(&str, &str, &str, &str, &str); 3] = [
     ),
 ];
 
-const APP_COMMANDS: &[&str] = &[
-    "bootstrap",
-    "get_memory_supervisor_status",
-    "list_characters",
-    "get_character",
-    "get_character_greeting_catalog",
-    "get_character_render_profile",
-    "resolve_asset_delivery",
-    "pick_content_package_import",
-    "list_completed_content_package_exports",
-    "export_content_source",
-    "reopen_content_package_import",
-    "list_pending_content_package_imports",
-    "select_content_package_import",
-    "approve_content_package_import",
-    "commit_content_package_import",
-    "discard_content_package_import",
-    "pick_import",
-    "inspect_import",
-    "commit_import",
-    "discard_import",
-    "create_conversation",
-    "open_conversation",
-    "open_existing_conversation",
-    "list_conversations",
-    "list_conversations_for_character",
-    "get_conversation",
-    "get_conversation_state",
-    "list_branches",
-    "create_branch",
-    "select_branch",
-    "set_conversation_mode",
-    "create_persona",
-    "update_persona",
-    "get_persona",
-    "list_personas",
-    "list_persona_page",
-    "delete_persona",
-    "get_conversation_persona_selection",
-    "select_conversation_persona",
-    "clear_conversation_persona",
-    "list_branch_messages",
-    "list_messages",
-    "generate_runtime_text",
-    "cancel_runtime_text",
-    "send_message",
-    "edit_user_message",
-    "regenerate_assistant_message",
-    "remove_message_from_branch",
-    "cancel_generation",
-    "subscribe_generation",
-    "dispose_chat_stream",
-    "get_provider_overview",
-    "list_model_routes",
-    "list_generation_presets",
-    "preview_provider_request",
-    "credential_status",
-    "capture_credential",
-    "delete_credential",
-    "get_settings",
-    "update_settings",
-    "select_generation_target",
-    "list_provider_templates",
-    "list_provider_connections",
-    "create_provider_connection",
-    "upsert_provider_connection",
-    "delete_provider_connection",
-    "list_provider_profiles",
-    "upsert_model_route",
-    "delete_model_route",
-    "list_capability_observations",
-    "effective_capability",
-    "effective_parameter_specs",
-    "upsert_user_capability_override",
-    "delete_user_capability_override",
-    "upsert_generation_preset",
-    "delete_generation_preset",
-    "validate_generation_preset_candidate",
-    "render_reasoning_control_for_preset",
-    "render_prompt_cache_control_for_preset",
-    "preview_provider_request_candidate",
-    "start_provider_model_sync",
-    "get_provider_model_sync",
-    "list_provider_model_syncs",
-    "approve_provider_model_sync",
-    "cancel_provider_model_sync",
-    "poll_provider_model_sync_events",
-    "ack_provider_model_sync_event",
-    "begin_provider_discovery",
-    "begin_provider_discovery_curl",
-    "list_provider_discoveries",
-    "get_provider_discovery",
-    "list_provider_discovery_candidates",
-    "list_provider_discovery_evidence",
-    "list_provider_discovery_approvals",
-    "get_provider_discovery_review",
-    "get_provider_discovery_approval_proposal",
-    "get_provider_discovery_review_proposal",
-    "get_provider_discovery_assistant_resume_boundary",
-    "run_provider_discovery_assistant_turn",
-    "resume_provider_discovery_assistant_core_host_action",
-    "approve_provider_discovery_assistant_retry",
-    "request_provider_discovery_assistant_revision",
-    "accept_provider_discovery_assistant_draft",
-    "record_provider_discovery_assistant_failure",
-    "interrupt_provider_discovery_assistant",
-    "restart_provider_discovery_assistant_after_interruption",
-    "continue_provider_discovery",
-    "supply_provider_discovery_document_evidence",
-    "supply_provider_discovery_curl_evidence",
-    "cancel_provider_discovery",
-    "commit_provider_discovery",
-    "poll_provider_discovery_events",
-    "poll_provider_discovery_events_for_session",
-    "ack_provider_discovery_event",
-    "recover_provider_discovery",
-    "list_provider_discovery_compensation_steps",
-    "continue_provider_discovery_compensation",
-    "resume_provider_discovery_compensation",
-    "pick_provider_catalog_import",
-    "activate_provider_catalog_import",
-    "discard_provider_catalog_import",
-    "provider_catalog_status",
-    "provider_catalog_history",
-    "diff_provider_catalog_revisions",
-    "prepare_provider_catalog_rollback",
-    "activate_provider_catalog_rollback",
-    "validate_prompt_preset",
-    "resolve_prompt_preview",
-    "send_reviewed_prompt",
-    "explain_prompt_plan",
-    "get_orchestration_workspace",
-    "save_room_orchestration_config",
-    "upsert_prompt_preset",
-    "get_prompt_preset",
-    "get_editable_prompt_preset",
-    "list_prompt_presets",
-    "list_prompt_preset_revisions",
-    "diff_prompt_preset_revisions",
-    "review_prompt_preset_rollback",
-    "apply_prompt_preset_rollback",
-    "reorder_prompt_blocks",
-    "delete_prompt_preset",
-    "upsert_task_profile",
-    "get_task_profile",
-    "list_task_profiles",
-    "delete_task_profile",
-    "upsert_memory_profile",
-    "get_memory_profile",
-    "list_memory_profiles",
-    "delete_memory_profile",
-    "get_memory_record",
-    "patch_memory_record",
-    "set_memory_record_exclusion",
-    "delete_memory_record",
-    "upsert_knowledge_book",
-    "get_knowledge_book",
-    "list_knowledge_books",
-    "delete_knowledge_book",
-    "upsert_transform_set",
-    "get_transform_set",
-    "list_transform_sets",
-    "delete_transform_set",
-    "upsert_interaction_rule_set",
-    "get_interaction_rule_set",
-    "list_interaction_rule_sets",
-    "delete_interaction_rule_set",
-    "list_interaction_effects",
-    "list_interaction_proposals",
-    "list_generation_attempt_proposals",
-    "list_retryable_generation_attempts",
-    "expire_interaction_proposals",
-    "expire_generation_attempt_proposals",
-    "list_interaction_effect_history",
-    "list_reopen_interaction_effects",
-    "submit_interaction_choice",
-    "acknowledge_interaction_effect",
-    "retry_interaction_effect",
-    "decide_interaction_proposal",
-    "decide_generation_attempt_proposal",
-    "upsert_content_module",
-    "get_content_module",
-    "list_content_modules",
-    "delete_content_module",
-    "list_prompt_preset_bindings",
-    "list_memory_records",
-    "retry_interrupted_memory_job",
-    "list_interrupted_memory_jobs",
-    "list_retryable_memory_query_embeddings",
-    "retry_memory_query_embedding",
-    "simulate_knowledge_activation",
-    "preview_transform_rule",
-    "list_content_module_bindings",
-    "list_content_module_revisions",
-    "diff_content_module_revisions",
-    "evaluate_content_module_share",
-    "list_content_module_lifecycle_candidates",
-    "list_content_module_lifecycle_bindings",
-    "review_content_module_activation",
-    "resolve_content_module_activation",
-    "activate_content_module",
-    "review_content_module_deactivation",
-    "deactivate_content_module",
-    "review_content_module_rollback",
-    "resolve_content_module_rollback",
-    "apply_content_module_rollback",
-];
+include!("generated/app_commands.rs");
 
 fn main() {
+    validate_ipc_command_manifest();
     validate_prompt_platform_contract();
     validate_recovery_compatibility_contract();
     let is_windows_msvc = is_windows_msvc_target();
@@ -289,6 +86,39 @@ fn main() {
 
     tauri_build::try_build(attributes).expect("failed to build the LorePia Tauri application");
     validate_registered_command_artifacts(Path::new(env!("CARGO_MANIFEST_DIR")));
+}
+
+/// Reject a stale or malformed generated registry before Tauri materializes permissions.
+fn validate_ipc_command_manifest() {
+    println!("cargo:rerun-if-changed={IPC_COMMAND_MANIFEST_PATH}");
+    let manifest: Value =
+        serde_json::from_str(IPC_COMMAND_MANIFEST).expect("IPC command manifest must be JSON");
+    assert_eq!(
+        manifest["version"].as_u64(),
+        Some(1),
+        "IPC command manifest version must be 1"
+    );
+    let commands = manifest["commands"]
+        .as_array()
+        .expect("IPC command manifest commands must be an array")
+        .iter()
+        .map(|command| {
+            command
+                .as_str()
+                .expect("every IPC command manifest entry must be a string")
+        })
+        .collect::<Vec<_>>();
+    let unique_commands = commands.iter().copied().collect::<BTreeSet<_>>();
+    assert_eq!(
+        unique_commands.len(),
+        commands.len(),
+        "IPC command manifest cannot contain duplicate commands"
+    );
+    assert_eq!(
+        commands.as_slice(),
+        APP_COMMANDS,
+        "IPC command manifest and generated app command registry are stale"
+    );
 }
 
 fn validate_recovery_compatibility_contract() {

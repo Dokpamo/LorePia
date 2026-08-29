@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-put-portable-runtime-state"
+description = "Enables the put_portable_runtime_state command without any pre-configured scope."
+commands.allow = ["put_portable_runtime_state"]
+
+[[permission]]
+identifier = "deny-put-portable-runtime-state"
+description = "Denies the put_portable_runtime_state command without any pre-configured scope."
+commands.deny = ["put_portable_runtime_state"]

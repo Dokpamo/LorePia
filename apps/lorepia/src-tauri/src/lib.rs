@@ -9,6 +9,7 @@ mod module_lifecycle_commands;
 mod orchestration_commands;
 mod package_commands;
 mod persona_commands;
+mod portable_runtime_state_commands;
 mod provider_commands;
 mod runtime_contract;
 mod runtime_generation_registry;
@@ -122,6 +123,8 @@ pub fn run() {
             commands::get_character,
             commands::get_character_greeting_catalog,
             commands::get_character_render_profile,
+            portable_runtime_state_commands::get_portable_runtime_state,
+            portable_runtime_state_commands::put_portable_runtime_state,
             commands::resolve_asset_delivery,
             package_commands::pick_content_package_import,
             package_commands::list_completed_content_package_exports,

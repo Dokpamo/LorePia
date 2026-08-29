@@ -9,6 +9,8 @@ use lorepia_domain::{
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+use crate::capabilities::{normalize_runtime_profile_capabilities, parse_runtime_capabilities};
+
 pub(crate) const MAX_METADATA_BYTES: usize = 4 * 1024 * 1024;
 pub(crate) const MAX_CHARACTER_NAME_BYTES: usize = 1_024;
 pub(crate) const MAX_CHARACTER_NAME_CHARS: usize = 256;
@@ -547,6 +549,7 @@ fn parse_runtime_extensions(
         let Some(object) = portable_runtime_extension_object(candidate) else {
             continue;
         };
+        let required_capabilities = parse_runtime_capabilities(object)?;
         let background_markup = optional_runtime_string(object, "backgroundHTML")?;
         let additional_text = optional_runtime_string(object, "additionalText")?;
         let toggle_schema = optional_runtime_string(object, "toggles")?;
@@ -577,22 +580,27 @@ fn parse_runtime_extensions(
                     | "additionalText"
                     | "toggles"
                     | "defaultVariables"
+                    | "requiredCapabilities"
+                    | "required_capabilities"
             ) {
                 continue;
             }
             metadata.insert(key.clone(), canonical_json(value)?);
         }
-        return Ok(CharacterRuntimeProfile {
+        let mut profile = CharacterRuntimeProfile {
             source_id: Some(format!("card-runtime:{source_sha256}")),
             transform_set_id: None,
             transforms: Vec::new(),
             scripts,
+            required_capabilities,
             background_markup,
             additional_text,
             toggle_schema,
             initial_variables,
             metadata,
-        });
+        };
+        normalize_runtime_profile_capabilities(&mut profile)?;
+        return Ok(profile);
     }
     Ok(CharacterRuntimeProfile::default())
 }
@@ -810,6 +818,8 @@ fn portable_runtime_extension_object(value: &Value) -> Option<&serde_json::Map<S
         "toggles",
         "defaultVariables",
         "lowLevelAccess",
+        "requiredCapabilities",
+        "required_capabilities",
     ]
     .iter()
     .any(|key| object.contains_key(*key))
@@ -1220,6 +1230,57 @@ mod tests {
         assert_eq!(
             description_error.message,
             "CCv3 data.description exceeds the 262144-byte or 65536-character limit"
+        );
+    }
+
+    #[test]
+    fn card_runtime_capabilities_normalize_legacy_and_reject_null_or_implicit_elevation() {
+        let card = |runtime: Value| {
+            serde_json::to_vec(&serde_json::json!({
+                "spec": CHARACTER_CARD_V3_SPEC,
+                "data": {
+                    "name": "Segu",
+                    "extensions": { "runtime": runtime }
+                }
+            }))
+            .expect("encode card")
+        };
+
+        let legacy = parse_card_json(&card(serde_json::json!({
+            "virtualscript": "return true"
+        })))
+        .expect("safe legacy runtime");
+        assert_eq!(
+            legacy.content.runtime.required_capabilities,
+            Some(vec![
+                lorepia_domain::PortableRuntimeCapability::RuntimeCallbacks,
+                lorepia_domain::PortableRuntimeCapability::UiWrite,
+            ])
+        );
+
+        for field in ["requiredCapabilities", "required_capabilities"] {
+            assert_unsupported(&card(serde_json::json!({
+                "virtualscript": "return true",
+                (field): null
+            })));
+        }
+        assert_unsupported(&card(serde_json::json!({
+            "virtualscript": "return true",
+            "lowLevelAccess": true
+        })));
+
+        let declared = parse_card_json(&card(serde_json::json!({
+            "virtualscript": "return true",
+            "lowLevelAccess": true,
+            "required_capabilities": ["runtime:callbacks", "elevated"]
+        })))
+        .expect("explicit elevated runtime");
+        assert_eq!(
+            declared.content.runtime.required_capabilities,
+            Some(vec![
+                lorepia_domain::PortableRuntimeCapability::RuntimeCallbacks,
+                lorepia_domain::PortableRuntimeCapability::Elevated,
+            ])
         );
     }
 }

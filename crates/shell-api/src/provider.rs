@@ -420,8 +420,8 @@ impl From<lorepia_core::ProviderCredentialSlotGarbage> for ProviderCredentialSlo
     }
 }
 
-impl From<lorepia_core::StoredProviderCredentialOperation> for ProviderCredentialOperationContext {
-    fn from(value: lorepia_core::StoredProviderCredentialOperation) -> Self {
+impl From<lorepia_core::ProviderCredentialOperationView> for ProviderCredentialOperationContext {
+    fn from(value: lorepia_core::ProviderCredentialOperationView) -> Self {
         Self {
             operation_id: value.plan.operation_id,
             connection_id: value.plan.connection_id.0,

@@ -40,7 +40,7 @@
       }
     ],
     "security": {
-      "capabilities": [],
+      "capabilities": ["main-development"],
       "csp": {
         "default-src": "'self'",
         "script-src": "'self' 'wasm-unsafe-eval'",

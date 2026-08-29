@@ -1,4 +1,11 @@
 import type { ImportInspectionDto, ImportTicketDto } from './import-contracts';
+import type { CharacterRenderProfileDto } from './portable-runtime-contracts';
+import type {
+    GetPortableRuntimeStateDto,
+    PortableRuntimeStateScopeInput,
+    PutPortableRuntimeStateInput,
+    PutPortableRuntimeStateResultDto,
+} from './portable-runtime-state-contracts';
 
 export type {
     ImportDynamicContentReviewDto,
@@ -8,9 +15,27 @@ export type {
     ImportRegexRuleReviewDto,
     ImportTicketDto,
 } from './import-contracts';
+export type {
+    CharacterDisplayTransformDto,
+    CharacterRenderAssetDto,
+    CharacterRenderProfileDto,
+    CharacterRuntimeKnowledgeDto,
+    CharacterRuntimeScriptDto,
+    PortableRuntimeCapabilityDto,
+} from './portable-runtime-contracts';
+export type {
+    GetPortableRuntimeStateDto,
+    GetPortableRuntimeStateInput,
+    PortableRuntimeStatePayloadDto,
+    PortableRuntimeStatePayloadValueDto,
+    PortableRuntimeStateRecordDto,
+    PortableRuntimeStateScopeInput,
+    PutPortableRuntimeStateInput,
+    PutPortableRuntimeStateResultDto,
+} from './portable-runtime-state-contracts';
 
-export const SUPPORTED_SHELL_API_VERSION = 2;
-export const SUPPORTED_CORE_API_VERSION = 9;
+export const SUPPORTED_SHELL_API_VERSION = 3;
+export const SUPPORTED_CORE_API_VERSION = 10;
 export const SUPPORTED_CHAT_EVENT_VERSION = 4;
 
 export type PlatformKind = 'android' | 'ios' | 'macos' | 'windows';
@@ -87,56 +112,6 @@ export interface CharacterGreetingCatalogDto {
         kind: 'default' | 'alternate';
         enabled: boolean;
     }[];
-}
-
-export interface CharacterRenderAssetDto {
-    asset_id: string;
-    aliases: string[];
-}
-
-export interface CharacterDisplayTransformDto {
-    pattern: string;
-    replacement: string;
-    flags: string;
-}
-
-export interface CharacterRuntimeScriptDto {
-    id: string;
-    name: string;
-    event: string;
-    language: string;
-    source: string;
-    elevated_access: boolean;
-}
-
-export interface CharacterRuntimeKnowledgeDto {
-    id: string;
-    name: string;
-    content: string;
-    enabled: boolean;
-    primary_keys: string[];
-    secondary_keys: string[];
-    constant: boolean;
-    selective: boolean;
-    case_sensitive: boolean;
-    whole_word: boolean;
-    use_regex: boolean;
-    probability_basis_points: number;
-    folder: boolean;
-}
-
-export interface CharacterRenderProfileDto {
-    character_id: string;
-    character_content_revision_id: string | null;
-    assets: CharacterRenderAssetDto[];
-    background_markup: string;
-    toggle_schema: string;
-    initial_variables: Record<string, string>;
-    output_transforms: CharacterDisplayTransformDto[];
-    display_transforms: CharacterDisplayTransformDto[];
-    runtime_scripts: CharacterRuntimeScriptDto[];
-    runtime_knowledge: CharacterRuntimeKnowledgeDto[];
-    runtime_script_count: number;
 }
 
 export interface CharacterGreetingSelectionInput {
@@ -3880,6 +3855,12 @@ export interface LorepiaClient {
     listMessages(conversationId: string): Promise<MessageDto[]>;
     generateRuntimeText?(input: GenerateRuntimeTextInput): Promise<RuntimeTextGenerationDto>;
     cancelRuntimeText?(requestId: string): Promise<boolean>;
+    getPortableRuntimeState?(
+        scope: PortableRuntimeStateScopeInput,
+    ): Promise<GetPortableRuntimeStateDto>;
+    putPortableRuntimeState?(
+        input: PutPortableRuntimeStateInput,
+    ): Promise<PutPortableRuntimeStateResultDto>;
     listInterruptedMemoryJobs(
         input: ListInterruptedMemoryJobsInput,
     ): Promise<InterruptedMemoryJobDto[]>;

@@ -1,4 +1,5 @@
 mod asset_delivery;
+mod connection_metrics;
 mod private_path;
 
 use std::{
@@ -47,6 +48,10 @@ use uuid::Uuid;
 
 use private_path::{harden_owned_tree_permissions, harden_private_path};
 
+pub(crate) use connection_metrics::DatabaseConnectionGuard;
+use connection_metrics::DatabaseConnectionMetricState;
+pub use connection_metrics::DatabaseConnectionMetrics;
+
 use crate::interaction_repository::{
     InteractionStateKey, clone_interaction_checkpoint_for_branch_transaction,
     interaction_state_key_for_branch, materialize_generation_attempt_interaction_for_append,
@@ -54,7 +59,7 @@ use crate::interaction_repository::{
 };
 use crate::verified_asset_cache::VerifiedAssetCache;
 
-pub(crate) const SCHEMA_VERSION: u32 = 39;
+pub(crate) const SCHEMA_VERSION: u32 = 40;
 const MIGRATION_0001: &str = include_str!("../migrations/0001_initial.sql");
 const MIGRATION_0002: &str = include_str!("../migrations/0002_import_asset_recovery.sql");
 const MIGRATION_0003: &str = include_str!("../migrations/0003_conversation_branches.sql");
@@ -117,6 +122,7 @@ const MIGRATION_0036: &str =
 const MIGRATION_0037: &str = include_str!("../migrations/0037_provider_credential_operations.sql");
 const MIGRATION_0038: &str = include_str!("../migrations/0038_conversation_speakers.sql");
 const MIGRATION_0039: &str = include_str!("../migrations/0039_runtime_model_audit.sql");
+const MIGRATION_0040: &str = include_str!("../migrations/0040_portable_runtime_state.sql");
 const LEGACY_PROVIDER_TEMPLATE_ID: &str = "custom-openai-chat-v1";
 const LEGACY_PROVIDER_TEMPLATE_VERSION: u32 = 1;
 const LEGACY_BASE_URL_CONFIG_KEY: &str = "api_base_url";
@@ -170,6 +176,14 @@ pub struct ApprovedAssetRange {
 
 pub struct Storage {
     root: PathBuf,
+    /// Serializes mutation of the shared source/asset CAS.
+    ///
+    /// Lock order is always `cas_mutation` -> `connection`. A CAS mutation
+    /// must never be started while the connection mutex is held. Startup
+    /// recovery mutates the same CAS before `Storage` becomes observable and
+    /// is additionally protected by the exclusive data-root owner lock.
+    cas_mutation: Mutex<()>,
+    connection_metrics: DatabaseConnectionMetricState,
     pub(crate) connection: Mutex<Connection>,
     verified_asset_cache: Mutex<VerifiedAssetCache>,
     #[cfg(test)]
@@ -321,6 +335,8 @@ impl Storage {
 
         let storage = Self {
             root,
+            cas_mutation: Mutex::new(()),
+            connection_metrics: DatabaseConnectionMetricState::default(),
             connection: Mutex::new(connection),
             verified_asset_cache: Mutex::new(VerifiedAssetCache::default()),
             #[cfg(test)]
@@ -346,6 +362,10 @@ impl Storage {
         &self.root
     }
 
+    pub fn database_connection_metrics(&self) -> DatabaseConnectionMetrics {
+        self.connection_metrics.snapshot()
+    }
+
     pub fn staging_dir(&self) -> PathBuf {
         self.root.join("staging")
     }
@@ -362,6 +382,23 @@ impl Storage {
         source_sha256: &str,
         source_size: u64,
     ) -> CoreResult<PathBuf> {
+        self.promote_package_source_observed(
+            import_id,
+            staged_path,
+            source_sha256,
+            source_size,
+            || {},
+        )
+    }
+
+    fn promote_package_source_observed(
+        &self,
+        import_id: &str,
+        staged_path: &Path,
+        source_sha256: &str,
+        source_size: u64,
+        before_file_publication: impl FnOnce(),
+    ) -> CoreResult<PathBuf> {
         validate_package_promotion_import_id(import_id)?;
         let staged_path = validate_owned_staged_file(&self.root, staged_path)?;
         let relative_path = content_relative_path(source_sha256)?;
@@ -374,24 +411,29 @@ impl Storage {
             media_type: None,
             relative_path: format!("sources/{relative_path}"),
         };
-        // Hold the repository connection lock while publishing the file and
-        // registering it. This closes the query/remove race in compensation
-        // against another promotion through the same owned Storage instance.
-        let mut connection = self.connection()?;
-        ensure_package_cas_promotion_intents(&mut connection, std::slice::from_ref(&intent))?;
-        let store_result = store_verified_source(
+        // CAS mutation is the outer lock. The durable intent is committed in a
+        // short DB phase, then the connection mutex is deliberately released
+        // while copy/hash/fsync publishes the immutable file.
+        let _cas_mutation = self.cas_mutation()?;
+        {
+            let mut connection = self.connection()?;
+            ensure_package_cas_promotion_intents(&mut connection, std::slice::from_ref(&intent))?;
+        }
+        let store_result = store_verified_source_observed(
             &staged_path,
             &final_path,
             &self.root.join("sources/sha256"),
             source_sha256,
             source_size,
+            before_file_publication,
         );
         if let Err(error) = store_result {
-            cleanup_package_cas_promotion(&self.root, &mut connection, &intent)?;
+            cleanup_package_cas_promotion(self, &_cas_mutation, &intent)?;
             return Err(error);
         }
-        mark_package_cas_file_durable(&connection, &intent)?;
-        let registration = (|| {
+        let registration = (|| -> CoreResult<()> {
+            let mut connection = self.connection()?;
+            mark_package_cas_file_durable(&connection, &intent)?;
             let transaction = connection
                 .transaction_with_behavior(TransactionBehavior::Immediate)
                 .map_err(storage_db_error)?;
@@ -427,7 +469,7 @@ impl Storage {
             transaction.commit().map_err(storage_db_error)
         })();
         if let Err(error) = registration {
-            cleanup_package_cas_promotion(&self.root, &mut connection, &intent)?;
+            cleanup_package_cas_promotion(self, &_cas_mutation, &intent)?;
             return Err(error);
         }
         verify_file(&final_path, source_sha256, source_size)?;
@@ -442,23 +484,29 @@ impl Storage {
     ) -> CoreResult<PathBuf> {
         let relative = content_relative_path(source_sha256)?;
         let expected_relative = format!("sources/{relative}");
-        let connection = self.connection()?;
-        let stored = connection
-            .query_row(
-                "SELECT relative_path, size_bytes
-                 FROM content_sources WHERE sha256 = ?1",
-                [source_sha256],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
-            )
-            .optional()
-            .map_err(storage_db_error)?
-            .ok_or_else(|| {
-                CoreError::new(
-                    CoreErrorCode::NotFound,
-                    "durable package source was not found",
-                    false,
+        // Keep cleanup and publication excluded while the DB identity snapshot
+        // is revalidated against its immutable file, but release SQLite before
+        // opening and hashing that file.
+        let _cas_mutation = self.cas_mutation()?;
+        let stored = {
+            let connection = self.connection()?;
+            connection
+                .query_row(
+                    "SELECT relative_path, size_bytes
+                     FROM content_sources WHERE sha256 = ?1",
+                    [source_sha256],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
                 )
-            })?;
+                .optional()
+                .map_err(storage_db_error)?
+                .ok_or_else(|| {
+                    CoreError::new(
+                        CoreErrorCode::NotFound,
+                        "durable package source was not found",
+                        false,
+                    )
+                })?
+        };
         if stored.0 != expected_relative
             || i64_to_u64("package source size", stored.1)? != source_size
         {
@@ -500,10 +548,14 @@ impl Storage {
                 relative_path: format!("assets/{relative}"),
             });
         }
-        // Serialize file publication and row registration for this owned data
-        // root so compensation cannot race another package promotion.
-        let mut connection = self.connection()?;
-        ensure_package_cas_promotion_intents(&mut connection, &intents)?;
+        // Package and legacy character imports share these CAS roots. Keep
+        // their file mutations serialized while releasing the DB mutex for
+        // file copy, hashing, signature inspection, and fsync.
+        let _cas_mutation = self.cas_mutation()?;
+        {
+            let mut connection = self.connection()?;
+            ensure_package_cas_promotion_intents(&mut connection, &intents)?;
+        }
         for (asset, intent) in staged_assets.iter().zip(&intents) {
             let staged_path = validate_owned_staged_file(&self.root, &asset.staged_path)?;
             let relative = content_relative_path(&asset.sha256)?;
@@ -516,20 +568,23 @@ impl Storage {
                 asset.size_bytes,
             ) {
                 for cleanup in &intents {
-                    cleanup_package_cas_promotion(&self.root, &mut connection, cleanup)?;
+                    cleanup_package_cas_promotion(self, &_cas_mutation, cleanup)?;
                 }
                 return Err(error);
             }
-            mark_package_cas_file_durable(&connection, intent)?;
             if let Err(error) = verify_media_type_signature(&final_path, &asset.media_type) {
                 for cleanup in &intents {
-                    cleanup_package_cas_promotion(&self.root, &mut connection, cleanup)?;
+                    cleanup_package_cas_promotion(self, &_cas_mutation, cleanup)?;
                 }
                 return Err(error);
             }
             promoted.push((asset, intent, relative, final_path));
         }
-        let registration = (|| {
+        let registration = (|| -> CoreResult<()> {
+            let mut connection = self.connection()?;
+            for intent in &intents {
+                mark_package_cas_file_durable(&connection, intent)?;
+            }
             let transaction = connection
                 .transaction_with_behavior(TransactionBehavior::Immediate)
                 .map_err(storage_db_error)?;
@@ -576,7 +631,7 @@ impl Storage {
         })();
         if let Err(error) = registration {
             for cleanup in &intents {
-                cleanup_package_cas_promotion(&self.root, &mut connection, cleanup)?;
+                cleanup_package_cas_promotion(self, &_cas_mutation, cleanup)?;
             }
             return Err(error);
         }
@@ -598,8 +653,8 @@ impl Storage {
             media_type: None,
             relative_path: format!("sources/{relative}"),
         };
-        let mut connection = self.connection()?;
-        cleanup_package_cas_promotion(&self.root, &mut connection, &intent)
+        let _cas_mutation = self.cas_mutation()?;
+        cleanup_package_cas_promotion(self, &_cas_mutation, &intent)
     }
 
     pub(crate) fn cleanup_package_asset_promotions(
@@ -628,9 +683,9 @@ impl Storage {
                 })
             })
             .collect::<CoreResult<Vec<_>>>()?;
-        let mut connection = self.connection()?;
+        let _cas_mutation = self.cas_mutation()?;
         intents.into_iter().try_fold(0_u64, |removed, intent| {
-            let was_removed = cleanup_package_cas_promotion(&self.root, &mut connection, &intent)?;
+            let was_removed = cleanup_package_cas_promotion(self, &_cas_mutation, &intent)?;
             removed
                 .checked_add(u64::from(was_removed))
                 .ok_or_else(|| CoreError::internal("package asset cleanup count overflow"))
@@ -643,27 +698,30 @@ impl Storage {
     ) -> CoreResult<()> {
         let relative = content_relative_path(descriptor.sha256.as_str())?;
         let expected_relative = format!("assets/{relative}");
-        let connection = self.connection()?;
-        let stored = connection
-            .query_row(
-                "SELECT relative_path, media_type, size_bytes
-                 FROM assets WHERE sha256 = ?1",
-                [descriptor.sha256.as_str()],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, i64>(2)?,
-                    ))
-                },
-            )
-            .optional()
-            .map_err(storage_db_error)?
-            .ok_or_else(|| {
-                CoreError::invalid(
-                    "package asset bytes must be durable in content-addressed storage first",
+        let _cas_mutation = self.cas_mutation()?;
+        let stored = {
+            let connection = self.connection()?;
+            connection
+                .query_row(
+                    "SELECT relative_path, media_type, size_bytes
+                     FROM assets WHERE sha256 = ?1",
+                    [descriptor.sha256.as_str()],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, i64>(2)?,
+                        ))
+                    },
                 )
-            })?;
+                .optional()
+                .map_err(storage_db_error)?
+                .ok_or_else(|| {
+                    CoreError::invalid(
+                        "package asset bytes must be durable in content-addressed storage first",
+                    )
+                })?
+        };
         if stored.0 != expected_relative
             || stored.1 != descriptor.media_type
             || i64_to_u64("package asset size", stored.2)? != descriptor.size_bytes
@@ -756,6 +814,7 @@ impl Storage {
         mut observe: impl FnMut(ImportCommitPhase),
     ) -> CoreResult<()> {
         validate_staged_assets(character, staged_assets)?;
+        let _cas_mutation = self.cas_mutation()?;
         self.create_import_journal(staged_path, character, import_job_id, staged_assets)?;
         observe(ImportCommitPhase::JournalCreated);
         self.store_import_files(staged_path, character, source_size, staged_assets)?;
@@ -785,6 +844,7 @@ impl Storage {
         mut observe: impl FnMut(ImportCommitPhase),
     ) -> CoreResult<()> {
         validate_staged_assets(character, staged_assets)?;
+        let _cas_mutation = self.cas_mutation()?;
         self.create_import_journal(staged_path, character, import_job_id, staged_assets)?;
         observe(ImportCommitPhase::JournalCreated);
         self.store_import_files(staged_path, character, source_size, staged_assets)?;
@@ -2082,6 +2142,12 @@ impl Storage {
         if changed != 1 {
             return Err(stale_branch_error());
         }
+        crate::portable_runtime_state::invalidate_portable_runtime_state_for_branch_transaction(
+            &transaction,
+            &conversation_id.0,
+            &branch_id.0,
+            invalidated_at,
+        )?;
         transaction
             .execute(
                 "UPDATE conversation_state
@@ -3407,11 +3473,15 @@ impl Storage {
         })
     }
 
-    pub(crate) fn connection(&self) -> CoreResult<MutexGuard<'_, Connection>> {
-        self.connection.lock().map_err(|_| {
+    pub(crate) fn connection(&self) -> CoreResult<DatabaseConnectionGuard<'_>> {
+        self.connection_metrics.acquire(&self.connection)
+    }
+
+    pub(super) fn cas_mutation(&self) -> CoreResult<MutexGuard<'_, ()>> {
+        self.cas_mutation.lock().map_err(|_| {
             CoreError::new(
                 CoreErrorCode::StorageUnavailable,
-                "database lock was poisoned",
+                "CAS mutation lock was poisoned",
                 true,
             )
         })
@@ -4390,23 +4460,33 @@ fn package_cas_product_reference_exists(
 }
 
 fn cleanup_package_cas_promotion(
-    root: &Path,
-    connection: &mut Connection,
+    storage: &Storage,
+    _cas_mutation: &MutexGuard<'_, ()>,
     intent: &PackageCasPromotionIntent,
 ) -> CoreResult<bool> {
     validate_package_cas_promotion_intent(intent)?;
-    if !prepare_package_cas_cleanup(connection, intent)? {
+    let should_remove = {
+        let mut connection = storage.connection()?;
+        prepare_package_cas_cleanup(&mut connection, intent)?
+    };
+    if !should_remove {
         return Ok(false);
     }
-    let removed = remove_package_cas_file(root, intent)?;
-    connection
-        .execute(
-            "DELETE FROM package_cas_promotion_journal
-             WHERE import_id = ?1 AND namespace = ?2 AND sha256 = ?3
-               AND phase = 'cleanup_pending'",
-            params![intent.import_id, intent.namespace, intent.sha256],
-        )
-        .map_err(storage_db_error)?;
+    // The committed cleanup_pending phase is the recovery authority. The CAS
+    // guard prevents a writer/read-validation race while file verification,
+    // removal, and directory fsync run without holding the SQLite mutex.
+    let removed = remove_package_cas_file(&storage.root, intent)?;
+    {
+        let connection = storage.connection()?;
+        connection
+            .execute(
+                "DELETE FROM package_cas_promotion_journal
+                 WHERE import_id = ?1 AND namespace = ?2 AND sha256 = ?3
+                   AND phase = 'cleanup_pending'",
+                params![intent.import_id, intent.namespace, intent.sha256],
+            )
+            .map_err(storage_db_error)?;
+    }
     Ok(removed)
 }
 
@@ -5249,6 +5329,13 @@ pub(crate) fn apply_migrations(connection: &mut Connection) -> CoreResult<()> {
         39,
         MIGRATION_0039,
         "portable runtime model audit",
+    )?;
+    apply_checked_migration(
+        connection,
+        current_version,
+        40,
+        MIGRATION_0040,
+        "portable runtime state",
     )?;
     read_current_schema_version(connection)?;
     Ok(())
@@ -10328,6 +10415,24 @@ fn store_verified_source(
     expected_sha256: &str,
     expected_size: u64,
 ) -> CoreResult<bool> {
+    store_verified_source_observed(
+        source,
+        final_path,
+        cas_root,
+        expected_sha256,
+        expected_size,
+        || {},
+    )
+}
+
+fn store_verified_source_observed(
+    source: &Path,
+    final_path: &Path,
+    cas_root: &Path,
+    expected_sha256: &str,
+    expected_size: u64,
+    before_file_copy: impl FnOnce(),
+) -> CoreResult<bool> {
     let parent = final_path
         .parent()
         .ok_or_else(|| CoreError::internal("source path has no parent"))?;
@@ -10349,6 +10454,7 @@ fn store_verified_source(
     }
 
     let temp_path = parent.join(format!(".{}.partial", Uuid::new_v4()));
+    before_file_copy();
     let copy_result = copy_and_hash(source, &temp_path);
     let (actual_sha256, actual_size) = match copy_result {
         Ok(result) => result,
@@ -17976,14 +18082,11 @@ mod tests {
                 std::slice::from_ref(&intent),
             )
             .expect("persist same-digest cleanup intent");
+            let cas_mutation = storage.cas_mutation().expect("CAS mutation guard");
 
             assert!(
-                !cleanup_package_cas_promotion(
-                    storage.data_root(),
-                    &mut storage.connection().expect("active database"),
-                    &intent,
-                )
-                .expect("clean up active-only package promotion"),
+                !cleanup_package_cas_promotion(&storage, &cas_mutation, &intent)
+                    .expect("clean up active-only package promotion"),
                 "a canonical rollback pin is retained rather than physically removed"
             );
             assert!(

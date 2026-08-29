@@ -6077,7 +6077,7 @@ pub fn provider_discovery_action_envelope(
 }
 
 impl crate::app::Core {
-    fn provider_discovery(&self) -> ProviderDiscoveryOrchestrator<'_> {
+    pub(crate) fn provider_discovery(&self) -> ProviderDiscoveryOrchestrator<'_> {
         ProviderDiscoveryOrchestrator::new(
             self.storage(),
             self.runtime_handle(),
@@ -6225,13 +6225,6 @@ impl crate::app::Core {
         session_id: &DiscoverySessionId,
     ) -> CoreResult<DiscoverySessionSnapshot> {
         self.provider_discovery().get(session_id)
-    }
-
-    pub fn list_provider_discovery_candidates(
-        &self,
-        session_id: &DiscoverySessionId,
-    ) -> CoreResult<Vec<StoredDiscoveryCandidate>> {
-        self.provider_discovery().candidates(session_id)
     }
 
     pub fn list_provider_discovery_evidence(
@@ -7694,19 +7687,11 @@ mod policy_tests {
         const MIGRATION_0037: &str =
             include_str!("../../storage/migrations/0037_provider_credential_operations.sql");
 
-        const MIGRATION_0038: &str =
-            include_str!("../../storage/migrations/0038_conversation_speakers.sql");
-        const MIGRATION_0039: &str =
-            include_str!("../../storage/migrations/0039_runtime_model_audit.sql");
-
         let connection = rusqlite::Connection::open(database).expect("open current database");
         connection
             .execute_batch("PRAGMA foreign_keys = OFF; BEGIN IMMEDIATE;")
             .expect("begin exact schema-37 inverse");
-        schema_fixture::drop_additive_migrations(
-            &connection,
-            &[(39, MIGRATION_0039), (38, MIGRATION_0038)],
-        );
+        schema_fixture::drop_post_schema_37_additive_migrations(&connection);
         for trigger_name in [
             "provider_discovery_native_no_effect_attestation_binding",
             "provider_discovery_operation_legal_transition",
@@ -9063,7 +9048,7 @@ mod policy_tests {
         .expect("upgrade genuine schema-36 Started cancellation");
         assert_eq!(
             upgraded.storage().schema_version().expect("schema version"),
-            39
+            40
         );
         upgraded
             .get_provider_discovery_credential_install_context(&committing.session.id)

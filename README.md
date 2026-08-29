@@ -70,7 +70,7 @@ npm run check --prefix apps/lorepia && npm run test --prefix apps/lorepia
 배포 번들 (`bundle.active`가 켜진 릴리즈 설정 사용):
 
 ```bash
-npm run tauri build --prefix apps/lorepia -- --config tauri.release.conf.json
+npm run tauri build --prefix apps/lorepia -- --config src-tauri/tauri.release.conf.json
 ```
 
 ## 데이터가 저장되는 곳

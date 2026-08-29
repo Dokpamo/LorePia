@@ -38,9 +38,9 @@ const BASELINE_SHA = 'c'.repeat(64);
 
 export const DEMO_BOOTSTRAP: BootstrapDto = {
     app_version: '0.1.0-demo',
-    shell_api_version: 2,
+    shell_api_version: 3,
     core_version: '0.1.0-demo',
-    core_api_version: 9,
+    core_api_version: 10,
     chat_event_version: 4,
     creator_schema_version: 1,
     platform: 'macos',

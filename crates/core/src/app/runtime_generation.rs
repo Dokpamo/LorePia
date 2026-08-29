@@ -290,3 +290,129 @@ fn finish_runtime_model_audit(storage: &Storage, request_id: &str, outcome: &Tas
         completed_at: Utc::now(),
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use async_trait::async_trait;
+    use lorepia_domain::ProviderCapabilities;
+    use lorepia_providers::ProviderEventSender;
+    use tokio::sync::watch;
+
+    use super::*;
+
+    struct CancellationTeardownBarrierProvider {
+        entered: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+        cancellation_seen: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+        release: Mutex<Option<tokio::sync::oneshot::Receiver<()>>>,
+    }
+
+    #[async_trait]
+    impl Provider for CancellationTeardownBarrierProvider {
+        fn capabilities(&self) -> ProviderCapabilities {
+            ProviderCapabilities {
+                streaming: true,
+                reasoning: false,
+                max_context_tokens: None,
+            }
+        }
+
+        async fn generate(
+            &self,
+            _request: GenerationRequest,
+            _credential: Option<&str>,
+            _sink: ProviderEventSender,
+            mut cancelled: watch::Receiver<bool>,
+        ) -> CoreResult<GenerationUsage> {
+            if let Some(entered) = self.entered.lock().expect("teardown entered lock").take() {
+                let _ = entered.send(());
+            }
+            while !*cancelled.borrow() {
+                cancelled
+                    .changed()
+                    .await
+                    .map_err(|_| CoreError::internal("teardown cancellation sender dropped"))?;
+            }
+            if let Some(cancellation_seen) = self
+                .cancellation_seen
+                .lock()
+                .expect("teardown cancellation lock")
+                .take()
+            {
+                let _ = cancellation_seen.send(());
+            }
+            let release = self
+                .release
+                .lock()
+                .expect("teardown release lock")
+                .take()
+                .expect("teardown release receiver");
+            release
+                .await
+                .map_err(|_| CoreError::internal("teardown release sender dropped"))?;
+            Err(CoreError::new(
+                CoreErrorCode::Cancelled,
+                "cooperative provider completed cancellation teardown",
+                false,
+            ))
+        }
+    }
+
+    #[tokio::test]
+    async fn cancelled_dispatch_waits_for_cooperative_provider_teardown_within_grace() {
+        let (entered_sender, entered_receiver) = tokio::sync::oneshot::channel();
+        let (cancellation_seen_sender, cancellation_seen_receiver) =
+            tokio::sync::oneshot::channel();
+        let (release_sender, release_receiver) = tokio::sync::oneshot::channel();
+        let provider = Arc::new(CancellationTeardownBarrierProvider {
+            entered: Mutex::new(Some(entered_sender)),
+            cancellation_seen: Mutex::new(Some(cancellation_seen_sender)),
+            release: Mutex::new(Some(release_receiver)),
+        });
+        let request = runtime_generation_request(
+            "cancellation-teardown-barrier-model".to_owned(),
+            vec![RuntimePromptMessage {
+                role: MessageRole::User,
+                content: "bounded prompt".to_owned(),
+            }],
+            Some(RUNTIME_MAX_OUTPUT_TOKENS),
+            None,
+        );
+        let (cancel_sender, cancelled) = watch::channel(false);
+        let dispatch = tokio::spawn(dispatch_auxiliary_task_provider(
+            provider,
+            request,
+            ConnectionBoundCredential::new(
+                ProviderConnectionId::from("cancellation-teardown-barrier-connection"),
+                None,
+            ),
+            5_000,
+            cancelled,
+        ));
+
+        entered_receiver.await.expect("provider dispatch entered");
+        cancel_sender.send(true).expect("cancel provider dispatch");
+        cancellation_seen_receiver
+            .await
+            .expect("provider observes cancellation signal");
+        assert!(
+            !dispatch.is_finished(),
+            "native dispatch must await provider teardown before becoming terminal"
+        );
+        release_sender
+            .send(())
+            .expect("release provider cancellation teardown");
+        let outcome = dispatch.await.expect("join cancelled provider dispatch");
+        assert!(matches!(
+            outcome,
+            TaskExecutionOutcome::Failed {
+                classification: TaskDispatchClassification::UnknownOutcome,
+                error: CoreError {
+                    code: CoreErrorCode::Cancelled,
+                    ..
+                },
+            }
+        ));
+    }
+}

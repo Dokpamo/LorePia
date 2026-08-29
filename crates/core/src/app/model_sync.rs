@@ -739,7 +739,7 @@ mod tests {
         core: &Core,
         connection_id: &ProviderConnectionId,
         kind: ProviderCredentialOperationKind,
-    ) -> CoreResult<lorepia_storage::StoredProviderCredentialOperation> {
+    ) -> CoreResult<crate::ProviderCredentialOperationView> {
         core.prepare_provider_credential_operation(
             connection_id,
             kind,

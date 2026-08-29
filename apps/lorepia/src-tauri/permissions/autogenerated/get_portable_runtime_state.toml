@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-portable-runtime-state"
+description = "Enables the get_portable_runtime_state command without any pre-configured scope."
+commands.allow = ["get_portable_runtime_state"]
+
+[[permission]]
+identifier = "deny-get-portable-runtime-state"
+description = "Denies the get_portable_runtime_state command without any pre-configured scope."
+commands.deny = ["get_portable_runtime_state"]

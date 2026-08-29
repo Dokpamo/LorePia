@@ -1,3 +1,5 @@
+import type { PortableRuntimeCapabilityDto } from './portable-runtime-contracts';
+
 export interface ImportTicketDto {
     ticket_id: string;
     display_name: string;
@@ -27,6 +29,8 @@ export interface ImportRegexRuleReviewDto {
 export interface ImportDynamicContentReviewDto {
     runtime_script_count: number;
     elevated_runtime_script_count: number;
+    required_runtime_capabilities: PortableRuntimeCapabilityDto[];
+    runtime_capabilities_declared: boolean;
     regex_rule_count: number;
     enabled_regex_rule_count: number;
     model_calls_possible: boolean;

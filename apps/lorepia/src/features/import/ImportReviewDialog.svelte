@@ -179,6 +179,18 @@
                                 })}
                             </li>
                         {/if}
+                        {#if inspection.dynamic_content.runtime_capabilities_declared}
+                            <li>
+                                {$tr('import.dynamic.capabilities', {
+                                    capabilities:
+                                        inspection.dynamic_content.required_runtime_capabilities.join(
+                                            ', ',
+                                        ) || $tr('import.dynamic.capabilities.none'),
+                                })}
+                            </li>
+                        {:else if inspection.dynamic_content.runtime_script_count > 0}
+                            <li>{$tr('import.dynamic.capabilities.legacy')}</li>
+                        {/if}
                         {#if inspection.dynamic_content.model_calls_possible}
                             <li>{$tr('import.dynamic.model')}</li>
                         {/if}

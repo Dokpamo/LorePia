@@ -28,6 +28,8 @@ describe('ImportReviewDialog dynamic content review', () => {
                     dynamic_content: {
                         runtime_script_count: 1,
                         elevated_runtime_script_count: 1,
+                        required_runtime_capabilities: ['runtime:callbacks', 'model:primary'],
+                        runtime_capabilities_declared: true,
                         regex_rule_count: 2,
                         enabled_regex_rule_count: 2,
                         model_calls_possible: true,

@@ -12,7 +12,7 @@ fn opens_reports_health_and_reopens_the_same_data_root() {
     assert!(health.data_root_writable);
     assert!(health.staging_writable);
     assert!(!health.recovery_pending);
-    assert_eq!(CORE_API_VERSION, 9);
+    assert_eq!(CORE_API_VERSION, 10);
 
     drop(core);
     let reopened = Core::open(CoreConfig::new(root.path())).expect("reopen core");

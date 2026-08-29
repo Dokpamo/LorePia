@@ -146,6 +146,27 @@ function renderChatWithSettings(
     return { controller, sendMessage, orchestrationController };
 }
 
+function portableRuntimeStub(close: () => void = vi.fn()): PortableCharacterRuntime {
+    return {
+        toggles: [],
+        generationVariables: {},
+        variables: {},
+        backgroundMarkup: '',
+        auxiliarySelection: null,
+        optionValue: vi.fn().mockReturnValue(''),
+        setOption: vi.fn().mockResolvedValue(undefined),
+        setAuxiliarySelection: vi.fn(),
+        setMessages: vi.fn(),
+        refreshDisplay: vi.fn().mockResolvedValue(undefined),
+        prepareInput: vi.fn((text: string) => Promise.resolve({ text, shouldSend: true })),
+        afterOutput: vi.fn().mockResolvedValue(undefined),
+        handleAction: vi.fn().mockResolvedValue(undefined),
+        displayText: (message: MessageDto) => message.content,
+        effectiveText: (message: MessageDto) => message.content,
+        close,
+    } as unknown as PortableCharacterRuntime;
+}
+
 async function swipePointer(
     target: Element,
     {
@@ -1220,6 +1241,8 @@ describe('ChatPane composer', () => {
             output_transforms: [],
             display_transforms: [],
             runtime_scripts: [],
+            required_runtime_capabilities: [],
+            runtime_capabilities_declared: false,
             runtime_knowledge: [],
             runtime_script_count: 0,
         };
@@ -1228,6 +1251,8 @@ describe('ChatPane composer', () => {
             character_id: 'character-2',
             character_content_revision_id: 'revision-b',
             background_markup: '<div>PROFILE-B</div>',
+            required_runtime_capabilities: ['runtime:callbacks', 'elevated'],
+            runtime_capabilities_declared: true,
             runtime_scripts: [
                 {
                     id: 'script-b',
@@ -1338,6 +1363,8 @@ describe('ChatPane composer', () => {
                 },
             ],
             runtime_scripts: [],
+            required_runtime_capabilities: [],
+            runtime_capabilities_declared: false,
             runtime_knowledge: [],
             runtime_script_count: 0,
         };
@@ -1362,8 +1389,7 @@ describe('ChatPane composer', () => {
 
         await fireEvent.click(screen.getByRole('button', { name: '대화 설정' }));
         const chatRead = await screen.findByRole('checkbox', { name: '현재 대화 읽기' });
-        expect(chatRead).toBeChecked();
-        await fireEvent.click(chatRead);
+        expect(chatRead).not.toBeChecked();
         await fireEvent.click(
             screen.getByRole('button', { name: '선택한 기능만 이번 세션에서 허용' }),
         );
@@ -1405,6 +1431,8 @@ describe('ChatPane composer', () => {
                     elevated_access: false,
                 },
             ],
+            required_runtime_capabilities: [],
+            runtime_capabilities_declared: false,
             runtime_knowledge: [],
             runtime_script_count: 1,
         };
@@ -1421,8 +1449,10 @@ describe('ChatPane composer', () => {
         await screen.findByRole('button', {
             name: '선택한 기능만 이번 세션에서 허용',
         });
-        expect(screen.getByRole('checkbox', { name: '현재 기본 모델 호출' })).not.toBeChecked();
-        expect(screen.getByRole('checkbox', { name: '선택한 보조 모델 호출' })).not.toBeChecked();
+        expect(screen.queryByRole('checkbox', { name: '현재 기본 모델 호출' })).toBeNull();
+        expect(screen.queryByRole('checkbox', { name: '선택한 보조 모델 호출' })).toBeNull();
+        expect(screen.getByRole('checkbox', { name: '카드 콜백 실행' })).toBeChecked();
+        expect(screen.getByRole('checkbox', { name: '카드 UI·배경·알림 표시' })).toBeChecked();
         const composer = screen.getByRole('textbox', { name: '메시지' });
         await fireEvent.input(composer, { target: { value: '안전 모드 대화' } });
         await fireEvent.click(screen.getByRole('button', { name: '메시지 보내기' }));
@@ -1453,6 +1483,8 @@ describe('ChatPane composer', () => {
                     elevated_access: false,
                 },
             ],
+            required_runtime_capabilities: [],
+            runtime_capabilities_declared: false,
             runtime_knowledge: [],
             runtime_script_count: 1,
         };
@@ -1518,6 +1550,84 @@ describe('ChatPane composer', () => {
                 ],
             }),
         );
+        controller.destroy();
+        orchestrationController.destroy();
+    });
+
+    it.each([
+        [
+            'recreates the portable runtime after a refreshed same-branch rewind',
+            { mutationCommitted: true, messagesRefreshed: true },
+        ],
+        [
+            'recreates the portable runtime when rewind committed but readback failed',
+            { mutationCommitted: true, messagesRefreshed: false },
+        ],
+    ] as const)('%s', async (_label, removalResult) => {
+        const appState = chatReadyState();
+        appState.messages.items = [
+            {
+                id: 'assistant-1',
+                conversation_id: 'conversation-1',
+                parent_id: null,
+                role: 'assistant',
+                content: '되감기 대상',
+                status: 'complete',
+                generation_id: 'generation-1',
+                created_at: '2026-08-29T00:00:00Z',
+            },
+        ];
+        const profile: CharacterRenderProfileDto = {
+            character_id: 'character-1',
+            character_content_revision_id: 'revision-1',
+            assets: [],
+            background_markup: '',
+            toggle_schema: '',
+            initial_variables: {},
+            output_transforms: [],
+            display_transforms: [],
+            runtime_scripts: [
+                {
+                    id: 'script-1',
+                    name: 'Runtime',
+                    event: 'load',
+                    language: 'lua',
+                    source: '-- no-op',
+                    elevated_access: false,
+                },
+            ],
+            required_runtime_capabilities: [],
+            runtime_capabilities_declared: false,
+            runtime_knowledge: [],
+            runtime_script_count: 1,
+        };
+        const firstRuntimeClose = vi.fn();
+        const firstRuntime = portableRuntimeStub(firstRuntimeClose);
+        const secondRuntime = portableRuntimeStub();
+        const createRuntime = vi
+            .spyOn(PortableCharacterRuntime, 'create')
+            .mockResolvedValueOnce(firstRuntime)
+            .mockResolvedValueOnce(secondRuntime);
+        const client = {
+            getCharacterRenderProfile: vi.fn().mockResolvedValue(profile),
+        } as unknown as LorepiaClient;
+        const { controller, orchestrationController } = renderChatWithSettings(appState, client);
+        const removeMessage = vi
+            .spyOn(controller, 'removeMessage')
+            .mockResolvedValue(removalResult);
+
+        await fireEvent.click(screen.getByRole('button', { name: '대화 설정' }));
+        await fireEvent.click(
+            await screen.findByRole('button', { name: '선택한 기능만 이번 세션에서 허용' }),
+        );
+        await waitFor(() => expect(createRuntime).toHaveBeenCalledTimes(1));
+
+        await fireEvent.click(screen.getByRole('button', { name: '여기부터 제거' }));
+        await fireEvent.click(screen.getByRole('button', { name: '제거 확인' }));
+
+        await waitFor(() => expect(removeMessage).toHaveBeenCalledWith('assistant-1'));
+        await waitFor(() => expect(createRuntime).toHaveBeenCalledTimes(2));
+        expect(firstRuntimeClose).toHaveBeenCalledOnce();
         controller.destroy();
         orchestrationController.destroy();
     });
@@ -2814,7 +2924,10 @@ describe('ChatPane composer', () => {
             .spyOn(controller, 'regenerateAssistantMessage')
             .mockResolvedValue(true);
         const createBranch = vi.spyOn(controller, 'createBranch').mockResolvedValue();
-        const remove = vi.spyOn(controller, 'removeMessage').mockResolvedValue();
+        const remove = vi.spyOn(controller, 'removeMessage').mockResolvedValue({
+            mutationCommitted: true,
+            messagesRefreshed: true,
+        });
         const writeText = vi.fn().mockResolvedValue(undefined);
         Object.defineProperty(navigator, 'clipboard', {
             configurable: true,
