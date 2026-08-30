@@ -916,7 +916,7 @@
       }
     },
     "STOR-DB-003": {
-      "baseline_context_bytes": 517177,
+      "baseline_context_bytes": 469362,
       "commands": [
         "cargo test -p lorepia-storage --lib database::tests",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
@@ -931,12 +931,16 @@
           "crates/storage/src/database.rs"
         ],
         "implementation": [
-          "crates/storage/src/database/asset_delivery.rs",
-          "crates/storage/src/database/bootstrap.rs",
-          "crates/storage/src/database/connection.rs",
-          "crates/storage/src/database/connection_metrics.rs",
-          "crates/storage/src/database/migration_provider_v4.rs",
-          "crates/storage/src/database/migration_runner.rs"
+          "crates/storage/src/database/capability_observations.rs",
+          "crates/storage/src/database/character_catalog.rs",
+          "crates/storage/src/database/generation_presets.rs",
+          "crates/storage/src/database/health.rs",
+          "crates/storage/src/database/model_routes.rs",
+          "crates/storage/src/database/provider_catalog.rs",
+          "crates/storage/src/database/provider_connections.rs",
+          "crates/storage/src/database/provider_validation.rs",
+          "crates/storage/src/database/settings.rs",
+          "crates/storage/src/database/stats.rs"
         ],
         "tests": [
           "crates/storage/tests/schema11_release_cutover.rs"
