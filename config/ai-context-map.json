@@ -1095,6 +1095,7 @@
       "baseline_context_bytes": 670434,
       "commands": [
         "cargo test -p lorepia-storage --lib database::tests",
+        "cargo test -p lorepia-storage --lib interaction_repository::tests",
         "cargo test -p lorepia-storage --test interaction_derived_event_storage",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
@@ -1112,6 +1113,8 @@
         "implementation": [
           "crates/storage/src/database/action.rs",
           "crates/storage/src/database/finalize.rs",
+          "crates/storage/src/interaction_repository/effects.rs",
+          "crates/storage/src/interaction_repository/event_transactions.rs",
           "crates/storage/src/message_display_projection.rs"
         ],
         "tests": [
