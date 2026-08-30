@@ -1,11 +1,12 @@
 use std::{
     collections::{HashMap, HashSet},
-    fs::{self, File, OpenOptions},
-    io::{BufReader, Read, Write},
-    path::{Path, PathBuf},
-    sync::{Arc, Mutex, RwLock},
+    fs::{self, OpenOptions},
+    path::Path,
+    sync::{Arc, Mutex},
     time::Duration,
 };
+#[cfg(test)]
+use std::{fs::File, path::PathBuf};
 
 use crate::{
     CoreConfig, DiscoveryRecoveryOwner, Revisioned, catalog::PendingProviderCatalogImportPlan,
@@ -17,7 +18,6 @@ use lorepia_chat::MAX_GENERATED_OUTPUT_CHARS;
 use lorepia_chat::{
     ChatEvent, ChatEventKind, GenerationFailure, GenerationOutcome, run_generation,
 };
-use lorepia_content::{StagedAsset, prepare_import};
 #[cfg(test)]
 use lorepia_domain::{
     ApiFamily, BoundedJson, CanonicalOrigin, CapabilityKey, CapabilityObservation, CapabilityValue,
@@ -32,9 +32,8 @@ use lorepia_domain::{
 use lorepia_domain::{
     AppSettings, Character, CharacterContentV1, Conversation, ConversationBranch,
     ConversationBranchId, ConversationId, ConversationMode, ConversationState, CoreError,
-    CoreErrorCode, CoreResult, GenerationStatus, HealthReport, ImportInspection, ImportLimits,
-    InspectionId, Message, MessageId, MessageStatus, OpaqueReasoningState, Sha256Digest,
-    TransformPhase,
+    CoreErrorCode, CoreResult, GenerationStatus, HealthReport, Message, MessageId, MessageStatus,
+    OpaqueReasoningState, Sha256Digest, TransformPhase,
 };
 #[cfg(test)]
 use lorepia_providers::parameter_mapping::ReasoningWireDialect;
@@ -53,7 +52,7 @@ use lorepia_providers::{
 use lorepia_storage::{
     DatabaseStats, MessageDisplayProjectionWrite, MessageTransformApplicationWrite,
     MessageTransformDisposition, MessageTransformPipelineFailureWrite, MessageTransformStage,
-    StagedAssetImport, Storage,
+    Storage,
 };
 #[cfg(test)]
 use lorepia_storage::{MessageGenerationAction, ProviderCredentialAccessAuthority, StoredRevision};
@@ -71,6 +70,7 @@ use uuid::Uuid;
 mod generation;
 mod generation_events;
 mod generation_workflow;
+mod imports;
 mod model_sync;
 mod portable_runtime_state;
 mod providers;
@@ -116,6 +116,7 @@ use generation_workflow::{
     apply_generation_output_transforms, apply_generation_result, partial_checkpoint_due,
     transform_content_sha256,
 };
+use imports::PendingImportRegistry;
 use runtime_control::RuntimeControl;
 
 #[allow(
@@ -195,21 +196,12 @@ struct CoreInner {
     storage: Arc<Storage>,
     discovery_recovery_owner: DiscoveryRecoveryOwner,
     runtime: RuntimeControl,
-    pending_imports: RwLock<HashMap<InspectionId, PendingImport>>,
+    pending_imports: PendingImportRegistry,
     pending_catalog_import_plans: Mutex<HashMap<String, PendingProviderCatalogImportPlan>>,
     pending_discovery_credential_reservations: Mutex<HashSet<String>>,
     active_generations: Arc<GenerationRegistry>,
     active_model_syncs: Arc<model_sync::ModelSyncRegistry>,
     event_bus: broadcast::Sender<ChatEvent>,
-}
-
-#[derive(Clone)]
-struct PendingImport {
-    path: PathBuf,
-    inspection: ImportInspection,
-    character_content: CharacterContentV1,
-    plan_hash: String,
-    staged_assets: Vec<StagedAsset>,
 }
 
 impl Drop for CoreInner {
@@ -278,7 +270,7 @@ impl Core {
                 storage,
                 discovery_recovery_owner: recovery_owner,
                 runtime,
-                pending_imports: RwLock::new(HashMap::new()),
+                pending_imports: PendingImportRegistry::new(HashMap::new()),
                 pending_catalog_import_plans: Mutex::new(HashMap::new()),
                 pending_discovery_credential_reservations: Mutex::new(HashSet::new()),
                 active_generations: Arc::new(GenerationRegistry::default()),
@@ -398,144 +390,6 @@ impl Core {
 
     pub(crate) fn runtime_handle(&self) -> &Handle {
         self.inner.runtime.handle()
-    }
-
-    pub fn inspect_import(&self, staged_path: impl AsRef<Path>) -> CoreResult<ImportInspection> {
-        let limits = ImportLimits::default();
-        let snapshot = snapshot_import_source(
-            staged_path.as_ref(),
-            &self.inner.storage.staging_dir(),
-            limits.max_source_bytes,
-        )?;
-        let prepared = match prepare_import(&snapshot, limits, &self.inner.storage.staging_dir()) {
-            Ok(prepared) => prepared,
-            Err(error) => {
-                let _ = fs::remove_file(&snapshot);
-                return Err(error);
-            }
-        };
-        let inspection = prepared.inspection;
-        self.inner
-            .pending_imports
-            .write()
-            .map_err(|_| CoreError::internal("pending import lock was poisoned"))?
-            .insert(
-                inspection.id.clone(),
-                PendingImport {
-                    path: snapshot,
-                    inspection: inspection.clone(),
-                    character_content: prepared.character_content,
-                    plan_hash: prepared.plan_hash,
-                    staged_assets: prepared.staged_assets,
-                },
-            );
-        Ok(inspection)
-    }
-
-    pub fn commit_import(&self, inspection_id: &InspectionId) -> CoreResult<Character> {
-        let pending = self
-            .inner
-            .pending_imports
-            .write()
-            .map_err(|_| CoreError::internal("pending import lock was poisoned"))?
-            .remove(inspection_id)
-            .ok_or_else(|| {
-                CoreError::new(CoreErrorCode::NotFound, "inspection was not found", false)
-            })?;
-        if !pending.inspection.is_allowed() {
-            let error = CoreError::new(
-                CoreErrorCode::UnsafeArchive,
-                "blocked import cannot be committed",
-                false,
-            );
-            self.restore_pending_import(inspection_id.clone(), pending)?;
-            return Err(error);
-        }
-        let Ok(verified) = prepare_import(
-            &pending.path,
-            ImportLimits::default(),
-            &self.inner.storage.staging_dir(),
-        ) else {
-            self.restore_pending_import(inspection_id.clone(), pending)?;
-            return Err(CoreError::new(
-                CoreErrorCode::UnsafeArchive,
-                "import source changed or became unsafe after inspection",
-                false,
-            ));
-        };
-        let verification_matches = verified.plan_hash == pending.plan_hash
-            && verified.character_content == pending.character_content
-            && verified.inspection.source_sha256 == pending.inspection.source_sha256
-            && verified.inspection.source_size == pending.inspection.source_size
-            && verified.inspection.kind == pending.inspection.kind;
-        for asset in &verified.staged_assets {
-            let _ = remove_snapshot(&asset.staged_path, &self.inner.storage.staging_dir());
-        }
-        if !verification_matches {
-            let error = CoreError::new(
-                CoreErrorCode::UnsafeArchive,
-                "import source or normalized inspection plan changed before commit",
-                false,
-            );
-            self.restore_pending_import(inspection_id.clone(), pending)?;
-            return Err(error);
-        }
-        let mut character = Character::new(
-            &pending.inspection.display_name,
-            &pending.inspection.description,
-            &pending.inspection.source_sha256,
-        );
-        character.avatar_asset_hash =
-            reviewed_avatar_asset_hash(&pending.inspection, &pending.staged_assets);
-        let staged_assets = pending
-            .staged_assets
-            .iter()
-            .map(|asset| StagedAssetImport {
-                staged_path: asset.staged_path.clone(),
-                sha256: asset.sha256.clone(),
-                media_type: asset.media_type.clone(),
-                size_bytes: asset.size_bytes,
-            })
-            .collect::<Vec<_>>();
-        let commit = self.inner.storage.commit_character_import_with_content(
-            &pending.path,
-            &character,
-            &pending.character_content,
-            &pending.plan_hash,
-            pending.inspection.source_size,
-            &inspection_id.0,
-            &staged_assets,
-        );
-        match commit {
-            Ok(()) => {
-                let _ = cleanup_pending_import(&pending, &self.inner.storage.staging_dir());
-                Ok(character)
-            }
-            Err(error) => match self.inner.storage.get_character(&character.id) {
-                Ok(committed) => {
-                    let _ = cleanup_pending_import(&pending, &self.inner.storage.staging_dir());
-                    Ok(committed)
-                }
-                Err(lookup) if lookup.code == CoreErrorCode::NotFound => {
-                    self.restore_pending_import(inspection_id.clone(), pending)?;
-                    Err(error)
-                }
-                Err(_) => Err(error),
-            },
-        }
-    }
-
-    pub fn discard_import(&self, inspection_id: &InspectionId) -> CoreResult<()> {
-        let pending = self
-            .inner
-            .pending_imports
-            .write()
-            .map_err(|_| CoreError::internal("pending import lock was poisoned"))?
-            .remove(inspection_id)
-            .ok_or_else(|| {
-                CoreError::new(CoreErrorCode::NotFound, "inspection was not found", false)
-            })?;
-        cleanup_pending_import(&pending, &self.inner.storage.staging_dir())
     }
 
     pub fn list_characters(&self) -> CoreResult<Vec<Character>> {
@@ -796,26 +650,6 @@ impl Core {
     pub fn database_stats(&self) -> CoreResult<DatabaseStats> {
         self.inner.storage.stats()
     }
-
-    fn restore_pending_import(
-        &self,
-        inspection_id: InspectionId,
-        pending: PendingImport,
-    ) -> CoreResult<()> {
-        let mut imports = self
-            .inner
-            .pending_imports
-            .write()
-            .map_err(|_| CoreError::internal("pending import lock was poisoned"))?;
-        if let std::collections::hash_map::Entry::Vacant(entry) = imports.entry(inspection_id) {
-            entry.insert(pending);
-            Ok(())
-        } else {
-            Err(CoreError::internal(
-                "inspection claim collided while restoring a retryable import",
-            ))
-        }
-    }
 }
 
 fn canonical_value_sha256(value: &impl Serialize, label: &str) -> CoreResult<String> {
@@ -879,147 +713,6 @@ fn directory_is_writable(path: &Path) -> bool {
         .is_ok();
     let _ = fs::remove_file(probe);
     created
-}
-
-fn snapshot_import_source(
-    source_path: &Path,
-    staging_dir: &Path,
-    max_source_bytes: u64,
-) -> CoreResult<PathBuf> {
-    let source_metadata = fs::symlink_metadata(source_path).map_err(import_io_error)?;
-    if !source_metadata.file_type().is_file() {
-        return Err(CoreError::invalid(
-            "the import source must be a regular file and cannot be a symbolic link",
-        ));
-    }
-    if source_metadata.len() > max_source_bytes {
-        return Err(CoreError::new(
-            CoreErrorCode::UnsupportedContent,
-            format!(
-                "source is {} bytes; maximum is {} bytes",
-                source_metadata.len(),
-                max_source_bytes
-            ),
-            false,
-        ));
-    }
-
-    fs::create_dir_all(staging_dir).map_err(import_io_error)?;
-    let extension = source_path
-        .extension()
-        .and_then(|value| value.to_str())
-        .filter(|value| {
-            !value.is_empty()
-                && value.len() <= 16
-                && value
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-        })
-        .map(|value| format!(".{}", value.to_ascii_lowercase()))
-        .unwrap_or_default();
-    let snapshot = staging_dir.join(format!("inspection-{}{extension}", Uuid::new_v4()));
-    let result = (|| {
-        let source = File::open(source_path).map_err(import_io_error)?;
-        let opened_metadata = source.metadata().map_err(import_io_error)?;
-        if !opened_metadata.is_file() {
-            return Err(CoreError::invalid(
-                "the import source is not a regular file",
-            ));
-        }
-        let mut reader = BufReader::new(source);
-        let mut destination = OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&snapshot)
-            .map_err(import_io_error)?;
-        let mut copied = 0_u64;
-        let mut buffer = vec![0_u8; 64 * 1024];
-        loop {
-            let read = reader.read(&mut buffer).map_err(import_io_error)?;
-            if read == 0 {
-                break;
-            }
-            copied = copied
-                .checked_add(
-                    u64::try_from(read)
-                        .map_err(|_| CoreError::internal("import byte count overflow"))?,
-                )
-                .ok_or_else(|| CoreError::internal("import size overflow"))?;
-            if copied > max_source_bytes {
-                return Err(CoreError::new(
-                    CoreErrorCode::UnsupportedContent,
-                    format!("source exceeds the {max_source_bytes} byte import limit"),
-                    false,
-                ));
-            }
-            destination
-                .write_all(&buffer[..read])
-                .map_err(import_io_error)?;
-        }
-        destination.flush().map_err(import_io_error)?;
-        destination.sync_all().map_err(import_io_error)?;
-        Ok(())
-    })();
-    if let Err(error) = result {
-        let _ = fs::remove_file(&snapshot);
-        return Err(error);
-    }
-    Ok(snapshot)
-}
-
-fn remove_snapshot(snapshot: &Path, staging_dir: &Path) -> CoreResult<()> {
-    if snapshot.parent() != Some(staging_dir) || snapshot.file_name().is_none() {
-        return Err(CoreError::new(
-            CoreErrorCode::StorageCorrupted,
-            "pending import snapshot is outside the owned staging directory",
-            false,
-        ));
-    }
-    match fs::remove_file(snapshot) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(import_io_error(error)),
-    }
-}
-
-fn reviewed_avatar_asset_hash(
-    inspection: &ImportInspection,
-    staged_assets: &[StagedAsset],
-) -> Option<String> {
-    let reviewed_representative = inspection.representative_image.as_ref().and_then(|image| {
-        staged_assets.iter().find(|asset| {
-            asset.original_path == image.logical_asset_id
-                && asset.signature_valid
-                && asset.media_type.starts_with("image/")
-        })
-    });
-    reviewed_representative
-        .or_else(|| {
-            staged_assets
-                .iter()
-                .find(|asset| asset.signature_valid && asset.media_type.starts_with("image/"))
-        })
-        .map(|asset| asset.sha256.clone())
-}
-
-fn cleanup_pending_import(pending: &PendingImport, staging_dir: &Path) -> CoreResult<()> {
-    let mut first_error = remove_snapshot(&pending.path, staging_dir).err();
-    for asset in &pending.staged_assets {
-        if let Err(error) = remove_snapshot(&asset.staged_path, staging_dir)
-            && first_error.is_none()
-        {
-            first_error = Some(error);
-        }
-    }
-    first_error.map_or(Ok(()), Err)
-}
-
-fn import_io_error(error: std::io::Error) -> CoreError {
-    CoreError::new(
-        CoreErrorCode::StorageUnavailable,
-        format!("cannot stage import source: {error}"),
-        true,
-    )
 }
 
 #[cfg(test)]
