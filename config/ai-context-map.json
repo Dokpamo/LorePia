@@ -1163,7 +1163,7 @@
       }
     },
     "STOR-ORCH-002": {
-      "baseline_context_bytes": 544892,
+      "baseline_context_bytes": 332122,
       "commands": [
         "cargo test -p lorepia-storage --lib orchestration::tests",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
@@ -1179,16 +1179,16 @@
           "crates/storage/src/orchestration.rs"
         ],
         "implementation": [
-          "crates/storage/src/orchestration/content_module_projection.rs",
-          "crates/storage/src/orchestration/content_module_revisions.rs",
-          "crates/storage/src/orchestration/document_history.rs",
-          "crates/storage/src/orchestration/document_store.rs",
-          "crates/storage/src/orchestration/knowledge_memory_profiles.rs",
+          "crates/storage/src/orchestration/generation_prompt.rs",
+          "crates/storage/src/orchestration/knowledge_memory_runtime.rs",
+          "crates/storage/src/orchestration/memory_context.rs",
+          "crates/storage/src/orchestration/memory_records.rs",
+          "crates/storage/src/orchestration/memory_visibility.rs",
+          "crates/storage/src/orchestration/module_activation.rs",
           "crates/storage/src/orchestration/module_authority.rs",
-          "crates/storage/src/orchestration/prompt_bindings.rs",
-          "crates/storage/src/orchestration/prompt_preset_projection.rs",
-          "crates/storage/src/orchestration/prompt_preset_rollback.rs",
-          "crates/storage/src/orchestration/transforms_interactions.rs"
+          "crates/storage/src/orchestration/module_bindings.rs",
+          "crates/storage/src/orchestration/module_runtime.rs",
+          "crates/storage/src/orchestration/package_commit_bridge.rs"
         ],
         "tests": [
           "crates/storage/tests/knowledge_embedding_storage.rs"
