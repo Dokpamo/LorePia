@@ -122,30 +122,7 @@
         ]
       }
     },
-    "CORE-GEN-001": {
-      "baseline_context_bytes": 997025,
-      "commands": [
-        "cargo test -p lorepia-core --test generation_attempt_derived_closure",
-        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
-      ],
-      "max_context_bytes": 250000,
-      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
-      "paths": {
-        "documents": [
-          "crates/core/AGENTS.md",
-          "docs/adr/0003-credential-and-secret-boundary.md"
-        ],
-        "entrypoints": [
-          "crates/core/src/app.rs"
-        ],
-        "implementation": [
-          "crates/core/src/app/generation_events.rs"
-        ],
-        "tests": [
-          "crates/core/tests/generation_attempt_derived_closure.rs"
-        ]
-      }
-    },
+    "CORE-GEN-001": {"baseline_context_bytes": 595390, "commands": ["cargo test -p lorepia-core", "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""], "max_context_bytes": 250000, "over_budget_reason": "app.rs and derived-closure test remain inputs for CORE-GEN-002/003", "paths": {"documents": ["crates/core/AGENTS.md", "docs/adr/0003-credential-and-secret-boundary.md"], "entrypoints": ["crates/core/src/app.rs"], "implementation": ["crates/core/src/app/generation/mod.rs", "crates/core/src/app/generation/types.rs", "crates/core/src/app/generation/operation_identity.rs", "crates/core/src/app/generation/admission.rs", "crates/core/src/app/generation/credential.rs", "crates/core/src/app/generation_events.rs"], "tests": ["crates/core/tests/generation_attempt_derived_closure.rs"]}},
     "CORE-GEN-002": {
       "baseline_context_bytes": 1194101,
       "commands": [
