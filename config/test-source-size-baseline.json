@@ -12,10 +12,6 @@
       "bytes": 86890,
       "lines": 2155
     },
-    "apps/lorepia/src/features/orchestration/OrchestrationUI.test.ts": {
-      "bytes": 121055,
-      "lines": 2763
-    },
     "apps/lorepia/src/features/orchestration/orchestration-controller.test.ts": {
       "bytes": 79825,
       "lines": 1910
