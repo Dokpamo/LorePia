@@ -5,13 +5,13 @@
     "normative_plan_path": "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
     "task_count": 59,
     "task_unit": "One Task ID per reviewable change; full-plan authorization removes pauses, not task scope or semantic gates.",
-    "dependency_resolution": "depends_on is the conservative acyclic task order; CORE-APP-001 remains the final Core facade task.",
-    "path_resolution": "read_first contains only paths present at this bootstrap revision, plus this manifest and plan being added in the same change. allowed_paths are repo-relative exact paths or glob patterns and are edit boundaries, not permission to change behavior.",
-    "context_resolution": "Tasks that must inspect a legacy giant parent may temporarily exceed the 250KB target only through an explicit non-growth context baseline in config/ai-context-map.json; required sources must never be omitted to make a budget appear green.",
-    "api_resolution": "STOR-API-001 may add compatible meaning-based views and methods, but public removals require separately proven compatibility. All other refactoring tasks preserve public contracts.",
-    "test_resolution": "Inline tests remain part of their production parent until a TEST task moves them. Test moves preserve names, assertions, fixture meaning, and count.",
-    "status_resolution": "This manifest defines scope; ENF-004 records durable completion evidence.",
-    "validation_ledger_resolution": "For B-E tasks, config/ai-context-map.json is an implicit allowed_path when a tracked path moves; for frontend tasks, config/i18n-literal-baseline.json is implicit only to migrate existing literals."
+    "dependency_resolution": "depends_on is conservative acyclic task order; CORE-APP-001 remains the final Core facade task.",
+    "path_resolution": "read_first lists bootstrap-present paths plus this same-change plan/manifest; allowed_paths are repo-relative exact/glob edit bounds, not behavior permission.",
+    "context_resolution": "A task inspecting a legacy giant parent may temporarily exceed 250KB only via an explicit non-growth baseline in config/ai-context-map.json; required sources cannot be omitted to feign compliance.",
+    "api_resolution": "STOR-API-001 alone may add compatible semantic views/methods; removals require proven compatibility; all other refactors preserve public contracts.",
+    "test_resolution": "Inline tests stay in their production parent until a TEST task moves them; moves preserve names, assertions, fixture meaning, and count.",
+    "status_resolution": "Manifest defines scope; ENF-004 records durable completion evidence.",
+    "validation_ledger_resolution": "During B-E tracked path moves, config/ai-context-map.json is implicitly allowed; frontend moves may likewise migrate only existing entries in config/i18n-literal-baseline.json."
   },
   "global_constraints": [
     "Use the Rust and Node versions pinned by rust-toolchain.toml and .node-version.",
@@ -490,7 +490,7 @@
     },
     "STOR-API-001": {
       "phase": "C",
-      "summary": "Define discovery semantic views/methods required by Core without exposing persistence rows.",
+      "summary": "Define and migrate Core-owned discovery semantic views and meaning-based Storage methods while preserving compatibility exports.",
       "depends_on": [
         "TEST-STOR-001"
       ],
@@ -512,16 +512,16 @@
         "crates/storage/src/discovery_repository/**",
         "crates/core/src/provider_discovery.rs",
         "crates/core/src/provider_discovery/**",
+        "crates/core/src/provider_discovery_view.rs",
+        "crates/core/src/lib.rs",
         "docs/architecture/storage-public-api-audit.md",
         "config/core-storage-public-api-baseline.json",
         "config/source-size-baseline.json"
       ],
       "forbidden_changes": [
-        "database schema or applied migration changes",
-        "transaction scope, TransactionBehavior, lock order, fsync order, journal phase, or recovery behavior changes",
-        "public API or serialized contract changes not explicitly authorized by this task",
-        "dependency additions or upgrades",
-        "source-size baseline increases or unrelated cleanup",
+        "schema/applied-migration changes",
+        "transaction behavior/scope, lock/fsync order, journal phase, or recovery behavior changes",
+        "unapproved public API/serialized-contract changes; dependency adds/upgrades; source-size cap growth; unrelated cleanup",
         "removal or narrowing of an existing public item without compatibility proof",
         "new Core or Shell re-export of a Storage Stored* type"
       ],
@@ -563,11 +563,9 @@
         "config/test-source-size-baseline.json"
       ],
       "forbidden_changes": [
-        "database schema or applied migration changes",
-        "transaction scope, TransactionBehavior, lock order, fsync order, journal phase, or recovery behavior changes",
-        "public API or serialized contract changes not explicitly authorized by this task",
-        "dependency additions or upgrades",
-        "source-size baseline increases or unrelated cleanup"
+        "schema/applied-migration changes",
+        "transaction behavior/scope, lock/fsync order, journal phase, or recovery behavior changes",
+        "unapproved public API/serialized-contract changes; dependency adds/upgrades; source-size cap growth; unrelated cleanup"
       ],
       "validation": [
         "cargo fmt --all --check",
@@ -607,11 +605,9 @@
         "config/test-source-size-baseline.json"
       ],
       "forbidden_changes": [
-        "database schema or applied migration changes",
-        "transaction scope, TransactionBehavior, lock order, fsync order, journal phase, or recovery behavior changes",
-        "public API or serialized contract changes not explicitly authorized by this task",
-        "dependency additions or upgrades",
-        "source-size baseline increases or unrelated cleanup"
+        "schema/applied-migration changes",
+        "transaction behavior/scope, lock/fsync order, journal phase, or recovery behavior changes",
+        "unapproved public API/serialized-contract changes; dependency adds/upgrades; source-size cap growth; unrelated cleanup"
       ],
       "validation": [
         "cargo fmt --all --check",
@@ -653,11 +649,9 @@
         "config/test-source-size-baseline.json"
       ],
       "forbidden_changes": [
-        "database schema or applied migration changes",
-        "transaction scope, TransactionBehavior, lock order, fsync order, journal phase, or recovery behavior changes",
-        "public API or serialized contract changes not explicitly authorized by this task",
-        "dependency additions or upgrades",
-        "source-size baseline increases or unrelated cleanup"
+        "schema/applied-migration changes",
+        "transaction behavior/scope, lock/fsync order, journal phase, or recovery behavior changes",
+        "unapproved public API/serialized-contract changes; dependency adds/upgrades; source-size cap growth; unrelated cleanup"
       ],
       "validation": [
         "cargo fmt --all --check",
@@ -675,9 +669,10 @@
     },
     "STOR-DISC-004": {
       "phase": "C",
-      "summary": "Extract discovery commit, credential execution, and recovery.",
+      "summary": "Extract discovery commit, provider-graph publication and selection restoration, credential execution, and recovery.",
       "depends_on": [
-        "STOR-DISC-003"
+        "STOR-DISC-003",
+        "STOR-DB-003"
       ],
       "read_first": [
         "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
@@ -693,17 +688,17 @@
       "allowed_paths": [
         "crates/storage/src/discovery_repository.rs",
         "crates/storage/src/discovery_repository/**",
+        "crates/storage/src/database.rs",
+        "crates/storage/src/database/**",
         "crates/storage/tests/discovery_state_storage.rs",
         "crates/storage/tests/provider_credential_operations.rs",
         "config/source-size-baseline.json",
         "config/test-source-size-baseline.json"
       ],
       "forbidden_changes": [
-        "database schema or applied migration changes",
-        "transaction scope, TransactionBehavior, lock order, fsync order, journal phase, or recovery behavior changes",
-        "public API or serialized contract changes not explicitly authorized by this task",
-        "dependency additions or upgrades",
-        "source-size baseline increases or unrelated cleanup"
+        "schema/applied-migration changes",
+        "transaction behavior/scope, lock/fsync order, journal phase, or recovery behavior changes",
+        "unapproved public API/serialized-contract changes; dependency adds/upgrades; source-size cap growth; unrelated cleanup"
       ],
       "validation": [
         "cargo fmt --all --check",
@@ -721,7 +716,7 @@
     },
     "STOR-DB-001": {
       "phase": "C",
-      "summary": "Extract database connection, pragmas, and bootstrap.",
+      "summary": "Extract Storage connection, pragmas, bootstrap, data-root ownership, and generic CAS filesystem primitives.",
       "depends_on": [
         "TEST-STOR-002"
       ],
@@ -738,16 +733,15 @@
       "allowed_paths": [
         "crates/storage/src/database.rs",
         "crates/storage/src/database/**",
+        "crates/storage/src/cutover.rs",
         "crates/storage/tests/private_storage_permissions.rs",
         "config/source-size-baseline.json",
         "config/test-source-size-baseline.json"
       ],
       "forbidden_changes": [
-        "database schema or applied migration changes",
-        "transaction scope, TransactionBehavior, lock order, fsync order, journal phase, or recovery behavior changes",
-        "public API or serialized contract changes not explicitly authorized by this task",
-        "dependency additions or upgrades",
-        "source-size baseline increases or unrelated cleanup"
+        "schema/applied-migration changes",
+        "transaction behavior/scope, lock/fsync order, journal phase, or recovery behavior changes",
+        "unapproved public API/serialized-contract changes; dependency adds/upgrades; source-size cap growth; unrelated cleanup"
       ],
       "validation": [
         "cargo fmt --all --check",
@@ -765,7 +759,7 @@
     },
     "STOR-DB-002": {
       "phase": "C",
-      "summary": "Extract schema and migration registry, runner, and verification.",
+      "summary": "Extract schema, migration registry and runner, migration-only legacy transforms, and verification.",
       "depends_on": [
         "STOR-DB-001"
       ],
@@ -789,11 +783,9 @@
         "config/test-source-size-baseline.json"
       ],
       "forbidden_changes": [
-        "database schema or applied migration changes",
-        "transaction scope, TransactionBehavior, lock order, fsync order, journal phase, or recovery behavior changes",
-        "public API or serialized contract changes not explicitly authorized by this task",
-        "dependency additions or upgrades",
-        "source-size baseline increases or unrelated cleanup"
+        "schema/applied-migration changes",
+        "transaction behavior/scope, lock/fsync order, journal phase, or recovery behavior changes",
+        "unapproved public API/serialized-contract changes; dependency adds/upgrades; source-size cap growth; unrelated cleanup"
       ],
       "validation": [
         "cargo fmt --all --check",
@@ -811,7 +803,7 @@
     },
     "STOR-DB-003": {
       "phase": "C",
-      "summary": "Extract database health, stats, and test support.",
+      "summary": "Extract database health, stats, character read catalog, application settings, and general provider catalog repositories.",
       "depends_on": [
         "STOR-DB-002"
       ],
@@ -833,11 +825,9 @@
         "config/test-source-size-baseline.json"
       ],
       "forbidden_changes": [
-        "database schema or applied migration changes",
-        "transaction scope, TransactionBehavior, lock order, fsync order, journal phase, or recovery behavior changes",
-        "public API or serialized contract changes not explicitly authorized by this task",
-        "dependency additions or upgrades",
-        "source-size baseline increases or unrelated cleanup"
+        "schema/applied-migration changes",
+        "transaction behavior/scope, lock/fsync order, journal phase, or recovery behavior changes",
+        "unapproved public API/serialized-contract changes; dependency adds/upgrades; source-size cap growth; unrelated cleanup"
       ],
       "validation": [
         "cargo fmt --all --check",
@@ -855,9 +845,10 @@
     },
     "STOR-INT-001": {
       "phase": "C",
-      "summary": "Extract conversation, branch, message reads, and projections.",
+      "summary": "Extract conversation, branch, and message repositories together with interaction-state, reopen, and display projections.",
       "depends_on": [
-        "TEST-STOR-003"
+        "TEST-STOR-003",
+        "STOR-DB-003"
       ],
       "read_first": [
         "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
@@ -872,16 +863,18 @@
       "allowed_paths": [
         "crates/storage/src/interaction_repository.rs",
         "crates/storage/src/interaction_repository/**",
+        "crates/storage/src/database.rs",
+        "crates/storage/src/database/**",
+        "crates/storage/src/message_display_projection.rs",
+        "crates/storage/src/message_display_projection/**",
         "crates/storage/tests/greeting_conversation_start.rs",
         "config/source-size-baseline.json",
         "config/test-source-size-baseline.json"
       ],
       "forbidden_changes": [
-        "database schema or applied migration changes",
-        "transaction scope, TransactionBehavior, lock order, fsync order, journal phase, or recovery behavior changes",
-        "public API or serialized contract changes not explicitly authorized by this task",
-        "dependency additions or upgrades",
-        "source-size baseline increases or unrelated cleanup"
+        "schema/applied-migration changes",
+        "transaction behavior/scope, lock/fsync order, journal phase, or recovery behavior changes",
+        "unapproved public API/serialized-contract changes; dependency adds/upgrades; source-size cap growth; unrelated cleanup"
       ],
       "validation": [
         "cargo fmt --all --check",
@@ -899,9 +892,10 @@
     },
     "STOR-INT-002": {
       "phase": "C",
-      "summary": "Extract proposal, effect, and checkpoint writes.",
+      "summary": "Extract generation append, action, and finalization transactions together with proposal, effect, and checkpoint writes.",
       "depends_on": [
-        "STOR-INT-001"
+        "STOR-INT-001",
+        "STOR-DISC-004"
       ],
       "read_first": [
         "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
@@ -916,16 +910,16 @@
       "allowed_paths": [
         "crates/storage/src/interaction_repository.rs",
         "crates/storage/src/interaction_repository/**",
+        "crates/storage/src/database.rs",
+        "crates/storage/src/database/**",
         "crates/storage/tests/interaction_derived_event_storage.rs",
         "config/source-size-baseline.json",
         "config/test-source-size-baseline.json"
       ],
       "forbidden_changes": [
-        "database schema or applied migration changes",
-        "transaction scope, TransactionBehavior, lock order, fsync order, journal phase, or recovery behavior changes",
-        "public API or serialized contract changes not explicitly authorized by this task",
-        "dependency additions or upgrades",
-        "source-size baseline increases or unrelated cleanup"
+        "schema/applied-migration changes",
+        "transaction behavior/scope, lock/fsync order, journal phase, or recovery behavior changes",
+        "unapproved public API/serialized-contract changes; dependency adds/upgrades; source-size cap growth; unrelated cleanup"
       ],
       "validation": [
         "cargo fmt --all --check",
@@ -943,7 +937,7 @@
     },
     "STOR-INT-003": {
       "phase": "C",
-      "summary": "Extract derived outbox and interaction recovery.",
+      "summary": "Extract derived outbox, interaction recovery, and interrupted-generation recovery and closure.",
       "depends_on": [
         "STOR-INT-002"
       ],
@@ -960,16 +954,16 @@
       "allowed_paths": [
         "crates/storage/src/interaction_repository.rs",
         "crates/storage/src/interaction_repository/**",
+        "crates/storage/src/database.rs",
+        "crates/storage/src/database/**",
         "crates/storage/tests/interaction_derived_event_storage.rs",
         "config/source-size-baseline.json",
         "config/test-source-size-baseline.json"
       ],
       "forbidden_changes": [
-        "database schema or applied migration changes",
-        "transaction scope, TransactionBehavior, lock order, fsync order, journal phase, or recovery behavior changes",
-        "public API or serialized contract changes not explicitly authorized by this task",
-        "dependency additions or upgrades",
-        "source-size baseline increases or unrelated cleanup"
+        "schema/applied-migration changes",
+        "transaction behavior/scope, lock/fsync order, journal phase, or recovery behavior changes",
+        "unapproved public API/serialized-contract changes; dependency adds/upgrades; source-size cap growth; unrelated cleanup"
       ],
       "validation": [
         "cargo fmt --all --check",
@@ -987,7 +981,7 @@
     },
     "STOR-ORCH-001": {
       "phase": "C",
-      "summary": "Extract prompt documents, presets, variables, and transforms.",
+      "summary": "Extract revisioned content-document stores and projections for personas, prompt presets, task profiles, knowledge, memory profiles, transforms, interactions, and modules.",
       "depends_on": [
         "TEST-STOR-004"
       ],
@@ -1009,11 +1003,9 @@
         "config/test-source-size-baseline.json"
       ],
       "forbidden_changes": [
-        "database schema or applied migration changes",
-        "transaction scope, TransactionBehavior, lock order, fsync order, journal phase, or recovery behavior changes",
-        "public API or serialized contract changes not explicitly authorized by this task",
-        "dependency additions or upgrades",
-        "source-size baseline increases or unrelated cleanup"
+        "schema/applied-migration changes",
+        "transaction behavior/scope, lock/fsync order, journal phase, or recovery behavior changes",
+        "unapproved public API/serialized-contract changes; dependency adds/upgrades; source-size cap growth; unrelated cleanup"
       ],
       "validation": [
         "cargo fmt --all --check",
@@ -1031,7 +1023,7 @@
     },
     "STOR-ORCH-002": {
       "phase": "C",
-      "summary": "Extract memory, knowledge, modules, and runtime plans.",
+      "summary": "Extract generation prompt plans, memory runtime state, knowledge activation, module binding and runtime plans, recovery, and the package-commit transaction bridge.",
       "depends_on": [
         "STOR-ORCH-001"
       ],
@@ -1053,11 +1045,9 @@
         "config/test-source-size-baseline.json"
       ],
       "forbidden_changes": [
-        "database schema or applied migration changes",
-        "transaction scope, TransactionBehavior, lock order, fsync order, journal phase, or recovery behavior changes",
-        "public API or serialized contract changes not explicitly authorized by this task",
-        "dependency additions or upgrades",
-        "source-size baseline increases or unrelated cleanup"
+        "schema/applied-migration changes",
+        "transaction behavior/scope, lock/fsync order, journal phase, or recovery behavior changes",
+        "unapproved public API/serialized-contract changes; dependency adds/upgrades; source-size cap growth; unrelated cleanup"
       ],
       "validation": [
         "cargo fmt --all --check",
@@ -1075,9 +1065,12 @@
     },
     "STOR-PKG-001": {
       "phase": "C",
-      "summary": "Split package query, review, commit, CAS promotion, lifecycle, and recovery.",
+      "summary": "Split package and character-import query, inspection, selection, approval, commit, CAS promotion, lifecycle, and recovery.",
       "depends_on": [
-        "STOR-API-001"
+        "STOR-API-001",
+        "STOR-DB-003",
+        "STOR-ORCH-002",
+        "STOR-INT-003"
       ],
       "read_first": [
         "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
@@ -1092,16 +1085,18 @@
       "allowed_paths": [
         "crates/storage/src/package_repository.rs",
         "crates/storage/src/package_repository/**",
+        "crates/storage/src/database.rs",
+        "crates/storage/src/database/**",
+        "crates/storage/src/orchestration.rs",
+        "crates/storage/src/orchestration/**",
         "crates/core/tests/orchestration_content_import.rs",
         "config/source-size-baseline.json",
         "config/test-source-size-baseline.json"
       ],
       "forbidden_changes": [
-        "database schema or applied migration changes",
-        "transaction scope, TransactionBehavior, lock order, fsync order, journal phase, or recovery behavior changes",
-        "public API or serialized contract changes not explicitly authorized by this task",
-        "dependency additions or upgrades",
-        "source-size baseline increases or unrelated cleanup"
+        "schema/applied-migration changes",
+        "transaction behavior/scope, lock/fsync order, journal phase, or recovery behavior changes",
+        "unapproved public API/serialized-contract changes; dependency adds/upgrades; source-size cap growth; unrelated cleanup"
       ],
       "validation": [
         "cargo fmt --all --check",
