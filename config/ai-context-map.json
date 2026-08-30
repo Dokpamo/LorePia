@@ -1147,7 +1147,7 @@
           "crates/storage/src/interaction_repository/derived_outbox/row_mapping.rs",
           "crates/storage/src/interaction_repository/derived_outbox/row_mapping/occurrence.rs",
           "crates/storage/src/interaction_repository/derived_outbox/validation.rs",
-          "crates/storage/src/interaction_repository/event_transactions.rs"
+          "crates/storage/src/database/interrupted_generation_recovery.rs"
         ],
         "tests": [
           "crates/core/tests/interaction_derived_supervisor.rs"
