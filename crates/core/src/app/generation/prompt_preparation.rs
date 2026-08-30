@@ -15,13 +15,13 @@ use super::target_resolution::{
     ResolvedGenerationTarget, build_resolved_generation_target,
     validate_generation_target_for_attempt,
 };
+use super::target_send::SameBranchGenerationTargetInput;
 use super::{
     GenerationActionTargetIdentity, GenerationOperationContext, SameBranchGenerationAttemptIdentity,
 };
 use crate::app::{
     Core, MAX_TASK_PROMPT_BYTES, MAX_TASK_PROMPT_CHARS, PreparedSameBranchGenerationAttempt,
-    SameBranchGenerationAttempt, SameBranchGenerationTargetInput,
-    generation_attempt_prompt_authority, validate_user_message_text,
+    SameBranchGenerationAttempt, generation_attempt_prompt_authority, validate_user_message_text,
 };
 use crate::orchestration::deterministic_prompt_user_message_id;
 
