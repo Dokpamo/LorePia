@@ -410,12 +410,12 @@
       }
     },
     "FE-APP-001": {
-      "baseline_context_bytes": 253236,
+      "baseline_context_bytes": null,
       "commands": [
-        "npm run test --prefix apps/lorepia -- src/app/app-controller.test.ts"
+        "npm run test --prefix apps/lorepia -- src/app/tests/app-controller.generation-identity.test.ts"
       ],
       "max_context_bytes": 250000,
-      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "over_budget_reason": null,
       "paths": {
         "documents": [
           "apps/lorepia/src/AGENTS.md"
@@ -427,14 +427,14 @@
           "apps/lorepia/src/app/app-state.ts"
         ],
         "tests": [
-          "apps/lorepia/src/app/app-controller.test.ts"
+          "apps/lorepia/src/app/tests/app-controller.generation-identity.test.ts"
         ]
       }
     },
     "FE-APP-002": {
       "baseline_context_bytes": null,
       "commands": [
-        "npm run test --prefix apps/lorepia -- src/app/app-controller.test.ts"
+        "npm run test --prefix apps/lorepia -- src/app/tests/app-controller.conversations.test.ts"
       ],
       "max_context_bytes": 250000,
       "over_budget_reason": null,
@@ -455,12 +455,12 @@
       }
     },
     "FE-APP-003": {
-      "baseline_context_bytes": 269553,
+      "baseline_context_bytes": null,
       "commands": [
         "npm run test --prefix apps/lorepia -- src/features/chat/chat-stream.test.ts"
       ],
       "max_context_bytes": 250000,
-      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "over_budget_reason": null,
       "paths": {
         "documents": [
           "apps/lorepia/src/AGENTS.md"
@@ -473,14 +473,14 @@
         ],
         "tests": [
           "apps/lorepia/src/features/chat/chat-stream.test.ts",
-          "apps/lorepia/src/app/app-controller.test.ts"
+          "apps/lorepia/src/app/tests/app-controller.chat-stream.test.ts"
         ]
       }
     },
     "FE-APP-004": {
       "baseline_context_bytes": null,
       "commands": [
-        "npm run test --prefix apps/lorepia -- src/app/app-controller.providers.test.ts"
+        "npm run test --prefix apps/lorepia -- src/app/tests/app-controller.provider-selection.test.ts src/app/tests/app-controller.provider-discovery.test.ts"
       ],
       "max_context_bytes": 250000,
       "over_budget_reason": null,
@@ -495,7 +495,8 @@
           "apps/lorepia/src/features/providers/settings-contracts.ts"
         ],
         "tests": [
-          "apps/lorepia/src/app/app-controller.providers.test.ts",
+          "apps/lorepia/src/app/tests/app-controller.provider-selection.test.ts",
+          "apps/lorepia/src/app/tests/app-controller.provider-discovery.test.ts",
           "apps/lorepia/src/features/providers/ProviderWorkflows.test.ts"
         ]
       }
@@ -1238,7 +1239,7 @@
     "TEST-FE-001": {
       "baseline_context_bytes": null,
       "commands": [
-        "npm run test --prefix apps/lorepia -- src/app/app-controller.test.ts src/app/app-controller.providers.test.ts"
+        "npm run test --prefix apps/lorepia -- src/app/tests/app-controller.bootstrap.test.ts src/app/tests/app-controller.conversations.test.ts src/app/tests/app-controller.memory-retry.test.ts src/app/tests/app-controller.generation-identity.test.ts src/app/tests/app-controller.chat-stream.test.ts src/app/tests/app-controller.provider-selection.test.ts src/app/tests/app-controller.provider-discovery.test.ts"
       ],
       "max_context_bytes": 250000,
       "over_budget_reason": null,
@@ -1247,10 +1248,17 @@
           "apps/lorepia/src/AGENTS.md"
         ],
         "entrypoints": [
-          "apps/lorepia/src/app/app-controller.test.ts"
+          "apps/lorepia/src/app/tests/app-controller.bootstrap.test.ts",
+          "apps/lorepia/src/app/tests/app-controller.conversations.test.ts",
+          "apps/lorepia/src/app/tests/app-controller.memory-retry.test.ts",
+          "apps/lorepia/src/app/tests/app-controller.generation-identity.test.ts",
+          "apps/lorepia/src/app/tests/app-controller.chat-stream.test.ts",
+          "apps/lorepia/src/app/tests/app-controller.provider-selection.test.ts",
+          "apps/lorepia/src/app/tests/app-controller.provider-discovery.test.ts"
         ],
         "implementation": [
-          "apps/lorepia/src/app/app-controller.providers.test.ts"
+          "apps/lorepia/src/app/tests/app-controller-test-support.ts",
+          "apps/lorepia/src/app/tests/app-controller-provider-test-support.ts"
         ],
         "tests": []
       }

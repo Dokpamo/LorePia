@@ -12,13 +12,41 @@
       "hangul_lines": 156,
       "sha256": "ce82c8aa1afc4f97deab4171188de88812515870ec691e5d3e3bad500148c4dd"
     },
-    "src/app/app-controller.providers.test.ts": {
-      "hangul_lines": 6,
-      "sha256": "74c9db036866c6b53176eeef344fc03934e886e99c21b54ebe91c1616cc55e2a"
+    "src/app/tests/app-controller-provider-test-support.ts": {
+      "hangul_lines": 4,
+      "sha256": "07dcfcd684de4bd58e1e7eaa094ba19141b7e5a39d26bdfe5510bae24d14a131"
     },
-    "src/app/app-controller.test.ts": {
-      "hangul_lines": 107,
-      "sha256": "3ad2aa675deaad7da89c2e2005deceb8b6ee9ea5287520610178d6e6e4f8df6a"
+    "src/app/tests/app-controller-test-support.ts": {
+      "hangul_lines": 4,
+      "sha256": "b58aae6788971e6d107dd370945ce26f4f95629645e90da6a3026ccbfc576e19"
+    },
+    "src/app/tests/app-controller.bootstrap.test.ts": {
+      "hangul_lines": 2,
+      "sha256": "98adc91177e9a6e71fa1fbe50534cb4a77e70630cbf938035a040d040ac04680"
+    },
+    "src/app/tests/app-controller.chat-stream.test.ts": {
+      "hangul_lines": 50,
+      "sha256": "6fc95fe797a099de30f6e802223d300a997318f26526f4ba4e9857e0b6f9d8f1"
+    },
+    "src/app/tests/app-controller.conversations.test.ts": {
+      "hangul_lines": 12,
+      "sha256": "18e1f0ad3e3e32eaa1c16797e440065bd5f7c6bd8025fd2ccc8489614755b487"
+    },
+    "src/app/tests/app-controller.generation-identity.test.ts": {
+      "hangul_lines": 34,
+      "sha256": "826b55c12cf32ec9d24ef548cf0f3aec49d55b1887b29f3f3f56ec64364f4f3f"
+    },
+    "src/app/tests/app-controller.memory-retry.test.ts": {
+      "hangul_lines": 5,
+      "sha256": "77958964dc97b67111af70d5e83fbeaf7c31f5d0346b2495750d48c01fe98871"
+    },
+    "src/app/tests/app-controller.provider-discovery.test.ts": {
+      "hangul_lines": 1,
+      "sha256": "59c3d85ba537fac9704bdc164a06f075c7da4fdc7f2c8be4f2fd7d62fd9c99d9"
+    },
+    "src/app/tests/app-controller.provider-selection.test.ts": {
+      "hangul_lines": 1,
+      "sha256": "c621aabd8f1266fb803e8075ffa2a4b2144ea3734af94f7ccca8e2ac8252ad94"
     },
     "src/features/assets/TrustedAsset.test.ts": {
       "hangul_lines": 14,

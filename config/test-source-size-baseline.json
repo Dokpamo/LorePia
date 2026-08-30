@@ -1,9 +1,5 @@
 {
   "baselines": {
-    "apps/lorepia/src/app/app-controller.test.ts": {
-      "bytes": 105664,
-      "lines": 2550
-    },
     "apps/lorepia/src/features/chat/portable-runtime.test.ts": {
       "bytes": 86890,
       "lines": 2155
