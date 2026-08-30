@@ -1122,22 +1122,32 @@
       }
     },
     "STOR-INT-003": {
-      "baseline_context_bytes": 759795,
+      "baseline_context_bytes": null,
       "commands": [
         "cargo test -p lorepia-core --test interaction_derived_supervisor",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
       "max_context_bytes": 250000,
-      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "over_budget_reason": null,
       "paths": {
         "documents": [
-          "crates/storage/AGENTS.md"
+          "crates/storage/AGENTS.md",
+          "docs/adr/0002-storage-transaction-boundaries.md"
         ],
         "entrypoints": [
           "crates/storage/src/interaction_repository.rs"
         ],
         "implementation": [
-          "crates/storage/src/interaction_repository/effect_history.rs"
+          "crates/storage/src/interaction_repository/types.rs",
+          "crates/storage/src/interaction_repository/derived_outbox.rs",
+          "crates/storage/src/interaction_repository/derived_outbox/claim.rs",
+          "crates/storage/src/interaction_repository/derived_outbox/commit.rs",
+          "crates/storage/src/interaction_repository/derived_outbox/quarantine.rs",
+          "crates/storage/src/interaction_repository/derived_outbox/recovery.rs",
+          "crates/storage/src/interaction_repository/derived_outbox/row_mapping.rs",
+          "crates/storage/src/interaction_repository/derived_outbox/row_mapping/occurrence.rs",
+          "crates/storage/src/interaction_repository/event_transactions.rs",
+          "crates/storage/src/interaction_repository/replay.rs"
         ],
         "tests": [
           "crates/core/tests/interaction_derived_supervisor.rs"
