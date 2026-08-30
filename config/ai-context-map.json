@@ -126,22 +126,23 @@
     "CORE-GEN-002": {"commands":["cargo test -p lorepia-core --test chat_vertical_slice","python3 scripts/check_source_architecture.py"],"max_context_bytes":250000,"paths":{"documents":["crates/core/AGENTS.md"],"entrypoints":["crates/core/src/app/generation/mod.rs"],"implementation":["crates/core/src/app/generation/target_resolution.rs","crates/core/src/app/generation/capabilities.rs","crates/core/src/app/generation/preset.rs","crates/core/src/app/generation/protocol_request.rs","crates/core/src/app/generation/prompt_preparation.rs","crates/core/src/app/generation/actions.rs","crates/core/src/app/generation/target_send.rs"],"tests":["crates/core/tests/chat_vertical_slice.rs"]}},
     "CORE-GEN-003": {"commands":["cargo test -p lorepia-core --test ordinary_same_branch_sealed_retry","python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""],"max_context_bytes":250000,"paths":{"documents":["crates/core/AGENTS.md","docs/adr/0003-credential-and-secret-boundary.md"],"entrypoints":["crates/core/src/app/generation/mod.rs"],"implementation":["crates/core/src/app/generation/attempt.rs","crates/core/src/app/generation/send.rs","crates/core/src/app/generation/send_dispatch.rs","crates/core/src/app/generation/delivery.rs","crates/core/src/app/generation/auxiliary.rs","crates/core/src/app/generation/message_actions.rs","crates/core/src/app/generation/message_action_dispatch.rs","crates/core/src/app/generation_events.rs","crates/core/src/app/generation_workflow.rs"],"tests":["crates/core/tests/chat_vertical_slice.rs"]}},
     "CORE-IMPORT-001": {
-      "baseline_context_bytes": 817471,
       "commands": [
         "cargo test -p lorepia-core --test import_vertical_slice",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
       "max_context_bytes": 250000,
-      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
       "paths": {
         "documents": [
           "crates/core/AGENTS.md",
           "docs/adr/0005-asset-delivery-verification.md"
         ],
         "entrypoints": [
-          "crates/core/src/app.rs"
+          "crates/core/src/app/imports/mod.rs"
         ],
-        "implementation": [],
+        "implementation": [
+          "crates/core/src/app/imports/pending.rs",
+          "crates/core/src/app/imports/staging.rs"
+        ],
         "tests": [
           "crates/core/tests/import_vertical_slice.rs"
         ]
