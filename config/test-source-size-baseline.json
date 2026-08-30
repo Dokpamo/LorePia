@@ -28,10 +28,6 @@
       "bytes": 79628,
       "lines": 2162
     },
-    "crates/core/tests/provider_discovery_integration.rs": {
-      "bytes": 85104,
-      "lines": 2304
-    },
     "crates/storage/tests/discovery_state_storage.rs": {
       "bytes": 92884,
       "lines": 2743
