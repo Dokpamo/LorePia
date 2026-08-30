@@ -1672,11 +1672,13 @@
         "config/refactoring/task-manifest.yaml",
         "AGENTS.md",
         "crates/shell-api/src/lib.rs",
-        "crates/shell-api/src/api.rs"
+        "crates/shell-api/src/api.rs",
+        "config/source-size-baseline.json"
       ],
       "allowed_paths": [
         "crates/shell-api/src/lib.rs",
-        "crates/shell-api/src/**"
+        "crates/shell-api/src/**",
+        "config/source-size-baseline.json"
       ],
       "forbidden_changes": [
         "public Core API, Shell DTO, schema, error code, or IPC command changes",
@@ -1840,7 +1842,8 @@
         "apps/lorepia/src/lib/ipc/client.ts",
         "apps/lorepia/src/lib/ipc/clients/**",
         "apps/lorepia/src/lib/ipc/client.test.ts",
-        "config/source-size-baseline.json"
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json"
       ],
       "forbidden_changes": [
         "renderer-visible behavior, focus, scroll, accessibility, or Svelte reactivity changes",
@@ -1850,7 +1853,7 @@
       ],
       "validation": [
         "npm run check --prefix apps/lorepia",
-        "npm run test --prefix apps/lorepia -- src/lib/ipc/client.test.ts",
+        "npm run test --prefix apps/lorepia -- src/lib/ipc",
         "python3 scripts/generate_ipc_commands.py --check",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
@@ -2032,12 +2035,14 @@
         "apps/lorepia/src/AGENTS.md",
         "apps/lorepia/src/features/chat/ChatPane.svelte",
         "apps/lorepia/src/features/chat/virtual-window.test.ts",
+        "apps/lorepia/src/styles/hover-contract.test.ts",
         "config/source-size-baseline.json"
       ],
       "allowed_paths": [
         "apps/lorepia/src/features/chat/ChatPane.svelte",
         "apps/lorepia/src/features/chat/**",
         "apps/lorepia/src/features/chat/virtual-window.test.ts",
+        "apps/lorepia/src/styles/hover-contract*.test.ts",
         "config/source-size-baseline.json",
         "config/test-source-size-baseline.json"
       ],
@@ -2049,7 +2054,7 @@
       ],
       "validation": [
         "npm run check --prefix apps/lorepia",
-        "npm run test --prefix apps/lorepia -- src/features/chat/virtual-window.test.ts",
+        "npm run test --prefix apps/lorepia -- src/{features/chat,styles}",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
       "done_when": [
@@ -2233,6 +2238,7 @@
         "apps/lorepia/src/AGENTS.md",
         "apps/lorepia/src/features/providers/ProviderSettings.svelte",
         "apps/lorepia/src/features/providers/ProviderSettings.test.ts",
+        "apps/lorepia/src/styles/hover-contract.test.ts",
         "config/source-size-baseline.json"
       ],
       "allowed_paths": [
@@ -2241,6 +2247,7 @@
         "apps/lorepia/src/features/providers/*Panel.svelte",
         "apps/lorepia/src/features/providers/DesktopSettingsSidebar.svelte",
         "apps/lorepia/src/features/providers/*.test.ts",
+        "apps/lorepia/src/styles/hover-contract*.test.ts",
         "config/source-size-baseline.json",
         "config/test-source-size-baseline.json"
       ],
@@ -2252,7 +2259,7 @@
       ],
       "validation": [
         "npm run check --prefix apps/lorepia",
-        "npm run test --prefix apps/lorepia -- src/features/providers",
+        "npm run test --prefix apps/lorepia -- src/{features/providers,styles}",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
       "done_when": [
@@ -2276,12 +2283,18 @@
         "apps/lorepia/src/AGENTS.md",
         "apps/lorepia/src/styles/app.css",
         "apps/lorepia/src/styles/hover-contract.test.ts",
+        "apps/lorepia/src/app/titlebar-contract.test.ts",
+        "apps/lorepia/src/features/orchestration/studio-shell-contract.test.ts",
+        "apps/lorepia/src/features/providers/ProviderSettings.test.ts",
         "config/source-size-baseline.json"
       ],
       "allowed_paths": [
         "apps/lorepia/src/styles/app.css",
         "apps/lorepia/src/styles/**",
         "apps/lorepia/src/styles/hover-contract.test.ts",
+        "apps/lorepia/src/app/titlebar-contract.test.ts",
+        "apps/lorepia/src/features/orchestration/studio-shell-contract.test.ts",
+        "apps/lorepia/src/features/providers/ProviderSettings.test.ts",
         "config/source-size-baseline.json",
         "config/test-source-size-baseline.json"
       ],
@@ -2293,7 +2306,7 @@
       ],
       "validation": [
         "npm run check --prefix apps/lorepia",
-        "npm run test --prefix apps/lorepia -- src/styles/hover-contract.test.ts",
+        "npm run test --prefix apps/lorepia -- src/{styles,app/titlebar-contract.test.ts,features/orchestration/studio-shell-contract.test.ts,features/providers/ProviderSettings.test.ts}",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
       "done_when": [
@@ -2434,7 +2447,8 @@
         "config/refactoring/task-manifest.yaml",
         "AGENTS.md",
         "config/refactoring/baseline-report.json",
-        "scripts/report_refactoring_baseline.py"
+        "scripts/report_refactoring_baseline.py",
+        "scripts/check_github_workflow_security.py"
       ],
       "allowed_paths": [
         "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
@@ -2445,6 +2459,7 @@
         "scripts/test_report_refactoring_baseline.py",
         "scripts/check_ai_context_map.py",
         "scripts/test_check_ai_context_map.py",
+        "scripts/*check_github_workflow_security.py",
         "docs/refactoring/**",
         ".github/workflows/ci.yml"
       ],

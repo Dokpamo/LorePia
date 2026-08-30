@@ -386,13 +386,13 @@
       }
     },
     "ENF-004": {
-      "baseline_context_bytes": 282233,
+      "baseline_context_bytes": null,
       "commands": [
         "python3 scripts/report_refactoring_baseline.py --check",
         "python3 scripts/check_ai_context_map.py --strict-budget"
       ],
       "max_context_bytes": 250000,
-      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "over_budget_reason": null,
       "paths": {
         "documents": [
           "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
@@ -402,7 +402,7 @@
           "scripts/report_refactoring_baseline.py"
         ],
         "implementation": [
-          "config/refactoring/baseline-report.json"
+          "config/ai-context-map.json"
         ],
         "tests": [
           "scripts/test_report_refactoring_baseline.py"
@@ -504,7 +504,7 @@
     "FE-CHAT-001": {
       "baseline_context_bytes": 294812,
       "commands": [
-        "npm run test --prefix apps/lorepia -- src/features/chat/ChatPane.test.ts src/features/chat/virtual-window.test.ts"
+        "npm run test --prefix apps/lorepia -- src/{features/chat,styles}"
       ],
       "max_context_bytes": 250000,
       "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
@@ -574,7 +574,7 @@
     "FE-CSS-001": {
       "baseline_context_bytes": null,
       "commands": [
-        "npm run test --prefix apps/lorepia -- src/styles/hover-contract.test.ts src/styles/semantic-state-contract.test.ts"
+        "npm run test --prefix apps/lorepia -- src/{styles,app/titlebar-contract.test.ts,features/orchestration/studio-shell-contract.test.ts,features/providers/ProviderSettings.test.ts}"
       ],
       "max_context_bytes": 250000,
       "over_budget_reason": null,
@@ -651,7 +651,7 @@
     "FE-PROV-001": {
       "baseline_context_bytes": null,
       "commands": [
-        "npm run test --prefix apps/lorepia -- src/features/providers/ProviderSettings.test.ts"
+        "npm run test --prefix apps/lorepia -- src/{features/providers,styles}"
       ],
       "max_context_bytes": 250000,
       "over_budget_reason": null,
@@ -784,7 +784,7 @@
     "IPC-002": {
       "baseline_context_bytes": 271728,
       "commands": [
-        "npm run test --prefix apps/lorepia -- src/lib/ipc/client.test.ts"
+        "npm run test --prefix apps/lorepia -- src/lib/ipc"
       ],
       "max_context_bytes": 250000,
       "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
