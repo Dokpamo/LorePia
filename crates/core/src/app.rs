@@ -21,22 +21,21 @@ use lorepia_chat::{
 };
 use lorepia_content::{StagedAsset, prepare_import};
 use lorepia_domain::{
-    ApiFamily, AppSettings, AuthBinding, BoundedJson, CanonicalOrigin, CapabilityKey,
-    CapabilityObservation, CapabilityValue, Character, CharacterContentV1, Confidence,
-    ConnectionConfig, ConnectionStatus, Conversation, ConversationBranch, ConversationBranchId,
-    ConversationId, ConversationMode, ConversationState, CoreError, CoreErrorCode, CoreResult,
-    CredentialRedirectPolicy, CredentialRef, CredentialScope, EndpointPath, GenerationPreset,
-    GenerationPresetId, GenerationStatus, GenerationTarget, HealthReport, ImportInspection,
-    ImportLimits, InspectionId, Message, MessageId, MessageStatus, ModelMetadataSource, ModelRoute,
-    ModelRouteConfig, ModelRouteId, ObservationId, ObservationSource, OpaqueReasoningState,
-    ProviderConnection, ProviderConnectionDraft, ProviderConnectionId,
-    ProviderLocalNetworkApproval, ProviderNetworkMode, ProviderProfile, ProviderTemplate,
-    Sha256Digest, SupportStatus, TemplateSource, TransformPhase,
+    ApiFamily, AppSettings, BoundedJson, CanonicalOrigin, CapabilityKey, CapabilityObservation,
+    CapabilityValue, Character, CharacterContentV1, Confidence, ConnectionStatus, Conversation,
+    ConversationBranch, ConversationBranchId, ConversationId, ConversationMode, ConversationState,
+    CoreError, CoreErrorCode, CoreResult, EndpointPath, GenerationPreset, GenerationPresetId,
+    GenerationStatus, GenerationTarget, HealthReport, ImportInspection, ImportLimits, InspectionId,
+    Message, MessageId, MessageStatus, ModelMetadataSource, ModelRoute, ModelRouteConfig,
+    ModelRouteId, ObservationId, ObservationSource, OpaqueReasoningState, ProviderConnection,
+    ProviderConnectionId, ProviderProfile, ProviderTemplate, Sha256Digest, SupportStatus,
+    TransformPhase,
 };
 #[cfg(test)]
 use lorepia_domain::{
-    GenerationId, GenerationProviderProvenance, GenerationRecord, GenerationRequest, MessageRole,
-    ModelAvailability, OpaqueReasoningContext, ParameterId, ParameterType, TransformSet,
+    CredentialRef, GenerationId, GenerationProviderProvenance, GenerationRecord, GenerationRequest,
+    MessageRole, ModelAvailability, OpaqueReasoningContext, ParameterId, ParameterType,
+    ProviderConnectionDraft, ProviderLocalNetworkApproval, ProviderNetworkMode, TransformSet,
     UiParameterLevel, VariableMap,
 };
 #[cfg(test)]
@@ -46,15 +45,14 @@ use lorepia_providers::parameter_mapping::{
 use lorepia_providers::parameter_mapping::{
     OpenRouterReasoningWireStyle, ParameterEngine, ReasoningWireDialect,
 };
-use lorepia_providers::url_policy::{ApprovedLocalNetworkOrigin, UrlPolicy};
 use lorepia_providers::{
-    AdapterRegistry, BuiltInTemplateId, ListedModel, ListedModelCapabilities,
-    ListedModelCapability, ListedModelReasoningCapability, ModelListResult, ModelRecordSource,
-    OpenAiCompatibleProvider, OpenRouterReasoningEffortSupport, OpenRouterSupportedParameter,
-    OpenRouterSupportedParameterSupport, validate_connection_fields, validate_manifest,
+    AdapterRegistry, ListedModel, ListedModelCapabilities, ListedModelCapability,
+    ListedModelReasoningCapability, ModelListResult, ModelRecordSource,
+    OpenRouterReasoningEffortSupport, OpenRouterSupportedParameter,
+    OpenRouterSupportedParameterSupport,
 };
 #[cfg(test)]
-use lorepia_providers::{OPAQUE_REASONING_STATE_UNSUPPORTED_ERROR, Provider};
+use lorepia_providers::{BuiltInTemplateId, OPAQUE_REASONING_STATE_UNSUPPORTED_ERROR, Provider};
 use lorepia_storage::{
     DatabaseStats, MessageDisplayProjectionWrite, MessageTransformApplicationWrite,
     MessageTransformDisposition, MessageTransformPipelineFailureWrite, MessageTransformStage,
@@ -78,6 +76,7 @@ mod generation_events;
 mod generation_workflow;
 mod model_sync;
 mod portable_runtime_state;
+mod providers;
 mod runtime_control;
 mod runtime_generation;
 
@@ -122,6 +121,15 @@ use generation_workflow::{
 };
 use runtime_control::RuntimeControl;
 
+pub use providers::ProviderTemplateView;
+use providers::validate_provider_template;
+#[cfg(test)]
+use providers::{
+    MAX_PROVIDER_BASE_URL_BYTES, MAX_PROVIDER_BASE_URL_CHARS, MAX_PROVIDER_DISPLAY_NAME_BYTES,
+    MAX_PROVIDER_DISPLAY_NAME_CHARS, MAX_PROVIDER_ID_BYTES, MAX_PROVIDER_ID_CHARS,
+    MAX_PROVIDER_MODEL_BYTES, MAX_PROVIDER_MODEL_CHARS,
+};
+
 pub use portable_runtime_state::{
     PortableRuntimeStatePayload, PortableRuntimeStateRecord, PortableRuntimeStateSaveResult,
     PortableRuntimeStateScope, PortableRuntimeStateSnapshot, PortableRuntimeStateWrite,
@@ -155,14 +163,6 @@ const MAX_RUNTIME_PROMPT_MESSAGES: usize = 128;
 const RUNTIME_GENERATION_TIMEOUT_MS: u64 = 180_000;
 const MAX_TASK_OUTPUT_BYTES: usize = 2 * 1024 * 1024;
 const MAX_TASK_OUTPUT_CHARS: usize = 512 * 1024;
-const MAX_PROVIDER_ID_BYTES: usize = 256;
-const MAX_PROVIDER_ID_CHARS: usize = 64;
-const MAX_PROVIDER_DISPLAY_NAME_BYTES: usize = 512;
-const MAX_PROVIDER_DISPLAY_NAME_CHARS: usize = 128;
-const MAX_PROVIDER_BASE_URL_BYTES: usize = 4 * 1024;
-const MAX_PROVIDER_BASE_URL_CHARS: usize = 1_024;
-const MAX_PROVIDER_MODEL_BYTES: usize = 1_024;
-const MAX_PROVIDER_MODEL_CHARS: usize = 256;
 const MAX_CONVERSATION_TITLE_BYTES: usize = 1_024;
 const MAX_CONVERSATION_TITLE_CHARS: usize = 256;
 const MAX_BRANCH_TITLE_BYTES: usize = 1_024;
@@ -234,18 +234,6 @@ pub struct ProviderModelRefreshResult {
     pub observed_at: DateTime<Utc>,
 }
 
-/// Native-facing provider-template presentation derived by Rust.
-///
-/// `default_network_mode` comes from the compiled adapter descriptor rather
-/// than from native inference or persisted template JSON. This keeps Ollama's
-/// loopback boundary explicit while every other built-in family defaults to
-/// the public network policy.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ProviderTemplateView {
-    pub template: ProviderTemplate,
-    pub default_network_mode: ProviderNetworkMode,
-}
-
 impl Drop for CoreInner {
     fn drop(&mut self) {
         self.active_generations
@@ -273,31 +261,6 @@ fn interaction_derived_supervisor_delay(storage: &Storage, now: DateTime<Utc>) -
             INTERACTION_DERIVED_SUPERVISOR_MIN_DELAY,
             INTERACTION_DERIVED_SUPERVISOR_IDLE_POLL,
         )
-}
-
-fn compiled_built_in_default_api_base_path(
-    template: &ProviderTemplate,
-) -> CoreResult<Option<EndpointPath>> {
-    if template.source != TemplateSource::BuiltIn {
-        return Ok(None);
-    }
-    let Some(id) = BuiltInTemplateId::ALL
-        .into_iter()
-        .find(|id| id.as_str() == template.id.as_str())
-    else {
-        return Ok(None);
-    };
-    let compiled = AdapterRegistry::built_in_template(id)?;
-    if template != &compiled {
-        return Ok(None);
-    }
-    EndpointPath::parse(id.default_api_base_path())
-        .map(Some)
-        .map_err(|error| {
-            CoreError::internal(format!(
-                "compiled provider API base path is invalid: {error}"
-            ))
-        })
 }
 
 impl Core {
@@ -852,263 +815,6 @@ impl Core {
         self.inner.storage.save_settings(settings)
     }
 
-    pub fn list_provider_templates(&self) -> CoreResult<Vec<ProviderTemplate>> {
-        let active_catalog = self.operational_provider_catalog_projection_at(Utc::now())?;
-        let active_templates = active_catalog.provider_templates();
-        let active_ids = active_templates
-            .iter()
-            .map(|template| template.id.clone())
-            .collect::<HashSet<_>>();
-        let mut by_id = self
-            .inner
-            .storage
-            .list_provider_templates()?
-            .into_iter()
-            // Signed template rows are retained only to keep already-created
-            // connections pinned. Visibility is controlled by the atomic
-            // active catalog pointer, never by these inert support rows.
-            .filter(|template| {
-                template.source != TemplateSource::SignedCatalog
-                    && !active_ids.contains(&template.id)
-            })
-            .fold(HashMap::new(), |mut latest, template| {
-                latest
-                    .entry(template.id.clone())
-                    .and_modify(|current: &mut ProviderTemplate| {
-                        if template.manifest_version > current.manifest_version {
-                            *current = template.clone();
-                        }
-                    })
-                    .or_insert(template);
-                latest
-            });
-        for template in active_templates {
-            validate_provider_template(&template)?;
-            by_id.insert(template.id.clone(), template);
-        }
-        let mut templates = by_id.into_values().collect::<Vec<_>>();
-        templates.sort_by(|left, right| {
-            left.display_name
-                .to_lowercase()
-                .cmp(&right.display_name.to_lowercase())
-                .then_with(|| left.id.cmp(&right.id))
-                .then_with(|| right.manifest_version.cmp(&left.manifest_version))
-        });
-        Ok(templates)
-    }
-
-    /// Lists provider templates together with Rust-owned presentation defaults.
-    pub fn list_provider_template_views(&self) -> CoreResult<Vec<ProviderTemplateView>> {
-        self.list_provider_templates()?
-            .into_iter()
-            .map(|template| {
-                validate_provider_template(&template)?;
-                let descriptor = AdapterRegistry::descriptor(template.api_family)?;
-                Ok(ProviderTemplateView {
-                    template,
-                    default_network_mode: descriptor.default_network_mode,
-                })
-            })
-            .collect()
-    }
-
-    pub fn list_provider_connections(&self) -> CoreResult<Vec<ProviderConnection>> {
-        self.inner.storage.list_provider_connections()
-    }
-
-    #[allow(
-        clippy::too_many_lines,
-        reason = "connection creation is one fail-closed validation and persistence boundary"
-    )]
-    pub fn create_provider_connection(
-        &self,
-        mut draft: ProviderConnectionDraft,
-    ) -> CoreResult<ProviderConnection> {
-        match self.inner.storage.get_provider_connection(&draft.id) {
-            Ok(_) => {
-                return Err(CoreError::invalid(
-                    "provider connection identifier already exists; create a new connection identifier",
-                ));
-            }
-            Err(error) if error.code == CoreErrorCode::NotFound => {}
-            Err(error) => return Err(error),
-        }
-        let (network_policy, local_network_approval) = match (
-            draft.network_mode,
-            draft.local_network_approval.as_ref(),
-        ) {
-            (ProviderNetworkMode::Public, None) => (UrlPolicy::public(), None),
-            (ProviderNetworkMode::LocalLoopback, None) => (UrlPolicy::local_loopback(), None),
-            (ProviderNetworkMode::ApprovedLocalNetwork, Some(approval)) => {
-                if approval.origin != draft.api_origin {
-                    return Err(CoreError::invalid(
-                        "local-network approval origin must exactly match the provider API origin",
-                    ));
-                }
-                let approval =
-                    ApprovedLocalNetworkOrigin::new(approval.origin.as_str(), &approval.addresses)
-                        .map_err(|error| {
-                            CoreError::invalid(format!(
-                                "provider local-network approval is invalid: {error}"
-                            ))
-                        })?;
-                let normalized = ProviderLocalNetworkApproval {
-                    origin: draft.api_origin.clone(),
-                    addresses: approval.addresses().to_vec(),
-                };
-                (
-                    UrlPolicy::approved_local_network(approval),
-                    Some(normalized),
-                )
-            }
-            (ProviderNetworkMode::ApprovedLocalNetwork, None) => {
-                return Err(CoreError::invalid(
-                    "approved local-network mode requires an exact origin and address approval",
-                ));
-            }
-            (ProviderNetworkMode::Public | ProviderNetworkMode::LocalLoopback, Some(_)) => {
-                return Err(CoreError::invalid(
-                    "local-network approval is only valid in approved local-network mode",
-                ));
-            }
-        };
-        let policy_url = network_policy
-            .canonicalize(&format!(
-                "{}/",
-                draft.api_origin.as_str().trim_end_matches('/')
-            ))
-            .map_err(|error| {
-                CoreError::invalid(format!("provider API origin is not allowed: {error}"))
-            })?;
-        if policy_url.origin().as_string() != draft.api_origin.as_str() {
-            return Err(CoreError::invalid(
-                "provider API origin is not in canonical form",
-            ));
-        }
-        draft.local_network_approval = local_network_approval;
-        let active_catalog = self.operational_provider_catalog_projection_at(Utc::now())?;
-        let expected_catalog_state_version = active_catalog.state_version;
-        let template = if let Some(template) =
-            active_catalog.provider_template(&draft.template_id, draft.template_version)
-        {
-            template
-        } else {
-            let template = self
-                .inner
-                .storage
-                .get_provider_template(&draft.template_id, draft.template_version)?;
-            if template.source == TemplateSource::SignedCatalog {
-                return Err(CoreError::new(
-                    CoreErrorCode::NotFound,
-                    "provider template is not active in the signed catalog",
-                    false,
-                ));
-            }
-            template
-        };
-        validate_provider_template(&template)?;
-        if draft.api_base_path.is_none() {
-            draft.api_base_path = compiled_built_in_default_api_base_path(&template)?;
-        }
-        let credential_scope = match &template.default_manifest.auth {
-            AuthBinding::None => {
-                if draft.approved_credential_origin.is_some() {
-                    return Err(CoreError::invalid(
-                        "credential-free provider must not declare a credential origin",
-                    ));
-                }
-                None
-            }
-            auth_binding => {
-                let approved_origin =
-                    draft.approved_credential_origin.as_ref().ok_or_else(|| {
-                        CoreError::invalid(
-                            "credential origin approval is required before saving this connection",
-                        )
-                    })?;
-                if approved_origin != &draft.api_origin {
-                    return Err(CoreError::invalid(
-                        "approved credential origin must exactly match the provider API origin",
-                    ));
-                }
-                Some(CredentialScope {
-                    allowed_origins: vec![approved_origin.clone()],
-                    auth_binding: auth_binding.clone(),
-                    redirect_policy: CredentialRedirectPolicy::Deny,
-                })
-            }
-        };
-        let now = Utc::now();
-        let connection = ProviderConnection {
-            credential_ref: credential_scope
-                .as_ref()
-                .map(|_| CredentialRef(draft.id.as_str().to_owned())),
-            credential_scope,
-            id: draft.id,
-            template_id: draft.template_id,
-            template_version: draft.template_version,
-            display_name: draft.display_name,
-            api_origin: draft.api_origin,
-            config: ConnectionConfig {
-                api_base_path: draft.api_base_path,
-                network_mode: draft.network_mode,
-                local_network_approval: draft.local_network_approval,
-                values: draft.values,
-            },
-            timeout_seconds: draft.timeout_seconds,
-            status: ConnectionStatus::Untested,
-            created_at: now,
-            updated_at: now,
-        };
-        if template.source == TemplateSource::SignedCatalog {
-            self.inner
-                .storage
-                .insert_provider_connection_for_catalog_state(
-                    &connection,
-                    &template,
-                    expected_catalog_state_version,
-                )?;
-        } else {
-            self.inner.storage.insert_provider_connection(&connection)?;
-        }
-        Ok(connection)
-    }
-
-    pub fn upsert_provider_connection(
-        &self,
-        connection: ProviderConnection,
-    ) -> CoreResult<ProviderConnection> {
-        let template = self
-            .inner
-            .storage
-            .get_provider_template(&connection.template_id, connection.template_version)?;
-        validate_provider_template(&template)?;
-        let current = self.inner.storage.get_provider_connection(&connection.id)?;
-        if connection.template_id != current.template_id
-            || connection.template_version != current.template_version
-            || connection.api_origin != current.api_origin
-            || connection.config != current.config
-            || connection.credential_ref != current.credential_ref
-            || connection.credential_scope != current.credential_scope
-        {
-            return Err(CoreError::invalid(
-                "provider template, endpoint configuration, network approval, and credential binding are immutable; create a newly approved connection instead",
-            ));
-        }
-        let updated = ProviderConnection {
-            display_name: connection.display_name,
-            timeout_seconds: connection.timeout_seconds,
-            updated_at: Utc::now(),
-            ..current
-        };
-        self.inner.storage.save_provider_connection(&updated)?;
-        Ok(updated)
-    }
-
-    pub fn delete_provider_connection(&self, id: &ProviderConnectionId) -> CoreResult<()> {
-        self.inner.storage.delete_provider_connection(id)
-    }
-
     pub fn list_model_routes(
         &self,
         connection_id: &ProviderConnectionId,
@@ -1581,65 +1287,6 @@ impl Core {
             });
         }
         Ok(MigratedLegacyTargetClassification::Alias)
-    }
-
-    pub fn list_provider_profiles(&self) -> CoreResult<Vec<ProviderProfile>> {
-        self.inner.storage.list_provider_profiles()
-    }
-
-    pub fn upsert_provider_profile(
-        &self,
-        mut profile: ProviderProfile,
-    ) -> CoreResult<ProviderProfile> {
-        profile.id = normalize_bounded_text(
-            "provider profile id",
-            std::mem::take(&mut profile.id),
-            MAX_PROVIDER_ID_BYTES,
-            MAX_PROVIDER_ID_CHARS,
-        )?;
-        profile.display_name = normalize_bounded_text(
-            "provider display name",
-            std::mem::take(&mut profile.display_name),
-            MAX_PROVIDER_DISPLAY_NAME_BYTES,
-            MAX_PROVIDER_DISPLAY_NAME_CHARS,
-        )?;
-        profile.base_url = normalize_bounded_text(
-            "provider base URL",
-            std::mem::take(&mut profile.base_url),
-            MAX_PROVIDER_BASE_URL_BYTES,
-            MAX_PROVIDER_BASE_URL_CHARS,
-        )?;
-        profile.model = normalize_bounded_text(
-            "provider model",
-            std::mem::take(&mut profile.model),
-            MAX_PROVIDER_MODEL_BYTES,
-            MAX_PROVIDER_MODEL_CHARS,
-        )?;
-        if profile.timeout_seconds == 0 || profile.timeout_seconds > 600 {
-            return Err(CoreError::invalid(
-                "provider profile requires an id, display name, model, and a timeout from 1 to 600 seconds",
-            ));
-        }
-        OpenAiCompatibleProvider::new(
-            &profile.base_url,
-            Duration::from_secs(u64::from(profile.timeout_seconds)),
-        )?;
-        match self.inner.storage.get_provider_profile(&profile.id) {
-            Ok(existing) if existing.base_url != profile.base_url => {
-                return Err(CoreError::invalid(
-                    "provider endpoint configuration is immutable; create a new provider connection instead",
-                ));
-            }
-            Ok(_) => {}
-            Err(error) if error.code == CoreErrorCode::NotFound => {}
-            Err(error) => return Err(error),
-        }
-        self.inner.storage.save_provider_profile(&profile)?;
-        Ok(profile)
-    }
-
-    pub fn delete_provider_profile(&self, id: &str) -> CoreResult<()> {
-        self.inner.storage.delete_provider_profile(id)
     }
 
     pub fn database_stats(&self) -> CoreResult<DatabaseStats> {
@@ -2148,22 +1795,6 @@ const fn api_family_wire_name(family: ApiFamily) -> &'static str {
         ApiFamily::GeminiGenerateContent => "gemini_generate_content",
         ApiFamily::OllamaNative => "ollama_native",
     }
-}
-
-fn validate_provider_template(template: &ProviderTemplate) -> CoreResult<()> {
-    if template.manifest_version == 0 {
-        return Err(CoreError::invalid(
-            "provider template version must be positive",
-        ));
-    }
-    if template.api_family != template.default_manifest.api_family {
-        return Err(CoreError::invalid(
-            "provider template API family does not match its manifest",
-        ));
-    }
-    validate_connection_fields(&template.connection_fields)?;
-    validate_manifest(&template.default_manifest)?;
-    Ok(())
 }
 
 fn canonical_value_sha256(value: &impl Serialize, label: &str) -> CoreResult<String> {
