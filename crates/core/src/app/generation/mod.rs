@@ -3,6 +3,8 @@ mod capabilities;
 mod credential;
 mod operation_identity;
 mod preset;
+mod prompt_preparation;
+mod protocol_request;
 mod target_resolution;
 mod types;
 
@@ -25,6 +27,15 @@ pub(super) use operation_identity::{
     same_branch_generation_semantic_fingerprint, validate_same_branch_attempt_semantic_identity,
 };
 pub(super) use preset::validate_generation_preset_candidate_plan;
+pub(crate) use prompt_preparation::BoundedTaskPrompt;
+pub(super) use prompt_preparation::{
+    ReviewedPromptSendContext, reviewed_prompt_session_seed,
+    validate_reviewed_generation_attempt_id,
+};
+#[cfg(test)]
+pub(super) use protocol_request::load_opaque_reasoning_context;
+pub(super) use protocol_request::snapshot_provider_request;
+pub(crate) use protocol_request::{PromptRouteWireContract, configure_generation_protocol_request};
 pub(super) use target_resolution::{
     GenerationProviderTemporalContext, ValidatedGenerationTarget, build_resolved_generation_target,
     generation_target_provider_authority, preflight_generation_target_connection_credential,
