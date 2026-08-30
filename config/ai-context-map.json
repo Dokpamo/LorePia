@@ -1036,13 +1036,12 @@
       }
     },
     "STOR-DISC-004": {
-      "baseline_context_bytes": 579804,
       "commands": [
+        "cargo test -p lorepia-storage --lib discovery_repository::tests::recovery",
         "cargo test -p lorepia-storage --test provider_credential_operations",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
       "max_context_bytes": 250000,
-      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
       "paths": {
         "documents": [
           "crates/storage/AGENTS.md"
@@ -1052,19 +1051,14 @@
         ],
         "implementation": [
           "crates/storage/src/discovery_repository/commit_store.rs",
-          "crates/storage/src/discovery_repository/commit_store/provider_graph.rs",
-          "crates/storage/src/discovery_repository/credential/attestation.rs",
-          "crates/storage/src/discovery_repository/credential/authority.rs",
-          "crates/storage/src/discovery_repository/credential/history.rs",
-          "crates/storage/src/discovery_repository/credential_execution.rs",
-          "crates/storage/src/discovery_repository/repository_io.rs",
-          "crates/storage/src/discovery_repository/types.rs",
-          "crates/storage/src/discovery_repository/validation.rs"
+          "crates/storage/src/discovery_repository/recovery.rs",
+          "crates/storage/src/discovery_repository/recovery/compensation.rs",
+          "crates/storage/src/discovery_repository/recovery/compensation_authority.rs",
+          "crates/storage/src/discovery_repository/recovery/saga.rs"
         ],
         "tests": [
-          "crates/storage/src/discovery_repository/tests/credentials.rs",
-          "crates/storage/src/discovery_repository/tests/recovery.rs",
-          "crates/storage/tests/provider_credential_operations.rs"
+          "crates/storage/src/discovery_repository/tests/commit.rs",
+          "crates/storage/src/discovery_repository/tests/recovery.rs"
         ]
       }
     },
