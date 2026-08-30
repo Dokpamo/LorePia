@@ -1,179 +1,429 @@
-//! Bounded value validation, canonical encoding, and audit persistence helpers.
+//! Deterministic discovery contracts, canonical encoding, and audit persistence.
+
+use chrono::{DateTime, Utc};
+use lorepia_domain::{
+    ApiFamily, AuthBinding, CanonicalOrigin, CoreError, CoreResult, EndpointPath, HeaderName,
+    HttpMethod, ProviderNetworkMode, ProviderTemplate, TemplateSource,
+    discovery::{
+        DiscoveryApprovalDecision, DiscoveryApprovalGrant, DiscoveryCandidate, DiscoveryCommitPlan,
+        DiscoveryOperationKind, DiscoverySideEffectClass, DiscoveryState, SanitizedDiscoveryInput,
+    },
+};
+use rusqlite::{Transaction, params};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 use super::{
-    BTreeSet, Connection, CoreError, CoreErrorCode, CoreResult, DateTime, Digest,
-    DiscoveryApprovalDecision, DiscoveryApprovalGrant, DiscoveryApprovalRecord, DiscoveryCandidate,
-    DiscoveryCommitPlan, DiscoveryEvidenceRecord, DiscoveryOperationKind, DiscoveryProbeBudget,
-    DiscoveryReviewDiff, DiscoverySessionId, DiscoverySideEffectClass, DiscoveryState, EvidenceId,
-    MAX_DISCOVERY_JSON_BYTES, MAX_DISCOVERY_JSON_CHARS, MAX_DISCOVERY_JSON_DEPTH,
-    MAX_DISCOVERY_JSON_NODES, MAX_DISCOVERY_ROWS, OptionalExtension, SanitizedDiscoveryInput,
-    Sha256, StoredDiscoveryCandidate, Transaction, Utc, Value, contract_error, corrupted,
-    database_error, params,
+    DISCOVERY_REDACTION_VERSION,
+    errors::{contract_error, corrupted, database_error},
+    validation::{
+        MAX_DISCOVERY_JSON_BYTES, MAX_DISCOVERY_JSON_CHARS, looks_like_secret, validate_identifier,
+        validate_opaque_credential_reference, validate_redacted_value, validate_sha256,
+    },
 };
 
-pub(super) fn validate_limit(limit: u32) -> CoreResult<()> {
-    if limit == 0 || limit > MAX_DISCOVERY_ROWS {
+const DETERMINISTIC_DISCOVERY_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InitialDeterministicDiscoveryOutput {
+    schema_version: u32,
+    selected_template: Option<ProviderTemplate>,
+    evidence: Vec<InitialRedactedDiscoveryEvidence>,
+    family_candidates: Vec<InitialDiscoveryFamilyCandidate>,
+    manifest_candidates: Vec<InitialDiscoveryManifestCandidate>,
+    connection_hints: Vec<InitialDiscoveryConnectionHint>,
+    fetch_issues: Vec<InitialDiscoveryFetchIssue>,
+    fetch_stopped_by_budget: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InitialRedactedDiscoveryEvidence {
+    kind: String,
+    source_origin: CanonicalOrigin,
+    content_sha256: String,
+    extracted_json: Value,
+    redaction_version: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum InitialDiscoveryCandidateConfidence {
+    Structural,
+    ExactCompiledProvider,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InitialDiscoveryFamilyCandidate {
+    api_family: ApiFamily,
+    confidence: InitialDiscoveryCandidateConfidence,
+    evidence_indices: Vec<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InitialDiscoveryManifestCandidate {
+    template: ProviderTemplate,
+    manifest_sha256: String,
+    confidence: InitialDiscoveryCandidateConfidence,
+    generation_endpoint_evidenced: bool,
+    model_endpoint_evidenced: bool,
+    auth_evidenced: bool,
+    evidence_indices: Vec<usize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum InitialConnectionOriginHintSource {
+    CompiledProviderDefault,
+    OpenApiServer,
+    SanitizedCurlRequest,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InitialDiscoveryConnectionHint {
+    api_family: ApiFamily,
+    api_origin: CanonicalOrigin,
+    api_base_path: Option<EndpointPath>,
+    network_mode: ProviderNetworkMode,
+    auth: AuthBinding,
+    requires_credential_origin_approval: bool,
+    source: InitialConnectionOriginHintSource,
+    evidence_indices: Vec<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InitialDiscoveryFetchIssue {
+    source_origin: CanonicalOrigin,
+    source_path_sha256: String,
+    source_path_is_root: bool,
+    kind: String,
+    http_status: Option<u16>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+enum InitialCurlAuthHint {
+    BearerHeader,
+    AuthorizationHeader,
+    ApiKeyHeader { header_name: HeaderName },
+    CookieHeader { header_name: HeaderName },
+    ApiKeyQuery { parameter_name: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+enum InitialJsonShape {
+    Null,
+    Boolean,
+    Number,
+    String,
+    Array { items: Vec<Self>, truncated: bool },
+    Object { fields: Vec<InitialJsonFieldShape> },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InitialJsonFieldShape {
+    name: String,
+    shape: InitialJsonShape,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InitialSanitizedCurlEvidence {
+    method: HttpMethod,
+    origin: CanonicalOrigin,
+    source_path_sha256: String,
+    source_path_is_root: bool,
+    query_parameter_names: Vec<String>,
+    header_names: Vec<HeaderName>,
+    auth_hints: Vec<InitialCurlAuthHint>,
+    body_json_shape: Option<InitialJsonShape>,
+    stream_hint: Option<bool>,
+    api_family_candidates: Vec<ApiFamily>,
+    trust: String,
+}
+
+pub(super) fn validate_initial_discovery_draft(
+    value: &Value,
+    input: &SanitizedDiscoveryInput,
+) -> CoreResult<()> {
+    const EXPECTED_KEYS: [&str; 15] = [
+        "schema_version",
+        "source",
+        "deterministic",
+        "evidence_ids",
+        "extra_evidence_ids",
+        "selected_candidate_id",
+        "template",
+        "connection",
+        "routes",
+        "observations",
+        "presets",
+        "credential_approval_id",
+        "probe_route_ids",
+        "probe_failure_count",
+        "assistant",
+    ];
+    validate_redacted_value(value)?;
+    let object = value
+        .as_object()
+        .ok_or_else(|| CoreError::invalid("initial discovery draft must be a JSON object"))?;
+    if object.len() != EXPECTED_KEYS.len()
+        || EXPECTED_KEYS.iter().any(|key| !object.contains_key(*key))
+        || object.get("schema_version").and_then(Value::as_u64) != Some(1)
+        || object.get("probe_failure_count").and_then(Value::as_u64) != Some(0)
+        || ["selected_candidate_id", "template", "connection"]
+            .into_iter()
+            .chain(["credential_approval_id", "assistant"])
+            .any(|key| !object[key].is_null())
+        || [
+            "evidence_ids",
+            "extra_evidence_ids",
+            "routes",
+            "observations",
+            "presets",
+            "probe_route_ids",
+        ]
+        .into_iter()
+        .any(|key| {
+            object[key]
+                .as_array()
+                .is_none_or(|values| !values.is_empty())
+        })
+    {
         return Err(CoreError::invalid(
-            "discovery list limit must be from 1 to 1000",
+            "initial discovery draft must contain only pristine source intent",
         ));
     }
-    Ok(())
-}
-
-pub(super) fn validate_identifier(label: &str, value: &str, maximum: usize) -> CoreResult<()> {
-    if value.is_empty()
-        || value.len() > maximum
-        || value.trim() != value
-        || value.chars().any(char::is_control)
-    {
-        return Err(CoreError::invalid(format!(
-            "{label} must be a bounded trimmed opaque identifier"
-        )));
-    }
-    Ok(())
-}
-
-pub(super) fn validate_sha256(label: &str, value: &str) -> CoreResult<()> {
-    if value.len() != 64
-        || !value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-    {
-        return Err(CoreError::invalid(format!(
-            "{label} must be a lowercase SHA-256 digest"
-        )));
-    }
-    Ok(())
-}
-
-pub(super) fn validate_discovery_evidence(evidence: &DiscoveryEvidenceRecord) -> CoreResult<()> {
-    validate_identifier("discovery evidence id", evidence.id.as_str(), 256)?;
-    validate_identifier(
-        "discovery evidence session id",
-        evidence.session_id.as_str(),
-        128,
-    )?;
-    validate_sha256("discovery evidence content hash", &evidence.content_sha256)?;
-    validate_persistable_discovery_url(
-        evidence.source_url.as_str(),
-        "discovery evidence source URL",
-    )?;
-    if !evidence.extracted_json.is_object() {
-        return Err(CoreError::invalid(
-            "discovery evidence extraction must be a JSON object",
-        ));
-    }
-    encode_redacted_json(&evidence.extracted_json, "discovery evidence")?;
-    Ok(())
-}
-
-pub(super) fn validate_sanitized_input(input: &SanitizedDiscoveryInput) -> CoreResult<()> {
-    if looks_like_secret(input.connection_id.as_str()) || looks_like_secret(&input.display_name) {
-        return Err(CoreError::invalid(
-            "discovery connection identity contains credential-like material",
-        ));
-    }
-    validate_persistable_discovery_url(input.site_url.as_str(), "discovery site URL")?;
-    if let Some(docs_url) = &input.docs_url {
-        validate_persistable_discovery_url(docs_url.as_str(), "discovery docs URL")?;
-    }
-    if let Some(reference) = &input.credential_ref {
-        validate_opaque_credential_reference(reference.as_str())?;
-    }
-    Ok(())
-}
-
-pub(super) fn validate_persistable_discovery_url(value: &str, label: &str) -> CoreResult<()> {
-    let parsed =
-        url::Url::parse(value).map_err(|_| CoreError::invalid(format!("{label} is invalid")))?;
-    if parsed.query().is_some()
-        || parsed.fragment().is_some()
-        || !parsed.username().is_empty()
-        || parsed.password().is_some()
-    {
-        return Err(CoreError::invalid(format!(
-            "{label} must not contain user information, a query, or a fragment"
-        )));
-    }
-    if parsed.host_str().is_some_and(looks_like_secret) {
-        return Err(CoreError::invalid(format!(
-            "{label} contains credential-like host material"
-        )));
-    }
-    for segment in parsed.path().split('/') {
-        let mut decoded = segment.to_owned();
-        for _ in 0..4 {
-            if !decoded.as_bytes().contains(&b'%') {
-                break;
+    let source = object["source"]
+        .as_object()
+        .ok_or_else(|| CoreError::invalid("initial discovery source intent is invalid"))?;
+    match source.get("kind").and_then(Value::as_str) {
+        Some("site") if source.len() == 1 && object["deterministic"].is_null() => Ok(()),
+        Some("curl") if source.len() == 1 => {
+            validate_initial_curl_deterministic_output(&object["deterministic"], input)
+        }
+        Some("known_provider") if source.len() == 2 => {
+            if !object["deterministic"].is_null() {
+                return Err(CoreError::invalid(
+                    "known-provider discovery cannot begin with transient deterministic output",
+                ));
             }
-            let next = percent_decode_path_segment(&decoded).ok_or_else(|| {
-                CoreError::invalid(format!("{label} contains invalid path encoding"))
+            let template_id = source
+                .get("template_id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    CoreError::invalid("known-provider source intent has no template identifier")
+                })?;
+            validate_identifier("known-provider source template id", template_id, 256)?;
+            if looks_like_secret(template_id) {
+                return Err(CoreError::invalid(
+                    "known-provider source template id resembles credential material",
+                ));
+            }
+            Ok(())
+        }
+        _ => Err(CoreError::invalid(
+            "initial discovery source intent is unsupported or contains payload data",
+        )),
+    }
+}
+
+#[allow(clippy::too_many_lines)]
+fn validate_initial_curl_deterministic_output(
+    value: &Value,
+    input: &SanitizedDiscoveryInput,
+) -> CoreResult<()> {
+    let output = serde_json::from_value::<InitialDeterministicDiscoveryOutput>(value.clone())
+        .map_err(|_| {
+            CoreError::invalid("initial cURL deterministic output has an invalid schema")
+        })?;
+    let canonical = serde_json::to_value(&output)
+        .map_err(|_| CoreError::internal("cannot canonicalize cURL deterministic output"))?;
+    if canonical != *value {
+        return Err(CoreError::invalid(
+            "initial cURL deterministic output contains non-canonical fields",
+        ));
+    }
+    if output.schema_version != DETERMINISTIC_DISCOVERY_SCHEMA_VERSION
+        || output.evidence.len() != 1
+        || output.family_candidates.len() > 5
+        || output.manifest_candidates.len() > 5
+        || output.connection_hints.len() > 5
+        || !output.fetch_issues.is_empty()
+        || output.fetch_stopped_by_budget
+    {
+        return Err(CoreError::invalid(
+            "initial cURL deterministic output violates its bounded contract",
+        ));
+    }
+
+    let input_origin = CanonicalOrigin::parse(input.site_url.as_str())
+        .map_err(|_| CoreError::invalid("initial cURL input site URL is not an origin"))?;
+    let evidence = &output.evidence[0];
+    if evidence.kind != "sanitized_curl_request"
+        || evidence.source_origin != input_origin
+        || evidence.redaction_version != DISCOVERY_REDACTION_VERSION
+    {
+        return Err(CoreError::invalid(
+            "initial cURL evidence is not bound to the sanitized input origin",
+        ));
+    }
+    validate_sha256(
+        "initial cURL evidence content hash",
+        &evidence.content_sha256,
+    )?;
+    let extracted =
+        serde_json::from_value::<InitialSanitizedCurlEvidence>(evidence.extracted_json.clone())
+            .map_err(|_| {
+                CoreError::invalid("initial cURL evidence has an invalid sanitized shape")
             })?;
-            if next == decoded {
-                break;
-            }
-            decoded = next;
-        }
-        if decoded.as_bytes().contains(&b'%') {
-            return Err(CoreError::invalid(format!(
-                "{label} contains excessively nested path encoding"
-            )));
-        }
-        if looks_like_secret(&decoded) {
-            return Err(CoreError::invalid(format!(
-                "{label} contains credential-like path material"
-            )));
-        }
+    let canonical_extracted = serde_json::to_value(&extracted)
+        .map_err(|_| CoreError::internal("cannot canonicalize sanitized cURL evidence"))?;
+    if canonical_extracted != evidence.extracted_json {
+        return Err(CoreError::invalid(
+            "initial cURL evidence contains non-canonical fields",
+        ));
     }
-    Ok(())
-}
-
-pub(super) fn percent_decode_path_segment(segment: &str) -> Option<String> {
-    let bytes = segment.as_bytes();
-    let mut decoded = Vec::with_capacity(bytes.len());
-    let mut index = 0_usize;
-    while index < bytes.len() {
-        if bytes[index] == b'%' {
-            let high = *bytes.get(index + 1)?;
-            let low = *bytes.get(index + 2)?;
-            decoded.push(hex_nibble(high)?.checked_mul(16)? + hex_nibble(low)?);
-            index += 3;
-        } else {
-            decoded.push(bytes[index]);
-            index += 1;
-        }
-    }
-    String::from_utf8(decoded).ok()
-}
-
-pub(super) const fn hex_nibble(byte: u8) -> Option<u8> {
-    match byte {
-        b'0'..=b'9' => Some(byte - b'0'),
-        b'a'..=b'f' => Some(byte - b'a' + 10),
-        b'A'..=b'F' => Some(byte - b'A' + 10),
-        _ => None,
-    }
-}
-
-pub(super) fn validate_opaque_credential_reference(reference: &str) -> CoreResult<()> {
-    let lower = reference.to_ascii_lowercase();
-    if reference.is_empty()
-        || reference.len() > 256
-        || reference.trim() != reference
-        || reference.chars().any(char::is_control)
-        || reference.contains("://")
-        || reference.contains('?')
-        || reference.contains('#')
-        || reference.contains('=')
-        || lower.contains("secret")
-        || lower.contains("password")
-        || lower.contains("api-key")
-        || lower.contains("apikey")
-        || lower.contains("token")
-        || looks_like_secret(reference)
+    let extracted_bytes = serde_json::to_vec(&evidence.extracted_json)
+        .map_err(|_| CoreError::internal("cannot hash sanitized cURL evidence"))?;
+    let extracted_sha256 = format!("{:x}", Sha256::digest(extracted_bytes));
+    if evidence.content_sha256 != extracted_sha256
+        || extracted.origin != evidence.source_origin
+        || extracted.trust != "sanitized_curl_structure"
     {
         return Err(CoreError::invalid(
-            "discovery credential_ref must be an opaque broker reference, not credential material",
+            "initial cURL evidence content hash or provenance is invalid",
+        ));
+    }
+    validate_sha256(
+        "initial cURL source path hash",
+        &extracted.source_path_sha256,
+    )?;
+    if extracted.query_parameter_names.len() > 64
+        || extracted.header_names.len() > 64
+        || extracted.auth_hints.len() > 64
+        || extracted.api_family_candidates.len() > 5
+    {
+        return Err(CoreError::invalid(
+            "initial cURL evidence exceeds parser collection bounds",
+        ));
+    }
+    for name in &extracted.query_parameter_names {
+        validate_identifier("initial cURL query parameter name", name, 256)?;
+    }
+    for hint in &extracted.auth_hints {
+        if let InitialCurlAuthHint::ApiKeyQuery { parameter_name } = hint {
+            validate_identifier(
+                "initial cURL authentication query parameter name",
+                parameter_name,
+                256,
+            )?;
+        }
+    }
+
+    for (index, candidate) in output.family_candidates.iter().enumerate() {
+        if candidate.confidence != InitialDiscoveryCandidateConfidence::Structural
+            || candidate.evidence_indices.as_slice() != [0]
+            || !extracted
+                .api_family_candidates
+                .contains(&candidate.api_family)
+            || output.family_candidates[..index]
+                .iter()
+                .any(|previous| previous.api_family == candidate.api_family)
+        {
+            return Err(CoreError::invalid(
+                "initial cURL family candidate has invalid evidence provenance",
+            ));
+        }
+    }
+    for (index, candidate) in output.manifest_candidates.iter().enumerate() {
+        validate_sha256(
+            "initial cURL manifest candidate hash",
+            &candidate.manifest_sha256,
+        )?;
+        let manifest_json = canonical_json_result(
+            serde_json::to_value(&candidate.template.default_manifest),
+            "initial cURL provider manifest",
+        )?;
+        let actual_manifest_sha256 = sha256_hex(manifest_json.as_bytes());
+        let expected_template_id = format!("discovered-{}", candidate.manifest_sha256);
+        if candidate.confidence != InitialDiscoveryCandidateConfidence::Structural
+            || !candidate.generation_endpoint_evidenced
+            || candidate.model_endpoint_evidenced
+            || candidate.evidence_indices.as_slice() != [0]
+            || candidate.manifest_sha256 != actual_manifest_sha256
+            || candidate.template.id.as_str() != expected_template_id
+            || candidate.template.manifest_version != 1
+            || candidate.template.source != TemplateSource::UserDiscovered
+            || candidate.template.api_family != candidate.template.default_manifest.api_family
+            || !output
+                .family_candidates
+                .iter()
+                .any(|family| family.api_family == candidate.template.api_family)
+            || output.manifest_candidates[..index]
+                .iter()
+                .any(|previous| previous.manifest_sha256 == candidate.manifest_sha256)
+        {
+            return Err(CoreError::invalid(
+                "initial cURL manifest candidate has invalid deterministic provenance",
+            ));
+        }
+        let default_origin = candidate
+            .template
+            .default_manifest
+            .default_api_origin
+            .as_ref();
+        if input.connection_options.network_mode == ProviderNetworkMode::ApprovedLocalNetwork {
+            if default_origin.is_some() || !candidate.template.default_manifest.sources.is_empty() {
+                return Err(CoreError::invalid(
+                    "initial LAN cURL manifest promoted connection-specific authority",
+                ));
+            }
+        } else if default_origin != Some(&evidence.source_origin) {
+            return Err(CoreError::invalid(
+                "initial cURL manifest origin does not match sanitized evidence",
+            ));
+        }
+    }
+
+    for (index, hint) in output.connection_hints.iter().enumerate() {
+        if hint.source != InitialConnectionOriginHintSource::SanitizedCurlRequest
+            || hint.api_origin != evidence.source_origin
+            || hint.network_mode != input.connection_options.network_mode
+            || hint.evidence_indices.as_slice() != [0]
+            || hint.requires_credential_origin_approval != (hint.auth != AuthBinding::None)
+            || !output
+                .manifest_candidates
+                .iter()
+                .any(|candidate| candidate.template.api_family == hint.api_family)
+            || output.connection_hints[..index].iter().any(|previous| {
+                previous.api_family == hint.api_family
+                    && previous.api_origin == hint.api_origin
+                    && previous.api_base_path == hint.api_base_path
+            })
+        {
+            return Err(CoreError::invalid(
+                "initial cURL connection hint has invalid deterministic provenance",
+            ));
+        }
+    }
+
+    let expected_selected = if output.manifest_candidates.len() == 1 {
+        Some(&output.manifest_candidates[0].template)
+    } else {
+        None
+    };
+    if output.selected_template.as_ref() != expected_selected {
+        return Err(CoreError::invalid(
+            "initial cURL selected template is not bound to the candidate set",
         ));
     }
     Ok(())
@@ -203,155 +453,6 @@ pub(super) fn decode_redacted_json(json: &str, label: &str) -> CoreResult<Value>
     validate_redacted_value(&value)
         .map_err(|_| corrupted(format!("{label} contains forbidden data")))?;
     Ok(value)
-}
-
-pub(super) fn validate_redacted_value(value: &Value) -> CoreResult<()> {
-    let mut nodes = 0_usize;
-    validate_redacted_value_inner(value, 0, &mut nodes)
-}
-
-pub(super) fn validate_redacted_value_inner(
-    value: &Value,
-    depth: usize,
-    nodes: &mut usize,
-) -> CoreResult<()> {
-    *nodes = nodes.saturating_add(1);
-    if depth > MAX_DISCOVERY_JSON_DEPTH || *nodes > MAX_DISCOVERY_JSON_NODES {
-        return Err(CoreError::invalid(
-            "redacted discovery JSON exceeds structural bounds",
-        ));
-    }
-    match value {
-        Value::Object(object) => {
-            for (key, child) in object {
-                let normalized = key
-                    .bytes()
-                    .filter(u8::is_ascii_alphanumeric)
-                    .map(|byte| byte.to_ascii_lowercase())
-                    .collect::<Vec<_>>();
-                if matches!(
-                    normalized.as_slice(),
-                    b"apikey"
-                        | b"apikeyvalue"
-                        | b"authorization"
-                        | b"authorizationvalue"
-                        | b"proxyauthorization"
-                        | b"cookie"
-                        | b"setcookie"
-                        | b"password"
-                        | b"secret"
-                        | b"clientsecret"
-                        | b"clientsecretvalue"
-                        | b"token"
-                        | b"bearertoken"
-                        | b"idtoken"
-                        | b"sessiontoken"
-                        | b"credential"
-                        | b"credentials"
-                        | b"accesstoken"
-                        | b"refreshtoken"
-                        | b"credentialvalue"
-                        | b"rawcredential"
-                        | b"requestheaders"
-                        | b"responseheaders"
-                        | b"headers"
-                        | b"documentbody"
-                        | b"rawdocument"
-                        | b"rawbody"
-                        | b"rawrequest"
-                        | b"rawresponse"
-                        | b"rawcurl"
-                        | b"pastedcurl"
-                ) {
-                    return Err(CoreError::invalid(
-                        "redacted discovery JSON contains a forbidden sensitive field",
-                    ));
-                }
-                if normalized.as_slice() == b"sourceurl"
-                    && let Some(source_url) = child.as_str()
-                {
-                    validate_persistable_discovery_url(source_url, "source_url")?;
-                }
-                validate_redacted_value_inner(child, depth + 1, nodes)?;
-            }
-        }
-        Value::Array(values) => {
-            for child in values {
-                validate_redacted_value_inner(child, depth + 1, nodes)?;
-            }
-        }
-        Value::String(value) => {
-            if value.chars().count() > MAX_DISCOVERY_JSON_CHARS {
-                return Err(CoreError::invalid(
-                    "redacted discovery JSON contains an oversized string",
-                ));
-            }
-            if looks_like_secret(value) {
-                return Err(CoreError::invalid(
-                    "redacted discovery JSON contains credential-like material",
-                ));
-            }
-            if value.contains("://")
-                && let Ok(url) = url::Url::parse(value)
-                && (!url.username().is_empty() || url.password().is_some())
-            {
-                return Err(CoreError::invalid(
-                    "redacted discovery JSON contains URL user information",
-                ));
-            }
-        }
-        _ => {}
-    }
-    Ok(())
-}
-
-pub(super) fn looks_like_secret(value: &str) -> bool {
-    const SECRET_PREFIXES: [&str; 10] = [
-        "sk-proj-",
-        "sk-ant-",
-        "sk-or-",
-        "sk-",
-        "AIza",
-        "xoxb-",
-        "xoxp-",
-        "ghp_",
-        "github_pat_",
-        "AKIA",
-    ];
-    let trimmed = value.trim();
-    let lower = trimmed.to_ascii_lowercase();
-    if lower.starts_with("bearer ")
-        || lower.starts_with("basic ")
-        || lower.contains("api_key=")
-        || lower.contains("apikey=")
-        || lower.contains("access_token=")
-        || lower.contains("secret=")
-        || lower.contains("password=")
-        || lower.contains("-----begin private key-----")
-        || lower.contains("-----begin rsa private key-----")
-        || lower.contains("sk-proj-")
-        || lower.contains("sk-ant-")
-        || lower.contains("sk-or-")
-        || lower.contains("github_pat_")
-    {
-        return true;
-    }
-    if SECRET_PREFIXES
-        .iter()
-        .any(|prefix| trimmed.starts_with(prefix))
-    {
-        return true;
-    }
-    let jwt_parts = trimmed.split('.').collect::<Vec<_>>();
-    jwt_parts.len() == 3
-        && jwt_parts[0].starts_with("eyJ")
-        && jwt_parts[1].starts_with("eyJ")
-        && jwt_parts.iter().all(|part| {
-            part.len() >= 8
-                && part
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
-        })
 }
 
 pub(super) fn encode_json_result(
@@ -421,244 +522,6 @@ pub(super) fn candidate_kind(candidate: &DiscoveryCandidate) -> &'static str {
     }
 }
 
-pub(super) fn validate_candidate_evidence_references(
-    transaction: &Transaction<'_>,
-    candidate: &StoredDiscoveryCandidate,
-) -> CoreResult<()> {
-    let mut unique = BTreeSet::new();
-    for evidence_id in &candidate.candidate.evidence_ids {
-        if !unique.insert(evidence_id.as_str()) {
-            return Err(CoreError::invalid(
-                "discovery candidate evidence references must be unique",
-            ));
-        }
-        let belongs = transaction
-            .query_row(
-                "SELECT EXISTS(
-                     SELECT 1
-                     FROM provider_discovery_evidence
-                     WHERE id = ?1 AND session_id = ?2
-                 )",
-                params![
-                    evidence_id.as_str(),
-                    candidate.candidate.session_id.as_str()
-                ],
-                |row| row.get::<_, bool>(0),
-            )
-            .map_err(database_error)?;
-        if !belongs {
-            return Err(CoreError::invalid(
-                "candidate evidence must exist in the same discovery session",
-            ));
-        }
-    }
-    Ok(())
-}
-
-pub(super) fn validate_session_evidence_ids<'a>(
-    connection: &Connection,
-    session_id: &DiscoverySessionId,
-    evidence_ids: impl IntoIterator<Item = &'a EvidenceId>,
-    label: &str,
-) -> CoreResult<()> {
-    let mut unique = BTreeSet::new();
-    for evidence_id in evidence_ids {
-        if !unique.insert(evidence_id.as_str()) {
-            return Err(CoreError::invalid(format!(
-                "{label} evidence references must be unique"
-            )));
-        }
-        let belongs = connection
-            .query_row(
-                "SELECT EXISTS(
-                     SELECT 1
-                     FROM provider_discovery_evidence
-                     WHERE id = ?1 AND session_id = ?2
-                 )",
-                params![evidence_id.as_str(), session_id.as_str()],
-                |row| row.get::<_, bool>(0),
-            )
-            .map_err(database_error)?;
-        if !belongs {
-            return Err(CoreError::invalid(format!(
-                "{label} evidence must exist in the same discovery session"
-            )));
-        }
-    }
-    Ok(())
-}
-
-pub(super) fn validate_review_evidence_references(
-    connection: &Connection,
-    session_id: &DiscoverySessionId,
-    review: &DiscoveryReviewDiff,
-) -> CoreResult<()> {
-    for change in &review.changes {
-        validate_session_evidence_ids(
-            connection,
-            session_id,
-            &change.evidence_ids,
-            "discovery review change",
-        )?;
-    }
-    Ok(())
-}
-
-pub(super) fn validate_approval_references(
-    transaction: &Transaction<'_>,
-    approval: &DiscoveryApprovalRecord,
-) -> CoreResult<()> {
-    match &approval.grant {
-        DiscoveryApprovalGrant::AssistantConsent {
-            assistant_route_id,
-            evidence_ids,
-            ..
-        } => {
-            validate_session_evidence_ids(
-                transaction,
-                &approval.session_id,
-                evidence_ids,
-                "assistant consent",
-            )?;
-            let route_exists = transaction
-                .query_row(
-                    "SELECT EXISTS(SELECT 1 FROM provider_models WHERE id = ?1)",
-                    [assistant_route_id.as_str()],
-                    |row| row.get::<_, bool>(0),
-                )
-                .map_err(database_error)?;
-            if !route_exists {
-                return Err(CoreError::invalid(
-                    "assistant consent route must exist before approval",
-                ));
-            }
-        }
-        DiscoveryApprovalGrant::CapabilityProbe {
-            model_route_ids,
-            budget,
-        } => {
-            let state = transaction
-                .query_row(
-                    "SELECT state FROM provider_discovery_sessions WHERE id = ?1",
-                    [approval.session_id.as_str()],
-                    |row| row.get::<_, String>(0),
-                )
-                .map_err(database_error)?;
-            if state != "awaiting_probe_consent" {
-                return Err(CoreError::invalid(
-                    "capability probe approval requires the consent state",
-                ));
-            }
-            validate_capability_probe_grant(
-                transaction,
-                &approval.session_id,
-                model_route_ids,
-                *budget,
-            )?;
-        }
-        _ => {}
-    }
-    Ok(())
-}
-
-pub(super) fn validate_capability_probe_grant(
-    connection: &Connection,
-    session_id: &DiscoverySessionId,
-    model_route_ids: &[lorepia_domain::ModelRouteId],
-    budget: DiscoveryProbeBudget,
-) -> CoreResult<()> {
-    let draft_json = connection
-        .query_row(
-            "SELECT draft_json
-             FROM provider_discovery_sessions
-             WHERE id = ?1",
-            [session_id.as_str()],
-            |row| row.get::<_, Option<String>>(0),
-        )
-        .optional()
-        .map_err(database_error)?
-        .flatten()
-        .ok_or_else(|| CoreError::invalid("capability probe proposal has no durable draft"))?;
-    let draft = decode_redacted_json(&draft_json, "stored discovery draft")?;
-    let probe_routes = draft
-        .get("probe_route_ids")
-        .and_then(Value::as_array)
-        .ok_or_else(|| CoreError::invalid("durable probe route proposal is missing"))?;
-    let mut expected = probe_routes
-        .iter()
-        .map(|value| {
-            value
-                .as_str()
-                .map(str::to_owned)
-                .ok_or_else(|| CoreError::invalid("durable probe route identifier is invalid"))
-        })
-        .collect::<CoreResult<Vec<_>>>()?;
-    expected.sort();
-    expected.dedup();
-    if expected.is_empty() {
-        return Err(CoreError::invalid(
-            "durable probe route proposal must not be empty",
-        ));
-    }
-    let graph_route_ids = draft
-        .get("routes")
-        .and_then(Value::as_array)
-        .ok_or_else(|| CoreError::invalid("durable discovery graph routes are missing"))?
-        .iter()
-        .map(|route| {
-            route
-                .get("id")
-                .and_then(Value::as_str)
-                .ok_or_else(|| CoreError::invalid("durable discovery route is invalid"))
-        })
-        .collect::<CoreResult<BTreeSet<_>>>()?;
-    if expected
-        .iter()
-        .any(|route_id| !graph_route_ids.contains(route_id.as_str()))
-    {
-        return Err(CoreError::invalid(
-            "durable probe proposal references a route outside its graph",
-        ));
-    }
-    let actual = model_route_ids
-        .iter()
-        .map(|route_id| route_id.as_str().to_owned())
-        .collect::<Vec<_>>();
-    let expected_budget =
-        DiscoveryProbeBudget::standard_for_route_count(expected.len()).map_err(contract_error)?;
-    if actual != expected || budget != expected_budget {
-        return Err(CoreError::invalid(
-            "capability probe approval differs from its durable proposal",
-        ));
-    }
-    Ok(())
-}
-
-pub(super) fn current_session_revision(
-    connection: &Connection,
-    session_id: &str,
-) -> CoreResult<u64> {
-    connection
-        .query_row(
-            "SELECT revision FROM provider_discovery_sessions WHERE id = ?1",
-            [session_id],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(database_error)?
-        .ok_or_else(|| {
-            CoreError::new(
-                CoreErrorCode::NotFound,
-                "provider discovery session was not found",
-                false,
-            )
-        })
-}
-
-pub(super) fn require_session(connection: &Connection, session_id: &str) -> CoreResult<()> {
-    current_session_revision(connection, session_id).map(|_| ())
-}
-
 #[allow(clippy::too_many_arguments)]
 pub(super) fn append_audit(
     transaction: &Transaction<'_>,
@@ -726,7 +589,7 @@ pub(super) fn parse_approval_decision(value: &str) -> CoreResult<DiscoveryApprov
         .map_err(|_| corrupted("stored discovery approval decision is invalid"))
 }
 
-pub(super) fn json_enum_wire(value: Value, label: &str) -> CoreResult<String> {
+fn json_enum_wire(value: Value, label: &str) -> CoreResult<String> {
     value
         .as_str()
         .map(str::to_owned)
@@ -760,7 +623,7 @@ pub(super) fn canonical_typed_json_result(
     canonical_typed_value(value, label)
 }
 
-pub(super) fn canonical_typed_value(value: Value, label: &str) -> CoreResult<String> {
+fn canonical_typed_value(value: Value, label: &str) -> CoreResult<String> {
     let mut output = String::new();
     write_canonical_json(&value, &mut output)?;
     if output.len() > MAX_DISCOVERY_JSON_BYTES || output.chars().count() > MAX_DISCOVERY_JSON_CHARS
@@ -772,7 +635,7 @@ pub(super) fn canonical_typed_value(value: Value, label: &str) -> CoreResult<Str
     Ok(output)
 }
 
-pub(super) fn write_canonical_json(value: &Value, output: &mut String) -> CoreResult<()> {
+fn write_canonical_json(value: &Value, output: &mut String) -> CoreResult<()> {
     match value {
         Value::Null => output.push_str("null"),
         Value::Bool(value) => output.push_str(if *value { "true" } else { "false" }),
