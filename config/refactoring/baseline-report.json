@@ -1,0 +1,3421 @@
+{
+  "baseline_commit": "01af428da8ea64f6028d7fef276b10bfa6fd9f79",
+  "files": {
+    "apps/lorepia/src-tauri/build.rs": {
+      "bytes": 19129,
+      "declarations": 19,
+      "lines": 518,
+      "public_symbols": 6
+    },
+    "apps/lorepia/src-tauri/src/asset_protocol.rs": {
+      "bytes": 24798,
+      "declarations": 38,
+      "lines": 718,
+      "public_symbols": 7
+    },
+    "apps/lorepia/src-tauri/src/channels.rs": {
+      "bytes": 3673,
+      "declarations": 5,
+      "lines": 97,
+      "public_symbols": 1
+    },
+    "apps/lorepia/src-tauri/src/chat_stream_registry.rs": {
+      "bytes": 3169,
+      "declarations": 10,
+      "lines": 116,
+      "public_symbols": 7
+    },
+    "apps/lorepia/src-tauri/src/commands.rs": {
+      "bytes": 70216,
+      "declarations": 78,
+      "lines": 1938,
+      "public_symbols": 44
+    },
+    "apps/lorepia/src-tauri/src/contract.rs": {
+      "bytes": 84447,
+      "declarations": 90,
+      "lines": 2167,
+      "public_symbols": 23
+    },
+    "apps/lorepia/src-tauri/src/credential_operations.rs": {
+      "bytes": 192563,
+      "declarations": 204,
+      "lines": 4813,
+      "public_symbols": 11
+    },
+    "apps/lorepia/src-tauri/src/error.rs": {
+      "bytes": 5779,
+      "declarations": 15,
+      "lines": 181,
+      "public_symbols": 8
+    },
+    "apps/lorepia/src-tauri/src/lib.rs": {
+      "bytes": 16936,
+      "declarations": 2,
+      "lines": 330,
+      "public_symbols": 2
+    },
+    "apps/lorepia/src-tauri/src/main.rs": {
+      "bytes": 44,
+      "declarations": 1,
+      "lines": 3,
+      "public_symbols": 0
+    },
+    "apps/lorepia/src-tauri/src/module_lifecycle_commands.rs": {
+      "bytes": 3768,
+      "declarations": 11,
+      "lines": 125,
+      "public_symbols": 11
+    },
+    "apps/lorepia/src-tauri/src/orchestration_commands.rs": {
+      "bytes": 38278,
+      "declarations": 86,
+      "lines": 1207,
+      "public_symbols": 77
+    },
+    "apps/lorepia/src-tauri/src/package_commands.rs": {
+      "bytes": 13961,
+      "declarations": 16,
+      "lines": 371,
+      "public_symbols": 12
+    },
+    "apps/lorepia/src-tauri/src/persona_commands.rs": {
+      "bytes": 3289,
+      "declarations": 10,
+      "lines": 128,
+      "public_symbols": 9
+    },
+    "apps/lorepia/src-tauri/src/portable_runtime_state_commands.rs": {
+      "bytes": 5376,
+      "declarations": 6,
+      "lines": 145,
+      "public_symbols": 4
+    },
+    "apps/lorepia/src-tauri/src/provider_commands.rs": {
+      "bytes": 223628,
+      "declarations": 310,
+      "lines": 5933,
+      "public_symbols": 115
+    },
+    "apps/lorepia/src-tauri/src/runtime_contract.rs": {
+      "bytes": 175,
+      "declarations": 1,
+      "lines": 7,
+      "public_symbols": 1
+    },
+    "apps/lorepia/src-tauri/src/runtime_generation_registry.rs": {
+      "bytes": 15617,
+      "declarations": 23,
+      "lines": 459,
+      "public_symbols": 7
+    },
+    "apps/lorepia/src-tauri/src/state.rs": {
+      "bytes": 78974,
+      "declarations": 112,
+      "lines": 2112,
+      "public_symbols": 42
+    },
+    "apps/lorepia/src/app/App.svelte": {
+      "bytes": 54725,
+      "declarations": 87,
+      "lines": 1367,
+      "public_symbols": 0
+    },
+    "apps/lorepia/src/app/app-controller.ts": {
+      "bytes": 126165,
+      "declarations": 66,
+      "lines": 3216,
+      "public_symbols": 3
+    },
+    "apps/lorepia/src/app/app-state.ts": {
+      "bytes": 4529,
+      "declarations": 6,
+      "lines": 150,
+      "public_symbols": 7
+    },
+    "apps/lorepia/src/app/provider-credential.ts": {
+      "bytes": 1293,
+      "declarations": 2,
+      "lines": 33,
+      "public_symbols": 2
+    },
+    "apps/lorepia/src/app/provider-discovery-flow.ts": {
+      "bytes": 6067,
+      "declarations": 6,
+      "lines": 161,
+      "public_symbols": 6
+    },
+    "apps/lorepia/src/components/ChoiceField.svelte": {
+      "bytes": 1520,
+      "declarations": 2,
+      "lines": 72,
+      "public_symbols": 0
+    },
+    "apps/lorepia/src/components/ChoicePopover.svelte": {
+      "bytes": 17911,
+      "declarations": 24,
+      "lines": 568,
+      "public_symbols": 0
+    },
+    "apps/lorepia/src/components/SegmentedControl.svelte": {
+      "bytes": 4884,
+      "declarations": 6,
+      "lines": 165,
+      "public_symbols": 0
+    },
+    "apps/lorepia/src/components/ToggleSwitch.svelte": {
+      "bytes": 3164,
+      "declarations": 3,
+      "lines": 131,
+      "public_symbols": 0
+    },
+    "apps/lorepia/src/components/detail/DetailActionBar.svelte": {
+      "bytes": 3862,
+      "declarations": 3,
+      "lines": 146,
+      "public_symbols": 0
+    },
+    "apps/lorepia/src/components/detail/DetailPage.svelte": {
+      "bytes": 2747,
+      "declarations": 5,
+      "lines": 100,
+      "public_symbols": 0
+    },
+    "apps/lorepia/src/components/detail/detail-scroll.ts": {
+      "bytes": 135,
+      "declarations": 1,
+      "lines": 3,
+      "public_symbols": 2
+    },
+    "apps/lorepia/src/features/assets/TrustedAsset.svelte": {
+      "bytes": 10916,
+      "declarations": 8,
+      "lines": 320,
+      "public_symbols": 0
+    },
+    "apps/lorepia/src/features/chat/ChatPane.svelte": {
+      "bytes": 115371,
+      "declarations": 131,
+      "lines": 2665,
+      "public_symbols": 0
+    },
+    "apps/lorepia/src/features/chat/GenerationAttemptApprovals.svelte": {
+      "bytes": 14917,
+      "declarations": 13,
+      "lines": 417,
+      "public_symbols": 0
+    },
+    "apps/lorepia/src/features/chat/InteractionRoomSurface.svelte": {
+      "bytes": 13731,
+      "declarations": 7,
+      "lines": 315,
+      "public_symbols": 0
+    },
+    "apps/lorepia/src/features/chat/MarkdownInline.svelte": {
+      "bytes": 1203,
+      "declarations": 1,
+      "lines": 39,
+      "public_symbols": 0
+    },
+    "apps/lorepia/src/features/chat/MarkdownText.svelte": {
+      "bytes": 2299,
+      "declarations": 1,
+      "lines": 94,
+      "public_symbols": 0
+    },
+    "apps/lorepia/src/features/chat/PortableMessage.svelte": {
+      "bytes": 22777,
+      "declarations": 20,
+      "lines": 561,
+      "public_symbols": 0
+    },
+    "apps/lorepia/src/features/chat/PortableRuntimeControls.svelte": {
+      "bytes": 12416,
+      "declarations": 7,
+      "lines": 348,
+      "public_symbols": 0
+    },
+    "apps/lorepia/src/features/chat/chat-stream.ts": {
+      "bytes": 8971,
+      "declarations": 19,
+      "lines": 257,
+      "public_symbols": 4
+    },
+    "apps/lorepia/src/features/chat/composer.ts": {
+      "bytes": 391,
+      "declarations": 2,
+      "lines": 16,
+      "public_symbols": 2
+    },
+    "apps/lorepia/src/features/chat/generation-attempt-approval-controller.ts": {
+      "bytes": 26793,
+      "declarations": 25,
+      "lines": 661,
+      "public_symbols": 7
+    },
+    "apps/lorepia/src/features/chat/interaction-room-controller.ts": {
+      "bytes": 21863,
+      "declarations": 11,
+      "lines": 552,
+      "public_symbols": 5
+    },
+    "apps/lorepia/src/features/chat/markdown.ts": {
+      "bytes": 9770,
+      "declarations": 8,
+      "lines": 268,
+      "public_symbols": 6
+    },
+    "apps/lorepia/src/features/chat/portable-display.ts": {
+      "bytes": 16809,
+      "declarations": 25,
+      "lines": 495,
+      "public_symbols": 6
+    },
+    "apps/lorepia/src/features/chat/portable-regex-operation.ts": {
+      "bytes": 1962,
+      "declarations": 4,
+      "lines": 52,
+      "public_symbols": 2
+    },
+    "apps/lorepia/src/features/chat/portable-regex-protocol.ts": {
+      "bytes": 2751,
+      "declarations": 11,
+      "lines": 87,
+      "public_symbols": 11
+    },
+    "apps/lorepia/src/features/chat/portable-regex.ts": {
+      "bytes": 9169,
+      "declarations": 24,
+      "lines": 283,
+      "public_symbols": 10
+    },
+    "apps/lorepia/src/features/chat/portable-regex.worker.ts": {
+      "bytes": 632,
+      "declarations": 1,
+      "lines": 19,
+      "public_symbols": 0
+    },
+    "apps/lorepia/src/features/chat/portable-renderer-policy.ts": {
+      "bytes": 14863,
+      "declarations": 9,
+      "lines": 534,
+      "public_symbols": 4
+    },
+    "apps/lorepia/src/features/chat/portable-renderer-protocol.ts": {
+      "bytes": 1369,
+      "declarations": 5,
+      "lines": 40,
+      "public_symbols": 5
+    },
+    "apps/lorepia/src/features/chat/portable-runtime-context.ts": {
+      "bytes": 5690,
+      "declarations": 12,
+      "lines": 150,
+      "public_symbols": 5
+    },
+    "apps/lorepia/src/features/chat/portable-runtime-kernel.ts": {
+      "bytes": 31671,
+      "declarations": 33,
+      "lines": 785,
+      "public_symbols": 2
+    },
+    "apps/lorepia/src/features/chat/portable-runtime-lifecycle.svelte.ts": {
+      "bytes": 14543,
+      "declarations": 12,
+      "lines": 395,
+      "public_symbols": 2
+    },
+    "apps/lorepia/src/features/chat/portable-runtime-model-policy.ts": {
+      "bytes": 5844,
+      "declarations": 11,
+      "lines": 160,
+      "public_symbols": 12
+    },
+    "apps/lorepia/src/features/chat/portable-runtime-protocol.ts": {
+      "bytes": 11453,
+      "declarations": 39,
+      "lines": 346,
+      "public_symbols": 23
+    },
+    "apps/lorepia/src/features/chat/portable-runtime-sandbox.lua": {
+      "bytes": 2270,
+      "declarations": 0,
+      "lines": 92,
+      "public_symbols": 0
+    },
+    "apps/lorepia/src/features/chat/portable-runtime-state.ts": {
+      "bytes": 6964,
+      "declarations": 13,
+      "lines": 202,
+      "public_symbols": 17
+    },
+    "apps/lorepia/src/features/chat/portable-runtime-worker-client.ts": {
+      "bytes": 9274,
+      "declarations": 18,
+      "lines": 265,
+      "public_symbols": 5
+    },
+    "apps/lorepia/src/features/chat/portable-runtime.ts": {
+      "bytes": 62208,
+      "declarations": 51,
+      "lines": 1598,
+      "public_symbols": 14
+    },
+    "apps/lorepia/src/features/chat/portable-runtime.worker.ts": {
+      "bytes": 817,
+      "declarations": 0,
+      "lines": 27,
+      "public_symbols": 0
+    },
+    "apps/lorepia/src/features/chat/virtual-window.ts": {
+      "bytes": 12862,
+      "declarations": 21,
+      "lines": 359,
+      "public_symbols": 16
+    },
+    "apps/lorepia/src/features/conversations/ConversationPane.svelte": {
+      "bytes": 37467,
+      "declarations": 38,
+      "lines": 1074,
+      "public_symbols": 0
+    },
+    "apps/lorepia/src/features/import/ImportReviewDialog.svelte": {
+      "bytes": 11800,
+      "declarations": 9,
+      "lines": 281,
+      "public_symbols": 0
+    },
+    "apps/lorepia/src/features/library/LibraryPane.svelte": {
+      "bytes": 34875,
+      "declarations": 40,
+      "lines": 1029,
+      "public_symbols": 0
+    },
+    "apps/lorepia/src/features/licenses/OpenSourceLicenses.svelte": {
+      "bytes": 4427,
+      "declarations": 0,
+      "lines": 165,
+      "public_symbols": 0
+    },
+    "apps/lorepia/src/features/orchestration/ContentModuleLifecyclePanel.svelte": {
+      "bytes": 72768,
+      "declarations": 46,
+      "lines": 1549,
+      "public_symbols": 1
+    },
+    "apps/lorepia/src/features/orchestration/CreatorDocumentEditors.svelte": {
+      "bytes": 25487,
+      "declarations": 40,
+      "lines": 684,
+      "public_symbols": 0
+    },
+    "apps/lorepia/src/features/orchestration/MemoryQueryRetryPanel.svelte": {
+      "bytes": 11153,
+      "declarations": 18,
+      "lines": 317,
+      "public_symbols": 0
+    },
+    "apps/lorepia/src/features/orchestration/OrchestrationQuickDrawer.svelte": {
+      "bytes": 47619,
+      "declarations": 41,
+      "lines": 1281,
+      "public_symbols": 0
+    },
+    "apps/lorepia/src/features/orchestration/OrchestrationStudio.svelte": {
+      "bytes": 263299,
+      "declarations": 159,
+      "lines": 4839,
+      "public_symbols": 0
+    },
+    "apps/lorepia/src/features/orchestration/PromptPresetHistory.svelte": {
+      "bytes": 16094,
+      "declarations": 18,
+      "lines": 470,
+      "public_symbols": 0
+    },
+    "apps/lorepia/src/features/orchestration/TaskProfilesPanel.svelte": {
+      "bytes": 18641,
+      "declarations": 34,
+      "lines": 508,
+      "public_symbols": 0
+    },
+    "apps/lorepia/src/features/orchestration/content-package-controller.ts": {
+      "bytes": 43533,
+      "declarations": 23,
+      "lines": 1128,
+      "public_symbols": 7
+    },
+    "apps/lorepia/src/features/orchestration/module-lifecycle-contracts.ts": {
+      "bytes": 16468,
+      "declarations": 55,
+      "lines": 512,
+      "public_symbols": 55
+    },
+    "apps/lorepia/src/features/orchestration/module-lifecycle-controller.ts": {
+      "bytes": 51313,
+      "declarations": 19,
+      "lines": 1290,
+      "public_symbols": 11
+    },
+    "apps/lorepia/src/features/orchestration/orchestration-controller.ts": {
+      "bytes": 111702,
+      "declarations": 33,
+      "lines": 2818,
+      "public_symbols": 23
+    },
+    "apps/lorepia/src/features/orchestration/prompt-preset-history-controller.ts": {
+      "bytes": 17009,
+      "declarations": 12,
+      "lines": 481,
+      "public_symbols": 6
+    },
+    "apps/lorepia/src/features/orchestration/studio-contracts.ts": {
+      "bytes": 5547,
+      "declarations": 7,
+      "lines": 138,
+      "public_symbols": 9
+    },
+    "apps/lorepia/src/features/personas/PersonaPanel.svelte": {
+      "bytes": 12050,
+      "declarations": 22,
+      "lines": 369,
+      "public_symbols": 0
+    },
+    "apps/lorepia/src/features/personas/persona-contracts.ts": {
+      "bytes": 3019,
+      "declarations": 17,
+      "lines": 117,
+      "public_symbols": 17
+    },
+    "apps/lorepia/src/features/personas/persona-controller.ts": {
+      "bytes": 13562,
+      "declarations": 6,
+      "lines": 360,
+      "public_symbols": 4
+    },
+    "apps/lorepia/src/features/providers/CapabilityPanel.svelte": {
+      "bytes": 44288,
+      "declarations": 62,
+      "lines": 1222,
+      "public_symbols": 0
+    },
+    "apps/lorepia/src/features/providers/CatalogPanel.svelte": {
+      "bytes": 26933,
+      "declarations": 34,
+      "lines": 737,
+      "public_symbols": 0
+    },
+    "apps/lorepia/src/features/providers/DesktopSettingsSidebar.svelte": {
+      "bytes": 9746,
+      "declarations": 14,
+      "lines": 333,
+      "public_symbols": 0
+    },
+    "apps/lorepia/src/features/providers/DiscoveryPanel.svelte": {
+      "bytes": 49889,
+      "declarations": 65,
+      "lines": 1214,
+      "public_symbols": 0
+    },
+    "apps/lorepia/src/features/providers/ModelSyncPanel.svelte": {
+      "bytes": 16911,
+      "declarations": 21,
+      "lines": 508,
+      "public_symbols": 0
+    },
+    "apps/lorepia/src/features/providers/ProviderCrudPanel.svelte": {
+      "bytes": 62440,
+      "declarations": 88,
+      "lines": 1583,
+      "public_symbols": 0
+    },
+    "apps/lorepia/src/features/providers/ProviderSettings.svelte": {
+      "bytes": 84143,
+      "declarations": 91,
+      "lines": 2073,
+      "public_symbols": 0
+    },
+    "apps/lorepia/src/features/providers/settings-contracts.ts": {
+      "bytes": 806,
+      "declarations": 2,
+      "lines": 29,
+      "public_symbols": 3
+    },
+    "apps/lorepia/src/lib/i18n/index.ts": {
+      "bytes": 2060,
+      "declarations": 6,
+      "lines": 55,
+      "public_symbols": 7
+    },
+    "apps/lorepia/src/lib/i18n/ko.ts": {
+      "bytes": 63058,
+      "declarations": 0,
+      "lines": 877,
+      "public_symbols": 1
+    },
+    "apps/lorepia/src/lib/ipc/client-payload-guards.ts": {
+      "bytes": 8880,
+      "declarations": 7,
+      "lines": 227,
+      "public_symbols": 2
+    },
+    "apps/lorepia/src/lib/ipc/client.ts": {
+      "bytes": 60531,
+      "declarations": 5,
+      "lines": 1678,
+      "public_symbols": 4
+    },
+    "apps/lorepia/src/lib/ipc/commands.generated.ts": {
+      "bytes": 12391,
+      "declarations": 0,
+      "lines": 214,
+      "public_symbols": 1
+    },
+    "apps/lorepia/src/lib/ipc/commands.ts": {
+      "bytes": 408,
+      "declarations": 0,
+      "lines": 12,
+      "public_symbols": 1
+    },
+    "apps/lorepia/src/lib/ipc/contracts.ts": {
+      "bytes": 124911,
+      "declarations": 412,
+      "lines": 4041,
+      "public_symbols": 415
+    },
+    "apps/lorepia/src/lib/ipc/errors.ts": {
+      "bytes": 2480,
+      "declarations": 4,
+      "lines": 71,
+      "public_symbols": 2
+    },
+    "apps/lorepia/src/lib/ipc/import-contracts.ts": {
+      "bytes": 1574,
+      "declarations": 6,
+      "lines": 56,
+      "public_symbols": 6
+    },
+    "apps/lorepia/src/lib/ipc/portable-runtime-contracts.ts": {
+      "bytes": 1629,
+      "declarations": 6,
+      "lines": 63,
+      "public_symbols": 6
+    },
+    "apps/lorepia/src/lib/ipc/portable-runtime-state-contracts.ts": {
+      "bytes": 1658,
+      "declarations": 8,
+      "lines": 61,
+      "public_symbols": 8
+    },
+    "apps/lorepia/src/lib/theme.ts": {
+      "bytes": 1754,
+      "declarations": 6,
+      "lines": 53,
+      "public_symbols": 5
+    },
+    "apps/lorepia/src/main.ts": {
+      "bytes": 343,
+      "declarations": 0,
+      "lines": 16,
+      "public_symbols": 0
+    },
+    "apps/lorepia/src/preview/demo-data.ts": {
+      "bytes": 40577,
+      "declarations": 4,
+      "lines": 1169,
+      "public_symbols": 29
+    },
+    "apps/lorepia/src/preview/main.ts": {
+      "bytes": 695,
+      "declarations": 0,
+      "lines": 27,
+      "public_symbols": 0
+    },
+    "apps/lorepia/src/preview/mock-client.ts": {
+      "bytes": 23718,
+      "declarations": 16,
+      "lines": 564,
+      "public_symbols": 2
+    },
+    "apps/lorepia/src/styles/app.css": {
+      "bytes": 120338,
+      "declarations": 0,
+      "lines": 4344,
+      "public_symbols": 0
+    },
+    "apps/lorepia/src/vite-env.d.ts": {
+      "bytes": 38,
+      "declarations": 0,
+      "lines": 1,
+      "public_symbols": 0
+    },
+    "crates/chat/src/events.rs": {
+      "bytes": 2175,
+      "declarations": 4,
+      "lines": 82,
+      "public_symbols": 5
+    },
+    "crates/chat/src/generation.rs": {
+      "bytes": 104268,
+      "declarations": 126,
+      "lines": 2799,
+      "public_symbols": 11
+    },
+    "crates/chat/src/lib.rs": {
+      "bytes": 687,
+      "declarations": 0,
+      "lines": 17,
+      "public_symbols": 3
+    },
+    "crates/chat/src/prompt.rs": {
+      "bytes": 34320,
+      "declarations": 26,
+      "lines": 949,
+      "public_symbols": 12
+    },
+    "crates/content/src/adapters.rs": {
+      "bytes": 44288,
+      "declarations": 52,
+      "lines": 1286,
+      "public_symbols": 15
+    },
+    "crates/content/src/archive.rs": {
+      "bytes": 52283,
+      "declarations": 54,
+      "lines": 1449,
+      "public_symbols": 5
+    },
+    "crates/content/src/capabilities.rs": {
+      "bytes": 13662,
+      "declarations": 20,
+      "lines": 376,
+      "public_symbols": 5
+    },
+    "crates/content/src/hashing.rs": {
+      "bytes": 803,
+      "declarations": 2,
+      "lines": 31,
+      "public_symbols": 1
+    },
+    "crates/content/src/lib.rs": {
+      "bytes": 29172,
+      "declarations": 28,
+      "lines": 804,
+      "public_symbols": 10
+    },
+    "crates/content/src/package.rs": {
+      "bytes": 116140,
+      "declarations": 114,
+      "lines": 3179,
+      "public_symbols": 25
+    },
+    "crates/content/src/path.rs": {
+      "bytes": 3413,
+      "declarations": 5,
+      "lines": 92,
+      "public_symbols": 1
+    },
+    "crates/content/src/png.rs": {
+      "bytes": 8120,
+      "declarations": 7,
+      "lines": 217,
+      "public_symbols": 2
+    },
+    "crates/content/src/runtime.rs": {
+      "bytes": 24071,
+      "declarations": 23,
+      "lines": 637,
+      "public_symbols": 5
+    },
+    "crates/core/src/app.rs": {
+      "bytes": 784071,
+      "declarations": 502,
+      "lines": 19693,
+      "public_symbols": 143
+    },
+    "crates/core/src/app/generation_events.rs": {
+      "bytes": 13183,
+      "declarations": 24,
+      "lines": 388,
+      "public_symbols": 23
+    },
+    "crates/core/src/app/generation_workflow.rs": {
+      "bytes": 21320,
+      "declarations": 14,
+      "lines": 596,
+      "public_symbols": 5
+    },
+    "crates/core/src/app/model_sync.rs": {
+      "bytes": 34958,
+      "declarations": 36,
+      "lines": 931,
+      "public_symbols": 11
+    },
+    "crates/core/src/app/portable_runtime_state.rs": {
+      "bytes": 5293,
+      "declarations": 14,
+      "lines": 166,
+      "public_symbols": 8
+    },
+    "crates/core/src/app/runtime_control.rs": {
+      "bytes": 2893,
+      "declarations": 5,
+      "lines": 82,
+      "public_symbols": 5
+    },
+    "crates/core/src/app/runtime_generation.rs": {
+      "bytes": 15801,
+      "declarations": 14,
+      "lines": 418,
+      "public_symbols": 8
+    },
+    "crates/core/src/asset_delivery.rs": {
+      "bytes": 4411,
+      "declarations": 10,
+      "lines": 146,
+      "public_symbols": 6
+    },
+    "crates/core/src/catalog.rs": {
+      "bytes": 83792,
+      "declarations": 79,
+      "lines": 2120,
+      "public_symbols": 31
+    },
+    "crates/core/src/config.rs": {
+      "bytes": 899,
+      "declarations": 3,
+      "lines": 30,
+      "public_symbols": 3
+    },
+    "crates/core/src/content_export.rs": {
+      "bytes": 10967,
+      "declarations": 12,
+      "lines": 273,
+      "public_symbols": 8
+    },
+    "crates/core/src/content_package.rs": {
+      "bytes": 230230,
+      "declarations": 129,
+      "lines": 5599,
+      "public_symbols": 32
+    },
+    "crates/core/src/interaction_derived_drain.rs": {
+      "bytes": 2277,
+      "declarations": 2,
+      "lines": 60,
+      "public_symbols": 3
+    },
+    "crates/core/src/interaction_projection.rs": {
+      "bytes": 17608,
+      "declarations": 28,
+      "lines": 462,
+      "public_symbols": 28
+    },
+    "crates/core/src/lib.rs": {
+      "bytes": 13018,
+      "declarations": 1,
+      "lines": 212,
+      "public_symbols": 32
+    },
+    "crates/core/src/message_display_projection.rs": {
+      "bytes": 3948,
+      "declarations": 6,
+      "lines": 96,
+      "public_symbols": 4
+    },
+    "crates/core/src/module_orchestration.rs": {
+      "bytes": 88197,
+      "declarations": 81,
+      "lines": 2104,
+      "public_symbols": 49
+    },
+    "crates/core/src/orchestration.rs": {
+      "bytes": 241875,
+      "declarations": 212,
+      "lines": 6043,
+      "public_symbols": 94
+    },
+    "crates/core/src/orchestration_runtime.rs": {
+      "bytes": 302113,
+      "declarations": 216,
+      "lines": 7484,
+      "public_symbols": 54
+    },
+    "crates/core/src/persona.rs": {
+      "bytes": 18113,
+      "declarations": 27,
+      "lines": 489,
+      "public_symbols": 19
+    },
+    "crates/core/src/provider_credential.rs": {
+      "bytes": 17508,
+      "declarations": 29,
+      "lines": 448,
+      "public_symbols": 26
+    },
+    "crates/core/src/provider_discovery.rs": {
+      "bytes": 490623,
+      "declarations": 338,
+      "lines": 11799,
+      "public_symbols": 130
+    },
+    "crates/core/src/provider_discovery/schema_fixture.rs": {
+      "bytes": 2881,
+      "declarations": 4,
+      "lines": 76,
+      "public_symbols": 3
+    },
+    "crates/core/src/provider_discovery_deterministic.rs": {
+      "bytes": 85850,
+      "declarations": 93,
+      "lines": 2201,
+      "public_symbols": 29
+    },
+    "crates/core/src/provider_discovery_view.rs": {
+      "bytes": 1201,
+      "declarations": 3,
+      "lines": 37,
+      "public_symbols": 2
+    },
+    "crates/core/src/revision.rs": {
+      "bytes": 2217,
+      "declarations": 4,
+      "lines": 66,
+      "public_symbols": 3
+    },
+    "crates/core/src/transform_documents.rs": {
+      "bytes": 1156,
+      "declarations": 4,
+      "lines": 38,
+      "public_symbols": 4
+    },
+    "crates/domain/src/capability.rs": {
+      "bytes": 4542,
+      "declarations": 9,
+      "lines": 149,
+      "public_symbols": 7
+    },
+    "crates/domain/src/character.rs": {
+      "bytes": 40455,
+      "declarations": 51,
+      "lines": 1198,
+      "public_symbols": 32
+    },
+    "crates/domain/src/content.rs": {
+      "bytes": 10167,
+      "declarations": 29,
+      "lines": 335,
+      "public_symbols": 20
+    },
+    "crates/domain/src/conversation.rs": {
+      "bytes": 5265,
+      "declarations": 18,
+      "lines": 168,
+      "public_symbols": 16
+    },
+    "crates/domain/src/discovery.rs": {
+      "bytes": 175109,
+      "declarations": 143,
+      "lines": 4422,
+      "public_symbols": 96
+    },
+    "crates/domain/src/error.rs": {
+      "bytes": 3742,
+      "declarations": 8,
+      "lines": 113,
+      "public_symbols": 7
+    },
+    "crates/domain/src/health.rs": {
+      "bytes": 382,
+      "declarations": 1,
+      "lines": 13,
+      "public_symbols": 1
+    },
+    "crates/domain/src/lib.rs": {
+      "bytes": 4424,
+      "declarations": 0,
+      "lines": 79,
+      "public_symbols": 14
+    },
+    "crates/domain/src/message.rs": {
+      "bytes": 7880,
+      "declarations": 18,
+      "lines": 248,
+      "public_symbols": 15
+    },
+    "crates/domain/src/model_sync.rs": {
+      "bytes": 7458,
+      "declarations": 15,
+      "lines": 220,
+      "public_symbols": 17
+    },
+    "crates/domain/src/orchestration.rs": {
+      "bytes": 167139,
+      "declarations": 219,
+      "lines": 4840,
+      "public_symbols": 162
+    },
+    "crates/domain/src/provider.rs": {
+      "bytes": 93309,
+      "declarations": 225,
+      "lines": 2721,
+      "public_symbols": 153
+    },
+    "crates/domain/src/settings.rs": {
+      "bytes": 1808,
+      "declarations": 3,
+      "lines": 57,
+      "public_symbols": 1
+    },
+    "crates/orchestration/src/interactions.rs": {
+      "bytes": 127891,
+      "declarations": 97,
+      "lines": 3353,
+      "public_symbols": 41
+    },
+    "crates/orchestration/src/knowledge.rs": {
+      "bytes": 67996,
+      "declarations": 73,
+      "lines": 1937,
+      "public_symbols": 22
+    },
+    "crates/orchestration/src/lib.rs": {
+      "bytes": 565,
+      "declarations": 1,
+      "lines": 25,
+      "public_symbols": 11
+    },
+    "crates/orchestration/src/memory.rs": {
+      "bytes": 50535,
+      "declarations": 57,
+      "lines": 1382,
+      "public_symbols": 27
+    },
+    "crates/orchestration/src/modules.rs": {
+      "bytes": 136696,
+      "declarations": 116,
+      "lines": 3644,
+      "public_symbols": 52
+    },
+    "crates/orchestration/src/package.rs": {
+      "bytes": 82299,
+      "declarations": 78,
+      "lines": 2380,
+      "public_symbols": 35
+    },
+    "crates/orchestration/src/portable_text.rs": {
+      "bytes": 20368,
+      "declarations": 25,
+      "lines": 576,
+      "public_symbols": 1
+    },
+    "crates/orchestration/src/resolver.rs": {
+      "bytes": 78778,
+      "declarations": 68,
+      "lines": 2033,
+      "public_symbols": 14
+    },
+    "crates/orchestration/src/template.rs": {
+      "bytes": 13123,
+      "declarations": 16,
+      "lines": 367,
+      "public_symbols": 4
+    },
+    "crates/orchestration/src/transforms.rs": {
+      "bytes": 54793,
+      "declarations": 56,
+      "lines": 1534,
+      "public_symbols": 33
+    },
+    "crates/providers/src/anthropic_messages.rs": {
+      "bytes": 119976,
+      "declarations": 98,
+      "lines": 3047,
+      "public_symbols": 7
+    },
+    "crates/providers/src/capability_probe.rs": {
+      "bytes": 73467,
+      "declarations": 110,
+      "lines": 2085,
+      "public_symbols": 54
+    },
+    "crates/providers/src/catalog.rs": {
+      "bytes": 116069,
+      "declarations": 157,
+      "lines": 3203,
+      "public_symbols": 80
+    },
+    "crates/providers/src/curl_parser.rs": {
+      "bytes": 64086,
+      "declarations": 102,
+      "lines": 1846,
+      "public_symbols": 17
+    },
+    "crates/providers/src/discovery/evidence.rs": {
+      "bytes": 32187,
+      "declarations": 52,
+      "lines": 995,
+      "public_symbols": 26
+    },
+    "crates/providers/src/discovery/fetcher.rs": {
+      "bytes": 70013,
+      "declarations": 91,
+      "lines": 2043,
+      "public_symbols": 27
+    },
+    "crates/providers/src/discovery/mod.rs": {
+      "bytes": 989,
+      "declarations": 0,
+      "lines": 26,
+      "public_symbols": 4
+    },
+    "crates/providers/src/discovery/openapi.rs": {
+      "bytes": 83155,
+      "declarations": 123,
+      "lines": 2475,
+      "public_symbols": 35
+    },
+    "crates/providers/src/embedding.rs": {
+      "bytes": 35826,
+      "declarations": 57,
+      "lines": 1087,
+      "public_symbols": 37
+    },
+    "crates/providers/src/gemini_generate_content.rs": {
+      "bytes": 74369,
+      "declarations": 94,
+      "lines": 2068,
+      "public_symbols": 11
+    },
+    "crates/providers/src/lib.rs": {
+      "bytes": 8789,
+      "declarations": 13,
+      "lines": 238,
+      "public_symbols": 24
+    },
+    "crates/providers/src/manifest_validator.rs": {
+      "bytes": 57973,
+      "declarations": 50,
+      "lines": 1616,
+      "public_symbols": 5
+    },
+    "crates/providers/src/network_transport.rs": {
+      "bytes": 6978,
+      "declarations": 18,
+      "lines": 209,
+      "public_symbols": 11
+    },
+    "crates/providers/src/ollama_native.rs": {
+      "bytes": 78913,
+      "declarations": 86,
+      "lines": 2166,
+      "public_symbols": 11
+    },
+    "crates/providers/src/openai_compatible.rs": {
+      "bytes": 126683,
+      "declarations": 123,
+      "lines": 3361,
+      "public_symbols": 8
+    },
+    "crates/providers/src/openai_responses.rs": {
+      "bytes": 61458,
+      "declarations": 68,
+      "lines": 1664,
+      "public_symbols": 7
+    },
+    "crates/providers/src/parameter_mapping.rs": {
+      "bytes": 235689,
+      "declarations": 197,
+      "lines": 6545,
+      "public_symbols": 62
+    },
+    "crates/providers/src/prompt_contract.rs": {
+      "bytes": 81927,
+      "declarations": 72,
+      "lines": 2036,
+      "public_symbols": 52
+    },
+    "crates/providers/src/registry.rs": {
+      "bytes": 218947,
+      "declarations": 208,
+      "lines": 5578,
+      "public_symbols": 49
+    },
+    "crates/providers/src/request_plan.rs": {
+      "bytes": 55192,
+      "declarations": 56,
+      "lines": 1507,
+      "public_symbols": 21
+    },
+    "crates/providers/src/setup_assistant.rs": {
+      "bytes": 184720,
+      "declarations": 183,
+      "lines": 5010,
+      "public_symbols": 89
+    },
+    "crates/providers/src/sse.rs": {
+      "bytes": 7890,
+      "declarations": 15,
+      "lines": 244,
+      "public_symbols": 12
+    },
+    "crates/providers/src/url_policy.rs": {
+      "bytes": 69213,
+      "declarations": 125,
+      "lines": 2027,
+      "public_symbols": 91
+    },
+    "crates/shell-api/src/api.rs": {
+      "bytes": 76773,
+      "declarations": 92,
+      "lines": 1974,
+      "public_symbols": 67
+    },
+    "crates/shell-api/src/asset.rs": {
+      "bytes": 6991,
+      "declarations": 15,
+      "lines": 204,
+      "public_symbols": 8
+    },
+    "crates/shell-api/src/catalog.rs": {
+      "bytes": 13248,
+      "declarations": 32,
+      "lines": 377,
+      "public_symbols": 17
+    },
+    "crates/shell-api/src/discovery.rs": {
+      "bytes": 112556,
+      "declarations": 158,
+      "lines": 2878,
+      "public_symbols": 93
+    },
+    "crates/shell-api/src/dto.rs": {
+      "bytes": 40440,
+      "declarations": 71,
+      "lines": 1162,
+      "public_symbols": 37
+    },
+    "crates/shell-api/src/error.rs": {
+      "bytes": 5528,
+      "declarations": 7,
+      "lines": 147,
+      "public_symbols": 4
+    },
+    "crates/shell-api/src/interaction.rs": {
+      "bytes": 67722,
+      "declarations": 93,
+      "lines": 1725,
+      "public_symbols": 48
+    },
+    "crates/shell-api/src/lib.rs": {
+      "bytes": 14317,
+      "declarations": 0,
+      "lines": 223,
+      "public_symbols": 18
+    },
+    "crates/shell-api/src/model_sync.rs": {
+      "bytes": 17905,
+      "declarations": 27,
+      "lines": 485,
+      "public_symbols": 17
+    },
+    "crates/shell-api/src/module_lifecycle.rs": {
+      "bytes": 99773,
+      "declarations": 91,
+      "lines": 2416,
+      "public_symbols": 35
+    },
+    "crates/shell-api/src/orchestration.rs": {
+      "bytes": 226471,
+      "declarations": 332,
+      "lines": 5951,
+      "public_symbols": 193
+    },
+    "crates/shell-api/src/package.rs": {
+      "bytes": 110343,
+      "declarations": 119,
+      "lines": 2757,
+      "public_symbols": 53
+    },
+    "crates/shell-api/src/persona.rs": {
+      "bytes": 22191,
+      "declarations": 34,
+      "lines": 610,
+      "public_symbols": 24
+    },
+    "crates/shell-api/src/portable_runtime_state.rs": {
+      "bytes": 19325,
+      "declarations": 34,
+      "lines": 559,
+      "public_symbols": 9
+    },
+    "crates/shell-api/src/provider.rs": {
+      "bytes": 114834,
+      "declarations": 176,
+      "lines": 3040,
+      "public_symbols": 101
+    },
+    "crates/shell-api/src/sensitive.rs": {
+      "bytes": 9944,
+      "declarations": 42,
+      "lines": 326,
+      "public_symbols": 27
+    },
+    "crates/shell-api/src/stream.rs": {
+      "bytes": 27393,
+      "declarations": 27,
+      "lines": 770,
+      "public_symbols": 9
+    },
+    "crates/shell-api/src/test_support.rs": {
+      "bytes": 18131,
+      "declarations": 13,
+      "lines": 405,
+      "public_symbols": 9
+    },
+    "crates/storage/src/catalog.rs": {
+      "bytes": 85986,
+      "declarations": 112,
+      "lines": 2410,
+      "public_symbols": 34
+    },
+    "crates/storage/src/content_export.rs": {
+      "bytes": 4012,
+      "declarations": 7,
+      "lines": 128,
+      "public_symbols": 5
+    },
+    "crates/storage/src/cutover.rs": {
+      "bytes": 87426,
+      "declarations": 99,
+      "lines": 2257,
+      "public_symbols": 3
+    },
+    "crates/storage/src/database.rs": {
+      "bytes": 694566,
+      "declarations": 453,
+      "lines": 17973,
+      "public_symbols": 129
+    },
+    "crates/storage/src/database/asset_delivery.rs": {
+      "bytes": 10842,
+      "declarations": 9,
+      "lines": 289,
+      "public_symbols": 4
+    },
+    "crates/storage/src/database/connection_metrics.rs": {
+      "bytes": 8364,
+      "declarations": 17,
+      "lines": 237,
+      "public_symbols": 5
+    },
+    "crates/storage/src/database/private_path.rs": {
+      "bytes": 2388,
+      "declarations": 4,
+      "lines": 68,
+      "public_symbols": 4
+    },
+    "crates/storage/src/database_legacy_recovery_tests.rs": {
+      "bytes": 11038,
+      "declarations": 6,
+      "lines": 344,
+      "public_symbols": 0
+    },
+    "crates/storage/src/discovery.rs": {
+      "bytes": 67275,
+      "declarations": 45,
+      "lines": 1840,
+      "public_symbols": 23
+    },
+    "crates/storage/src/discovery_repository.rs": {
+      "bytes": 769337,
+      "declarations": 370,
+      "lines": 18495,
+      "public_symbols": 67
+    },
+    "crates/storage/src/discovery_repository/contract_codec.rs": {
+      "bytes": 28963,
+      "declarations": 38,
+      "lines": 823,
+      "public_symbols": 39
+    },
+    "crates/storage/src/discovery_repository/errors.rs": {
+      "bytes": 1604,
+      "declarations": 4,
+      "lines": 41,
+      "public_symbols": 4
+    },
+    "crates/storage/src/discovery_repository/repository_io.rs": {
+      "bytes": 44188,
+      "declarations": 27,
+      "lines": 1183,
+      "public_symbols": 28
+    },
+    "crates/storage/src/discovery_repository/tests/unknown_outcome.rs": {
+      "bytes": 4487,
+      "declarations": 1,
+      "lines": 104,
+      "public_symbols": 0
+    },
+    "crates/storage/src/generation_attempt.rs": {
+      "bytes": 163943,
+      "declarations": 143,
+      "lines": 4150,
+      "public_symbols": 50
+    },
+    "crates/storage/src/generation_attempt/retryable_projection.rs": {
+      "bytes": 2709,
+      "declarations": 1,
+      "lines": 65,
+      "public_symbols": 1
+    },
+    "crates/storage/src/interaction_repository.rs": {
+      "bytes": 686563,
+      "declarations": 325,
+      "lines": 16862,
+      "public_symbols": 95
+    },
+    "crates/storage/src/interaction_repository/effect_history.rs": {
+      "bytes": 29176,
+      "declarations": 20,
+      "lines": 736,
+      "public_symbols": 16
+    },
+    "crates/storage/src/knowledge_embedding.rs": {
+      "bytes": 32867,
+      "declarations": 43,
+      "lines": 897,
+      "public_symbols": 11
+    },
+    "crates/storage/src/lib.rs": {
+      "bytes": 9259,
+      "declarations": 0,
+      "lines": 156,
+      "public_symbols": 20
+    },
+    "crates/storage/src/lifecycle_outbox.rs": {
+      "bytes": 19795,
+      "declarations": 23,
+      "lines": 520,
+      "public_symbols": 11
+    },
+    "crates/storage/src/memory_query_embedding.rs": {
+      "bytes": 33130,
+      "declarations": 36,
+      "lines": 887,
+      "public_symbols": 15
+    },
+    "crates/storage/src/memory_queue.rs": {
+      "bytes": 231062,
+      "declarations": 166,
+      "lines": 6110,
+      "public_symbols": 35
+    },
+    "crates/storage/src/message_display_projection.rs": {
+      "bytes": 38665,
+      "declarations": 39,
+      "lines": 1009,
+      "public_symbols": 13
+    },
+    "crates/storage/src/model_sync.rs": {
+      "bytes": 129970,
+      "declarations": 68,
+      "lines": 3358,
+      "public_symbols": 14
+    },
+    "crates/storage/src/orchestration.rs": {
+      "bytes": 523360,
+      "declarations": 455,
+      "lines": 14051,
+      "public_symbols": 135
+    },
+    "crates/storage/src/orchestration/builtins.rs": {
+      "bytes": 15618,
+      "declarations": 10,
+      "lines": 404,
+      "public_symbols": 2
+    },
+    "crates/storage/src/orchestration/module_authority.rs": {
+      "bytes": 4760,
+      "declarations": 3,
+      "lines": 129,
+      "public_symbols": 3
+    },
+    "crates/storage/src/orchestration/tests.rs": {
+      "bytes": 76030,
+      "declarations": 44,
+      "lines": 1920,
+      "public_symbols": 0
+    },
+    "crates/storage/src/package_repository.rs": {
+      "bytes": 265267,
+      "declarations": 165,
+      "lines": 6646,
+      "public_symbols": 51
+    },
+    "crates/storage/src/package_repository/completed_authority.rs": {
+      "bytes": 14456,
+      "declarations": 12,
+      "lines": 402,
+      "public_symbols": 8
+    },
+    "crates/storage/src/persona_repository.rs": {
+      "bytes": 31171,
+      "declarations": 29,
+      "lines": 833,
+      "public_symbols": 7
+    },
+    "crates/storage/src/portable_runtime_state.rs": {
+      "bytes": 65799,
+      "declarations": 60,
+      "lines": 1760,
+      "public_symbols": 12
+    },
+    "crates/storage/src/provider_credential_repository.rs": {
+      "bytes": 154521,
+      "declarations": 114,
+      "lines": 3949,
+      "public_symbols": 42
+    },
+    "crates/storage/src/runtime_model_audit.rs": {
+      "bytes": 17688,
+      "declarations": 22,
+      "lines": 482,
+      "public_symbols": 9
+    },
+    "crates/storage/src/verified_asset_cache.rs": {
+      "bytes": 20953,
+      "declarations": 29,
+      "lines": 594,
+      "public_symbols": 14
+    },
+    "plugins/lorepia-platform/android/src/main/java/dev/lorepia/tauri/platform/AndroidCredentialStore.kt": {
+      "bytes": 27953,
+      "declarations": 0,
+      "lines": 771,
+      "public_symbols": 0
+    },
+    "plugins/lorepia-platform/android/src/main/java/dev/lorepia/tauri/platform/AndroidImportStager.kt": {
+      "bytes": 5298,
+      "declarations": 0,
+      "lines": 146,
+      "public_symbols": 0
+    },
+    "plugins/lorepia-platform/android/src/main/java/dev/lorepia/tauri/platform/LorepiaPlatformPlugin.kt": {
+      "bytes": 27740,
+      "declarations": 3,
+      "lines": 717,
+      "public_symbols": 0
+    },
+    "plugins/lorepia-platform/android/src/main/java/dev/lorepia/tauri/platform/PlatformPolicy.kt": {
+      "bytes": 12121,
+      "declarations": 0,
+      "lines": 334,
+      "public_symbols": 0
+    },
+    "plugins/lorepia-platform/android/src/main/java/dev/lorepia/tauri/platform/PlatformWorkQueues.kt": {
+      "bytes": 626,
+      "declarations": 0,
+      "lines": 22,
+      "public_symbols": 0
+    },
+    "plugins/lorepia-platform/build.rs": {
+      "bytes": 1065,
+      "declarations": 2,
+      "lines": 31,
+      "public_symbols": 0
+    },
+    "plugins/lorepia-platform/ios/Sources/ContentSourceExporter.swift": {
+      "bytes": 10691,
+      "declarations": 2,
+      "lines": 377,
+      "public_symbols": 0
+    },
+    "plugins/lorepia-platform/ios/Sources/ImportStager.swift": {
+      "bytes": 7049,
+      "declarations": 2,
+      "lines": 207,
+      "public_symbols": 0
+    },
+    "plugins/lorepia-platform/ios/Sources/KeychainCredentialStore.swift": {
+      "bytes": 15362,
+      "declarations": 2,
+      "lines": 452,
+      "public_symbols": 0
+    },
+    "plugins/lorepia-platform/ios/Sources/LorepiaPlatformPlugin.swift": {
+      "bytes": 25051,
+      "declarations": 2,
+      "lines": 883,
+      "public_symbols": 0
+    },
+    "plugins/lorepia-platform/ios/Sources/PlatformPolicy.swift": {
+      "bytes": 6882,
+      "declarations": 2,
+      "lines": 233,
+      "public_symbols": 0
+    },
+    "plugins/lorepia-platform/src/credential_envelope.rs": {
+      "bytes": 17461,
+      "declarations": 19,
+      "lines": 462,
+      "public_symbols": 8
+    },
+    "plugins/lorepia-platform/src/desktop.rs": {
+      "bytes": 204435,
+      "declarations": 179,
+      "lines": 5325,
+      "public_symbols": 25
+    },
+    "plugins/lorepia-platform/src/desktop/macos.rs": {
+      "bytes": 81746,
+      "declarations": 122,
+      "lines": 2310,
+      "public_symbols": 13
+    },
+    "plugins/lorepia-platform/src/desktop/windows.rs": {
+      "bytes": 72514,
+      "declarations": 83,
+      "lines": 1881,
+      "public_symbols": 28
+    },
+    "plugins/lorepia-platform/src/desktop/windows_bound_record.rs": {
+      "bytes": 1317,
+      "declarations": 3,
+      "lines": 39,
+      "public_symbols": 2
+    },
+    "plugins/lorepia-platform/src/error.rs": {
+      "bytes": 1813,
+      "declarations": 4,
+      "lines": 54,
+      "public_symbols": 5
+    },
+    "plugins/lorepia-platform/src/lib.rs": {
+      "bytes": 28779,
+      "declarations": 49,
+      "lines": 777,
+      "public_symbols": 30
+    },
+    "plugins/lorepia-platform/src/mobile.rs": {
+      "bytes": 16590,
+      "declarations": 28,
+      "lines": 478,
+      "public_symbols": 19
+    },
+    "plugins/lorepia-platform/src/model.rs": {
+      "bytes": 15557,
+      "declarations": 54,
+      "lines": 551,
+      "public_symbols": 55
+    },
+    "plugins/lorepia-platform/src/staging.rs": {
+      "bytes": 23685,
+      "declarations": 20,
+      "lines": 619,
+      "public_symbols": 8
+    },
+    "plugins/lorepia-platform/src/validation.rs": {
+      "bytes": 19915,
+      "declarations": 23,
+      "lines": 526,
+      "public_symbols": 21
+    }
+  },
+  "format_version": 1,
+  "hotspots": [
+    {
+      "bytes": 784071,
+      "declarations": 502,
+      "lines": 19693,
+      "path": "crates/core/src/app.rs",
+      "public_symbols": 143
+    },
+    {
+      "bytes": 769337,
+      "declarations": 370,
+      "lines": 18495,
+      "path": "crates/storage/src/discovery_repository.rs",
+      "public_symbols": 67
+    },
+    {
+      "bytes": 694566,
+      "declarations": 453,
+      "lines": 17973,
+      "path": "crates/storage/src/database.rs",
+      "public_symbols": 129
+    },
+    {
+      "bytes": 686563,
+      "declarations": 325,
+      "lines": 16862,
+      "path": "crates/storage/src/interaction_repository.rs",
+      "public_symbols": 95
+    },
+    {
+      "bytes": 523360,
+      "declarations": 455,
+      "lines": 14051,
+      "path": "crates/storage/src/orchestration.rs",
+      "public_symbols": 135
+    },
+    {
+      "bytes": 490623,
+      "declarations": 338,
+      "lines": 11799,
+      "path": "crates/core/src/provider_discovery.rs",
+      "public_symbols": 130
+    },
+    {
+      "bytes": 302113,
+      "declarations": 216,
+      "lines": 7484,
+      "path": "crates/core/src/orchestration_runtime.rs",
+      "public_symbols": 54
+    },
+    {
+      "bytes": 265267,
+      "declarations": 165,
+      "lines": 6646,
+      "path": "crates/storage/src/package_repository.rs",
+      "public_symbols": 51
+    },
+    {
+      "bytes": 263299,
+      "declarations": 159,
+      "lines": 4839,
+      "path": "apps/lorepia/src/features/orchestration/OrchestrationStudio.svelte",
+      "public_symbols": 0
+    },
+    {
+      "bytes": 241875,
+      "declarations": 212,
+      "lines": 6043,
+      "path": "crates/core/src/orchestration.rs",
+      "public_symbols": 94
+    },
+    {
+      "bytes": 235689,
+      "declarations": 197,
+      "lines": 6545,
+      "path": "crates/providers/src/parameter_mapping.rs",
+      "public_symbols": 62
+    },
+    {
+      "bytes": 231062,
+      "declarations": 166,
+      "lines": 6110,
+      "path": "crates/storage/src/memory_queue.rs",
+      "public_symbols": 35
+    },
+    {
+      "bytes": 230230,
+      "declarations": 129,
+      "lines": 5599,
+      "path": "crates/core/src/content_package.rs",
+      "public_symbols": 32
+    },
+    {
+      "bytes": 226471,
+      "declarations": 332,
+      "lines": 5951,
+      "path": "crates/shell-api/src/orchestration.rs",
+      "public_symbols": 193
+    },
+    {
+      "bytes": 223628,
+      "declarations": 310,
+      "lines": 5933,
+      "path": "apps/lorepia/src-tauri/src/provider_commands.rs",
+      "public_symbols": 115
+    },
+    {
+      "bytes": 218947,
+      "declarations": 208,
+      "lines": 5578,
+      "path": "crates/providers/src/registry.rs",
+      "public_symbols": 49
+    },
+    {
+      "bytes": 204435,
+      "declarations": 179,
+      "lines": 5325,
+      "path": "plugins/lorepia-platform/src/desktop.rs",
+      "public_symbols": 25
+    },
+    {
+      "bytes": 192563,
+      "declarations": 204,
+      "lines": 4813,
+      "path": "apps/lorepia/src-tauri/src/credential_operations.rs",
+      "public_symbols": 11
+    },
+    {
+      "bytes": 184720,
+      "declarations": 183,
+      "lines": 5010,
+      "path": "crates/providers/src/setup_assistant.rs",
+      "public_symbols": 89
+    },
+    {
+      "bytes": 175109,
+      "declarations": 143,
+      "lines": 4422,
+      "path": "crates/domain/src/discovery.rs",
+      "public_symbols": 96
+    },
+    {
+      "bytes": 167139,
+      "declarations": 219,
+      "lines": 4840,
+      "path": "crates/domain/src/orchestration.rs",
+      "public_symbols": 162
+    },
+    {
+      "bytes": 163943,
+      "declarations": 143,
+      "lines": 4150,
+      "path": "crates/storage/src/generation_attempt.rs",
+      "public_symbols": 50
+    },
+    {
+      "bytes": 154521,
+      "declarations": 114,
+      "lines": 3949,
+      "path": "crates/storage/src/provider_credential_repository.rs",
+      "public_symbols": 42
+    },
+    {
+      "bytes": 136696,
+      "declarations": 116,
+      "lines": 3644,
+      "path": "crates/orchestration/src/modules.rs",
+      "public_symbols": 52
+    },
+    {
+      "bytes": 129970,
+      "declarations": 68,
+      "lines": 3358,
+      "path": "crates/storage/src/model_sync.rs",
+      "public_symbols": 14
+    },
+    {
+      "bytes": 127891,
+      "declarations": 97,
+      "lines": 3353,
+      "path": "crates/orchestration/src/interactions.rs",
+      "public_symbols": 41
+    },
+    {
+      "bytes": 126683,
+      "declarations": 123,
+      "lines": 3361,
+      "path": "crates/providers/src/openai_compatible.rs",
+      "public_symbols": 8
+    },
+    {
+      "bytes": 126165,
+      "declarations": 66,
+      "lines": 3216,
+      "path": "apps/lorepia/src/app/app-controller.ts",
+      "public_symbols": 3
+    },
+    {
+      "bytes": 124911,
+      "declarations": 412,
+      "lines": 4041,
+      "path": "apps/lorepia/src/lib/ipc/contracts.ts",
+      "public_symbols": 415
+    },
+    {
+      "bytes": 120338,
+      "declarations": 0,
+      "lines": 4344,
+      "path": "apps/lorepia/src/styles/app.css",
+      "public_symbols": 0
+    },
+    {
+      "bytes": 119976,
+      "declarations": 98,
+      "lines": 3047,
+      "path": "crates/providers/src/anthropic_messages.rs",
+      "public_symbols": 7
+    },
+    {
+      "bytes": 116140,
+      "declarations": 114,
+      "lines": 3179,
+      "path": "crates/content/src/package.rs",
+      "public_symbols": 25
+    },
+    {
+      "bytes": 116069,
+      "declarations": 157,
+      "lines": 3203,
+      "path": "crates/providers/src/catalog.rs",
+      "public_symbols": 80
+    },
+    {
+      "bytes": 115371,
+      "declarations": 131,
+      "lines": 2665,
+      "path": "apps/lorepia/src/features/chat/ChatPane.svelte",
+      "public_symbols": 0
+    },
+    {
+      "bytes": 114834,
+      "declarations": 176,
+      "lines": 3040,
+      "path": "crates/shell-api/src/provider.rs",
+      "public_symbols": 101
+    },
+    {
+      "bytes": 112556,
+      "declarations": 158,
+      "lines": 2878,
+      "path": "crates/shell-api/src/discovery.rs",
+      "public_symbols": 93
+    },
+    {
+      "bytes": 111702,
+      "declarations": 33,
+      "lines": 2818,
+      "path": "apps/lorepia/src/features/orchestration/orchestration-controller.ts",
+      "public_symbols": 23
+    },
+    {
+      "bytes": 110343,
+      "declarations": 119,
+      "lines": 2757,
+      "path": "crates/shell-api/src/package.rs",
+      "public_symbols": 53
+    },
+    {
+      "bytes": 104268,
+      "declarations": 126,
+      "lines": 2799,
+      "path": "crates/chat/src/generation.rs",
+      "public_symbols": 11
+    },
+    {
+      "bytes": 99773,
+      "declarations": 91,
+      "lines": 2416,
+      "path": "crates/shell-api/src/module_lifecycle.rs",
+      "public_symbols": 35
+    },
+    {
+      "bytes": 93309,
+      "declarations": 225,
+      "lines": 2721,
+      "path": "crates/domain/src/provider.rs",
+      "public_symbols": 153
+    },
+    {
+      "bytes": 88197,
+      "declarations": 81,
+      "lines": 2104,
+      "path": "crates/core/src/module_orchestration.rs",
+      "public_symbols": 49
+    },
+    {
+      "bytes": 87426,
+      "declarations": 99,
+      "lines": 2257,
+      "path": "crates/storage/src/cutover.rs",
+      "public_symbols": 3
+    },
+    {
+      "bytes": 85986,
+      "declarations": 112,
+      "lines": 2410,
+      "path": "crates/storage/src/catalog.rs",
+      "public_symbols": 34
+    },
+    {
+      "bytes": 85850,
+      "declarations": 93,
+      "lines": 2201,
+      "path": "crates/core/src/provider_discovery_deterministic.rs",
+      "public_symbols": 29
+    },
+    {
+      "bytes": 84447,
+      "declarations": 90,
+      "lines": 2167,
+      "path": "apps/lorepia/src-tauri/src/contract.rs",
+      "public_symbols": 23
+    },
+    {
+      "bytes": 84143,
+      "declarations": 91,
+      "lines": 2073,
+      "path": "apps/lorepia/src/features/providers/ProviderSettings.svelte",
+      "public_symbols": 0
+    },
+    {
+      "bytes": 83792,
+      "declarations": 79,
+      "lines": 2120,
+      "path": "crates/core/src/catalog.rs",
+      "public_symbols": 31
+    },
+    {
+      "bytes": 83155,
+      "declarations": 123,
+      "lines": 2475,
+      "path": "crates/providers/src/discovery/openapi.rs",
+      "public_symbols": 35
+    },
+    {
+      "bytes": 82299,
+      "declarations": 78,
+      "lines": 2380,
+      "path": "crates/orchestration/src/package.rs",
+      "public_symbols": 35
+    },
+    {
+      "bytes": 81927,
+      "declarations": 72,
+      "lines": 2036,
+      "path": "crates/providers/src/prompt_contract.rs",
+      "public_symbols": 52
+    },
+    {
+      "bytes": 81746,
+      "declarations": 122,
+      "lines": 2310,
+      "path": "plugins/lorepia-platform/src/desktop/macos.rs",
+      "public_symbols": 13
+    },
+    {
+      "bytes": 78974,
+      "declarations": 112,
+      "lines": 2112,
+      "path": "apps/lorepia/src-tauri/src/state.rs",
+      "public_symbols": 42
+    },
+    {
+      "bytes": 78913,
+      "declarations": 86,
+      "lines": 2166,
+      "path": "crates/providers/src/ollama_native.rs",
+      "public_symbols": 11
+    },
+    {
+      "bytes": 78778,
+      "declarations": 68,
+      "lines": 2033,
+      "path": "crates/orchestration/src/resolver.rs",
+      "public_symbols": 14
+    },
+    {
+      "bytes": 76773,
+      "declarations": 92,
+      "lines": 1974,
+      "path": "crates/shell-api/src/api.rs",
+      "public_symbols": 67
+    },
+    {
+      "bytes": 76030,
+      "declarations": 44,
+      "lines": 1920,
+      "path": "crates/storage/src/orchestration/tests.rs",
+      "public_symbols": 0
+    },
+    {
+      "bytes": 74369,
+      "declarations": 94,
+      "lines": 2068,
+      "path": "crates/providers/src/gemini_generate_content.rs",
+      "public_symbols": 11
+    },
+    {
+      "bytes": 73467,
+      "declarations": 110,
+      "lines": 2085,
+      "path": "crates/providers/src/capability_probe.rs",
+      "public_symbols": 54
+    },
+    {
+      "bytes": 72768,
+      "declarations": 46,
+      "lines": 1549,
+      "path": "apps/lorepia/src/features/orchestration/ContentModuleLifecyclePanel.svelte",
+      "public_symbols": 1
+    },
+    {
+      "bytes": 72514,
+      "declarations": 83,
+      "lines": 1881,
+      "path": "plugins/lorepia-platform/src/desktop/windows.rs",
+      "public_symbols": 28
+    },
+    {
+      "bytes": 70216,
+      "declarations": 78,
+      "lines": 1938,
+      "path": "apps/lorepia/src-tauri/src/commands.rs",
+      "public_symbols": 44
+    },
+    {
+      "bytes": 70013,
+      "declarations": 91,
+      "lines": 2043,
+      "path": "crates/providers/src/discovery/fetcher.rs",
+      "public_symbols": 27
+    },
+    {
+      "bytes": 69213,
+      "declarations": 125,
+      "lines": 2027,
+      "path": "crates/providers/src/url_policy.rs",
+      "public_symbols": 91
+    },
+    {
+      "bytes": 67996,
+      "declarations": 73,
+      "lines": 1937,
+      "path": "crates/orchestration/src/knowledge.rs",
+      "public_symbols": 22
+    },
+    {
+      "bytes": 67722,
+      "declarations": 93,
+      "lines": 1725,
+      "path": "crates/shell-api/src/interaction.rs",
+      "public_symbols": 48
+    },
+    {
+      "bytes": 67275,
+      "declarations": 45,
+      "lines": 1840,
+      "path": "crates/storage/src/discovery.rs",
+      "public_symbols": 23
+    },
+    {
+      "bytes": 65799,
+      "declarations": 60,
+      "lines": 1760,
+      "path": "crates/storage/src/portable_runtime_state.rs",
+      "public_symbols": 12
+    },
+    {
+      "bytes": 64086,
+      "declarations": 102,
+      "lines": 1846,
+      "path": "crates/providers/src/curl_parser.rs",
+      "public_symbols": 17
+    },
+    {
+      "bytes": 63058,
+      "declarations": 0,
+      "lines": 877,
+      "path": "apps/lorepia/src/lib/i18n/ko.ts",
+      "public_symbols": 1
+    },
+    {
+      "bytes": 62440,
+      "declarations": 88,
+      "lines": 1583,
+      "path": "apps/lorepia/src/features/providers/ProviderCrudPanel.svelte",
+      "public_symbols": 0
+    },
+    {
+      "bytes": 62208,
+      "declarations": 51,
+      "lines": 1598,
+      "path": "apps/lorepia/src/features/chat/portable-runtime.ts",
+      "public_symbols": 14
+    },
+    {
+      "bytes": 61458,
+      "declarations": 68,
+      "lines": 1664,
+      "path": "crates/providers/src/openai_responses.rs",
+      "public_symbols": 7
+    },
+    {
+      "bytes": 60531,
+      "declarations": 5,
+      "lines": 1678,
+      "path": "apps/lorepia/src/lib/ipc/client.ts",
+      "public_symbols": 4
+    },
+    {
+      "bytes": 57973,
+      "declarations": 50,
+      "lines": 1616,
+      "path": "crates/providers/src/manifest_validator.rs",
+      "public_symbols": 5
+    },
+    {
+      "bytes": 55192,
+      "declarations": 56,
+      "lines": 1507,
+      "path": "crates/providers/src/request_plan.rs",
+      "public_symbols": 21
+    },
+    {
+      "bytes": 54793,
+      "declarations": 56,
+      "lines": 1534,
+      "path": "crates/orchestration/src/transforms.rs",
+      "public_symbols": 33
+    },
+    {
+      "bytes": 54725,
+      "declarations": 87,
+      "lines": 1367,
+      "path": "apps/lorepia/src/app/App.svelte",
+      "public_symbols": 0
+    },
+    {
+      "bytes": 52283,
+      "declarations": 54,
+      "lines": 1449,
+      "path": "crates/content/src/archive.rs",
+      "public_symbols": 5
+    },
+    {
+      "bytes": 51313,
+      "declarations": 19,
+      "lines": 1290,
+      "path": "apps/lorepia/src/features/orchestration/module-lifecycle-controller.ts",
+      "public_symbols": 11
+    },
+    {
+      "bytes": 50535,
+      "declarations": 57,
+      "lines": 1382,
+      "path": "crates/orchestration/src/memory.rs",
+      "public_symbols": 27
+    },
+    {
+      "bytes": 49889,
+      "declarations": 65,
+      "lines": 1214,
+      "path": "apps/lorepia/src/features/providers/DiscoveryPanel.svelte",
+      "public_symbols": 0
+    },
+    {
+      "bytes": 47619,
+      "declarations": 41,
+      "lines": 1281,
+      "path": "apps/lorepia/src/features/orchestration/OrchestrationQuickDrawer.svelte",
+      "public_symbols": 0
+    },
+    {
+      "bytes": 44288,
+      "declarations": 52,
+      "lines": 1286,
+      "path": "crates/content/src/adapters.rs",
+      "public_symbols": 15
+    },
+    {
+      "bytes": 44288,
+      "declarations": 62,
+      "lines": 1222,
+      "path": "apps/lorepia/src/features/providers/CapabilityPanel.svelte",
+      "public_symbols": 0
+    },
+    {
+      "bytes": 44188,
+      "declarations": 27,
+      "lines": 1183,
+      "path": "crates/storage/src/discovery_repository/repository_io.rs",
+      "public_symbols": 28
+    },
+    {
+      "bytes": 43533,
+      "declarations": 23,
+      "lines": 1128,
+      "path": "apps/lorepia/src/features/orchestration/content-package-controller.ts",
+      "public_symbols": 7
+    },
+    {
+      "bytes": 40577,
+      "declarations": 4,
+      "lines": 1169,
+      "path": "apps/lorepia/src/preview/demo-data.ts",
+      "public_symbols": 29
+    },
+    {
+      "bytes": 40455,
+      "declarations": 51,
+      "lines": 1198,
+      "path": "crates/domain/src/character.rs",
+      "public_symbols": 32
+    },
+    {
+      "bytes": 40440,
+      "declarations": 71,
+      "lines": 1162,
+      "path": "crates/shell-api/src/dto.rs",
+      "public_symbols": 37
+    },
+    {
+      "bytes": 38665,
+      "declarations": 39,
+      "lines": 1009,
+      "path": "crates/storage/src/message_display_projection.rs",
+      "public_symbols": 13
+    },
+    {
+      "bytes": 38278,
+      "declarations": 86,
+      "lines": 1207,
+      "path": "apps/lorepia/src-tauri/src/orchestration_commands.rs",
+      "public_symbols": 77
+    },
+    {
+      "bytes": 37467,
+      "declarations": 38,
+      "lines": 1074,
+      "path": "apps/lorepia/src/features/conversations/ConversationPane.svelte",
+      "public_symbols": 0
+    },
+    {
+      "bytes": 35826,
+      "declarations": 57,
+      "lines": 1087,
+      "path": "crates/providers/src/embedding.rs",
+      "public_symbols": 37
+    },
+    {
+      "bytes": 34958,
+      "declarations": 36,
+      "lines": 931,
+      "path": "crates/core/src/app/model_sync.rs",
+      "public_symbols": 11
+    },
+    {
+      "bytes": 34875,
+      "declarations": 40,
+      "lines": 1029,
+      "path": "apps/lorepia/src/features/library/LibraryPane.svelte",
+      "public_symbols": 0
+    },
+    {
+      "bytes": 34320,
+      "declarations": 26,
+      "lines": 949,
+      "path": "crates/chat/src/prompt.rs",
+      "public_symbols": 12
+    },
+    {
+      "bytes": 33130,
+      "declarations": 36,
+      "lines": 887,
+      "path": "crates/storage/src/memory_query_embedding.rs",
+      "public_symbols": 15
+    },
+    {
+      "bytes": 32867,
+      "declarations": 43,
+      "lines": 897,
+      "path": "crates/storage/src/knowledge_embedding.rs",
+      "public_symbols": 11
+    },
+    {
+      "bytes": 32187,
+      "declarations": 52,
+      "lines": 995,
+      "path": "crates/providers/src/discovery/evidence.rs",
+      "public_symbols": 26
+    }
+  ],
+  "ipc_commands": {
+    "count": 207,
+    "names": [
+      "accept_provider_discovery_assistant_draft",
+      "ack_provider_discovery_event",
+      "ack_provider_model_sync_event",
+      "acknowledge_interaction_effect",
+      "activate_content_module",
+      "activate_provider_catalog_import",
+      "activate_provider_catalog_rollback",
+      "apply_content_module_rollback",
+      "apply_prompt_preset_rollback",
+      "approve_content_package_import",
+      "approve_provider_discovery_assistant_retry",
+      "approve_provider_model_sync",
+      "begin_provider_discovery",
+      "begin_provider_discovery_curl",
+      "bootstrap",
+      "cancel_generation",
+      "cancel_provider_discovery",
+      "cancel_provider_model_sync",
+      "cancel_runtime_text",
+      "capture_credential",
+      "clear_conversation_persona",
+      "commit_content_package_import",
+      "commit_import",
+      "commit_provider_discovery",
+      "continue_provider_discovery",
+      "continue_provider_discovery_compensation",
+      "create_branch",
+      "create_conversation",
+      "create_persona",
+      "create_provider_connection",
+      "credential_status",
+      "deactivate_content_module",
+      "decide_generation_attempt_proposal",
+      "decide_interaction_proposal",
+      "delete_content_module",
+      "delete_credential",
+      "delete_generation_preset",
+      "delete_interaction_rule_set",
+      "delete_knowledge_book",
+      "delete_memory_profile",
+      "delete_memory_record",
+      "delete_model_route",
+      "delete_persona",
+      "delete_prompt_preset",
+      "delete_provider_connection",
+      "delete_task_profile",
+      "delete_transform_set",
+      "delete_user_capability_override",
+      "diff_content_module_revisions",
+      "diff_prompt_preset_revisions",
+      "diff_provider_catalog_revisions",
+      "discard_content_package_import",
+      "discard_import",
+      "discard_provider_catalog_import",
+      "dispose_chat_stream",
+      "edit_user_message",
+      "effective_capability",
+      "effective_parameter_specs",
+      "evaluate_content_module_share",
+      "expire_generation_attempt_proposals",
+      "expire_interaction_proposals",
+      "explain_prompt_plan",
+      "export_content_source",
+      "generate_runtime_text",
+      "get_character",
+      "get_character_greeting_catalog",
+      "get_character_render_profile",
+      "get_content_module",
+      "get_conversation",
+      "get_conversation_persona_selection",
+      "get_conversation_state",
+      "get_editable_prompt_preset",
+      "get_interaction_rule_set",
+      "get_knowledge_book",
+      "get_memory_profile",
+      "get_memory_record",
+      "get_memory_supervisor_status",
+      "get_orchestration_workspace",
+      "get_persona",
+      "get_portable_runtime_state",
+      "get_prompt_preset",
+      "get_provider_discovery",
+      "get_provider_discovery_approval_proposal",
+      "get_provider_discovery_assistant_resume_boundary",
+      "get_provider_discovery_review",
+      "get_provider_discovery_review_proposal",
+      "get_provider_model_sync",
+      "get_provider_overview",
+      "get_settings",
+      "get_task_profile",
+      "get_transform_set",
+      "inspect_import",
+      "interrupt_provider_discovery_assistant",
+      "list_branch_messages",
+      "list_branches",
+      "list_capability_observations",
+      "list_characters",
+      "list_completed_content_package_exports",
+      "list_content_module_bindings",
+      "list_content_module_lifecycle_bindings",
+      "list_content_module_lifecycle_candidates",
+      "list_content_module_revisions",
+      "list_content_modules",
+      "list_conversations",
+      "list_conversations_for_character",
+      "list_generation_attempt_proposals",
+      "list_generation_presets",
+      "list_interaction_effect_history",
+      "list_interaction_effects",
+      "list_interaction_proposals",
+      "list_interaction_rule_sets",
+      "list_interrupted_memory_jobs",
+      "list_knowledge_books",
+      "list_memory_profiles",
+      "list_memory_records",
+      "list_messages",
+      "list_model_routes",
+      "list_pending_content_package_imports",
+      "list_persona_page",
+      "list_personas",
+      "list_prompt_preset_bindings",
+      "list_prompt_preset_revisions",
+      "list_prompt_presets",
+      "list_provider_connections",
+      "list_provider_discoveries",
+      "list_provider_discovery_approvals",
+      "list_provider_discovery_candidates",
+      "list_provider_discovery_compensation_steps",
+      "list_provider_discovery_evidence",
+      "list_provider_model_syncs",
+      "list_provider_profiles",
+      "list_provider_templates",
+      "list_reopen_interaction_effects",
+      "list_retryable_generation_attempts",
+      "list_retryable_memory_query_embeddings",
+      "list_task_profiles",
+      "list_transform_sets",
+      "open_conversation",
+      "open_existing_conversation",
+      "patch_memory_record",
+      "pick_content_package_import",
+      "pick_import",
+      "pick_provider_catalog_import",
+      "poll_provider_discovery_events",
+      "poll_provider_discovery_events_for_session",
+      "poll_provider_model_sync_events",
+      "prepare_provider_catalog_rollback",
+      "preview_provider_request",
+      "preview_provider_request_candidate",
+      "preview_transform_rule",
+      "provider_catalog_history",
+      "provider_catalog_status",
+      "put_portable_runtime_state",
+      "record_provider_discovery_assistant_failure",
+      "recover_provider_discovery",
+      "regenerate_assistant_message",
+      "remove_message_from_branch",
+      "render_prompt_cache_control_for_preset",
+      "render_reasoning_control_for_preset",
+      "reopen_content_package_import",
+      "reorder_prompt_blocks",
+      "request_provider_discovery_assistant_revision",
+      "resolve_asset_delivery",
+      "resolve_content_module_activation",
+      "resolve_content_module_rollback",
+      "resolve_prompt_preview",
+      "restart_provider_discovery_assistant_after_interruption",
+      "resume_provider_discovery_assistant_core_host_action",
+      "resume_provider_discovery_compensation",
+      "retry_interaction_effect",
+      "retry_interrupted_memory_job",
+      "retry_memory_query_embedding",
+      "review_content_module_activation",
+      "review_content_module_deactivation",
+      "review_content_module_rollback",
+      "review_prompt_preset_rollback",
+      "run_provider_discovery_assistant_turn",
+      "save_room_orchestration_config",
+      "select_branch",
+      "select_content_package_import",
+      "select_conversation_persona",
+      "select_generation_target",
+      "send_message",
+      "send_reviewed_prompt",
+      "set_conversation_mode",
+      "set_memory_record_exclusion",
+      "simulate_knowledge_activation",
+      "start_provider_model_sync",
+      "submit_interaction_choice",
+      "subscribe_generation",
+      "supply_provider_discovery_curl_evidence",
+      "supply_provider_discovery_document_evidence",
+      "update_persona",
+      "update_settings",
+      "upsert_content_module",
+      "upsert_generation_preset",
+      "upsert_interaction_rule_set",
+      "upsert_knowledge_book",
+      "upsert_memory_profile",
+      "upsert_model_route",
+      "upsert_prompt_preset",
+      "upsert_provider_connection",
+      "upsert_task_profile",
+      "upsert_transform_set",
+      "upsert_user_capability_override",
+      "validate_generation_preset_candidate",
+      "validate_prompt_preset"
+    ],
+    "sha256": "9a587f6f2302724859d752d472a1f01b8c080acae82676e070c7395fd4a599d8"
+  },
+  "policy": "deterministic worktree measurement; no timestamps or host paths",
+  "public_api": {
+    "by_file": {
+      "apps/lorepia/src-tauri/build.rs": {
+        "count": 6,
+        "sha256": "fea59a8fb991e75ec3bef3376605978c6489fc9e7a84027516962925dc76280b"
+      },
+      "apps/lorepia/src-tauri/src/asset_protocol.rs": {
+        "count": 7,
+        "sha256": "50d1deed9e820c806176d49fde522f4d6cd855a731d098eb692f5fbb0f6237a5"
+      },
+      "apps/lorepia/src-tauri/src/channels.rs": {
+        "count": 1,
+        "sha256": "1707f2f5b55d61d5e2dd79d81c5e64769d2ba2591fd5565c263a85c12c98315a"
+      },
+      "apps/lorepia/src-tauri/src/chat_stream_registry.rs": {
+        "count": 7,
+        "sha256": "2d98d2fb8a140855a92bf9150b688482e7d9165b97d5960c7f6cc5cfcae05694"
+      },
+      "apps/lorepia/src-tauri/src/commands.rs": {
+        "count": 44,
+        "sha256": "4165bf4b7cdcea35f39cd38124a60c3214eefcc8d93570bdd60afc68215ea79c"
+      },
+      "apps/lorepia/src-tauri/src/contract.rs": {
+        "count": 23,
+        "sha256": "313e8ffbdfdeb924ecfe9cdbab920d404b31b7f37adbf5ee167a8176a516a224"
+      },
+      "apps/lorepia/src-tauri/src/credential_operations.rs": {
+        "count": 11,
+        "sha256": "76d9d2b22f1fe10159ba73f1f4880637abd0aa7aee6bbb0c7a9df811fc5e218e"
+      },
+      "apps/lorepia/src-tauri/src/error.rs": {
+        "count": 8,
+        "sha256": "d318bc35ff20be1d75a911fc5ef4784c2e91b22086637b74cdbdc15238a19955"
+      },
+      "apps/lorepia/src-tauri/src/lib.rs": {
+        "count": 2,
+        "sha256": "c77104d5ecc1e2adbbc2aefaa3598c871f9d40231f79f330dab1703ab6d8f120"
+      },
+      "apps/lorepia/src-tauri/src/module_lifecycle_commands.rs": {
+        "count": 11,
+        "sha256": "dd8515eb31d771b778fd440e33715a2bfec460a318b5525ef0b27abff13e97e4"
+      },
+      "apps/lorepia/src-tauri/src/orchestration_commands.rs": {
+        "count": 77,
+        "sha256": "46d5237f94f5b2f77543d65672fb538e78bd214905f8aa4a8a6009dc78daa6f8"
+      },
+      "apps/lorepia/src-tauri/src/package_commands.rs": {
+        "count": 12,
+        "sha256": "4a4d619a2dfbeaebbb1f9fe58006ff7530e8efc1c1b347f4dc2e593781daa58d"
+      },
+      "apps/lorepia/src-tauri/src/persona_commands.rs": {
+        "count": 9,
+        "sha256": "fe6cb59d615e348c58c927e0263d834528bdeee2d7fa764162800e343f85f22f"
+      },
+      "apps/lorepia/src-tauri/src/portable_runtime_state_commands.rs": {
+        "count": 4,
+        "sha256": "1d685a2b23a7000f1891c3250ad204500220754660f25ba746972971fcc1a095"
+      },
+      "apps/lorepia/src-tauri/src/provider_commands.rs": {
+        "count": 115,
+        "sha256": "ac7235822c1e3cfb332212f51dc66277ca581a65cb855df786d9054b4a93ce68"
+      },
+      "apps/lorepia/src-tauri/src/runtime_contract.rs": {
+        "count": 1,
+        "sha256": "b3b02ab25d5c57af07b0cd7ce58c868a20b98aa373fdd79e2a947371e2cbc02e"
+      },
+      "apps/lorepia/src-tauri/src/runtime_generation_registry.rs": {
+        "count": 7,
+        "sha256": "105159e72c74fbf6edcda8cee961b27b7c1ad5a9d28e766971dec864ea92fe06"
+      },
+      "apps/lorepia/src-tauri/src/state.rs": {
+        "count": 42,
+        "sha256": "ed2e4dbf3bd84045b7209555c1485ca45fd69b720ade06fb49c9af5338037357"
+      },
+      "apps/lorepia/src/app/app-controller.ts": {
+        "count": 3,
+        "sha256": "2e3a4fd6cf9d6d0de403075639b3481d91d4db876674a9d52f728c7c6d25ba01"
+      },
+      "apps/lorepia/src/app/app-state.ts": {
+        "count": 7,
+        "sha256": "4923367ce0240cd96040dc9c4e410c228525bb0a0e9cfd28ac52f40e9d3ba457"
+      },
+      "apps/lorepia/src/app/provider-credential.ts": {
+        "count": 2,
+        "sha256": "533584b426f61d84b9e7fd72de43930756cdc23989edd32c6752f8d18c4bb3d3"
+      },
+      "apps/lorepia/src/app/provider-discovery-flow.ts": {
+        "count": 6,
+        "sha256": "5be1a4d1f57b2838377360694dfe439624b4f89d3a8cc2c32aed754cfc7a117a"
+      },
+      "apps/lorepia/src/components/detail/detail-scroll.ts": {
+        "count": 2,
+        "sha256": "3117b343d2f428193c1a9d82962f5286365e7a967f06645d1834fb332f368ce2"
+      },
+      "apps/lorepia/src/features/chat/chat-stream.ts": {
+        "count": 4,
+        "sha256": "d4a6d80f70608935e8b3f62b2b39c32cdfbf3505400562dde7fc9624aab7b110"
+      },
+      "apps/lorepia/src/features/chat/composer.ts": {
+        "count": 2,
+        "sha256": "e97a787b263dacb6636115c4644b9cb32844df643066d312e43325336bed3144"
+      },
+      "apps/lorepia/src/features/chat/generation-attempt-approval-controller.ts": {
+        "count": 7,
+        "sha256": "1d3f3915705209e78c276cf163d38dad778c0e41dd5479137e6498ba2f6b4517"
+      },
+      "apps/lorepia/src/features/chat/interaction-room-controller.ts": {
+        "count": 5,
+        "sha256": "9f336ece60053f7816f7a4427f213e25efe81377c62d7610abf2adc324085066"
+      },
+      "apps/lorepia/src/features/chat/markdown.ts": {
+        "count": 6,
+        "sha256": "1f789feca469f9b4d760dfb78839c92c10f7cc40812639f799d5e2cee80a9a74"
+      },
+      "apps/lorepia/src/features/chat/portable-display.ts": {
+        "count": 6,
+        "sha256": "2a41f224254b062ee00c182fc0537f2361a7e03e649e2371923772b0a1490539"
+      },
+      "apps/lorepia/src/features/chat/portable-regex-operation.ts": {
+        "count": 2,
+        "sha256": "03abf143c62cb60392d21ada19d199695d056811443c83b5a08064347bc85e02"
+      },
+      "apps/lorepia/src/features/chat/portable-regex-protocol.ts": {
+        "count": 11,
+        "sha256": "e231e51f34a6bfcab81d77a4144b909eba512aaa62d11776af9b981b19ca0c8d"
+      },
+      "apps/lorepia/src/features/chat/portable-regex.ts": {
+        "count": 10,
+        "sha256": "963b4a7e21b5b1411fe3d8ee9fb67851ba8e228038f8e5275589231d85f893fd"
+      },
+      "apps/lorepia/src/features/chat/portable-renderer-policy.ts": {
+        "count": 4,
+        "sha256": "8f5c0758fc1cde9757f9138adfce3a7118c922ac5d8a0f17cbb55c5fbffb68ed"
+      },
+      "apps/lorepia/src/features/chat/portable-renderer-protocol.ts": {
+        "count": 5,
+        "sha256": "389a95f37863008647a75ff5ed40c41a9f4ea962c88e2e3d66ee6dc3b223fd46"
+      },
+      "apps/lorepia/src/features/chat/portable-runtime-context.ts": {
+        "count": 5,
+        "sha256": "46f251cf2de2352ded3bd2ce9dd60681ca00d522a49a2dae94a118b8c485a2e7"
+      },
+      "apps/lorepia/src/features/chat/portable-runtime-kernel.ts": {
+        "count": 2,
+        "sha256": "cff1724e28e36b01dcd56c27cebb62c59a2eb0862795ae06d3ff78462464b15d"
+      },
+      "apps/lorepia/src/features/chat/portable-runtime-lifecycle.svelte.ts": {
+        "count": 2,
+        "sha256": "1ef7383d9eddeb3866fafda616b08a643c09dbc38c232042d4a3faa6c64e5a6e"
+      },
+      "apps/lorepia/src/features/chat/portable-runtime-model-policy.ts": {
+        "count": 12,
+        "sha256": "8881472e03bc4a46c5e126e34c6e8b766a497832aee218bd5725be3184dbfd65"
+      },
+      "apps/lorepia/src/features/chat/portable-runtime-protocol.ts": {
+        "count": 23,
+        "sha256": "cca1fd788493be3d27ed4367eb73797857537660c5bd0c23cd7d29f67e176422"
+      },
+      "apps/lorepia/src/features/chat/portable-runtime-state.ts": {
+        "count": 17,
+        "sha256": "8c2bb8890530dcda90588f295b8da66bd7bfd2c2d75bc43e282ad8d40407d885"
+      },
+      "apps/lorepia/src/features/chat/portable-runtime-worker-client.ts": {
+        "count": 5,
+        "sha256": "1e4bf400fd4f3d51cad20043e197ca39c03a7a818e76ad2103a09af683ac4a87"
+      },
+      "apps/lorepia/src/features/chat/portable-runtime.ts": {
+        "count": 14,
+        "sha256": "1eaef5c37253b3b8f92118ef571c58fada1c10f4e7a3deb1096b50ae1c7b207e"
+      },
+      "apps/lorepia/src/features/chat/virtual-window.ts": {
+        "count": 16,
+        "sha256": "934ac643abb3fbd8f769a3e5d94182eca921db4aed61de1c6a68a12e48bb9b14"
+      },
+      "apps/lorepia/src/features/orchestration/ContentModuleLifecyclePanel.svelte": {
+        "count": 1,
+        "sha256": "729519ad495fc22396f0a8ed1380097d32673c86b927a24997101b4231335cd1"
+      },
+      "apps/lorepia/src/features/orchestration/content-package-controller.ts": {
+        "count": 7,
+        "sha256": "3719f25fb2b74f00b18e706c24ffbb3a21151923be565b930c0607aa58e4d55e"
+      },
+      "apps/lorepia/src/features/orchestration/module-lifecycle-contracts.ts": {
+        "count": 55,
+        "sha256": "c89d3c444d61558d61a1c4469fc9d1124eed4df92d6b115e893f99fecea2e77e"
+      },
+      "apps/lorepia/src/features/orchestration/module-lifecycle-controller.ts": {
+        "count": 11,
+        "sha256": "9b9ef7f9c825d728d70c0e90cfbf9654f2727d7adda34a6ec8e5578e0944ec59"
+      },
+      "apps/lorepia/src/features/orchestration/orchestration-controller.ts": {
+        "count": 23,
+        "sha256": "e601a91bf749ac755eccf3bf5d2cca0471863853c05e538b1a711448af70eda3"
+      },
+      "apps/lorepia/src/features/orchestration/prompt-preset-history-controller.ts": {
+        "count": 6,
+        "sha256": "1bba3238bf2af5938a37067918dd9aa75512923ead879073d90db6688b268277"
+      },
+      "apps/lorepia/src/features/orchestration/studio-contracts.ts": {
+        "count": 9,
+        "sha256": "82a5c3f723bf6b18bf18242c333c149f37e03a1cdece1a42b00701eb929633e2"
+      },
+      "apps/lorepia/src/features/personas/persona-contracts.ts": {
+        "count": 17,
+        "sha256": "7a0dab7757210d8eebdb28ffaf34a7cc96d05d9ae3b18012804ccf4d17dcb64d"
+      },
+      "apps/lorepia/src/features/personas/persona-controller.ts": {
+        "count": 4,
+        "sha256": "f0b11d9e23ca6d4a0211deb9dabf659cc5a64b89540ca70ca9aa2ce40883950f"
+      },
+      "apps/lorepia/src/features/providers/settings-contracts.ts": {
+        "count": 3,
+        "sha256": "be8352402399eb6981da74fa071d2eb63a3088c217cc99fb7a7c2998c0ed5bd4"
+      },
+      "apps/lorepia/src/lib/i18n/index.ts": {
+        "count": 7,
+        "sha256": "c5102b37b4a85be553f7525a2fb18ecc943de09a357923fcf59f35d5d59f3867"
+      },
+      "apps/lorepia/src/lib/i18n/ko.ts": {
+        "count": 1,
+        "sha256": "5d0056a7d27af69c6f5a881b53b6c5d81567be774090fca35c5f35b2f7fbaf16"
+      },
+      "apps/lorepia/src/lib/ipc/client-payload-guards.ts": {
+        "count": 2,
+        "sha256": "b96d9a7d74511034409ef90c1f1d63e5faa6ec083fea6a05141d7b0cfeb8f9af"
+      },
+      "apps/lorepia/src/lib/ipc/client.ts": {
+        "count": 4,
+        "sha256": "17dae8284e3ec0b4fd98bbd479bb3f687469991ba33eb51976040e05af43cdc5"
+      },
+      "apps/lorepia/src/lib/ipc/commands.generated.ts": {
+        "count": 1,
+        "sha256": "7b4da221739fd6e4ee137b5a3349bb237f717f8b00f3a72aa13d0d2bb1e91307"
+      },
+      "apps/lorepia/src/lib/ipc/commands.ts": {
+        "count": 1,
+        "sha256": "5f11060f1e4538e6270ed527468eb941b758f73803129a19eb5a4c371a1b1c5f"
+      },
+      "apps/lorepia/src/lib/ipc/contracts.ts": {
+        "count": 415,
+        "sha256": "f31a67210f6e0f39060ea4379299cbf5d04f8e7e2f92ee73dfac9d59e0c809d6"
+      },
+      "apps/lorepia/src/lib/ipc/errors.ts": {
+        "count": 2,
+        "sha256": "bb02a9b9437528a671c959d845436afdd787a5e307ee5884013c9fc21686e9b7"
+      },
+      "apps/lorepia/src/lib/ipc/import-contracts.ts": {
+        "count": 6,
+        "sha256": "1629871ed2e8bb44482239b61441daf8dbc56ba221a76f4388d755c9a6c13d16"
+      },
+      "apps/lorepia/src/lib/ipc/portable-runtime-contracts.ts": {
+        "count": 6,
+        "sha256": "c4f1d769faed54e47df76e8a6a35dd75df60961ff6bf3d3830bc911ecbea5006"
+      },
+      "apps/lorepia/src/lib/ipc/portable-runtime-state-contracts.ts": {
+        "count": 8,
+        "sha256": "9006477bd524760b6e67672f74e8cda660857954ff9c88c78f5bfaeb1f51e28f"
+      },
+      "apps/lorepia/src/lib/theme.ts": {
+        "count": 5,
+        "sha256": "232ba6db6c34346e0fb33aa1a621056e8bb13d9d90a9ef39ae5e3c77ab3c783c"
+      },
+      "apps/lorepia/src/preview/demo-data.ts": {
+        "count": 29,
+        "sha256": "2156335359e0b98bf37d4148600d0bdb3763dbba0ec2ddc5ad2246d2d0b11b4d"
+      },
+      "apps/lorepia/src/preview/mock-client.ts": {
+        "count": 2,
+        "sha256": "817a4b6bd35d6fa51397c132a60fedfed3ca93e708893554310310887e76ac81"
+      },
+      "crates/chat/src/events.rs": {
+        "count": 5,
+        "sha256": "399d789047214bdffd43d4082c6ce71449583ae6a6f53dd21527cc2c9ae3b842"
+      },
+      "crates/chat/src/generation.rs": {
+        "count": 11,
+        "sha256": "b605962e04f05076c82e0ff667cc49f9d3e82e8ba82395cf3e5297422813306f"
+      },
+      "crates/chat/src/lib.rs": {
+        "count": 3,
+        "sha256": "4fcfb532f24b637907afee39c073239824d9a61eb627cad0b6bb1793c8aa3404"
+      },
+      "crates/chat/src/prompt.rs": {
+        "count": 12,
+        "sha256": "1830886ab16d5ce76163e3a1c9c24297fa7c4d7d92c9840d3a8437eda71ea8a1"
+      },
+      "crates/content/src/adapters.rs": {
+        "count": 15,
+        "sha256": "afce975332c778976fe786c39c2bc1d2505d6cae86eea0024f585ca60002de61"
+      },
+      "crates/content/src/archive.rs": {
+        "count": 5,
+        "sha256": "6cff11f38f9e9dc4c026f45068ae353ef3a40d7578e48d5b3150b813b8b8701a"
+      },
+      "crates/content/src/capabilities.rs": {
+        "count": 5,
+        "sha256": "4eec4024cd0ac905c2a2712313e547024adb14494a3001a7c8aac364e2812a09"
+      },
+      "crates/content/src/hashing.rs": {
+        "count": 1,
+        "sha256": "44f025c648790e6f0e407311a54c9cbd2f4b84cee3ede42aebe04e74e77a2e15"
+      },
+      "crates/content/src/lib.rs": {
+        "count": 10,
+        "sha256": "44d4a85b792b5bc5c3f5daad73261a02bb97609a2812e687a7fadd0b690c2fd8"
+      },
+      "crates/content/src/package.rs": {
+        "count": 25,
+        "sha256": "2c745f77d2255ef3e001cef6d684c28dd198713c278ec459796f91a38f89698a"
+      },
+      "crates/content/src/path.rs": {
+        "count": 1,
+        "sha256": "36c7fe242ec0c46d944723c54c67956b6286f2a18cd2d57411257673036b9058"
+      },
+      "crates/content/src/png.rs": {
+        "count": 2,
+        "sha256": "bfccaaae993c4aa3d99fa530faa66d360000348ccabcd9c73813599e5ac38c7d"
+      },
+      "crates/content/src/runtime.rs": {
+        "count": 5,
+        "sha256": "54a678c660cd8ff8fe703fc563c6f0e01e325268ef06dabb936457c542a75380"
+      },
+      "crates/core/src/app.rs": {
+        "count": 143,
+        "sha256": "6ea1278b0027faf2ae89f3bb107e8a75a83b106ff50b9af1d4458e2e819a693c"
+      },
+      "crates/core/src/app/generation_events.rs": {
+        "count": 23,
+        "sha256": "72ff9b04e836dd4c4ffd9b5411a535c5ebffb3f88a87592f5d1d4a50b1445b1e"
+      },
+      "crates/core/src/app/generation_workflow.rs": {
+        "count": 5,
+        "sha256": "894c2aeb563492cc1d59c9ad0c89fba391f041cd9a51bb70f2872bd81f44a982"
+      },
+      "crates/core/src/app/model_sync.rs": {
+        "count": 11,
+        "sha256": "8944662b8ffb50a7d44e0e1b5be4fb05e6cced0099168022fc9f8ff97e07a375"
+      },
+      "crates/core/src/app/portable_runtime_state.rs": {
+        "count": 8,
+        "sha256": "fccb65c1b3729fe887f0809f480531376cd0382b9d07ee81e05db535dd15d9f5"
+      },
+      "crates/core/src/app/runtime_control.rs": {
+        "count": 5,
+        "sha256": "eb038ac9f1d00a4c21abc1cf808bdd16b48d1958db9a0557d7ac7d14e20907b8"
+      },
+      "crates/core/src/app/runtime_generation.rs": {
+        "count": 8,
+        "sha256": "fe5cfb5afe741df051301493fc1e1b3886d63d92d84407eea39475faca970f42"
+      },
+      "crates/core/src/asset_delivery.rs": {
+        "count": 6,
+        "sha256": "e7fb80ba04e13a81e015f2872963bf3eb6502e3fcefa82030b1e0b725f651b91"
+      },
+      "crates/core/src/catalog.rs": {
+        "count": 31,
+        "sha256": "4d744b9116daac5e93cfe3592c6dd6cabc3d9fe215038b45a3162a6bf8803776"
+      },
+      "crates/core/src/config.rs": {
+        "count": 3,
+        "sha256": "94b8c930d5e007604afeaf0caf695f5e8b9a9820ddc0d47e9d395b94e53d55f2"
+      },
+      "crates/core/src/content_export.rs": {
+        "count": 8,
+        "sha256": "1ec0ba63017eb4a3e8c6dac18b616b2f77007900c12451060817abf32af92414"
+      },
+      "crates/core/src/content_package.rs": {
+        "count": 32,
+        "sha256": "acc0bf662bdeeda6e3554914f2f1e2b91580db1b33a99120701ff4f1eb2d6664"
+      },
+      "crates/core/src/interaction_derived_drain.rs": {
+        "count": 3,
+        "sha256": "3d62094d50e570a392cdb123dc49f919c4e3627ac78c5e3328e8fd5b9e69b612"
+      },
+      "crates/core/src/interaction_projection.rs": {
+        "count": 28,
+        "sha256": "437c15e9ca017096cc3ce9ffb612dd88fbd1720c9e16c8812e7f41352d78ec48"
+      },
+      "crates/core/src/lib.rs": {
+        "count": 32,
+        "sha256": "32db900d559452d3ea7f1413051b65e6a0a61bcd1f18bfe89475bf293b83ba2b"
+      },
+      "crates/core/src/message_display_projection.rs": {
+        "count": 4,
+        "sha256": "a170786f53bad094a78e3214eb2d2a8d2dc6abb1c6f899a68c9f0e7d1d8e41e7"
+      },
+      "crates/core/src/module_orchestration.rs": {
+        "count": 49,
+        "sha256": "93d6d7c43591a31f1d319737ddfdb5dfb3649b539a6ef782990aa7922a24e7a0"
+      },
+      "crates/core/src/orchestration.rs": {
+        "count": 94,
+        "sha256": "42b60bd95602d510b6fb933559183371d7de4689b758343fe2c672145ae2d44c"
+      },
+      "crates/core/src/orchestration_runtime.rs": {
+        "count": 54,
+        "sha256": "c7c88a1905d90f62ded9f705e94e30ab21306089a8644f15e48f7b9f08152247"
+      },
+      "crates/core/src/persona.rs": {
+        "count": 19,
+        "sha256": "36d5c284a7cca6cbec7e238eb1fbaa3a7d375a2bea67276c21f0034c80518f47"
+      },
+      "crates/core/src/provider_credential.rs": {
+        "count": 26,
+        "sha256": "3a3c83957fa8fce564de57fee02da2ed0fa7f570ca44a3026c6d896462f199a2"
+      },
+      "crates/core/src/provider_discovery.rs": {
+        "count": 130,
+        "sha256": "a8762f84a6b6c08cf2d6f71866a1c2d73bdc9adc3cf7b20f49bca7b806301b5b"
+      },
+      "crates/core/src/provider_discovery/schema_fixture.rs": {
+        "count": 3,
+        "sha256": "2fe3679f5321b4ee08c1db4968c35e929bbc3826fb15ce31ed1d8bde673b045b"
+      },
+      "crates/core/src/provider_discovery_deterministic.rs": {
+        "count": 29,
+        "sha256": "4e333b654c9065807486b8df4b5ec714bb87f75f5e48cac49a437e1b5088a98b"
+      },
+      "crates/core/src/provider_discovery_view.rs": {
+        "count": 2,
+        "sha256": "162856f7b13a2e9806e155bca85c6ecdae18518c8487c0209425aacc2f075f86"
+      },
+      "crates/core/src/revision.rs": {
+        "count": 3,
+        "sha256": "1f97de598f31e8602855c84a2fcc5e3d8331d0379931f254ac7b6524bedc331c"
+      },
+      "crates/core/src/transform_documents.rs": {
+        "count": 4,
+        "sha256": "b4e19d9d8909e42f5b0c858fc82915bf95a7f03a5c8ec1673dc69e70568648ab"
+      },
+      "crates/domain/src/capability.rs": {
+        "count": 7,
+        "sha256": "80221ad45f1efc389150d9590a6b8d258695e6f511413440fec88ecb5ac47f8b"
+      },
+      "crates/domain/src/character.rs": {
+        "count": 32,
+        "sha256": "9f45e3f42c2d19e3a39b91534a8d20c02d0eee9d81692fc8ef8fb9afdb869b34"
+      },
+      "crates/domain/src/content.rs": {
+        "count": 20,
+        "sha256": "82e1b4c8aae1eae6b75438d98ebfb22db6c30677ec33b195df339e1d3dbbb68e"
+      },
+      "crates/domain/src/conversation.rs": {
+        "count": 16,
+        "sha256": "a734edf062c4f85c0c21fee42319b6bb91e37a9612d18a567504ca798290691b"
+      },
+      "crates/domain/src/discovery.rs": {
+        "count": 96,
+        "sha256": "bd8367cf093bd82fb08902fc6d676ec4e60cead26cb19b4b65d816440f444697"
+      },
+      "crates/domain/src/error.rs": {
+        "count": 7,
+        "sha256": "704a21f70537092df0bf7fc06eaa81dc9d183b142cfe86d03bb7a8d60c463b51"
+      },
+      "crates/domain/src/health.rs": {
+        "count": 1,
+        "sha256": "dde624e730c236fdc31e23caec782fca02c4296e9bdd90b13680666003e2bdab"
+      },
+      "crates/domain/src/lib.rs": {
+        "count": 14,
+        "sha256": "93f8e2b2997b8032b47a303a16e3d199e29c8ec0e39506d40ba61805bd6303b3"
+      },
+      "crates/domain/src/message.rs": {
+        "count": 15,
+        "sha256": "6783279948158344bf778384f0602d8a542c0f34e7214392cf9ed123e54ae9ba"
+      },
+      "crates/domain/src/model_sync.rs": {
+        "count": 17,
+        "sha256": "990160199ffc03cef65d9ba8dd2eb9f8d2fa3ea9874d04639b66a715e48c53f9"
+      },
+      "crates/domain/src/orchestration.rs": {
+        "count": 162,
+        "sha256": "3e2858dcaa45ce0fa5d73a919914e1f614b76e845510cd07223d21f82f8cf27e"
+      },
+      "crates/domain/src/provider.rs": {
+        "count": 153,
+        "sha256": "85df1ddc2e694af96797688f3783834c90d09329036023aec22ffe67a0799724"
+      },
+      "crates/domain/src/settings.rs": {
+        "count": 1,
+        "sha256": "028c4962f2f7fd29b5cbaf4eb95ba343bb2679f6a776ed1ee1de067e7376e8b3"
+      },
+      "crates/orchestration/src/interactions.rs": {
+        "count": 41,
+        "sha256": "9c8ec5d57d47750b1f217ada452ec2f828235f16106426d89fb7555cc832747a"
+      },
+      "crates/orchestration/src/knowledge.rs": {
+        "count": 22,
+        "sha256": "b55765920f488ada41e16cae3c1b00efe3ddac5c2c6963cb8b5ef5248219c68a"
+      },
+      "crates/orchestration/src/lib.rs": {
+        "count": 11,
+        "sha256": "0d84200adf6e9061467a30f42ee7cc190e70c46341e8bf81da05e7cddcbde593"
+      },
+      "crates/orchestration/src/memory.rs": {
+        "count": 27,
+        "sha256": "6e0d1a6fbf269d55eeb9b90d7ddebfd9ba051bca4aa666e6e7b7db56106f6e63"
+      },
+      "crates/orchestration/src/modules.rs": {
+        "count": 52,
+        "sha256": "6ef5f45a9516845afbd41dc6812a870d999305c472c6b16859aaf5d7e3126f52"
+      },
+      "crates/orchestration/src/package.rs": {
+        "count": 35,
+        "sha256": "ddbd72d229a557bc9d58c02a2206fbc6f518abe5793ba6809cd58bdf303e3883"
+      },
+      "crates/orchestration/src/portable_text.rs": {
+        "count": 1,
+        "sha256": "151eee1531c35bfe6fea7c1ea723b720344109d22a260f7f06525a5920a8164f"
+      },
+      "crates/orchestration/src/resolver.rs": {
+        "count": 14,
+        "sha256": "a7c3ff708750e4a9244cc3ec5b4fc531b6fc83e2db27c028b6a8ffd74f19af0e"
+      },
+      "crates/orchestration/src/template.rs": {
+        "count": 4,
+        "sha256": "672001a387f86c5ddc65294419d61ec21655a6343ea7fccf6d5c9f554f3f4f3e"
+      },
+      "crates/orchestration/src/transforms.rs": {
+        "count": 33,
+        "sha256": "45f21ac8816d2a46cd19acc2c32b6b8c970ec98498a95c65bbf1c8e3267ee86e"
+      },
+      "crates/providers/src/anthropic_messages.rs": {
+        "count": 7,
+        "sha256": "a154c0d2121213ce9213a8e2081876c8a19d62f5976a4297c94f709099c6d457"
+      },
+      "crates/providers/src/capability_probe.rs": {
+        "count": 54,
+        "sha256": "6d9823fc32efa9f36ea65380f5cbb30a182fd8251c2b7317456130fbe34be39d"
+      },
+      "crates/providers/src/catalog.rs": {
+        "count": 80,
+        "sha256": "2de0890b625c9a0a73f024fa86245a8deb49eb7ddd114253da515fefce9035df"
+      },
+      "crates/providers/src/curl_parser.rs": {
+        "count": 17,
+        "sha256": "5c66033fc07b043186b4df638bae487835a44c841782f041df41be8bedfa6d9c"
+      },
+      "crates/providers/src/discovery/evidence.rs": {
+        "count": 26,
+        "sha256": "b5acec516691ff15cedd7ffd49bd5f682f9be9acf441ed4c5b5bc6cf5855711c"
+      },
+      "crates/providers/src/discovery/fetcher.rs": {
+        "count": 27,
+        "sha256": "61e2c0d71e27d36d1dfb24ab544cf8edaa4984398b9fff035ac90539220dd991"
+      },
+      "crates/providers/src/discovery/mod.rs": {
+        "count": 4,
+        "sha256": "ad320e38e55cbb9aad8a52f4ebee081471ad2d15ed975391c66c08c777d2b5a8"
+      },
+      "crates/providers/src/discovery/openapi.rs": {
+        "count": 35,
+        "sha256": "9c40b1e45be8e448ecbfd9b6d015c45c5ee0c3640a2cb473d93788cf5cd72e2c"
+      },
+      "crates/providers/src/embedding.rs": {
+        "count": 37,
+        "sha256": "8e80a780edf715e4a0e6d05846b553aa05ca3c4280f84a4c44674e9820f1ecef"
+      },
+      "crates/providers/src/gemini_generate_content.rs": {
+        "count": 11,
+        "sha256": "f8dab867e36adaf60b196e9cfd24b9e072cc8b61f656b4214171829b3db51def"
+      },
+      "crates/providers/src/lib.rs": {
+        "count": 24,
+        "sha256": "3b2a6222619b8c31bb9593caac00a1e2169a9dff685bd12f47f02859b8e235f2"
+      },
+      "crates/providers/src/manifest_validator.rs": {
+        "count": 5,
+        "sha256": "8a94af7c56687fd89dd747bf08b726f5467e3e5b0bcb8c617b84515ac5f1ffe1"
+      },
+      "crates/providers/src/network_transport.rs": {
+        "count": 11,
+        "sha256": "6a136a9c09a82f8d8ae2611f21bb263ef343eea30026a4e4133a168b62e86a4d"
+      },
+      "crates/providers/src/ollama_native.rs": {
+        "count": 11,
+        "sha256": "61470f9b4d71f07924de0e1df19a279365695a4282bc0c72c13d76e72e376895"
+      },
+      "crates/providers/src/openai_compatible.rs": {
+        "count": 8,
+        "sha256": "1e967e759875cfd8c2c9e6558a4b794351fe3b33bca3cad1c95ae795329bf7bf"
+      },
+      "crates/providers/src/openai_responses.rs": {
+        "count": 7,
+        "sha256": "7903f246e3924445f1002e485fa6493cd8e9f03895f18df4c23e201460bce7f5"
+      },
+      "crates/providers/src/parameter_mapping.rs": {
+        "count": 62,
+        "sha256": "8cadbafafd6ca81633b62c0e11e18f4f669f393bc42e42aff499aa3a3731d677"
+      },
+      "crates/providers/src/prompt_contract.rs": {
+        "count": 52,
+        "sha256": "286bd4b51f5258dc7af7bba8759d0dffc088748533f8d8d0fc309d564c9c9aa6"
+      },
+      "crates/providers/src/registry.rs": {
+        "count": 49,
+        "sha256": "836e021aca7dbe59caace4e760e87cb688645935722ded33461a60c7bfac18c1"
+      },
+      "crates/providers/src/request_plan.rs": {
+        "count": 21,
+        "sha256": "03e7e8cdee175db8fef0df1a341e3a247007d3ab354a1b10fdc4a38324e4368f"
+      },
+      "crates/providers/src/setup_assistant.rs": {
+        "count": 89,
+        "sha256": "effa0c65f26e38d643857bcba7d93673aa5b1acde87bfa043e0719c8168bfea6"
+      },
+      "crates/providers/src/sse.rs": {
+        "count": 12,
+        "sha256": "80a5a941deda21ee5d019de283459aec6006ef4882085dc4fc12b6a5222b1b74"
+      },
+      "crates/providers/src/url_policy.rs": {
+        "count": 91,
+        "sha256": "887db5b1718cf4c8d49eacb74653e50eb5e0ba1513a62fab892b69b0f1fbb311"
+      },
+      "crates/shell-api/src/api.rs": {
+        "count": 67,
+        "sha256": "f4ad32089fb3b8430362be886d40e646e5401c4e11513ad22ed1602f0cb805ec"
+      },
+      "crates/shell-api/src/asset.rs": {
+        "count": 8,
+        "sha256": "10358e602cae25f6f99bd29400e9dded8c0266f2ad538589aea50ba19573f35d"
+      },
+      "crates/shell-api/src/catalog.rs": {
+        "count": 17,
+        "sha256": "5b2c309a56169a4332cf53ba64c7b30ae598914833866b33a3e622e2439fdbe6"
+      },
+      "crates/shell-api/src/discovery.rs": {
+        "count": 93,
+        "sha256": "bba037e21760334c460ececab4dabc312acd9ec662dcc536b7f848807ee7c14e"
+      },
+      "crates/shell-api/src/dto.rs": {
+        "count": 37,
+        "sha256": "9737acbcea5158af046b2265decb9970aeb61d77f6bf75c5496d792045b4daac"
+      },
+      "crates/shell-api/src/error.rs": {
+        "count": 4,
+        "sha256": "041842f756fe67104140b69356696fce66bd4a24efcfd30f5dcf87d5f1f9a984"
+      },
+      "crates/shell-api/src/interaction.rs": {
+        "count": 48,
+        "sha256": "c8629bf7769466621a63c1f8cca764ce58f5aeecf885fe41062a9b659efaadce"
+      },
+      "crates/shell-api/src/lib.rs": {
+        "count": 18,
+        "sha256": "0d324d6cd220ed1e3fa5a8583c7f1924ee653f94e009bf089f5e35a1b2368b54"
+      },
+      "crates/shell-api/src/model_sync.rs": {
+        "count": 17,
+        "sha256": "c292b578b974619027668ddb10d638ad0580a88434e471748cc551aa8920eaf8"
+      },
+      "crates/shell-api/src/module_lifecycle.rs": {
+        "count": 35,
+        "sha256": "5fd65c7a48a4441ca28ad93f7131f2b4b4adc5b2bd9a0a3403b385b838be1493"
+      },
+      "crates/shell-api/src/orchestration.rs": {
+        "count": 193,
+        "sha256": "433b9f6bd22c8dd0e2b4dacfcd838f38820573aef506d6ac5aba9508dfa6b945"
+      },
+      "crates/shell-api/src/package.rs": {
+        "count": 53,
+        "sha256": "0850251b7eda9529fb7de72d42a7d9d6cfba274fafad358de05249a522f9feda"
+      },
+      "crates/shell-api/src/persona.rs": {
+        "count": 24,
+        "sha256": "00d99cc041055a042431470089beb8b71d0dbb85ef2ad7fe9015ad5de164818f"
+      },
+      "crates/shell-api/src/portable_runtime_state.rs": {
+        "count": 9,
+        "sha256": "79ead2da28e862abd8ef17795774ca2558ead84470a3a54bf535ccaa3f4217f5"
+      },
+      "crates/shell-api/src/provider.rs": {
+        "count": 101,
+        "sha256": "b126712a38378147c9bf95fdb6677ceac19dc32202b61a4c7b9040f2aad5dae8"
+      },
+      "crates/shell-api/src/sensitive.rs": {
+        "count": 27,
+        "sha256": "383953d0b112d191f336ecbaeb04cb11fceef036f1ca50c5f95dab5ad8ab8471"
+      },
+      "crates/shell-api/src/stream.rs": {
+        "count": 9,
+        "sha256": "75fab6202cb413ac11d9af394b9889583240fbe18ec57b68b8941d501da1e893"
+      },
+      "crates/shell-api/src/test_support.rs": {
+        "count": 9,
+        "sha256": "b869a99d3afcf0977a9a09ea71a2011b25e605a1086c2efd0e409a923e0102d1"
+      },
+      "crates/storage/src/catalog.rs": {
+        "count": 34,
+        "sha256": "daacf6d944f7318c3faaa4067f84161442850527368dd26f965e337655817de4"
+      },
+      "crates/storage/src/content_export.rs": {
+        "count": 5,
+        "sha256": "c93d0b551ef78211be8763e1f3685f28196f13a020333b2023b526df4d789aac"
+      },
+      "crates/storage/src/cutover.rs": {
+        "count": 3,
+        "sha256": "eee9c2f430717bb0e4296097947b82e1eafadbde1b2eac7834628b3fcadd402f"
+      },
+      "crates/storage/src/database.rs": {
+        "count": 129,
+        "sha256": "35ffc7b1168c18c1173f043c539a3e9d6419400a9f68c481d8e022725e55373b"
+      },
+      "crates/storage/src/database/asset_delivery.rs": {
+        "count": 4,
+        "sha256": "0cfc33f86aae4bbcab48c53fe52f7fb8bca5bf3b753bd6de2a4046e88b345821"
+      },
+      "crates/storage/src/database/connection_metrics.rs": {
+        "count": 5,
+        "sha256": "95771cf697585ec10b8fd621667358e9786536727b4a926242292e28f188870a"
+      },
+      "crates/storage/src/database/private_path.rs": {
+        "count": 4,
+        "sha256": "0ad3ee628fb0292105fe82d5cb58ab0191785f98317d7453c627db80b8c68e78"
+      },
+      "crates/storage/src/discovery.rs": {
+        "count": 23,
+        "sha256": "650d417aa32f14bb61c64ca83e89d8c384772faea774cc114f0c5287f855b55b"
+      },
+      "crates/storage/src/discovery_repository.rs": {
+        "count": 67,
+        "sha256": "5a0f41a3581543899444d08737e2d52c40e9d8cbe9aa84b531148700b54dc43a"
+      },
+      "crates/storage/src/discovery_repository/contract_codec.rs": {
+        "count": 39,
+        "sha256": "e923b245cc7bc99a004fce26f1155751e3b212cf66b59ffb9c4098a8428bd823"
+      },
+      "crates/storage/src/discovery_repository/errors.rs": {
+        "count": 4,
+        "sha256": "b78f5ab3fcc41d417ad89173787e7c4756b81b07722ed04211cc943f7c257574"
+      },
+      "crates/storage/src/discovery_repository/repository_io.rs": {
+        "count": 28,
+        "sha256": "73c400a90cf3d183db5ae48b83a2907ad4086c3b06059a74f8bfd31d9e158d66"
+      },
+      "crates/storage/src/generation_attempt.rs": {
+        "count": 50,
+        "sha256": "e3c8f65e3b5edf775690afddc2932bc65381223d15546389ece0dd65c10b26eb"
+      },
+      "crates/storage/src/generation_attempt/retryable_projection.rs": {
+        "count": 1,
+        "sha256": "732c46aa82036fb1bce9c29e5d2e701426f782aab2219c1e585d144bb170d3bb"
+      },
+      "crates/storage/src/interaction_repository.rs": {
+        "count": 95,
+        "sha256": "96f97b20e077c5fdd44f908ef4a7712511f1bc912b68f567f35532e91d55638f"
+      },
+      "crates/storage/src/interaction_repository/effect_history.rs": {
+        "count": 16,
+        "sha256": "3cd91e781b23ff0b964aedd654a96444d26d215acce0252b99c25a006b4b0386"
+      },
+      "crates/storage/src/knowledge_embedding.rs": {
+        "count": 11,
+        "sha256": "57971c55e3967c880c34b108ea6380933b17af4cc0ccf2713184a38558484487"
+      },
+      "crates/storage/src/lib.rs": {
+        "count": 20,
+        "sha256": "ab439e3e5493cf72d01c8b6e92af97aa8318847ae6f666900b9b25fdfe50c7bc"
+      },
+      "crates/storage/src/lifecycle_outbox.rs": {
+        "count": 11,
+        "sha256": "bdcfb21ae5ab19325605936fe3607708bac92ab82e226c94d8e3344963de2751"
+      },
+      "crates/storage/src/memory_query_embedding.rs": {
+        "count": 15,
+        "sha256": "05c2f6142c545e4746c77c986047c44d8a2d61a16e21714dae5f6298c06f4a4c"
+      },
+      "crates/storage/src/memory_queue.rs": {
+        "count": 35,
+        "sha256": "9607149ac90404b84ce8c0f4c0cc07fe0dcc2b9c7d1550109643536d2ce488cf"
+      },
+      "crates/storage/src/message_display_projection.rs": {
+        "count": 13,
+        "sha256": "c932a5083bb19f828d26308f41897231d9a26e8c74282cd927c8a4fea2618b62"
+      },
+      "crates/storage/src/model_sync.rs": {
+        "count": 14,
+        "sha256": "483afbd515b81acf2ef6108d8d212206bae400afcdc09ace91b211ec8ff3428a"
+      },
+      "crates/storage/src/orchestration.rs": {
+        "count": 135,
+        "sha256": "22b0ff3fd98259b69045d09a79b38582400c5683ddacae8953137dd2434e4540"
+      },
+      "crates/storage/src/orchestration/builtins.rs": {
+        "count": 2,
+        "sha256": "f8ec1f77ae4b34b9a18a71ac488eff30ebaae46680f09352720ca631359bf1ca"
+      },
+      "crates/storage/src/orchestration/module_authority.rs": {
+        "count": 3,
+        "sha256": "2dfd80f3a8acfebc9e537ccc1df2f0e5bc228628c1f51584aa6697dab1bc72d0"
+      },
+      "crates/storage/src/package_repository.rs": {
+        "count": 51,
+        "sha256": "10d8ca0acc1aff37b9f2bc340b8e752e647a0887171d8c68448468cac5326c4c"
+      },
+      "crates/storage/src/package_repository/completed_authority.rs": {
+        "count": 8,
+        "sha256": "c8395005244963f5810aeeb5d22f26b262ed9d92ba88424381d619a485c65497"
+      },
+      "crates/storage/src/persona_repository.rs": {
+        "count": 7,
+        "sha256": "2ed239007f1d1afb09bd235511a08c2f821e0c56732142074a5011258fd81f48"
+      },
+      "crates/storage/src/portable_runtime_state.rs": {
+        "count": 12,
+        "sha256": "a5d76bc32a36d2f75d47f8f388eeda06bc777432c6c8265c9ec04ccf024d57b7"
+      },
+      "crates/storage/src/provider_credential_repository.rs": {
+        "count": 42,
+        "sha256": "44027ca389381381a7077f5e8555201b86ac58b9e56b56ca9ad394448dcf96d8"
+      },
+      "crates/storage/src/runtime_model_audit.rs": {
+        "count": 9,
+        "sha256": "c1582ac61b7c557253ff1380bf4886ad00a69aea4cd9ac36a2b431a8754f7254"
+      },
+      "crates/storage/src/verified_asset_cache.rs": {
+        "count": 14,
+        "sha256": "46680dc938cb077e537e87fc003dbf3617b13843ed7a2fdad02ea57f7e39d2b5"
+      },
+      "plugins/lorepia-platform/src/credential_envelope.rs": {
+        "count": 8,
+        "sha256": "c97083a56eab30c5160253053666d1554f7e3fdce79e9cf65d5551561125185f"
+      },
+      "plugins/lorepia-platform/src/desktop.rs": {
+        "count": 25,
+        "sha256": "68ff6d99e8c1335de22f96e6d2ff96495a2459b58880f05605141b9bffe25dd9"
+      },
+      "plugins/lorepia-platform/src/desktop/macos.rs": {
+        "count": 13,
+        "sha256": "8dd21a97d4c2c195bb0fcfafb30f4f594941cff7936e8a8ada4e9c151b19f8f8"
+      },
+      "plugins/lorepia-platform/src/desktop/windows.rs": {
+        "count": 28,
+        "sha256": "9fbaed998523e813b779c6a40fbe53dbe3c38a07fae8f6d7c468114a4162c1cc"
+      },
+      "plugins/lorepia-platform/src/desktop/windows_bound_record.rs": {
+        "count": 2,
+        "sha256": "1837659770267d3040fcdc81040ded6a814b180f5a52cd1ee3076bc62624d86a"
+      },
+      "plugins/lorepia-platform/src/error.rs": {
+        "count": 5,
+        "sha256": "75c39df5c606a6c188d1353a717deb35dc2efdc72fe5f8d9c2cd6b581860ffca"
+      },
+      "plugins/lorepia-platform/src/lib.rs": {
+        "count": 30,
+        "sha256": "8603a5cff1675e5bfc9948b8ee7de4c99b05099978b6e6bb64109fc1faa18b9d"
+      },
+      "plugins/lorepia-platform/src/mobile.rs": {
+        "count": 19,
+        "sha256": "6fb8af69af8457b22f5524a7e0e35ce6bf157889c4773db5a467d149d25f7047"
+      },
+      "plugins/lorepia-platform/src/model.rs": {
+        "count": 55,
+        "sha256": "6204d1147f94863987b0334e948ffbbe3b9e7f1cff9e984785f1e9fc88a7ccbb"
+      },
+      "plugins/lorepia-platform/src/staging.rs": {
+        "count": 8,
+        "sha256": "60b83fab42c4fd3b74bb885a970bb22c909fef9be4511d8749ffec2872461c78"
+      },
+      "plugins/lorepia-platform/src/validation.rs": {
+        "count": 21,
+        "sha256": "1c97a2392b3df2d11a1c4c748d56720f09279db7c695ab97228fb26288a5089b"
+      }
+    },
+    "core_api_version": 10,
+    "policy": "conservative source-level declaration fingerprint, not semantic rustdoc API",
+    "sha256": "eb7ee6d482fa89205200f744b1b70eec97865d4a19dac577cc0a1659b5ac8019",
+    "shell_api_version": 3
+  },
+  "ratchets": {
+    "config/core-storage-public-api-baseline.json": "5f2cddaacf3620714ca15e5025449febbea0615758646d94b36a5379b560fde6",
+    "config/source-size-baseline.json": "d4bf962221ec5f05604f2da3eff933b7c3daf4ec90537bd138325107d2cf84c9"
+  },
+  "summary": {
+    "production_bytes": 15047234,
+    "production_declarations": 14020,
+    "production_files": 270,
+    "production_lines": 392681,
+    "public_symbols": 5466
+  }
+}
