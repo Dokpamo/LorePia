@@ -7,6 +7,15 @@ use std::{
     time::Duration,
 };
 
+use crate::{
+    CoreConfig, DiscoveryRecoveryOwner, Revisioned,
+    catalog::{CatalogRouteProjection, PendingProviderCatalogImportPlan},
+    core_version,
+    orchestration::{
+        GenerationPlanInput, GenerationPromptAuthorityCapture, deterministic_prompt_user_message_id,
+    },
+    revision::project_revision,
+};
 use chrono::{DateTime, Utc};
 #[cfg(test)]
 use lorepia_chat::MAX_GENERATED_OUTPUT_CHARS;
@@ -21,18 +30,18 @@ use lorepia_domain::{
     ConnectionConfig, ConnectionStatus, Conversation, ConversationBranch, ConversationBranchId,
     ConversationId, ConversationMode, ConversationState, CoreError, CoreErrorCode, CoreResult,
     CredentialRedirectPolicy, CredentialRef, CredentialScope, EndpointPath, GenerationId,
-    GenerationPreset, GenerationPresetId, GenerationProviderProvenance, GenerationReasoningEffort,
-    GenerationRecord, GenerationRequest, GenerationStatus, GenerationTarget, GenerationUsage,
-    HealthReport, ImportInspection, ImportLimits, InspectionId, Message, MessageActionGeneration,
-    MessageId, MessageRole, MessageStatus, ModelMetadataSource, ModelRoute, ModelRouteConfig,
-    ModelRouteId, ObservationId, ObservationSource, OpaqueReasoningState, ProviderConnection,
-    ProviderConnectionDraft, ProviderConnectionId, ProviderLocalNetworkApproval,
-    ProviderNetworkMode, ProviderProfile, ProviderTemplate, Sha256Digest, SupportStatus,
-    TaskProfile, TemplateSource, TransformPhase, TransformSet, VariableMap,
+    GenerationPreset, GenerationPresetId, GenerationReasoningEffort, GenerationRecord,
+    GenerationStatus, GenerationTarget, HealthReport, ImportInspection, ImportLimits, InspectionId,
+    Message, MessageActionGeneration, MessageId, MessageStatus, ModelMetadataSource, ModelRoute,
+    ModelRouteConfig, ModelRouteId, ObservationId, ObservationSource, OpaqueReasoningState,
+    ProviderConnection, ProviderConnectionDraft, ProviderConnectionId,
+    ProviderLocalNetworkApproval, ProviderNetworkMode, ProviderProfile, ProviderTemplate,
+    Sha256Digest, SupportStatus, TemplateSource, TransformPhase, VariableMap,
 };
 #[cfg(test)]
 use lorepia_domain::{
-    ModelAvailability, OpaqueReasoningContext, ParameterId, ParameterType, UiParameterLevel,
+    GenerationProviderProvenance, GenerationRequest, MessageRole, ModelAvailability,
+    OpaqueReasoningContext, ParameterId, ParameterType, TransformSet, UiParameterLevel,
 };
 #[cfg(test)]
 use lorepia_providers::OPAQUE_REASONING_STATE_UNSUPPORTED_ERROR;
@@ -48,14 +57,15 @@ use lorepia_providers::{
     AdapterRegistry, BuiltInTemplateId, ListedModel, ListedModelCapabilities,
     ListedModelCapability, ListedModelReasoningCapability, ModelListResult, ModelRecordSource,
     OpenAiCompatibleProvider, OpenRouterReasoningEffortSupport, OpenRouterSupportedParameter,
-    OpenRouterSupportedParameterSupport, Provider, ProviderEvent, validate_connection_fields,
-    validate_manifest,
+    OpenRouterSupportedParameterSupport, Provider, validate_connection_fields, validate_manifest,
 };
+#[cfg(test)]
+use lorepia_storage::StoredRevision;
 use lorepia_storage::{
     DatabaseStats, GenerationProviderTargetAuthority, MessageDisplayProjectionWrite,
     MessageGenerationAction, MessageGenerationActionContext, MessageTransformApplicationWrite,
     MessageTransformDisposition, MessageTransformPipelineFailureWrite, MessageTransformStage,
-    ProviderCredentialAccessAuthority, StagedAssetImport, Storage, StoredRevision,
+    ProviderCredentialAccessAuthority, StagedAssetImport, Storage,
     deterministic_proposed_branch_id,
 };
 use serde::Serialize;
@@ -66,17 +76,6 @@ use tokio::{
     time::{self, MissedTickBehavior},
 };
 use uuid::Uuid;
-use zeroize::Zeroize;
-
-use crate::{
-    CoreConfig, DiscoveryRecoveryOwner, Revisioned,
-    catalog::{CatalogRouteProjection, PendingProviderCatalogImportPlan},
-    core_version,
-    orchestration::{
-        GenerationPlanInput, GenerationPromptAuthorityCapture, deterministic_prompt_user_message_id,
-    },
-    revision::project_revision,
-};
 
 mod generation;
 mod generation_events;
@@ -86,8 +85,24 @@ mod portable_runtime_state;
 mod runtime_control;
 mod runtime_generation;
 
+use generation::{
+    ActiveGenerationGuard, GenerationActionSemanticSnapshot, GenerationActionTargetIdentity,
+    GenerationCompletionContext, GenerationCredential, GenerationEventForwardingContext,
+    GenerationTask, GenerationTransformContext, MAX_ACTIVE_GENERATIONS_PER_CONVERSATION,
+    MAX_ACTIVE_GENERATIONS_PER_PROCESS, MAX_ACTIVE_GENERATIONS_PER_PROVIDER,
+    MessageGenerationActionIdentityInput, PreparedSameBranchGenerationAttempt,
+    SameBranchGenerationAttempt, TerminalPersistenceContext, ValidatedGenerationTarget,
+    dispatch_auxiliary_task_provider, effective_capability_at, effective_route_parameter_specs,
+    generation_action_name, generation_attempt_prompt_authority,
+    generation_target_provider_authority, new_generation_operation_id,
+    preflight_generation_target_connection_credential, provider_profile_target_authority,
+    require_generation_provider_target_authority, reviewed_prompt_session_seed,
+    snapshot_provider_request, validate_capability_wire_metadata,
+    validate_generation_preset_candidate_plan, validate_generation_target_plan,
+    validate_generation_target_plan_with_reasoning_effort,
+};
 pub(crate) use generation::{
-    BoundedTaskPrompt, PromptRouteWireContract, ResolvedGenerationTarget,
+    BoundedTaskPrompt, PromptRouteWireContract, TaskDispatchClassification, TaskExecutionOutcome,
     configure_generation_protocol_request, generation_attempt_module_authority,
     prompt_route_supports_temperature, prompt_route_wire_contract,
     prompt_route_wire_contract_with_reasoning_effort, resolve_generation_target,
@@ -97,36 +112,19 @@ pub use generation::{
     GenerationOperationContext, MAX_GENERATION_OPERATION_NONCE_BYTES,
     MAX_GENERATION_OPERATION_NONCE_CHARS,
 };
-use generation::{
-    GenerationActionSemanticSnapshot, GenerationActionTargetIdentity, GenerationCredential,
-    GenerationLaunchPermit, GenerationProviderTemporalContext,
-    MAX_ACTIVE_GENERATIONS_PER_CONVERSATION, MAX_ACTIVE_GENERATIONS_PER_PROCESS,
-    MAX_ACTIVE_GENERATIONS_PER_PROVIDER, MessageGenerationActionIdentityInput,
-    PreparedSameBranchGenerationAttempt, SameBranchGenerationAttempt, ValidatedGenerationTarget,
-    effective_capability_at, effective_route_parameter_specs, generation_action_name,
-    generation_attempt_prompt_authority, generation_target_provider_authority,
-    new_generation_operation_id, preflight_generation_target_connection_credential,
-    provider_profile_target_authority, require_generation_provider_target_authority,
-    reviewed_prompt_session_seed, snapshot_provider_request, validate_capability_wire_metadata,
-    validate_connection_credential_binding, validate_generation_preset_candidate_plan,
-    validate_generation_target_plan, validate_generation_target_plan_with_reasoning_effort,
-};
 #[cfg(test)]
 use generation::{
-    SameBranchGenerationAttemptIdentity, compiled_openrouter_parameter_spec,
-    direct_model_provider_target_authority, direct_model_temporal_context,
-    load_opaque_reasoning_context, openrouter_safe_signed_parameter_specs,
-    resolve_generation_target_with_connection_credential,
-    same_branch_generation_semantic_fingerprint,
+    GenerationLaunchPermit, SameBranchGenerationAttemptIdentity,
+    compiled_openrouter_parameter_spec, direct_model_provider_target_authority,
+    direct_model_temporal_context, load_opaque_reasoning_context,
+    openrouter_safe_signed_parameter_specs, resolve_generation_target_with_connection_credential,
+    same_branch_generation_semantic_fingerprint, unknown_task_outcome,
+    validate_connection_credential_binding,
 };
 pub use generation_events::GenerationEventSubscription;
 #[cfg(test)]
-use generation_events::GenerationLivePrefix;
-use generation_events::{
-    GenerationDeliveryPhase, GenerationProviderAdmissionKey, GenerationRegistry,
-    generation_subscription_unavailable,
-};
-use generation_workflow::execute_generation_task;
+use generation_events::{GenerationDeliveryPhase, GenerationLivePrefix};
+use generation_events::{GenerationProviderAdmissionKey, GenerationRegistry};
 #[cfg(test)]
 use generation_workflow::{
     apply_generation_output_transforms, apply_generation_result, partial_checkpoint_due,
@@ -212,20 +210,6 @@ struct PendingImport {
     staged_assets: Vec<StagedAsset>,
 }
 
-struct GenerationTask {
-    storage: Arc<Storage>,
-    active_generations: Arc<GenerationRegistry>,
-    event_bus: broadcast::Sender<ChatEvent>,
-    branch_id: ConversationBranchId,
-    request: GenerationRequest,
-    assistant: Message,
-    provider: Arc<dyn Provider>,
-    credential: GenerationCredential,
-    cancel_receiver: watch::Receiver<bool>,
-    preserve_partial: bool,
-    transforms: GenerationTransformContext,
-}
-
 struct PreparedMessageGenerationAction {
     conversation_id: ConversationId,
     source_branch_id: ConversationBranchId,
@@ -251,25 +235,6 @@ struct MessageGenerationAttemptConfiguration<'a> {
     provider_target_authority: &'a GenerationProviderTargetAuthority,
     credential_authority: Option<&'a ProviderCredentialAccessAuthority>,
     require_exact_credential_authority: bool,
-}
-
-struct SameBranchGenerationDispatch<'a> {
-    conversation_id: &'a ConversationId,
-    branch_id: &'a ConversationBranchId,
-    expected_head: Option<&'a MessageId>,
-    mode: ConversationMode,
-    model: String,
-    generation_target: Option<&'a GenerationTarget>,
-    provider_family: Option<ApiFamily>,
-    preserve_opaque_reasoning_state: bool,
-    credential: GenerationCredential,
-    credential_authority: Option<ProviderCredentialAccessAuthority>,
-    require_exact_credential_authority: bool,
-    provider: Arc<dyn Provider>,
-    provider_target: GenerationActionTargetIdentity,
-    user_message: Message,
-    attempt: PreparedSameBranchGenerationAttempt,
-    prepared: crate::orchestration::PreparedGenerationPlan,
 }
 
 struct PreparedMessageActionAttempt {
@@ -335,52 +300,6 @@ enum MessageActionAttempt {
     Ready(Box<PreparedMessageActionAttempt>),
 }
 
-#[derive(Clone)]
-struct GenerationTransformContext {
-    sets: Vec<TransformSet>,
-    variables: VariableMap,
-    supported_capabilities: Vec<CapabilityKey>,
-    approved_import_source_ids: std::collections::BTreeSet<String>,
-    display_context: Option<lorepia_domain::PromptResolutionContext>,
-}
-
-impl From<crate::orchestration::PreparedGenerationPlan> for GenerationTransformContext {
-    fn from(prepared: crate::orchestration::PreparedGenerationPlan) -> Self {
-        Self {
-            sets: prepared.transform_sets,
-            variables: prepared.variables,
-            supported_capabilities: prepared.supported_capabilities,
-            approved_import_source_ids: prepared.approved_import_source_ids,
-            display_context: Some(prepared.display_context),
-        }
-    }
-}
-
-/// Dispatch certainty for one auxiliary provider attempt.
-///
-/// Runtime fallback is allowed only for `BeforeDispatch` and
-/// `KnownNoSideEffect`. A timeout, cancellation, or ambiguous transport error
-/// after the provider future starts is always `UnknownOutcome`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum TaskDispatchClassification {
-    BeforeDispatch,
-    KnownNoSideEffect,
-    UnknownOutcome,
-    ProviderRejected,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum TaskExecutionOutcome {
-    Completed {
-        canonical_text: String,
-        usage: GenerationUsage,
-    },
-    Failed {
-        classification: TaskDispatchClassification,
-        error: CoreError,
-    },
-}
-
 enum MigratedLegacyTargetClassification {
     Ordinary,
     Current { profile_id: String },
@@ -425,45 +344,6 @@ pub struct ProviderModelRefreshResult {
 pub struct ProviderTemplateView {
     pub template: ProviderTemplate,
     pub default_network_mode: ProviderNetworkMode,
-}
-
-struct TerminalPersistenceContext<'a> {
-    storage: &'a Storage,
-    generation_id: &'a GenerationId,
-}
-
-struct GenerationCompletionContext {
-    storage: Arc<Storage>,
-    active_generations: Arc<GenerationRegistry>,
-    event_bus: broadcast::Sender<ChatEvent>,
-    branch_id: ConversationBranchId,
-    conversation_id: ConversationId,
-    generation_id: GenerationId,
-    assistant_message_id: MessageId,
-    preserve_partial: bool,
-    transforms: GenerationTransformContext,
-}
-
-struct GenerationEventForwardingContext {
-    active_generations: Arc<GenerationRegistry>,
-    event_bus: broadcast::Sender<ChatEvent>,
-    storage: Arc<Storage>,
-    checkpoint: Message,
-    branch_id: ConversationBranchId,
-    assistant_message_id: MessageId,
-    preserve_partial: bool,
-    defer_text_events: bool,
-}
-
-struct ActiveGenerationGuard {
-    generation_id: GenerationId,
-    active_generations: Arc<GenerationRegistry>,
-}
-
-impl Drop for ActiveGenerationGuard {
-    fn drop(&mut self) {
-        self.active_generations.remove(&self.generation_id);
-    }
 }
 
 impl Drop for CoreInner {
@@ -1628,69 +1508,6 @@ impl Core {
         )
     }
 
-    pub fn cancel_generation(&self, generation_id: &GenerationId) -> CoreResult<()> {
-        self.inner.active_generations.cancel(generation_id)
-    }
-
-    /// Atomically validates a live generation route and subscribes at its
-    /// authoritative event watermark.
-    pub fn subscribe_generation_events(
-        &self,
-        generation_id: &GenerationId,
-        conversation_id: &ConversationId,
-        branch_id: &ConversationBranchId,
-    ) -> CoreResult<GenerationEventSubscription> {
-        let entry = self.inner.active_generations.entry(generation_id)?;
-        let delivery = entry
-            .delivery
-            .lock()
-            .map_err(|_| CoreError::internal("generation delivery lock was poisoned"))?;
-        if delivery.phase == GenerationDeliveryPhase::Terminal
-            || entry.route.conversation != *conversation_id
-            || entry.route.branch != *branch_id
-        {
-            return Err(generation_subscription_unavailable());
-        }
-
-        let generation = self.inner.storage.get_generation(generation_id)?;
-        if generation.status != GenerationStatus::Running
-            || generation.conversation_id != *conversation_id
-            || generation.branch_id != *branch_id
-            || generation.assistant_message_id.as_ref() != Some(&entry.route.assistant_message)
-        {
-            return Err(generation_subscription_unavailable());
-        }
-
-        #[cfg(test)]
-        if let Some(pause) = entry
-            .subscription_pause
-            .lock()
-            .map_err(|_| CoreError::internal("generation subscription test lock was poisoned"))?
-            .take()
-        {
-            pause
-                .entered
-                .send(())
-                .map_err(|_| CoreError::internal("generation subscription test did not start"))?;
-            pause
-                .release
-                .recv_timeout(Duration::from_secs(2))
-                .map_err(|_| CoreError::internal("generation subscription test timed out"))?;
-        }
-
-        let receiver = self.inner.event_bus.subscribe();
-        let live_prefix = delivery.live_prefix.as_ref().ok_or_else(|| {
-            CoreError::internal("live generation catch-up prefix exceeded its bounded contract")
-        })?;
-        Ok(GenerationEventSubscription {
-            receiver,
-            assistant_message_id: entry.route.assistant_message.clone(),
-            sequence_watermark: delivery.sequence_watermark,
-            display_prefix: live_prefix.display.clone(),
-            reasoning_prefix: live_prefix.reasoning.clone(),
-        })
-    }
-
     pub fn subscribe_events(&self) -> broadcast::Receiver<ChatEvent> {
         self.inner.event_bus.subscribe()
     }
@@ -2518,451 +2335,6 @@ impl Core {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn send_message_to_branch_with_provider_options_and_contract(
-        &self,
-        conversation_id: &ConversationId,
-        branch_id: &ConversationBranchId,
-        expected_head: Option<&MessageId>,
-        mode: ConversationMode,
-        text: &str,
-        operation_context: GenerationOperationContext<'_>,
-        model: String,
-        generation_target: Option<&GenerationTarget>,
-        provider_family: Option<ApiFamily>,
-        preserve_opaque_reasoning_state: bool,
-        temperature: Option<f64>,
-        max_output_tokens: Option<u32>,
-        variable_overrides: &VariableMap,
-        credential: impl Into<GenerationCredential>,
-        credential_authority: Option<ProviderCredentialAccessAuthority>,
-        require_exact_credential_authority: bool,
-        provider: Arc<dyn Provider>,
-        prompt_wire_contract: Option<&PromptRouteWireContract>,
-        provider_temporal_context: GenerationProviderTemporalContext,
-    ) -> CoreResult<GenerationId> {
-        let credential = credential.into();
-        let prompt_provider_family = provider_family.or_else(|| {
-            generation_target
-                .is_none()
-                .then_some(ApiFamily::OpenAiChatCompletions)
-        });
-        let text = validate_user_message_text(text)?;
-        let conversation = self.inner.storage.get_conversation(conversation_id)?;
-        let character = self
-            .inner
-            .storage
-            .get_character(&conversation.character_id)?;
-        let branch = self.inner.storage.get_conversation_branch(branch_id)?;
-        if branch.conversation_id != *conversation_id {
-            return Err(CoreError::new(
-                CoreErrorCode::NotFound,
-                "conversation branch was not found in the conversation",
-                false,
-            ));
-        }
-        let mut user_message =
-            Message::user_after(conversation_id.clone(), expected_head.cloned(), text);
-        user_message.id =
-            deterministic_prompt_user_message_id(conversation_id, branch_id, expected_head, text);
-        let attempt = match self.prepare_same_branch_generation_attempt(
-            &character,
-            conversation_id,
-            branch_id,
-            expected_head,
-            mode,
-            text,
-            operation_context,
-            generation_target,
-            temperature,
-            max_output_tokens,
-            None,
-            variable_overrides,
-            prompt_wire_contract,
-            &provider_temporal_context.operation_target,
-            &provider_temporal_context.authority,
-            credential_authority.as_ref(),
-            require_exact_credential_authority,
-        )? {
-            SameBranchGenerationAttempt::Existing(generation_id) => return Ok(generation_id),
-            SameBranchGenerationAttempt::Ready(attempt) => *attempt,
-        };
-        let mode = generation_attempt_prompt_authority(&attempt.attempt)?.mode;
-        let mut history = self.inner.storage.list_recent_branch_messages_for_prompt(
-            branch_id,
-            MAX_PROMPT_MESSAGES.saturating_sub(2),
-            MAX_HISTORY_MESSAGE_BYTES,
-            MAX_HISTORY_MESSAGE_CHARS,
-        )?;
-        history.push(user_message.clone());
-        let prepared = self.prepare_generation_plan(GenerationPlanInput {
-            character: &character,
-            conversation_id,
-            branch_id,
-            context_source_branch_id: &attempt.attempt.input.source_branch_id,
-            context_head_message_id: attempt.attempt.input.context_head_message_id.as_ref(),
-            interaction_state_branch_id: None,
-            interaction_state_override: Some(&attempt.interaction_state),
-            applied_module_plan_override: attempt.applied_module_plan.as_ref(),
-            memory_lineage_branch_id: None,
-            mode,
-            history: &history,
-            model: &model,
-            generation_target,
-            provider_family: prompt_provider_family,
-            temperature,
-            max_output_tokens,
-            prompt_preset_id: None,
-            prompt_selection_authority: attempt.attempt.input.prompt_selection_authority.as_ref(),
-            generation_attempt_id: Some(&attempt.attempt.generation_id),
-            variable_overrides,
-            expected_plan_hash: None,
-            prompt_wire_contract,
-            resolution_time: attempt.attempt.created_at,
-            session_seed: Some(reviewed_prompt_session_seed(
-                &attempt.attempt.input.base_request_fingerprint_sha256,
-            )),
-        })?;
-        self.finish_same_branch_generation_dispatch(SameBranchGenerationDispatch {
-            conversation_id,
-            branch_id,
-            expected_head,
-            mode,
-            model,
-            generation_target,
-            provider_family,
-            preserve_opaque_reasoning_state,
-            credential,
-            credential_authority,
-            require_exact_credential_authority,
-            provider,
-            provider_target: provider_temporal_context.operation_target,
-            user_message,
-            attempt,
-            prepared,
-        })
-    }
-
-    fn finish_same_branch_generation_dispatch(
-        &self,
-        dispatch: SameBranchGenerationDispatch<'_>,
-    ) -> CoreResult<GenerationId> {
-        let SameBranchGenerationDispatch {
-            conversation_id,
-            branch_id,
-            expected_head,
-            mode,
-            model,
-            generation_target,
-            provider_family,
-            preserve_opaque_reasoning_state,
-            credential,
-            credential_authority,
-            require_exact_credential_authority,
-            provider,
-            provider_target,
-            user_message,
-            attempt,
-            mut prepared,
-        } = dispatch;
-        let generation_id = attempt.attempt.generation_id.clone();
-        let generation_started_at = attempt.attempt.created_at;
-        prepared.materialized.request.generation_id = generation_id.clone();
-        let mut request = prepared.materialized.request.clone();
-        let preserve_opaque_reasoning_state =
-            preserve_opaque_reasoning_state && credential.as_deref().is_none_or(str::is_empty);
-        configure_generation_protocol_request(
-            &self.inner.storage,
-            &mut request,
-            generation_target,
-            provider_family,
-            preserve_opaque_reasoning_state,
-        )?;
-        let provider_request_value =
-            snapshot_provider_request(provider.as_ref(), &request, generation_target)?;
-        let generation_id = request.generation_id.clone();
-        let mut assistant_message = Message::pending_assistant(
-            conversation_id.clone(),
-            user_message.id.clone(),
-            generation_id.clone(),
-        );
-        assistant_message.created_at = generation_started_at;
-        let generation = GenerationRecord {
-            id: generation_id.clone(),
-            conversation_id: conversation_id.clone(),
-            branch_id: branch_id.clone(),
-            user_message_id: user_message.id.clone(),
-            assistant_message_id: Some(assistant_message.id.clone()),
-            mode,
-            model,
-            model_route_id: generation_target.map(|target| target.model_route_id.clone()),
-            generation_preset_id: generation_target
-                .map(|target| target.generation_preset_id.clone()),
-            provider_family,
-            status: GenerationStatus::Running,
-            input_tokens: None,
-            cached_read_tokens: None,
-            cached_write_tokens: None,
-            output_tokens: None,
-            reasoning_tokens: None,
-            tool_tokens: None,
-            provider_raw_summary: None,
-            opaque_reasoning_state: Vec::new(),
-            error_code: None,
-            started_at: assistant_message.created_at,
-            finished_at: None,
-        };
-        let prompt_plan = prepared.generation_prompt_plan_record(
-            generation_id.clone(),
-            conversation_id.clone(),
-            branch_id.clone(),
-            expected_head.cloned(),
-            user_message.id.clone(),
-            generation_target,
-            provider_request_value,
-            assistant_message.created_at,
-        )?;
-        let launch = self.prepare_generation_launch_for_target(&generation, &provider_target)?;
-        self.seal_same_branch_generation_attempt(attempt.attempt, &prepared, &prompt_plan)?;
-        self.inner
-            .storage
-            .append_generation_attempt_with_prompt_plan(
-                branch_id,
-                expected_head,
-                &user_message,
-                &assistant_message,
-                &generation,
-                &prompt_plan,
-                &prepared.knowledge_logs,
-                credential_authority.as_ref(),
-                require_exact_credential_authority,
-            )?;
-        let transforms = GenerationTransformContext::from(prepared);
-        self.start_generation_task(
-            launch,
-            branch_id.clone(),
-            request,
-            assistant_message,
-            provider,
-            credential,
-            transforms,
-        )
-    }
-
-    #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
-    async fn send_message_to_branch_with_provider_options_and_contract_async(
-        &self,
-        conversation_id: &ConversationId,
-        branch_id: &ConversationBranchId,
-        expected_head: Option<&MessageId>,
-        mode: ConversationMode,
-        text: &str,
-        operation_context: GenerationOperationContext<'_>,
-        model: String,
-        generation_target: Option<&GenerationTarget>,
-        provider_family: Option<ApiFamily>,
-        preserve_opaque_reasoning_state: bool,
-        temperature: Option<f64>,
-        max_output_tokens: Option<u32>,
-        variable_overrides: &VariableMap,
-        credential: impl Into<GenerationCredential> + Send,
-        credential_authority: Option<ProviderCredentialAccessAuthority>,
-        require_exact_credential_authority: bool,
-        admission_lease: Option<GenerationCredentialAdmissionLease>,
-        provider: Arc<dyn Provider>,
-        prompt_wire_contract: Option<&PromptRouteWireContract>,
-        provider_temporal_context: GenerationProviderTemporalContext,
-        task_credential_broker: &dyn crate::TaskCredentialBroker,
-        cancelled: watch::Receiver<bool>,
-    ) -> CoreResult<GenerationId> {
-        let credential = credential.into();
-        let prompt_provider_family = provider_family.or_else(|| {
-            generation_target
-                .is_none()
-                .then_some(ApiFamily::OpenAiChatCompletions)
-        });
-        let text = validate_user_message_text(text)?;
-        let conversation = self.inner.storage.get_conversation(conversation_id)?;
-        let character = self
-            .inner
-            .storage
-            .get_character(&conversation.character_id)?;
-        let branch = self.inner.storage.get_conversation_branch(branch_id)?;
-        if branch.conversation_id != *conversation_id {
-            return Err(CoreError::new(
-                CoreErrorCode::NotFound,
-                "conversation branch was not found in the conversation",
-                false,
-            ));
-        }
-        let mut user_message =
-            Message::user_after(conversation_id.clone(), expected_head.cloned(), text);
-        user_message.id =
-            deterministic_prompt_user_message_id(conversation_id, branch_id, expected_head, text);
-        let attempt = match self.prepare_same_branch_generation_attempt(
-            &character,
-            conversation_id,
-            branch_id,
-            expected_head,
-            mode,
-            text,
-            operation_context,
-            generation_target,
-            temperature,
-            max_output_tokens,
-            None,
-            variable_overrides,
-            prompt_wire_contract,
-            &provider_temporal_context.operation_target,
-            &provider_temporal_context.authority,
-            credential_authority.as_ref(),
-            require_exact_credential_authority,
-        )? {
-            SameBranchGenerationAttempt::Existing(generation_id) => return Ok(generation_id),
-            SameBranchGenerationAttempt::Ready(attempt) => *attempt,
-        };
-        if let Some(admission_lease) = admission_lease {
-            admission_lease.release();
-        }
-        let mode = generation_attempt_prompt_authority(&attempt.attempt)?.mode;
-        let generation_id = attempt.attempt.generation_id.clone();
-        let generation_started_at = attempt.attempt.created_at;
-        let mut history = self.inner.storage.list_recent_branch_messages_for_prompt(
-            branch_id,
-            MAX_PROMPT_MESSAGES.saturating_sub(2),
-            MAX_HISTORY_MESSAGE_BYTES,
-            MAX_HISTORY_MESSAGE_CHARS,
-        )?;
-        history.push(user_message.clone());
-        let mut prepared = self
-            .prepare_generation_plan_async(
-                GenerationPlanInput {
-                    character: &character,
-                    conversation_id,
-                    branch_id,
-                    context_source_branch_id: &attempt.attempt.input.source_branch_id,
-                    context_head_message_id: attempt.attempt.input.context_head_message_id.as_ref(),
-                    interaction_state_branch_id: None,
-                    interaction_state_override: Some(&attempt.interaction_state),
-                    applied_module_plan_override: attempt.applied_module_plan.as_ref(),
-                    memory_lineage_branch_id: None,
-                    mode,
-                    history: &history,
-                    model: &model,
-                    generation_target,
-                    provider_family: prompt_provider_family,
-                    temperature,
-                    max_output_tokens,
-                    prompt_preset_id: None,
-                    prompt_selection_authority: attempt
-                        .attempt
-                        .input
-                        .prompt_selection_authority
-                        .as_ref(),
-                    generation_attempt_id: Some(&attempt.attempt.generation_id),
-                    variable_overrides,
-                    expected_plan_hash: None,
-                    prompt_wire_contract,
-                    resolution_time: attempt.attempt.created_at,
-                    session_seed: Some(reviewed_prompt_session_seed(
-                        &attempt.attempt.input.base_request_fingerprint_sha256,
-                    )),
-                },
-                task_credential_broker,
-                cancelled,
-            )
-            .await?;
-        prepared.materialized.request.generation_id = generation_id.clone();
-        let mut request = prepared.materialized.request.clone();
-        let preserve_opaque_reasoning_state =
-            preserve_opaque_reasoning_state && credential.as_deref().is_none_or(str::is_empty);
-        configure_generation_protocol_request(
-            &self.inner.storage,
-            &mut request,
-            generation_target,
-            provider_family,
-            preserve_opaque_reasoning_state,
-        )?;
-        let provider_request_value =
-            snapshot_provider_request(provider.as_ref(), &request, generation_target)?;
-        let generation_id = request.generation_id.clone();
-        let mut assistant_message = Message::pending_assistant(
-            conversation_id.clone(),
-            user_message.id.clone(),
-            generation_id.clone(),
-        );
-        assistant_message.created_at = generation_started_at;
-        let generation = GenerationRecord {
-            id: generation_id.clone(),
-            conversation_id: conversation_id.clone(),
-            branch_id: branch_id.clone(),
-            user_message_id: user_message.id.clone(),
-            assistant_message_id: Some(assistant_message.id.clone()),
-            mode,
-            model,
-            model_route_id: generation_target.map(|target| target.model_route_id.clone()),
-            generation_preset_id: generation_target
-                .map(|target| target.generation_preset_id.clone()),
-            provider_family,
-            status: GenerationStatus::Running,
-            input_tokens: None,
-            cached_read_tokens: None,
-            cached_write_tokens: None,
-            output_tokens: None,
-            reasoning_tokens: None,
-            tool_tokens: None,
-            provider_raw_summary: None,
-            opaque_reasoning_state: Vec::new(),
-            error_code: None,
-            started_at: assistant_message.created_at,
-            finished_at: None,
-        };
-        let prompt_plan = prepared.generation_prompt_plan_record(
-            generation_id.clone(),
-            conversation_id.clone(),
-            branch_id.clone(),
-            expected_head.cloned(),
-            user_message.id.clone(),
-            generation_target,
-            provider_request_value,
-            assistant_message.created_at,
-        )?;
-        let launch = self.prepare_generation_launch_for_target(
-            &generation,
-            &provider_temporal_context.operation_target,
-        )?;
-        self.seal_same_branch_generation_attempt(attempt.attempt, &prepared, &prompt_plan)?;
-        self.inner
-            .storage
-            .append_generation_attempt_with_prompt_plan(
-                branch_id,
-                expected_head,
-                &user_message,
-                &assistant_message,
-                &generation,
-                &prompt_plan,
-                &prepared.knowledge_logs,
-                credential_authority.as_ref(),
-                require_exact_credential_authority,
-            )?;
-        let transforms = GenerationTransformContext {
-            sets: prepared.transform_sets,
-            variables: prepared.variables,
-            supported_capabilities: prepared.supported_capabilities,
-            approved_import_source_ids: prepared.approved_import_source_ids,
-            display_context: Some(prepared.display_context),
-        };
-        self.start_generation_task(
-            launch,
-            branch_id.clone(),
-            request,
-            assistant_message,
-            provider,
-            credential,
-            transforms,
-        )
-    }
-
     #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     fn edit_user_message_with_provider(
@@ -3475,364 +2847,6 @@ impl Core {
             branch,
             generation_id,
         })
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn start_generation_task(
-        &self,
-        launch: GenerationLaunchPermit,
-        branch_id: ConversationBranchId,
-        request: GenerationRequest,
-        assistant_message: Message,
-        provider: Arc<dyn Provider>,
-        credential: GenerationCredential,
-        transforms: GenerationTransformContext,
-    ) -> CoreResult<GenerationId> {
-        let generation_id = request.generation_id.clone();
-        let task = launch.into_task(
-            Arc::clone(&self.inner.storage),
-            self.inner.event_bus.clone(),
-            branch_id,
-            request,
-            assistant_message,
-            provider,
-            credential,
-            transforms,
-        )?;
-        self.inner.runtime.spawn(execute_generation_task(task));
-        Ok(generation_id)
-    }
-
-    /// Executes one exact auxiliary-task target without exposing its prompt,
-    /// request body, credential, or provider events across the Rust boundary.
-    ///
-    /// The caller owns fallback policy. In particular, it must never retry or
-    /// select a fallback after `UnknownOutcome` or `ProviderRejected`.
-    pub(crate) async fn execute_task_profile_target(
-        &self,
-        task_profile: &StoredRevision<TaskProfile>,
-        target: &GenerationTarget,
-        resolved: ResolvedGenerationTarget,
-        prompt: BoundedTaskPrompt,
-        credential: ConnectionBoundCredential,
-        cancelled: watch::Receiver<bool>,
-    ) -> TaskExecutionOutcome {
-        let before_dispatch = |error| TaskExecutionOutcome::Failed {
-            classification: TaskDispatchClassification::BeforeDispatch,
-            error,
-        };
-        if let Err(error) =
-            self.validate_task_profile_dispatch(task_profile, target, &resolved, &credential)
-        {
-            return before_dispatch(error);
-        }
-        if *cancelled.borrow() {
-            return TaskExecutionOutcome::Failed {
-                classification: TaskDispatchClassification::KnownNoSideEffect,
-                error: CoreError::new(
-                    CoreErrorCode::Cancelled,
-                    "auxiliary task was cancelled before provider dispatch",
-                    true,
-                ),
-            };
-        }
-
-        let request = auxiliary_task_generation_request(target, &resolved, prompt);
-        if let Err(error) = resolved.provider.snapshot_request(&request) {
-            return before_dispatch(error);
-        }
-        dispatch_auxiliary_task_provider(
-            Arc::clone(&resolved.provider),
-            request,
-            credential,
-            task_profile.value.timeout_ms,
-            cancelled,
-        )
-        .await
-    }
-
-    fn validate_task_profile_dispatch(
-        &self,
-        task_profile: &StoredRevision<TaskProfile>,
-        target: &GenerationTarget,
-        resolved: &ResolvedGenerationTarget,
-        credential: &ConnectionBoundCredential,
-    ) -> CoreResult<()> {
-        let current_profile = self.storage().get_task_profile(&task_profile.value.id)?;
-        if current_profile.revision != task_profile.revision
-            || current_profile.revision_id != task_profile.revision_id
-            || current_profile.value != task_profile.value
-            || current_profile.deleted_at.is_some()
-            || task_profile.revision_id.is_none()
-        {
-            return Err(CoreError::invalid(
-                "auxiliary task profile changed before provider dispatch",
-            ));
-        }
-        let target_plan = self.resolve_task_generation_targets(&task_profile.value.id)?;
-        if !target_plan
-            .targets
-            .iter()
-            .any(|candidate| candidate == target)
-        {
-            return Err(CoreError::invalid(
-                "auxiliary task target is not part of the immutable task profile",
-            ));
-        }
-        let current_target = validate_generation_target_plan(self, target)?;
-        if current_target.connection.id != resolved.connection_id
-            || current_target.route.model_id != resolved.model
-            || current_target.prompt_wire_contract != resolved.prompt_wire_contract
-        {
-            return Err(CoreError::invalid(
-                "auxiliary generation target changed before provider dispatch",
-            ));
-        }
-        validate_connection_credential_binding(&current_target.connection, credential)
-    }
-}
-
-fn auxiliary_task_generation_request(
-    target: &GenerationTarget,
-    resolved: &ResolvedGenerationTarget,
-    prompt: BoundedTaskPrompt,
-) -> GenerationRequest {
-    let conversation_id = ConversationId::new();
-    let created_at = Utc::now();
-    let system_message = Message {
-        id: MessageId::new(),
-        conversation_id: conversation_id.clone(),
-        parent_id: None,
-        role: MessageRole::System,
-        content: prompt.system_instruction,
-        status: MessageStatus::Complete,
-        generation_id: None,
-        created_at,
-    };
-    let user_message = Message {
-        id: MessageId::new(),
-        conversation_id: conversation_id.clone(),
-        parent_id: Some(system_message.id.clone()),
-        role: MessageRole::User,
-        content: prompt.input,
-        status: MessageStatus::Complete,
-        generation_id: None,
-        created_at,
-    };
-    GenerationRequest {
-        generation_id: GenerationId::new(),
-        conversation_id,
-        model: resolved.model.clone(),
-        messages: vec![system_message, user_message],
-        resolved_prompt_plan: None,
-        provider_execution_plan_hash: None,
-        temperature: None,
-        max_output_tokens: resolved.prompt_wire_contract.configured_max_output_tokens,
-        provider_provenance: Some(GenerationProviderProvenance {
-            api_family: resolved.api_family,
-            model_route_id: target.model_route_id.clone(),
-            generation_preset_id: target.generation_preset_id.clone(),
-        }),
-        preserve_opaque_reasoning_state: false,
-        opaque_reasoning_context: Vec::new(),
-    }
-}
-
-async fn dispatch_auxiliary_task_provider(
-    provider: Arc<dyn Provider>,
-    request: GenerationRequest,
-    credential: ConnectionBoundCredential,
-    timeout_ms: u64,
-    mut cancelled: watch::Receiver<bool>,
-) -> TaskExecutionOutcome {
-    if *cancelled.borrow() {
-        return TaskExecutionOutcome::Failed {
-            classification: TaskDispatchClassification::KnownNoSideEffect,
-            error: CoreError::new(
-                CoreErrorCode::Cancelled,
-                "auxiliary task was cancelled before provider dispatch",
-                true,
-            ),
-        };
-    }
-    let (event_sender, event_receiver) = mpsc::channel(128);
-    let (attempt_cancel_sender, attempt_cancel_receiver) = watch::channel(false);
-    let provider_attempt = async {
-        tokio::join!(
-            provider.generate(
-                request,
-                credential.value.as_deref(),
-                event_sender,
-                attempt_cancel_receiver,
-            ),
-            collect_task_provider_events(event_receiver),
-        )
-    };
-    tokio::pin!(provider_attempt);
-    let timeout = time::sleep(Duration::from_millis(timeout_ms));
-    tokio::pin!(timeout);
-    let cancellation = async {
-        loop {
-            if *cancelled.borrow() {
-                break;
-            }
-            if cancelled.changed().await.is_err() {
-                std::future::pending::<()>().await;
-            }
-        }
-    };
-    tokio::pin!(cancellation);
-
-    let (provider_result, output_result) = tokio::select! {
-        result = &mut provider_attempt => result,
-        () = &mut cancellation => {
-            let _ = attempt_cancel_sender.send(true);
-            // Built-in adapters tear down in-flight transport on this signal; briefly await
-            // local confirmation before dropping futures. The remote outcome remains unknown.
-            let _ = time::timeout(
-                AUXILIARY_PROVIDER_TEARDOWN_GRACE,
-                &mut provider_attempt,
-            )
-            .await;
-            return unknown_task_outcome("auxiliary task was cancelled after provider dispatch began");
-        }
-        () = &mut timeout => {
-            let _ = attempt_cancel_sender.send(true);
-            // Apply the same bounded local teardown handshake on timeout. A
-            // provider which ignores cancellation still has its local attempt
-            // force-dropped when this grace period expires.
-            let _ = time::timeout(
-                AUXILIARY_PROVIDER_TEARDOWN_GRACE,
-                &mut provider_attempt,
-            )
-            .await;
-            return unknown_task_outcome("auxiliary task timed out after provider dispatch began");
-        }
-    };
-    classify_task_provider_result(provider_result, output_result)
-}
-
-fn unknown_task_outcome(message: &'static str) -> TaskExecutionOutcome {
-    TaskExecutionOutcome::Failed {
-        classification: TaskDispatchClassification::UnknownOutcome,
-        error: CoreError::new(CoreErrorCode::Cancelled, message, false),
-    }
-}
-
-fn classify_task_provider_result(
-    provider_result: CoreResult<GenerationUsage>,
-    output_result: CoreResult<String>,
-) -> TaskExecutionOutcome {
-    match (provider_result, output_result) {
-        (Ok(usage), Ok(canonical_text)) if !canonical_text.trim().is_empty() => {
-            TaskExecutionOutcome::Completed {
-                canonical_text,
-                usage,
-            }
-        }
-        (Ok(_), Ok(mut canonical_text)) => {
-            canonical_text.zeroize();
-            TaskExecutionOutcome::Failed {
-                classification: TaskDispatchClassification::ProviderRejected,
-                error: CoreError::new(
-                    CoreErrorCode::UnsupportedContent,
-                    "auxiliary provider returned no canonical text",
-                    false,
-                ),
-            }
-        }
-        (Ok(_), Err(error)) => TaskExecutionOutcome::Failed {
-            classification: TaskDispatchClassification::ProviderRejected,
-            error,
-        },
-        (Err(error), output_result) => {
-            if let Ok(mut output) = output_result {
-                output.zeroize();
-            }
-            TaskExecutionOutcome::Failed {
-                classification: task_provider_error_classification(error.code),
-                error,
-            }
-        }
-    }
-}
-
-fn task_provider_error_classification(code: CoreErrorCode) -> TaskDispatchClassification {
-    match code {
-        CoreErrorCode::InvalidInput
-        | CoreErrorCode::UnsupportedContent
-        | CoreErrorCode::NotFound
-        | CoreErrorCode::PermissionDenied
-        | CoreErrorCode::ProviderAuthFailed
-        | CoreErrorCode::ProviderRateLimited => TaskDispatchClassification::ProviderRejected,
-        CoreErrorCode::UnsafeArchive
-        | CoreErrorCode::StorageUnavailable
-        | CoreErrorCode::StorageCorrupted
-        | CoreErrorCode::ProviderUnavailable
-        | CoreErrorCode::NetworkUnavailable
-        | CoreErrorCode::Cancelled
-        | CoreErrorCode::Internal => TaskDispatchClassification::UnknownOutcome,
-    }
-}
-
-async fn collect_task_provider_events(
-    mut receiver: mpsc::Receiver<ProviderEvent>,
-) -> CoreResult<String> {
-    let mut output = String::new();
-    let mut rejected = None;
-    while let Some(event) = receiver.recv().await {
-        match event {
-            ProviderEvent::TextDelta(mut delta) => {
-                if rejected.is_some() {
-                    delta.zeroize();
-                    continue;
-                }
-                let next_bytes = output.len().checked_add(delta.len());
-                let next_chars = output.chars().count().checked_add(delta.chars().count());
-                if next_bytes.is_none_or(|bytes| bytes > MAX_TASK_OUTPUT_BYTES)
-                    || next_chars.is_none_or(|chars| chars > MAX_TASK_OUTPUT_CHARS)
-                {
-                    output.zeroize();
-                    delta.zeroize();
-                    rejected = Some(CoreError::new(
-                        CoreErrorCode::UnsupportedContent,
-                        "auxiliary provider output exceeded its size limit",
-                        false,
-                    ));
-                } else {
-                    output.push_str(&delta);
-                    delta.zeroize();
-                }
-            }
-            ProviderEvent::ReasoningDelta(mut reasoning) => reasoning.zeroize(),
-            ProviderEvent::OpaqueReasoningState(mut state) => {
-                state.zeroize_sensitive_payloads();
-                rejected.get_or_insert_with(|| {
-                    CoreError::new(
-                        CoreErrorCode::UnsupportedContent,
-                        "auxiliary provider returned unsupported opaque reasoning state",
-                        false,
-                    )
-                });
-            }
-            ProviderEvent::ToolCallStarted { .. }
-            | ProviderEvent::ToolCallArgumentsDelta { .. }
-            | ProviderEvent::ToolCallCompleted { .. } => {
-                rejected.get_or_insert_with(|| {
-                    CoreError::new(
-                        CoreErrorCode::UnsupportedContent,
-                        "auxiliary provider returned an unsupported tool call",
-                        false,
-                    )
-                });
-            }
-        }
-    }
-    if let Some(error) = rejected {
-        output.zeroize();
-        Err(error)
-    } else {
-        Ok(output)
     }
 }
 

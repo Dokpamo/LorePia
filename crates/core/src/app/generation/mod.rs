@@ -1,13 +1,16 @@
 mod actions;
 mod admission;
 mod attempt;
+mod auxiliary;
 mod capabilities;
 mod credential;
+mod delivery;
 mod operation_identity;
 mod preset;
 mod prompt_preparation;
 mod protocol_request;
 mod send;
+mod send_dispatch;
 mod target_resolution;
 mod target_send;
 mod types;
@@ -21,6 +24,10 @@ pub(super) use attempt::{
     PreparedSameBranchGenerationAttempt, SameBranchGenerationAttempt,
     generation_attempt_prompt_authority,
 };
+pub(super) use auxiliary::dispatch_auxiliary_task_provider;
+#[cfg(test)]
+pub(super) use auxiliary::unknown_task_outcome;
+pub(crate) use auxiliary::{TaskDispatchClassification, TaskExecutionOutcome};
 pub use capabilities::EffectiveCapability;
 #[cfg(test)]
 pub(super) use capabilities::{
@@ -31,6 +38,10 @@ pub(super) use capabilities::{
 };
 pub use credential::{ConnectionBoundCredential, GenerationCredentialAdmissionLease};
 pub(super) use credential::{GenerationCredential, validate_connection_credential_binding};
+pub(super) use delivery::{
+    ActiveGenerationGuard, GenerationCompletionContext, GenerationEventForwardingContext,
+    GenerationTask, GenerationTransformContext, TerminalPersistenceContext,
+};
 pub(super) use operation_identity::{
     generation_action_name, new_generation_operation_id,
     same_branch_generation_semantic_fingerprint, validate_same_branch_attempt_semantic_identity,
