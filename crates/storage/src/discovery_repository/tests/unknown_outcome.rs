@@ -6,7 +6,8 @@ use tempfile::tempdir;
 
 use crate::Storage;
 
-use super::{draft_session, now, restore_test_trigger, sha256_hex, suspend_test_trigger};
+use super::sha256_hex;
+use super::support::{draft_session, now, restore_test_trigger, suspend_test_trigger};
 
 #[test]
 fn unknown_billable_outcome_rejects_approval_with_missing_references() {
