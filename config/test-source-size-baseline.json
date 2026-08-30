@@ -4,10 +4,6 @@
       "bytes": 105664,
       "lines": 2550
     },
-    "apps/lorepia/src/features/chat/ChatPane.test.ts": {
-      "bytes": 144006,
-      "lines": 3359
-    },
     "apps/lorepia/src/features/chat/portable-runtime.test.ts": {
       "bytes": 86890,
       "lines": 2155

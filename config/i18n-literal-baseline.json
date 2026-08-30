@@ -29,8 +29,8 @@
       "sha256": "d3062c626fb78223c595cca3a9b15493096a55870b39ca2183f9d307a2b92f62"
     },
     "src/features/chat/ChatPane.test.ts": {
-      "hangul_lines": 240,
-      "sha256": "297ac05afb6079209425fc37fdd154a463155785bf8f5617d2b0d077ff599485"
+      "hangul_lines": 70,
+      "sha256": "8d5a1cc81ee4d4ccb175ba8d3bd302509e1f7e99248b1e43f321345bb95985eb"
     },
     "src/features/chat/GenerationAttemptApprovals.test.ts": {
       "hangul_lines": 17,
@@ -71,6 +71,26 @@
     "src/features/chat/portable-runtime.test.ts": {
       "hangul_lines": 2,
       "sha256": "4ac38f0b2e872dcb473b7c743a1323ea9b8b8ccb18f0ad2aa35ce8c8fba30014"
+    },
+    "src/features/chat/tests/ChatPane.actions.test.ts": {
+      "hangul_lines": 71,
+      "sha256": "353ad3fd8c285e9bad3ecdc2ee623c6236337005fa8b262867102dd1eb725014"
+    },
+    "src/features/chat/tests/ChatPane.composer.test.ts": {
+      "hangul_lines": 60,
+      "sha256": "ecbf0856a11fa9c97c185a9494a437fa6a1f7f24aab5feb5f0b25c062f021b66"
+    },
+    "src/features/chat/tests/ChatPane.runtime.test.ts": {
+      "hangul_lines": 24,
+      "sha256": "49831e21dd46963da494fa41eec7e04ea0d34a102b9c1f06f1cb657914e930b4"
+    },
+    "src/features/chat/tests/ChatPane.scroll.test.ts": {
+      "hangul_lines": 13,
+      "sha256": "0888c2ecb045b1c170f16f8b195aba62511e3b3fa60a1988a7519937d49aeae9"
+    },
+    "src/features/chat/tests/chat-pane-state-builder.ts": {
+      "hangul_lines": 2,
+      "sha256": "9e5be5f67c32b0376aaa71735d20f892fe3a10b84ee1d1caf02bcec2337475b4"
     },
     "src/features/conversations/ConversationPane.svelte": {
       "hangul_lines": 4,
