@@ -1,11 +1,13 @@
 mod actions;
 mod admission;
+mod attempt;
 mod capabilities;
 mod credential;
 mod operation_identity;
 mod preset;
 mod prompt_preparation;
 mod protocol_request;
+mod send;
 mod target_resolution;
 mod target_send;
 mod types;
@@ -13,6 +15,11 @@ mod types;
 pub(super) use admission::{
     GenerationLaunchPermit, MAX_ACTIVE_GENERATIONS_PER_CONVERSATION,
     MAX_ACTIVE_GENERATIONS_PER_PROCESS, MAX_ACTIVE_GENERATIONS_PER_PROVIDER,
+};
+pub(crate) use attempt::generation_attempt_module_authority;
+pub(super) use attempt::{
+    PreparedSameBranchGenerationAttempt, SameBranchGenerationAttempt,
+    generation_attempt_prompt_authority,
 };
 pub use capabilities::EffectiveCapability;
 #[cfg(test)]
