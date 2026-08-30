@@ -1094,6 +1094,7 @@
     "STOR-INT-002": {
       "baseline_context_bytes": 670434,
       "commands": [
+        "cargo test -p lorepia-storage --lib database::tests",
         "cargo test -p lorepia-storage --test interaction_derived_event_storage",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
@@ -1105,15 +1106,18 @@
           "docs/adr/0002-storage-transaction-boundaries.md"
         ],
         "entrypoints": [
+          "crates/storage/src/database/generation_append.rs",
           "crates/storage/src/interaction_repository.rs"
         ],
         "implementation": [
-          "crates/storage/src/database/migration_special.rs",
+          "crates/storage/src/database/action.rs",
+          "crates/storage/src/database/finalize.rs",
           "crates/storage/src/message_display_projection.rs"
         ],
         "tests": [
-          "crates/storage/tests/interaction_derived_event_storage.rs",
-          "crates/core/tests/ordinary_interaction_sealed_replay.rs"
+          "crates/storage/src/database/tests/conversation_and_import.rs",
+          "crates/storage/src/database/tests/generation_completion.rs",
+          "crates/storage/tests/interaction_derived_event_storage.rs"
         ]
       }
     },
