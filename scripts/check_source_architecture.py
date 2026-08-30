@@ -15,6 +15,7 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = REPO_ROOT / "config" / "source-size-baseline.json"
+DEFAULT_TEST_CONFIG = REPO_ROOT / "config" / "test-source-size-baseline.json"
 DEFAULT_CORE_STORAGE_API_CONFIG = (
     REPO_ROOT / "config" / "core-storage-public-api-baseline.json"
 )
@@ -25,6 +26,7 @@ SOURCE_ROOTS = (
     "plugins",
 )
 SOURCE_SUFFIXES = {".css", ".kt", ".lua", ".rs", ".svelte", ".swift", ".ts"}
+TEST_SOURCE_SUFFIXES = {".kt", ".rs", ".svelte", ".swift", ".ts"}
 FORBIDDEN_ORCHESTRATION_DEPENDENCIES = {
     "diesel",
     "hyper",
@@ -127,7 +129,56 @@ def is_production_source(relative: Path) -> bool:
     return len(parts) >= 5 and parts[0] == "plugins" and parts[2:4] == ("ios", "Sources")
 
 
-def production_sources(root: Path) -> list[Path]:
+def is_test_source(relative: Path) -> bool:
+    """Return whether a path is a hand-authored frontend, Rust, or native test."""
+
+    if relative.suffix not in TEST_SOURCE_SUFFIXES:
+        return False
+    parts = relative.parts
+    if any(part in {".tauri", "node_modules", "target"} for part in parts):
+        return False
+    if parts[:3] == ("apps", "lorepia", "src"):
+        return (
+            (len(parts) >= 4 and parts[3] == "tests")
+            or FRONTEND_TEST_NAME_RE.search(relative.name) is not None
+        )
+    if parts[:3] == ("apps", "lorepia", "src-tauri"):
+        if len(parts) >= 4 and parts[3] == "gen":
+            return False
+        if relative.suffix != ".rs" or len(parts) < 5:
+            return False
+        if parts[3] == "tests":
+            return True
+        if parts[3] == "src":
+            tail = parts[4:]
+            return (
+                "tests" in tail
+                or relative.name == "tests.rs"
+                or relative.name.endswith("_tests.rs")
+            )
+        return False
+    if parts and parts[0] in {"crates", "plugins"} and len(parts) >= 4:
+        if relative.suffix == ".rs":
+            if parts[2] == "tests":
+                return True
+            if parts[2] == "src":
+                tail = parts[3:]
+                return (
+                    "tests" in tail
+                    or relative.name == "tests.rs"
+                    or relative.name.endswith("_tests.rs")
+                )
+        if relative.suffix == ".kt":
+            return any(
+                parts[index] == "src" and parts[index + 1] in {"test", "androidTest"}
+                for index in range(len(parts) - 1)
+            )
+        if relative.suffix == ".swift":
+            return "Tests" in parts
+    return False
+
+
+def production_sources(root: Path, *, exclude_test_sources: bool = False) -> list[Path]:
     candidates: set[Path] = set()
     for source_root in SOURCE_ROOTS:
         absolute = root / source_root
@@ -136,7 +187,23 @@ def production_sources(root: Path) -> list[Path]:
         for candidate in absolute.rglob("*"):
             if candidate.is_file():
                 relative = candidate.relative_to(root)
-                if is_production_source(relative):
+                if is_production_source(relative) and not (
+                    exclude_test_sources and is_test_source(relative)
+                ):
+                    candidates.add(relative)
+    return sorted(candidates)
+
+
+def test_sources(root: Path) -> list[Path]:
+    candidates: set[Path] = set()
+    for source_root in SOURCE_ROOTS:
+        absolute = root / source_root
+        if not absolute.is_dir():
+            continue
+        for candidate in absolute.rglob("*"):
+            if candidate.is_file():
+                relative = candidate.relative_to(root)
+                if is_test_source(relative):
                     candidates.add(relative)
     return sorted(candidates)
 
@@ -348,6 +415,25 @@ def load_config(config_path: Path) -> dict[str, Any]:
     return config
 
 
+def load_test_config(config_path: Path) -> dict[str, Any]:
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"cannot read {config_path}: {error}") from error
+    if config.get("version") != 1:
+        raise ValueError("test-source-size baseline version must be 1")
+    limits = config.get("new_test_file_limits")
+    baselines = config.get("baselines")
+    if not isinstance(limits, dict) or not isinstance(baselines, dict):
+        raise ValueError(
+            "test-source-size baseline must contain new_test_file_limits and baselines objects"
+        )
+    for key in ("bytes", "lines"):
+        if not isinstance(limits.get(key), int) or limits[key] <= 0:
+            raise ValueError(f"new_test_file_limits.{key} must be a positive integer")
+    return config
+
+
 def load_core_storage_api_config(config_path: Path) -> dict[str, Any]:
     try:
         config = json.loads(config_path.read_text(encoding="utf-8"))
@@ -404,6 +490,45 @@ def evaluate_baseline_changes(
             ):
                 failures.append(
                     f"{path} {key} baseline increased from {base_value} to {current_value}"
+                )
+    return failures
+
+
+def evaluate_test_baseline_changes(
+    current: dict[str, Any], base: dict[str, Any]
+) -> list[str]:
+    failures: list[str] = []
+    current_limits = current.get("new_test_file_limits", {})
+    base_limits = base.get("new_test_file_limits", {})
+    for key in ("bytes", "lines"):
+        current_value = current_limits.get(key)
+        base_value = base_limits.get(key)
+        if isinstance(current_value, int) and isinstance(base_value, int) and current_value > base_value:
+            failures.append(
+                f"new-test-file {key} limit increased from {base_value} to {current_value}"
+            )
+
+    current_baselines = current.get("baselines", {})
+    base_baselines = base.get("baselines", {})
+    if not isinstance(current_baselines, dict) or not isinstance(base_baselines, dict):
+        return [*failures, "base and current test baseline maps must be objects"]
+    for path, current_limit in current_baselines.items():
+        if path not in base_baselines:
+            failures.append(f"new test baseline exception is not allowed after bootstrap: {path}")
+            continue
+        base_limit = base_baselines[path]
+        if not isinstance(current_limit, dict) or not isinstance(base_limit, dict):
+            continue
+        for key in ("bytes", "lines"):
+            current_value = current_limit.get(key)
+            base_value = base_limit.get(key)
+            if (
+                isinstance(current_value, int)
+                and isinstance(base_value, int)
+                and current_value > base_value
+            ):
+                failures.append(
+                    f"{path} {key} test baseline increased from {base_value} to {current_value}"
                 )
     return failures
 
@@ -492,7 +617,7 @@ def evaluate_source_sizes(
     baselines = config["baselines"]
     failures: list[str] = []
     measurements: list[SourceMeasurement] = []
-    sources = production_sources(root)
+    sources = production_sources(root, exclude_test_sources=True)
     source_names = {source.as_posix() for source in sources}
     failures.extend(evaluate_frontend_test_imports(root, sources))
     failures.extend(evaluate_portable_regex_boundary(root, sources))
@@ -550,6 +675,79 @@ def evaluate_source_sizes(
                 )
 
     shown = [measurement for measurement in measurements if measurement.kind == "baseline" or measurement.failed]
+    return failures, shown
+
+
+def evaluate_test_source_sizes(
+    root: Path, config_path: Path
+) -> tuple[list[str], list[SourceMeasurement]]:
+    config = load_test_config(config_path)
+    limits = config["new_test_file_limits"]
+    baselines = config["baselines"]
+    failures: list[str] = []
+    measurements: list[SourceMeasurement] = []
+    sources = test_sources(root)
+    source_names = {source.as_posix() for source in sources}
+
+    for baseline_path, baseline in sorted(baselines.items()):
+        if not isinstance(baseline_path, str) or not isinstance(baseline, dict):
+            failures.append("test baseline entries must map source paths to limit objects")
+            continue
+        if baseline_path not in source_names:
+            failures.append(
+                f"stale or non-test baseline entry: {baseline_path}; remove it explicitly"
+            )
+            continue
+        if not all(
+            isinstance(baseline.get(key), int) and baseline[key] > 0
+            for key in ("bytes", "lines")
+        ):
+            failures.append(f"invalid test baseline limits for {baseline_path}")
+
+    for relative in sources:
+        relative_name = relative.as_posix()
+        baseline = baselines.get(relative_name)
+        if isinstance(baseline, dict):
+            byte_limit = baseline.get("bytes")
+            line_limit = baseline.get("lines")
+            if not isinstance(byte_limit, int) or not isinstance(line_limit, int):
+                continue
+            kind = "test-baseline"
+        else:
+            byte_limit = limits["bytes"]
+            line_limit = limits["lines"]
+            kind = "test-new"
+        try:
+            measurement = measure_source(
+                root,
+                relative,
+                byte_limit=byte_limit,
+                line_limit=line_limit,
+                kind=kind,
+            )
+        except (OSError, UnicodeDecodeError) as error:
+            failures.append(f"cannot inspect test source {relative_name}: {error}")
+            continue
+        measurements.append(measurement)
+        if measurement.failed:
+            if kind == "test-baseline":
+                failures.append(
+                    f"{relative_name} grew beyond its test baseline "
+                    f"({measurement.bytes}/{byte_limit} bytes, "
+                    f"{measurement.lines}/{line_limit} lines)"
+                )
+            else:
+                failures.append(
+                    f"new test source exceeds the design-review limit: {relative_name} "
+                    f"({measurement.bytes}/{byte_limit} bytes, "
+                    f"{measurement.lines}/{line_limit} lines)"
+                )
+
+    shown = [
+        measurement
+        for measurement in measurements
+        if measurement.kind == "test-baseline" or measurement.failed
+    ]
     return failures, shown
 
 
@@ -733,6 +931,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=REPO_ROOT)
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    parser.add_argument("--test-config", type=Path, default=DEFAULT_TEST_CONFIG)
     parser.add_argument(
         "--core-storage-api-config",
         type=Path,
@@ -754,14 +953,25 @@ def main() -> int:
     args = parse_args()
     root = args.root.resolve()
     config = args.config.resolve()
+    test_config = args.test_config.resolve()
     core_storage_api_config = args.core_storage_api_config.resolve()
     try:
         failures, measurements = evaluate_source_sizes(root, config)
+        test_failures, test_measurements = evaluate_test_source_sizes(root, test_config)
+        failures.extend(test_failures)
+        measurements.extend(test_measurements)
         core_storage_api = load_core_storage_api_config(core_storage_api_config)
         if args.base_ref:
             base_config = load_base_config(root, config, args.base_ref)
             if base_config is not None:
                 failures.extend(evaluate_baseline_changes(load_config(config), base_config))
+            base_test_config = load_base_config(root, test_config, args.base_ref)
+            if base_test_config is not None:
+                failures.extend(
+                    evaluate_test_baseline_changes(
+                        load_test_config(test_config), base_test_config
+                    )
+                )
             base_core_storage_api = load_json_at_ref(
                 root, core_storage_api_config, args.base_ref
             )

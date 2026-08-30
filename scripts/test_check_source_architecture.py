@@ -14,7 +14,11 @@ from check_source_architecture import (
     evaluate_core_storage_api_baseline_changes,
     evaluate_core_storage_public_reexports,
     evaluate_source_sizes,
+    evaluate_test_baseline_changes,
+    evaluate_test_source_sizes,
+    is_test_source,
     strip_rust_comments_and_strings,
+    test_sources,
 )
 
 
@@ -25,6 +29,21 @@ def write_config(root: Path, *, baselines: dict[str, dict[str, int]]) -> Path:
             {
                 "version": 1,
                 "new_file_limits": {"bytes": 100, "lines": 5},
+                "baselines": baselines,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return config
+
+
+def write_test_config(root: Path, *, baselines: dict[str, dict[str, int]]) -> Path:
+    config = root / "test-source-size-baseline.json"
+    config.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "new_test_file_limits": {"bytes": 100, "lines": 5},
                 "baselines": baselines,
             }
         ),
@@ -204,7 +223,7 @@ class SourceArchitectureTests(unittest.TestCase):
             self.assertEqual(len(failures), 1)
             self.assertIn("new production source exceeds", failures[0])
 
-    def test_production_file_cannot_hide_under_tests_or_native_source_trees(self) -> None:
+    def test_test_sources_do_not_count_as_production_but_native_main_sources_do(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             sources = [
@@ -224,9 +243,82 @@ class SourceArchitectureTests(unittest.TestCase):
                 source.write_text("public value\n" * 6, encoding="utf-8")
             config = write_config(root, baselines={})
 
-            failures, _ = evaluate_source_sizes(root, config)
+            failures, production = evaluate_source_sizes(root, config)
 
-            self.assertEqual(len(failures), len(sources))
+            self.assertEqual(len(failures), 2)
+            self.assertNotIn(sources[0].relative_to(root).as_posix(), {item.path for item in production})
+
+            test_config = write_test_config(root, baselines={})
+            test_failures, _ = evaluate_test_source_sizes(root, test_config)
+            self.assertEqual(len(test_failures), 1)
+            self.assertIn(sources[0].relative_to(root).as_posix(), test_failures[0])
+
+    def test_frontend_rust_android_and_ios_tests_are_classified(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            paths = [
+                root / "apps/lorepia/src/feature.test.ts",
+                root / "apps/lorepia/src/tests/support.ts",
+                root / "apps/lorepia/src-tauri/tests/contract.rs",
+                root / "crates/sample/tests/integration.rs",
+                root / "crates/sample/src/feature/tests.rs",
+                root / "crates/sample/src/feature/child_tests.rs",
+                root / "plugins/sample/android/src/test/java/PluginTest.kt",
+                root / "plugins/sample/android/src/androidTest/java/PluginDeviceTest.kt",
+                root / "plugins/sample/ios/Tests/PluginTests.swift",
+            ]
+            for path in paths:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("test\n", encoding="utf-8")
+
+            observed = test_sources(root)
+
+            self.assertEqual(observed, sorted(path.relative_to(root) for path in paths))
+            self.assertTrue(all(is_test_source(path.relative_to(root)) for path in paths))
+
+    def test_existing_test_may_shrink_but_must_not_grow(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "crates/sample/tests/giant.rs"
+            source.parent.mkdir(parents=True)
+            original = "fn item() {}\n" * 6
+            source.write_text(original, encoding="utf-8")
+            relative = source.relative_to(root).as_posix()
+            config = write_test_config(
+                root,
+                baselines={
+                    relative: {
+                        "bytes": len(original.encode("utf-8")),
+                        "lines": 6,
+                    }
+                },
+            )
+
+            self.assertEqual(evaluate_test_source_sizes(root, config)[0], [])
+            source.write_text(original + "fn grew() {}\n", encoding="utf-8")
+            self.assertIn(
+                "grew beyond its test baseline",
+                evaluate_test_source_sizes(root, config)[0][0],
+            )
+
+    def test_test_baseline_caps_and_exceptions_cannot_grow(self) -> None:
+        base = {
+            "version": 1,
+            "new_test_file_limits": {"bytes": 100, "lines": 5},
+            "baselines": {"crates/sample/tests/a.rs": {"bytes": 200, "lines": 10}},
+        }
+        current = {
+            "version": 1,
+            "new_test_file_limits": {"bytes": 101, "lines": 5},
+            "baselines": {
+                "crates/sample/tests/a.rs": {"bytes": 201, "lines": 10},
+                "crates/sample/tests/b.rs": {"bytes": 300, "lines": 20},
+            },
+        }
+
+        failures = evaluate_test_baseline_changes(current, base)
+
+        self.assertEqual(len(failures), 3)
 
     def test_frontend_production_cannot_import_excluded_test_sources(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

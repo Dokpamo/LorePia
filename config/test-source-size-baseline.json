@@ -1,0 +1,77 @@
+{
+  "baselines": {
+    "apps/lorepia/src/app/app-controller.test.ts": {
+      "bytes": 105664,
+      "lines": 2550
+    },
+    "apps/lorepia/src/features/chat/ChatPane.test.ts": {
+      "bytes": 144006,
+      "lines": 3359
+    },
+    "apps/lorepia/src/features/chat/portable-runtime.test.ts": {
+      "bytes": 86890,
+      "lines": 2155
+    },
+    "apps/lorepia/src/features/orchestration/OrchestrationUI.test.ts": {
+      "bytes": 121055,
+      "lines": 2763
+    },
+    "apps/lorepia/src/features/orchestration/orchestration-controller.test.ts": {
+      "bytes": 79825,
+      "lines": 1910
+    },
+    "apps/lorepia/src/lib/ipc/client.test.ts": {
+      "bytes": 69408,
+      "lines": 1828
+    },
+    "apps/lorepia/src/styles/hover-contract.test.ts": {
+      "bytes": 91894,
+      "lines": 1343
+    },
+    "crates/core/tests/generation_attempt_derived_closure.rs": {
+      "bytes": 180370,
+      "lines": 4773
+    },
+    "crates/core/tests/orchestration_core_contract.rs": {
+      "bytes": 130794,
+      "lines": 3293
+    },
+    "crates/core/tests/ordinary_same_branch_sealed_retry.rs": {
+      "bytes": 79628,
+      "lines": 2162
+    },
+    "crates/core/tests/provider_discovery_integration.rs": {
+      "bytes": 85104,
+      "lines": 2304
+    },
+    "crates/storage/src/orchestration/tests.rs": {
+      "bytes": 76030,
+      "lines": 1920
+    },
+    "crates/storage/tests/discovery_state_storage.rs": {
+      "bytes": 92884,
+      "lines": 2743
+    },
+    "crates/storage/tests/interaction_derived_event_storage.rs": {
+      "bytes": 56452,
+      "lines": 1631
+    },
+    "crates/storage/tests/orchestration_migrations.rs": {
+      "bytes": 69066,
+      "lines": 1737
+    },
+    "crates/storage/tests/provider_credential_operations.rs": {
+      "bytes": 98778,
+      "lines": 2451
+    },
+    "crates/storage/tests/schema11_release_cutover.rs": {
+      "bytes": 54088,
+      "lines": 1374
+    }
+  },
+  "new_test_file_limits": {
+    "bytes": 61440,
+    "lines": 1200
+  },
+  "version": 1
+}
