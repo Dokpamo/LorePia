@@ -160,7 +160,7 @@ impl Core {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(in crate::app) fn start_generation_task(
+    pub(super) fn start_generation_task(
         &self,
         launch: GenerationLaunchPermit,
         branch_id: ConversationBranchId,

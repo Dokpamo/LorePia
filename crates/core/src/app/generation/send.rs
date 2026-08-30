@@ -25,7 +25,7 @@ use super::{
 use crate::app::{CORE_MAX_OUTPUT_TOKENS, Core, GenerationTransformContext};
 
 impl Core {
-    pub(in crate::app) fn launch_reviewed_prompt_send(
+    pub(super) fn launch_reviewed_prompt_send(
         &self,
         plan_request: &crate::PromptPlanRequest,
         context: ReviewedPromptSendContext,
@@ -135,7 +135,7 @@ impl Core {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(in crate::app) fn send_message_to_branch_with_provider_profile(
+    pub(super) fn send_message_to_branch_with_provider_profile(
         &self,
         conversation_id: &ConversationId,
         branch_id: &ConversationBranchId,

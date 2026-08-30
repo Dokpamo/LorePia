@@ -40,9 +40,9 @@ pub(in crate::app) enum SameBranchGenerationAttempt {
 }
 
 pub(in crate::app) struct PreparedSameBranchGenerationAttempt {
-    pub(in crate::app) attempt: lorepia_storage::StoredGenerationAttempt,
-    pub(in crate::app) interaction_state: lorepia_storage::StoredInteractionState,
-    pub(in crate::app) applied_module_plan: Option<lorepia_orchestration::AppliedModuleRuntimePlan>,
+    pub(super) attempt: lorepia_storage::StoredGenerationAttempt,
+    pub(super) interaction_state: lorepia_storage::StoredInteractionState,
+    pub(super) applied_module_plan: Option<lorepia_orchestration::AppliedModuleRuntimePlan>,
 }
 
 impl Core {
@@ -69,7 +69,7 @@ impl Core {
             })
     }
 
-    pub(in crate::app) fn resolve_same_branch_generation_operation_identity(
+    pub(super) fn resolve_same_branch_generation_operation_identity(
         &self,
         input: SameBranchGenerationAttemptIdentity<'_>,
     ) -> CoreResult<ResolvedGenerationOperationIdentity> {
@@ -111,7 +111,7 @@ impl Core {
         })
     }
 
-    pub(in crate::app) fn preflight_same_branch_provider_authority(
+    pub(super) fn preflight_same_branch_provider_authority(
         &self,
         input: SameBranchGenerationAttemptIdentity<'_>,
         provider_target_authority: &GenerationProviderTargetAuthority,
@@ -153,7 +153,7 @@ impl Core {
     /// Prepares or resumes the isolated attempt shared by expert preview and
     /// reviewed send. `expected_plan_hash` is intentionally absent from the
     /// operation identity; it is validated later against the resolved plan.
-    pub(in crate::app) fn prepare_reviewed_prompt_generation_attempt(
+    pub(super) fn prepare_reviewed_prompt_generation_attempt(
         &self,
         plan_request: &crate::PromptPlanRequest,
         operation_context: GenerationOperationContext<'_>,
@@ -201,7 +201,7 @@ impl Core {
         )
     }
 
-    pub(in crate::app) fn validate_existing_reviewed_generation(
+    pub(super) fn validate_existing_reviewed_generation(
         &self,
         generation_id: GenerationId,
         expected_generation_attempt_id: &GenerationId,
@@ -364,7 +364,7 @@ impl Core {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(in crate::app) fn prepare_same_branch_generation_attempt(
+    pub(super) fn prepare_same_branch_generation_attempt(
         &self,
         character: &Character,
         conversation_id: &ConversationId,
@@ -587,7 +587,7 @@ impl Core {
         }
     }
 
-    pub(in crate::app) fn seal_same_branch_generation_attempt(
+    pub(super) fn seal_same_branch_generation_attempt(
         &self,
         attempt: lorepia_storage::StoredGenerationAttempt,
         prepared: &crate::orchestration::PreparedGenerationPlan,
