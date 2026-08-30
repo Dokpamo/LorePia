@@ -19,7 +19,7 @@
     "apps/lorepia/src/styles/app.css": {"bytes": 120338, "lines": 4344},
     "crates/chat/src/generation.rs": {"bytes": 104268, "lines": 2799},
     "crates/content/src/package.rs": {"bytes": 116140, "lines": 3179},
-    "crates/core/src/app.rs": {"bytes": 222936, "lines": 5694},
+    "crates/core/src/app.rs": {"bytes": 92762, "lines": 2396},
     "crates/core/src/catalog.rs": {"bytes": 83792, "lines": 2120},
     "crates/core/src/content_package.rs": {"bytes": 230230, "lines": 5599},
     "crates/core/src/module_orchestration.rs": {"bytes": 88197, "lines": 2104},
