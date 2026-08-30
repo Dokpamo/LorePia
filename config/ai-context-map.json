@@ -1138,16 +1138,16 @@
           "crates/storage/src/interaction_repository.rs"
         ],
         "implementation": [
-          "crates/storage/src/interaction_repository/types.rs",
           "crates/storage/src/interaction_repository/derived_outbox.rs",
           "crates/storage/src/interaction_repository/derived_outbox/claim.rs",
           "crates/storage/src/interaction_repository/derived_outbox/commit.rs",
+          "crates/storage/src/interaction_repository/derived_outbox/enqueue.rs",
           "crates/storage/src/interaction_repository/derived_outbox/quarantine.rs",
           "crates/storage/src/interaction_repository/derived_outbox/recovery.rs",
           "crates/storage/src/interaction_repository/derived_outbox/row_mapping.rs",
           "crates/storage/src/interaction_repository/derived_outbox/row_mapping/occurrence.rs",
-          "crates/storage/src/interaction_repository/event_transactions.rs",
-          "crates/storage/src/interaction_repository/replay.rs"
+          "crates/storage/src/interaction_repository/derived_outbox/validation.rs",
+          "crates/storage/src/interaction_repository/event_transactions.rs"
         ],
         "tests": [
           "crates/core/tests/interaction_derived_supervisor.rs"

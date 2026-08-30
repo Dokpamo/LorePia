@@ -2,9 +2,19 @@
 
 mod claim;
 mod commit;
+mod enqueue;
 mod quarantine;
 mod recovery;
 mod row_mapping;
+mod validation;
+
+pub(in crate::interaction_repository) use enqueue::{
+    DerivedChainParent, DerivedEventOutboxWrite, write_derived_event_outbox,
+};
+pub(in crate::interaction_repository) use validation::{
+    require_no_pending_derived_predecessor, require_no_pending_derived_predecessor_through,
+    validate_derived_event_writes,
+};
 
 use chrono::{DateTime, Utc};
 use lorepia_domain::{
