@@ -32,10 +32,6 @@
       "bytes": 85104,
       "lines": 2304
     },
-    "crates/storage/src/orchestration/tests.rs": {
-      "bytes": 76030,
-      "lines": 1920
-    },
     "crates/storage/tests/discovery_state_storage.rs": {
       "bytes": 92884,
       "lines": 2743
