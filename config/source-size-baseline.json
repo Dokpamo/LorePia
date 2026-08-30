@@ -60,7 +60,7 @@
     "crates/storage/src/interaction_repository.rs": {"bytes": 509689, "lines": 12668},
     "crates/storage/src/memory_queue.rs": {"bytes": 231062, "lines": 6110},
     "crates/storage/src/model_sync.rs": {"bytes": 129970, "lines": 3358},
-    "crates/storage/src/orchestration.rs": {"bytes": 523360, "lines": 14051},
+    "crates/storage/src/orchestration.rs": {"bytes": 279787, "lines": 7343},
     "crates/storage/src/package_repository.rs": {"bytes": 265267, "lines": 6646},
     "crates/storage/src/provider_credential_repository.rs": {"bytes": 154521, "lines": 3949},
     "plugins/lorepia-platform/src/desktop.rs": {"bytes": 204435, "lines": 5325},

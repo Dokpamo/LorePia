@@ -1106,7 +1106,7 @@
       }
     },
     "STOR-ORCH-001": {
-      "baseline_context_bytes": 641994,
+      "baseline_context_bytes": 623769,
       "commands": [
         "cargo test -p lorepia-storage --lib orchestration::tests",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
@@ -1122,16 +1122,24 @@
           "crates/storage/src/orchestration.rs"
         ],
         "implementation": [
-          "crates/storage/src/orchestration/builtins.rs"
+          "crates/storage/src/orchestration/catalog_documents.rs",
+          "crates/storage/src/orchestration/content_module_projection.rs",
+          "crates/storage/src/orchestration/content_module_revisions.rs",
+          "crates/storage/src/orchestration/document_history.rs",
+          "crates/storage/src/orchestration/document_store.rs",
+          "crates/storage/src/orchestration/knowledge_memory_profiles.rs",
+          "crates/storage/src/orchestration/prompt_bindings.rs",
+          "crates/storage/src/orchestration/prompt_preset_projection.rs",
+          "crates/storage/src/orchestration/prompt_preset_rollback.rs",
+          "crates/storage/src/orchestration/transforms_interactions.rs"
         ],
         "tests": [
-          "crates/storage/tests/orchestration_migrations.rs",
-          "crates/core/tests/prompt_preset_rollback.rs"
+          "crates/storage/tests/orchestration_migrations.rs"
         ]
       }
     },
     "STOR-ORCH-002": {
-      "baseline_context_bytes": 695489,
+      "baseline_context_bytes": 544892,
       "commands": [
         "cargo test -p lorepia-storage --lib orchestration::tests",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
@@ -1140,17 +1148,26 @@
       "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
       "paths": {
         "documents": [
-          "crates/storage/AGENTS.md"
+          "crates/storage/AGENTS.md",
+          "docs/adr/0002-storage-transaction-boundaries.md"
         ],
         "entrypoints": [
           "crates/storage/src/orchestration.rs"
         ],
         "implementation": [
-          "crates/storage/src/orchestration/module_authority.rs"
+          "crates/storage/src/orchestration/content_module_projection.rs",
+          "crates/storage/src/orchestration/content_module_revisions.rs",
+          "crates/storage/src/orchestration/document_history.rs",
+          "crates/storage/src/orchestration/document_store.rs",
+          "crates/storage/src/orchestration/knowledge_memory_profiles.rs",
+          "crates/storage/src/orchestration/module_authority.rs",
+          "crates/storage/src/orchestration/prompt_bindings.rs",
+          "crates/storage/src/orchestration/prompt_preset_projection.rs",
+          "crates/storage/src/orchestration/prompt_preset_rollback.rs",
+          "crates/storage/src/orchestration/transforms_interactions.rs"
         ],
         "tests": [
-          "crates/storage/tests/knowledge_embedding_storage.rs",
-          "crates/core/tests/orchestration_core_contract.rs"
+          "crates/storage/tests/knowledge_embedding_storage.rs"
         ]
       }
     },
