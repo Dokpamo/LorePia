@@ -1,5 +1,15 @@
 use super::assistant_runtime::api_family_slug;
-use super::*;
+use super::{
+    AdapterRegistry, AssistantBudget, AssistantConsent, AssistantDraftReview,
+    AssistantEvidenceKind, AssistantState, BTreeMap, BTreeSet, CanonicalOrigin, CoreError,
+    CoreErrorCode, CoreResult, DecoderId, DeterministicDiscoveryOutput, DiscoveryApprovalGrant,
+    DiscoveryAssistantCheckpoint, DiscoveryEvidenceKind, DiscoveryEvidenceRecord,
+    DiscoveryOperationId, DiscoveryOperationKind, DiscoverySessionId, DiscoverySessionSnapshot,
+    DiscoveryState, DiscoveryWorkingDraft, DraftField, EvidenceClaim, EvidenceId, HttpMethod,
+    MAX_DISCOVERY_ROWS, ProviderDiscoveryApprovalProposal, ProviderDiscoveryOrchestrator,
+    RedactedAssistantEvidence, SetupAssistantEngine, Storage, UnresolvedQuestion, Value,
+    approval_proposal_for, deterministic_id, hydrate_working_draft,
+};
 
 /// One exact native action which can safely resume a durable setup-assistant
 /// boundary. Native clients must not infer this from the overall discovery
