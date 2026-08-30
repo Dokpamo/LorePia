@@ -51,24 +51,28 @@
       }
     },
     "CORE-DISC-001": {
-      "baseline_context_bytes": 594313,
       "commands": [
         "cargo test -p lorepia-core --test provider_discovery_integration",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
       "max_context_bytes": 250000,
-      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
       "paths": {
         "documents": [
-          "crates/core/AGENTS.md"
+          "crates/core/AGENTS.md",
+          "docs/adr/0002-storage-transaction-boundaries.md",
+          "docs/adr/0003-credential-and-secret-boundary.md"
         ],
         "entrypoints": [
-          "crates/core/src/provider_discovery.rs"
+          "crates/core/src/provider_discovery/types.rs",
+          "crates/core/src/provider_discovery/begin.rs",
+          "crates/core/src/provider_discovery/actions.rs"
         ],
         "implementation": [
-          "crates/core/src/provider_discovery_view.rs"
+          "crates/core/src/provider_discovery/driver.rs",
+          "crates/core/src/provider_discovery/views.rs"
         ],
         "tests": [
+          "crates/core/src/provider_discovery/tests/network_integrity.rs",
           "crates/core/tests/provider_discovery_integration.rs"
         ]
       }
