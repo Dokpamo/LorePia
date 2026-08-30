@@ -77,6 +77,7 @@ use crate::{
     revision::project_revision,
 };
 
+mod generation;
 mod generation_events;
 mod generation_workflow;
 mod model_sync;
@@ -84,6 +85,16 @@ mod portable_runtime_state;
 mod runtime_control;
 mod runtime_generation;
 
+use generation::{
+    GenerationActionSemanticSnapshot, GenerationActionTargetIdentity,
+    MessageGenerationActionIdentityInput, ResolvedGenerationOperationIdentity,
+    SameBranchGenerationAttemptIdentity, generation_action_name, new_generation_operation_id,
+    same_branch_generation_semantic_fingerprint, validate_same_branch_attempt_semantic_identity,
+};
+pub use generation::{
+    GenerationOperationContext, MAX_GENERATION_OPERATION_NONCE_BYTES,
+    MAX_GENERATION_OPERATION_NONCE_CHARS,
+};
 pub use generation_events::GenerationEventSubscription;
 #[cfg(test)]
 use generation_events::GenerationLivePrefix;
@@ -133,21 +144,6 @@ const MAX_LIVE_DISPLAY_PREFIX_BYTES: usize = match MAX_LIVE_DISPLAY_PREFIX_CHARS
 };
 const MAX_USER_MESSAGE_BYTES: usize = 64 * 1024;
 const MAX_USER_MESSAGE_CHARS: usize = 16 * 1024;
-pub const MAX_GENERATION_OPERATION_NONCE_BYTES: usize = 128;
-pub const MAX_GENERATION_OPERATION_NONCE_CHARS: usize = 64;
-
-/// Caller-owned boundary for a new generation operation or an exact durable
-/// attempt selected for restart-safe resume. The variants are intentionally
-/// exclusive so callers cannot ambiguously rotate and resume at once.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GenerationOperationContext<'a> {
-    New {
-        operation_nonce: &'a str,
-    },
-    Resume {
-        generation_attempt_id: &'a GenerationId,
-    },
-}
 const MAX_TASK_PROMPT_BYTES: usize = 512 * 1024;
 const MAX_TASK_PROMPT_CHARS: usize = 128 * 1024;
 const MAX_RUNTIME_PROMPT_MESSAGES: usize = 128;
@@ -360,35 +356,6 @@ struct GenerationTask {
     transforms: GenerationTransformContext,
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-enum GenerationActionTargetIdentity {
-    GenerationTarget {
-        model_route_id: ModelRouteId,
-        generation_preset_id: GenerationPresetId,
-    },
-    ProviderProfile {
-        provider_profile_id: String,
-    },
-    #[cfg(test)]
-    DirectModel {
-        model_sha256: String,
-    },
-}
-
-#[derive(Serialize)]
-struct GenerationActionSemanticSnapshot<'a> {
-    schema_version: u32,
-    action: &'static str,
-    conversation_id: &'a ConversationId,
-    source_branch_id: &'a ConversationBranchId,
-    expected_source_head_message_id: Option<&'a MessageId>,
-    target_message_id: &'a MessageId,
-    context_head_message_id: Option<&'a MessageId>,
-    replacement_text_sha256: &'a str,
-    target: &'a GenerationActionTargetIdentity,
-}
-
 struct PreparedMessageGenerationAction {
     conversation_id: ConversationId,
     source_branch_id: ConversationBranchId,
@@ -405,17 +372,6 @@ struct PreparedMessageGenerationAction {
     mode: ConversationMode,
 }
 
-struct MessageGenerationActionIdentityInput<'a> {
-    conversation_id: &'a ConversationId,
-    source_branch_id: &'a ConversationBranchId,
-    expected_source_head_message_id: Option<&'a MessageId>,
-    target_message_id: &'a MessageId,
-    action: MessageGenerationAction,
-    replacement_text: Option<&'a str>,
-    operation_context: GenerationOperationContext<'a>,
-    target: GenerationActionTargetIdentity,
-}
-
 #[derive(Clone, Copy)]
 struct MessageGenerationAttemptConfiguration<'a> {
     generation_target: Option<&'a GenerationTarget>,
@@ -425,45 +381,6 @@ struct MessageGenerationAttemptConfiguration<'a> {
     provider_target_authority: &'a GenerationProviderTargetAuthority,
     credential_authority: Option<&'a ProviderCredentialAccessAuthority>,
     require_exact_credential_authority: bool,
-}
-
-#[derive(Serialize)]
-struct GenerationSendSemanticSnapshot<'a> {
-    /// This includes only caller-owned semantic request identity. Conversation
-    /// mode, provider mapping, effective quick settings, and the operation
-    /// nonce are sealed or scoped separately so none can alter prompt
-    /// semantics after an approval pause.
-    schema_version: u32,
-    conversation_id: &'a ConversationId,
-    branch_id: &'a ConversationBranchId,
-    expected_head_message_id: Option<&'a MessageId>,
-    user_text_sha256: &'a str,
-    target: &'a GenerationActionTargetIdentity,
-    temperature: Option<f64>,
-    max_output_tokens: Option<u32>,
-    prompt_preset_id: Option<&'a lorepia_domain::PromptPresetId>,
-    variable_overrides: &'a VariableMap,
-}
-
-#[derive(Serialize)]
-struct GenerationOperationNonceEnvelope<'a> {
-    schema_version: u32,
-    domain: &'static str,
-    semantic_base_fingerprint_sha256: &'a Sha256Digest,
-    operation_nonce: &'a str,
-}
-
-struct SameBranchGenerationAttemptIdentity<'a> {
-    conversation_id: &'a ConversationId,
-    branch_id: &'a ConversationBranchId,
-    expected_head: Option<&'a MessageId>,
-    text: &'a str,
-    operation_context: GenerationOperationContext<'a>,
-    target: &'a GenerationActionTargetIdentity,
-    temperature: Option<f64>,
-    max_output_tokens: Option<u32>,
-    prompt_preset_id: Option<&'a lorepia_domain::PromptPresetId>,
-    variable_overrides: &'a VariableMap,
 }
 
 struct SameBranchGenerationTargetInput<'a> {
@@ -497,12 +414,6 @@ struct ExistingSameBranchAttemptRequest<'a> {
     base_request_fingerprint_sha256: &'a Sha256Digest,
     provider_target_authority: &'a GenerationProviderTargetAuthority,
     resume_generation_attempt_id: Option<&'a GenerationId>,
-}
-
-struct ResolvedGenerationOperationIdentity {
-    operation_id: String,
-    base_request_fingerprint_sha256: Sha256Digest,
-    resume_generation_attempt_id: Option<GenerationId>,
 }
 
 enum ExistingSameBranchAttempt {
@@ -7200,81 +7111,6 @@ impl Core {
     }
 }
 
-fn same_branch_generation_semantic_fingerprint(
-    input: &SameBranchGenerationAttemptIdentity<'_>,
-) -> CoreResult<Sha256Digest> {
-    let user_text_sha256 = format!("{:x}", Sha256::digest(input.text.as_bytes()));
-    Sha256Digest::parse(canonical_value_sha256(
-        &GenerationSendSemanticSnapshot {
-            schema_version: 1,
-            conversation_id: input.conversation_id,
-            branch_id: input.branch_id,
-            expected_head_message_id: input.expected_head,
-            user_text_sha256: &user_text_sha256,
-            target: input.target,
-            temperature: input.temperature,
-            max_output_tokens: input.max_output_tokens,
-            prompt_preset_id: input.prompt_preset_id,
-            variable_overrides: input.variable_overrides,
-        },
-        "generation semantic base request",
-    )?)
-    .map_err(CoreError::invalid)
-}
-
-fn new_generation_operation_id(
-    domain: &'static str,
-    base_request_fingerprint_sha256: &Sha256Digest,
-    operation_nonce: &str,
-) -> CoreResult<String> {
-    let operation_nonce = validate_generation_operation_nonce(operation_nonce)?;
-    let operation_sha256 = canonical_value_sha256(
-        &GenerationOperationNonceEnvelope {
-            schema_version: 1,
-            domain,
-            semantic_base_fingerprint_sha256: base_request_fingerprint_sha256,
-            operation_nonce,
-        },
-        "generation operation",
-    )?;
-    Ok(format!("{domain}-{operation_sha256}"))
-}
-
-fn validate_same_branch_attempt_semantic_identity(
-    attempt: &lorepia_storage::StoredGenerationAttempt,
-    conversation_id: &ConversationId,
-    branch_id: &ConversationBranchId,
-    expected_head: Option<&MessageId>,
-    base_request_fingerprint_sha256: &Sha256Digest,
-    resume_generation_attempt_id: Option<&GenerationId>,
-) -> CoreResult<()> {
-    let mismatched = resume_generation_attempt_id
-        .is_some_and(|generation_id| generation_id != &attempt.generation_id)
-        || attempt.input.conversation_id != *conversation_id
-        || attempt.input.source_branch_id != *branch_id
-        || attempt.input.proposed_branch_id != *branch_id
-        || attempt.input.expected_head_message_id != expected_head.cloned()
-        || attempt.input.context_head_message_id != expected_head.cloned()
-        || attempt.input.base_request_fingerprint_sha256 != *base_request_fingerprint_sha256
-        || attempt.input.prompt_selection_authority.is_none();
-    if mismatched {
-        return if resume_generation_attempt_id.is_some() {
-            Err(CoreError::new(
-                CoreErrorCode::InvalidInput,
-                "generation resume attempt does not match the caller-owned request; start a new generation operation",
-                true,
-            ))
-        } else {
-            Err(CoreError::new(
-                CoreErrorCode::StorageCorrupted,
-                "stored same-branch generation attempt differs from its immutable request",
-                false,
-            ))
-        };
-    }
-    Ok(())
-}
-
 fn generation_attempt_prompt_authority(
     attempt: &lorepia_storage::StoredGenerationAttempt,
 ) -> CoreResult<&lorepia_storage::GenerationPromptSelectionAuthority> {
@@ -9289,20 +9125,6 @@ fn canonical_value_sha256(value: &impl Serialize, label: &str) -> CoreResult<Str
     Ok(format!("{:x}", Sha256::digest(encoded)))
 }
 
-fn validate_generation_operation_nonce(value: &str) -> CoreResult<&str> {
-    if value.is_empty()
-        || value.trim() != value
-        || value.len() > MAX_GENERATION_OPERATION_NONCE_BYTES
-        || value.chars().count() > MAX_GENERATION_OPERATION_NONCE_CHARS
-        || value.chars().any(char::is_control)
-    {
-        return Err(CoreError::invalid(
-            "generation operation nonce is empty, unsafe, or exceeds its size limit",
-        ));
-    }
-    Ok(value)
-}
-
 #[cfg(test)]
 fn direct_model_provider_target_authority(
     model: &str,
@@ -9611,13 +9433,6 @@ fn validate_action_replacement(
             Err(CoreError::invalid("message text cannot be empty"))
         }
         None => Ok(None),
-    }
-}
-
-const fn generation_action_name(action: MessageGenerationAction) -> &'static str {
-    match action {
-        MessageGenerationAction::EditUser => "edit_user",
-        MessageGenerationAction::RegenerateAssistant => "regenerate_assistant",
     }
 }
 
