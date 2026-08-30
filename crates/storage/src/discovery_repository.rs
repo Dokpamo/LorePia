@@ -83,215 +83,6 @@ struct NativeNoEffectExecutionBindingEvidence<'a> {
 }
 
 impl Storage {
-    pub fn get_discovery_session(
-        &self,
-        session_id: &DiscoverySessionId,
-    ) -> CoreResult<DiscoverySessionSnapshot> {
-        let connection = self.connection()?;
-        load_session_snapshot(&connection, session_id.as_str())?.ok_or_else(|| {
-            CoreError::new(
-                CoreErrorCode::NotFound,
-                "provider discovery session was not found",
-                false,
-            )
-        })
-    }
-
-    pub fn list_discovery_sessions(&self, limit: u32) -> CoreResult<Vec<DiscoverySessionSnapshot>> {
-        validate_limit(limit)?;
-        let connection = self.connection()?;
-        let ids = {
-            let mut statement = connection
-                .prepare(
-                    "SELECT id
-                     FROM provider_discovery_sessions
-                     ORDER BY updated_at DESC, id
-                     LIMIT ?1",
-                )
-                .map_err(database_error)?;
-            statement
-                .query_map([limit], |row| row.get::<_, String>(0))
-                .map_err(database_error)?
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(database_error)?
-        };
-        ids.into_iter()
-            .map(|id| {
-                load_session_snapshot(&connection, &id)?.ok_or_else(|| {
-                    corrupted("discovery session disappeared while it was being listed")
-                })
-            })
-            .collect()
-    }
-
-    /// Returns every session with an unfinished durable operation.
-    ///
-    /// Startup recovery must not infer completeness from the bounded
-    /// user-facing history query. This complete internal scan uses the partial
-    /// `provider_discovery_operations_recovery` index and de-duplicates session
-    /// identifiers while preserving durable operation order.
-    pub fn list_unfinished_discovery_sessions_for_recovery(
-        &self,
-    ) -> CoreResult<Vec<DiscoverySessionSnapshot>> {
-        let connection = self.connection()?;
-        let unfinished = discovery::list_unfinished_discovery_operations(&connection)
-            .map_err(discovery_error)?;
-        let mut seen = BTreeSet::new();
-        unfinished
-            .into_iter()
-            .filter(|operation| seen.insert(operation.session_id.clone()))
-            .map(|operation| operation.session_id)
-            .map(|session_id| {
-                load_session_snapshot(&connection, &session_id)?.ok_or_else(|| {
-                    corrupted("unfinished discovery session disappeared during recovery scan")
-                })
-            })
-            .collect()
-    }
-
-    pub fn list_discovery_evidence(
-        &self,
-        session_id: &DiscoverySessionId,
-        limit: u32,
-    ) -> CoreResult<Vec<DiscoveryEvidenceRecord>> {
-        validate_limit(limit)?;
-        let connection = self.connection()?;
-        require_session(&connection, session_id.as_str())?;
-        let mut statement = connection
-            .prepare(
-                "SELECT id, session_id, kind, source_url, content_sha256,
-                        extracted_json, fetched_at
-                 FROM provider_discovery_evidence
-                 WHERE session_id = ?1
-                 ORDER BY fetched_at, id
-                 LIMIT ?2",
-            )
-            .map_err(database_error)?;
-        statement
-            .query_map(params![session_id.as_str(), limit], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, String>(5)?,
-                    row.get::<_, String>(6)?,
-                ))
-            })
-            .map_err(database_error)?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(database_error)?
-            .into_iter()
-            .map(decode_evidence_row)
-            .collect()
-    }
-
-    pub fn list_discovery_candidates(
-        &self,
-        session_id: &DiscoverySessionId,
-        limit: u32,
-    ) -> CoreResult<Vec<StoredDiscoveryCandidate>> {
-        validate_limit(limit)?;
-        let connection = self.connection()?;
-        require_session(&connection, session_id.as_str())?;
-        let mut statement = connection
-            .prepare(
-                "SELECT id, session_id, candidate_kind, summary_json, evidence_ids_json,
-                        proposed_revision, created_at
-                 FROM provider_discovery_candidates
-                 WHERE session_id = ?1
-                 ORDER BY proposed_revision, created_at, id
-                 LIMIT ?2",
-            )
-            .map_err(database_error)?;
-        statement
-            .query_map(params![session_id.as_str(), limit], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, u64>(5)?,
-                    row.get::<_, String>(6)?,
-                ))
-            })
-            .map_err(database_error)?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(database_error)?
-            .into_iter()
-            .map(decode_candidate_row)
-            .collect()
-    }
-
-    pub fn list_discovery_approvals(
-        &self,
-        session_id: &DiscoverySessionId,
-        limit: u32,
-    ) -> CoreResult<Vec<DiscoveryApprovalRecord>> {
-        validate_limit(limit)?;
-        let connection = self.connection()?;
-        require_session(&connection, session_id.as_str())?;
-        let mut statement = connection
-            .prepare(
-                "SELECT id, session_id, approval_kind, candidate_id, decision,
-                        grant_json, session_revision, grant_sha256, created_at
-                 FROM provider_discovery_approvals
-                 WHERE session_id = ?1
-                 ORDER BY session_revision, created_at, id
-                 LIMIT ?2",
-            )
-            .map_err(database_error)?;
-        statement
-            .query_map(params![session_id.as_str(), limit], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, Option<String>>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, String>(5)?,
-                    row.get::<_, u64>(6)?,
-                    row.get::<_, String>(7)?,
-                    row.get::<_, String>(8)?,
-                ))
-            })
-            .map_err(database_error)?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(database_error)?
-            .into_iter()
-            .map(decode_approval_row)
-            .collect()
-    }
-
-    pub fn get_discovery_review(
-        &self,
-        session_id: &DiscoverySessionId,
-    ) -> CoreResult<Option<DiscoveryReviewDiff>> {
-        Ok(self.get_discovery_session(session_id)?.review)
-    }
-
-    pub fn get_current_discovery_operation(
-        &self,
-        session_id: &DiscoverySessionId,
-    ) -> CoreResult<Option<DiscoveryOperationRecord>> {
-        let connection = self.connection()?;
-        let snapshot =
-            load_session_snapshot(&connection, session_id.as_str())?.ok_or_else(|| {
-                CoreError::new(
-                    CoreErrorCode::NotFound,
-                    "provider discovery session was not found",
-                    false,
-                )
-            })?;
-        snapshot
-            .active_operation_id
-            .as_ref()
-            .map(|operation_id| load_operation_by_id(&connection, operation_id))
-            .transpose()
-    }
-
     pub fn mark_discovery_operation_started(
         &self,
         operation_id: &DiscoveryOperationId,
@@ -459,26 +250,6 @@ impl Storage {
         let result = persist_transition_in_transaction(&transaction, write, None)?;
         transaction.commit().map_err(database_error)?;
         Ok(result)
-    }
-
-    pub fn get_discovery_native_no_effect_attestation(
-        &self,
-        operation_id: &DiscoveryOperationId,
-    ) -> CoreResult<Option<DiscoveryNativeNoEffectAttestationRecord>> {
-        let connection = self.connection()?;
-        load_native_no_effect_attestation(&connection, operation_id.as_str())
-    }
-
-    /// Loads the immutable physical native authority for one discovery
-    /// operation. An unreserved prepared operation returns `None`; a reserved
-    /// prepared operation returns the row without a store-attempt timestamp,
-    /// and a started operation must return the same row with that timestamp.
-    pub fn get_discovery_native_credential_execution(
-        &self,
-        operation_id: &DiscoveryOperationId,
-    ) -> CoreResult<Option<DiscoveryNativeCredentialExecutionRecord>> {
-        let connection = self.connection()?;
-        load_discovery_native_credential_execution(&connection, operation_id)
     }
 
     /// Reserves a fresh physical authority while the semantic operation stays
@@ -865,70 +636,6 @@ impl Storage {
         Ok(result)
     }
 
-    pub fn find_discovery_action_replay(
-        &self,
-        session_id: &DiscoverySessionId,
-        action_id: &DiscoveryActionId,
-        request_sha256: &str,
-        action_kind: &str,
-    ) -> CoreResult<Option<DiscoveryActionReplay>> {
-        validate_sha256("discovery action request hash", request_sha256)?;
-        validate_identifier("discovery action kind", action_kind, 128)?;
-        let row = self
-            .connection()?
-            .query_row(
-                "SELECT session_id, action_kind, request_sha256, expected_revision,
-                        resulting_revision, event_sequence, outcome, response_json
-                 FROM provider_discovery_action_receipts
-                 WHERE action_id = ?1",
-                [action_id.as_str()],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, u64>(3)?,
-                        row.get::<_, u64>(4)?,
-                        row.get::<_, u64>(5)?,
-                        row.get::<_, String>(6)?,
-                        row.get::<_, String>(7)?,
-                    ))
-                },
-            )
-            .optional()
-            .map_err(database_error)?;
-        let Some(row) = row else {
-            return Ok(None);
-        };
-        if row.0 != session_id.as_str() || row.1 != action_kind || row.2 != request_sha256 {
-            return Err(CoreError::invalid(
-                "discovery action identifier was reused with a different request",
-            ));
-        }
-        let transition = serde_json::from_str::<DiscoveryTransition>(&row.7)
-            .map_err(|_| corrupted("stored discovery action response is invalid"))?;
-        let receipt = DiscoveryActionReceipt {
-            action_id: action_id.clone(),
-            session_id: session_id.clone(),
-            action_kind: row.1,
-            request_sha256: row.2,
-            expected_revision: row.3,
-            resulting_revision: row.4,
-            event_sequence: row.5,
-            outcome: serde_json::from_value(Value::String(row.6))
-                .map_err(|_| corrupted("stored discovery receipt outcome is invalid"))?,
-        };
-        if transition.receipt != receipt {
-            return Err(corrupted(
-                "stored discovery replay response does not match its receipt",
-            ));
-        }
-        Ok(Some(DiscoveryActionReplay {
-            receipt,
-            transition,
-        }))
-    }
-
     /// Finalizes a credential-confirmed discovery commit in one `SQLite`
     /// transaction. Until this transaction commits, no provider graph row is
     /// visible to connection, route, preset, model-sync, or generation readers.
@@ -1235,34 +942,6 @@ impl Storage {
         Ok(result)
     }
 
-    pub fn get_discovery_commit_attempt(
-        &self,
-        attempt_id: &DiscoveryCommitAttemptId,
-    ) -> CoreResult<DiscoveryCommitAttemptRecord> {
-        let connection = self.connection()?;
-        load_commit_attempt(&connection, attempt_id)
-    }
-
-    /// Returns the operation-scoped physical credential authority that led to
-    /// the current compensation ledger. Selection follows the immutable
-    /// receipt/recovery chain into `compensating`; it never guesses from the
-    /// latest operation or from the reusable commit-attempt identifier.
-    pub fn get_discovery_credential_compensation_operation_id(
-        &self,
-        session_id: &DiscoverySessionId,
-        attempt_id: &DiscoveryCommitAttemptId,
-        plan_sha256: &str,
-    ) -> CoreResult<DiscoveryOperationId> {
-        validate_sha256("discovery compensation plan hash", plan_sha256)?;
-        let connection = self.connection()?;
-        load_discovery_credential_compensation_operation_id(
-            &connection,
-            session_id,
-            attempt_id,
-            plan_sha256,
-        )
-    }
-
     /// Classifies unfinished work after a crash and records interruption
     /// transitions. This method never executes or replays an external effect.
     pub fn recover_unfinished_discovery_operations(
@@ -1406,54 +1085,6 @@ impl Storage {
 }
 
 impl Storage {
-    /// Captures the exact route-and-preset selection for an immutable commit
-    /// plan. Both identifiers are read under the same storage lock.
-    pub fn current_discovery_previous_selection(&self) -> CoreResult<DiscoveryPreviousSelection> {
-        let connection = self.connection()?;
-        load_discovery_previous_selection(&connection)
-    }
-
-    pub fn list_discovery_compensation_steps(
-        &self,
-        attempt_id: &DiscoveryCommitAttemptId,
-    ) -> CoreResult<Vec<DiscoveryCompensationRecord>> {
-        let connection = self.connection()?;
-        let attempt = load_commit_attempt(&connection, attempt_id)?;
-        let mut statement = connection
-            .prepare(
-                "SELECT id, commit_attempt_id, ordinal, action_id, step_kind, step_json,
-                        status, attempt_count, last_failure_json, created_at,
-                        updated_at, completed_at
-                 FROM provider_discovery_compensation_steps
-                 WHERE commit_attempt_id = ?1
-                 ORDER BY ordinal DESC, id",
-            )
-            .map_err(database_error)?;
-        statement
-            .query_map([attempt_id.as_str()], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, u32>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, String>(5)?,
-                    row.get::<_, String>(6)?,
-                    row.get::<_, u32>(7)?,
-                    row.get::<_, Option<String>>(8)?,
-                    row.get::<_, String>(9)?,
-                    row.get::<_, String>(10)?,
-                    row.get::<_, Option<String>>(11)?,
-                ))
-            })
-            .map_err(database_error)?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(database_error)?
-            .into_iter()
-            .map(|row| decode_compensation_row(row, &attempt.plan))
-            .collect()
-    }
-
     /// Advances a compensation step without splitting failure state.
     ///
     /// A failed or unknown step must use the matching atomic transition API so
@@ -9660,7 +9291,9 @@ fn validate_commit_phase_preconditions(
 
 pub(crate) mod contract_codec;
 mod errors;
+mod queries;
 mod repository_io;
+mod row_mapping;
 mod semantic_view;
 mod types;
 mod validation;
@@ -9686,12 +9319,16 @@ use contract_codec::{
     parse_operation_kind, parse_side_effect_class, parse_timestamp, sha256_hex,
 };
 use errors::{contract_error, corrupted, database_error, discovery_error};
-use repository_io::{
-    ApprovalRow, CompensationRow, compensation_status_transition_allowed, decode_approval_row,
-    decode_candidate_row, decode_compensation_row, decode_evidence_row, ensure_foreign_keys_clean,
+use queries::{
     load_discovery_native_credential_execution, load_operation_by_id, load_pollable_outbox_rows,
     load_pollable_outbox_rows_for_session, load_session_snapshot,
+};
+use repository_io::{
+    compensation_status_transition_allowed, ensure_foreign_keys_clean,
     validate_discovery_native_physical_authority_id,
+};
+use row_mapping::{
+    ApprovalRow, CompensationRow, decode_approval_row, decode_compensation_row, decode_evidence_row,
 };
 #[cfg(test)]
 use validation::is_pristine_discovery_session;
