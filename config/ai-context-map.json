@@ -219,27 +219,29 @@
       }
     },
     "CORE-PROV-001": {
-      "baseline_context_bytes": 971902,
       "commands": [
         "cargo test -p lorepia-core --test model_refresh_concurrency",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
       "max_context_bytes": 250000,
-      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
       "paths": {
         "documents": [
           "crates/core/AGENTS.md"
         ],
         "entrypoints": [
-          "crates/core/src/app.rs"
+          "crates/core/src/app/providers/mod.rs"
         ],
         "implementation": [
           "crates/core/src/catalog.rs",
-          "crates/core/src/app/model_sync.rs"
+          "crates/core/src/app/model_sync.rs",
+          "crates/core/src/app/providers/templates.rs",
+          "crates/core/src/app/providers/connections.rs",
+          "crates/core/src/app/providers/routes.rs",
+          "crates/core/src/app/providers/capabilities.rs",
+          "crates/core/src/app/providers/model_reconciliation.rs"
         ],
         "tests": [
-          "crates/core/tests/model_refresh_concurrency.rs",
-          "crates/core/tests/semantic_provider_vertical.rs"
+          "crates/core/tests/model_refresh_concurrency.rs"
         ]
       }
     },
