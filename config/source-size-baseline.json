@@ -57,7 +57,7 @@
     "crates/storage/src/database.rs": {"bytes": 450407, "lines": 12065},
     "crates/storage/src/discovery_repository.rs": {"bytes": 769337, "lines": 18495},
     "crates/storage/src/generation_attempt.rs": {"bytes": 163943, "lines": 4150},
-    "crates/storage/src/interaction_repository.rs": {"bytes": 686563, "lines": 16862},
+    "crates/storage/src/interaction_repository.rs": {"bytes": 509689, "lines": 12668},
     "crates/storage/src/memory_queue.rs": {"bytes": 231062, "lines": 6110},
     "crates/storage/src/model_sync.rs": {"bytes": 129970, "lines": 3358},
     "crates/storage/src/orchestration.rs": {"bytes": 523360, "lines": 14051},
