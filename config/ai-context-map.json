@@ -1064,23 +1064,28 @@
       }
     },
     "STOR-INT-001": {
-      "baseline_context_bytes": 1454824,
+      "baseline_context_bytes": null,
       "commands": [
         "cargo test -p lorepia-storage --test greeting_conversation_start",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
       "max_context_bytes": 250000,
-      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
       "paths": {
         "documents": [
           "crates/storage/AGENTS.md"
         ],
         "entrypoints": [
-          "crates/storage/src/interaction_repository.rs",
-          "crates/storage/src/database.rs"
+          "crates/storage/src/database/conversations.rs",
+          "crates/storage/src/interaction_repository/types.rs",
+          "crates/storage/src/message_display_projection.rs"
         ],
         "implementation": [
-          "crates/storage/src/message_display_projection.rs"
+          "crates/storage/src/database/branches.rs",
+          "crates/storage/src/database/messages.rs",
+          "crates/storage/src/interaction_repository/checkpoints.rs",
+          "crates/storage/src/interaction_repository/projections.rs",
+          "crates/storage/src/interaction_repository/state.rs",
+          "crates/storage/src/message_display_projection/persistence.rs"
         ],
         "tests": [
           "crates/storage/tests/greeting_conversation_start.rs"
