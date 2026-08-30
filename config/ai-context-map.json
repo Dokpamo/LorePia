@@ -1036,7 +1036,7 @@
       }
     },
     "STOR-DISC-004": {
-      "baseline_context_bytes": 637772,
+      "baseline_context_bytes": 579804,
       "commands": [
         "cargo test -p lorepia-storage --test provider_credential_operations",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
@@ -1051,8 +1051,13 @@
           "crates/storage/src/discovery_repository.rs"
         ],
         "implementation": [
+          "crates/storage/src/discovery_repository/commit_store.rs",
+          "crates/storage/src/discovery_repository/commit_store/provider_graph.rs",
+          "crates/storage/src/discovery_repository/credential/attestation.rs",
+          "crates/storage/src/discovery_repository/credential/authority.rs",
+          "crates/storage/src/discovery_repository/credential/history.rs",
+          "crates/storage/src/discovery_repository/credential_execution.rs",
           "crates/storage/src/discovery_repository/repository_io.rs",
-          "crates/storage/src/discovery_repository/row_mapping.rs",
           "crates/storage/src/discovery_repository/types.rs",
           "crates/storage/src/discovery_repository/validation.rs"
         ],
