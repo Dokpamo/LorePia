@@ -5,6 +5,8 @@ mod auxiliary;
 mod capabilities;
 mod credential;
 mod delivery;
+mod message_action_dispatch;
+mod message_actions;
 mod operation_identity;
 mod preset;
 mod prompt_preparation;
