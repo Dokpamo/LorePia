@@ -285,114 +285,15 @@ pub struct ProviderDiscoveryAssistantResumeBoundary {
     pub draft_review: Option<AssistantDraftReview>,
 }
 
-/// Secret-free options for a cURL-only discovery start.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProviderDiscoveryCurlInput {
-    pub connection_id: ProviderConnectionId,
-    pub display_name: String,
-    pub docs_url: Option<HttpUrl>,
-    pub credential_ref: Option<CredentialRef>,
-    pub preferred_assistant: Option<ModelRouteId>,
-    pub connection_options: ProviderDiscoveryConnectionOptions,
-    pub supplied_evidence_ids: Vec<EvidenceId>,
-}
+mod types;
+mod views;
 
-/// One-shot cURL inspection result.
-///
-/// This type is intentionally not serializable. Its manual `Debug` never
-/// exposes the extracted credential. Callers should immediately move that
-/// credential to the native vault, retain only the opaque credential
-/// reference, and pass `redacted_curl()` to discovery.
-pub struct ProviderCurlInspection {
-    site_url: HttpUrl,
-    origin: CanonicalOrigin,
-    redacted_curl: String,
-    auth_hints: Vec<CurlAuthHint>,
-    evidence: ParsedCurlEvidence,
-    extracted_credential: Option<SecretBytes>,
-}
-
-impl std::fmt::Debug for ProviderCurlInspection {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("ProviderCurlInspection")
-            .field("site_url", &self.site_url)
-            .field("origin", &self.origin)
-            .field("redacted_curl", &self.redacted_curl)
-            .field("auth_hints", &self.auth_hints)
-            .field(
-                "extracted_credential_present",
-                &self.extracted_credential.is_some(),
-            )
-            .finish_non_exhaustive()
-    }
-}
-
-impl ProviderCurlInspection {
-    pub fn site_url(&self) -> &HttpUrl {
-        &self.site_url
-    }
-
-    pub fn origin(&self) -> &CanonicalOrigin {
-        &self.origin
-    }
-
-    pub fn redacted_curl(&self) -> &str {
-        &self.redacted_curl
-    }
-
-    pub fn auth_hints(&self) -> &[CurlAuthHint] {
-        &self.auth_hints
-    }
-
-    pub fn evidence(&self) -> &ParsedCurlEvidence {
-        &self.evidence
-    }
-
-    pub fn extracted_credential(&self) -> Option<&[u8]> {
-        self.extracted_credential
-            .as_ref()
-            .map(SecretBytes::expose_to_vault)
-    }
-
-    pub fn into_parts(self) -> (ParsedCurlEvidence, Option<SecretBytes>) {
-        (self.evidence, self.extracted_credential)
-    }
-}
-
-/// A source selector with no serializable raw cURL representation.
-///
-/// Site and known-provider sources are reconstructed from the sanitized input.
-/// A cURL source is one-shot: if the process stops before it is reduced to a
-/// safe deterministic result, the user must explicitly restart with a newly
-/// supplied source.
-pub struct ProviderDiscoverySource {
-    intent: DiscoverySourceIntent,
-    transient: Option<DeterministicDiscoverySource>,
-    declared_connection_options: Option<ProviderDiscoveryConnectionOptions>,
-    derived_site_url: Option<HttpUrl>,
-}
-
-/// One fresh evidence source accepted only while discovery is waiting for more
-/// evidence.
-///
-/// The document variant is already secret-free. The cURL variant owns a
-/// one-shot, zeroizing input and therefore implements neither serialization,
-/// cloning, nor debug formatting.
-pub enum ProviderDiscoveryAdditionalEvidence {
-    DocumentUrl(HttpUrl),
-    Curl(SecretCurlInput),
-}
-
-impl ProviderDiscoveryAdditionalEvidence {
-    pub const fn document_url(url: HttpUrl) -> Self {
-        Self::DocumentUrl(url)
-    }
-
-    pub const fn curl(input: SecretCurlInput) -> Self {
-        Self::Curl(input)
-    }
-}
+pub(crate) use types::ProviderDiscoveryOrchestrator;
+use types::{DiscoverySourceIntent, DiscoveryWorkingDraft};
+pub use types::{
+    ProviderCurlInspection, ProviderDiscoveryAdditionalEvidence, ProviderDiscoveryCurlInput,
+    ProviderDiscoverySource,
+};
 
 impl ProviderDiscoverySource {
     pub fn known_provider(template: BuiltInTemplateId) -> Self {
@@ -450,114 +351,7 @@ impl ProviderDiscoverySource {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-enum DiscoverySourceIntent {
-    KnownProvider {
-        template_id: lorepia_domain::ProviderTemplateId,
-    },
-    Site,
-    Curl,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct DiscoveryWorkingDraft {
-    schema_version: u32,
-    source: DiscoverySourceIntent,
-    deterministic: Option<DeterministicDiscoveryOutput>,
-    evidence_ids: Vec<EvidenceId>,
-    extra_evidence_ids: Vec<EvidenceId>,
-    selected_candidate_id: Option<DiscoveryCandidateId>,
-    template: Option<ProviderTemplate>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    catalog_authority: Option<DiscoveryCatalogAuthorityBinding>,
-    connection: Option<ProviderConnection>,
-    routes: Vec<ModelRoute>,
-    observations: Vec<CapabilityObservation>,
-    presets: Vec<GenerationPreset>,
-    credential_approval_id: Option<DiscoveryApprovalId>,
-    probe_route_ids: Vec<ModelRouteId>,
-    probe_failure_count: u32,
-    assistant: Option<AssistantEngineSnapshot>,
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    assistant_evidence_claims: BTreeMap<EvidenceId, Vec<EvidenceClaim>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    assistant_approval_binding: Option<DiscoveryApprovalBinding>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    assistant_more_evidence_questions: Vec<UnresolvedQuestion>,
-}
-
-impl DiscoveryWorkingDraft {
-    fn new(source: DiscoverySourceIntent) -> Self {
-        Self {
-            schema_version: WORKING_DRAFT_SCHEMA_VERSION,
-            source,
-            deterministic: None,
-            evidence_ids: Vec::new(),
-            extra_evidence_ids: Vec::new(),
-            selected_candidate_id: None,
-            template: None,
-            catalog_authority: None,
-            connection: None,
-            routes: Vec::new(),
-            observations: Vec::new(),
-            presets: Vec::new(),
-            credential_approval_id: None,
-            probe_route_ids: Vec::new(),
-            probe_failure_count: 0,
-            assistant: None,
-            assistant_evidence_claims: BTreeMap::new(),
-            assistant_approval_binding: None,
-            assistant_more_evidence_questions: Vec::new(),
-        }
-    }
-}
-
-/// Coordinates one discovery graph against a Storage and Core runtime.
-pub(crate) struct ProviderDiscoveryOrchestrator<'a> {
-    storage: &'a Storage,
-    runtime: &'a Handle,
-    recovery_owner: DiscoveryRecoveryOwner,
-}
-
-impl<'a> ProviderDiscoveryOrchestrator<'a> {
-    pub const fn new(
-        storage: &'a Storage,
-        runtime: &'a Handle,
-        recovery_owner: DiscoveryRecoveryOwner,
-    ) -> Self {
-        Self {
-            storage,
-            runtime,
-            recovery_owner,
-        }
-    }
-
-    pub fn get(&self, session_id: &DiscoverySessionId) -> CoreResult<DiscoverySessionSnapshot> {
-        self.storage.get_discovery_session(session_id)
-    }
-
-    pub fn candidates(&self, session_id: &DiscoverySessionId) -> CoreResult<Vec<CandidateView>> {
-        self.storage
-            .read_discovery_candidates(session_id, MAX_DISCOVERY_ROWS)
-    }
-
-    pub fn evidence(
-        &self,
-        session_id: &DiscoverySessionId,
-    ) -> CoreResult<Vec<DiscoveryEvidenceRecord>> {
-        self.storage
-            .list_discovery_evidence(session_id, MAX_DISCOVERY_ROWS)
-    }
-
-    pub fn review(
-        &self,
-        session_id: &DiscoverySessionId,
-    ) -> CoreResult<Option<DiscoveryReviewDiff>> {
-        self.storage.get_discovery_review(session_id)
-    }
-
+impl ProviderDiscoveryOrchestrator<'_> {
     pub fn assistant_resume_boundary(
         &self,
         session_id: &DiscoverySessionId,
@@ -661,32 +455,6 @@ impl<'a> ProviderDiscoveryOrchestrator<'a> {
         }
     }
 
-    pub fn poll_outbox(
-        &self,
-        limit: u32,
-        available_at: DateTime<Utc>,
-    ) -> CoreResult<Vec<DiscoveryOutboxEvent>> {
-        self.storage.poll_discovery_events(limit, available_at)
-    }
-
-    pub fn poll_outbox_for_session(
-        &self,
-        session_id: &DiscoverySessionId,
-        limit: u32,
-        available_at: DateTime<Utc>,
-    ) -> CoreResult<Vec<DiscoveryOutboxEvent>> {
-        self.storage
-            .poll_discovery_events_for_session(session_id, limit, available_at)
-    }
-
-    pub fn ack_outbox(
-        &self,
-        event_id: &DiscoveryEventId,
-        delivered_at: DateTime<Utc>,
-    ) -> CoreResult<bool> {
-        self.storage.ack_discovery_event(event_id, delivered_at)
-    }
-
     /// Marks unfinished work interrupted or outcome-unknown. It never executes
     /// a prepared operation and therefore never replays a request on startup.
     pub fn recover_startup(
@@ -696,18 +464,6 @@ impl<'a> ProviderDiscoveryOrchestrator<'a> {
         let resumable = resumable_assistant_operation_ids(self.storage)?;
         self.storage
             .recover_unfinished_discovery_operations_except(recovered_at, &resumable)
-    }
-
-    pub fn approvals(
-        &self,
-        session_id: &DiscoverySessionId,
-    ) -> CoreResult<Vec<DiscoveryApprovalRecord>> {
-        self.storage
-            .list_discovery_approvals(session_id, MAX_DISCOVERY_ROWS)
-    }
-
-    pub fn list(&self, limit: u32) -> CoreResult<Vec<DiscoverySessionSnapshot>> {
-        self.storage.list_discovery_sessions(limit)
     }
 
     pub fn unfinished_recovery_candidates(&self) -> CoreResult<Vec<DiscoverySessionSnapshot>> {
@@ -6074,14 +5830,6 @@ pub fn provider_discovery_action_envelope(
 }
 
 impl crate::app::Core {
-    pub(crate) fn provider_discovery(&self) -> ProviderDiscoveryOrchestrator<'_> {
-        ProviderDiscoveryOrchestrator::new(
-            self.storage(),
-            self.runtime_handle(),
-            self.discovery_recovery_owner(),
-        )
-    }
-
     fn prepared_discovery_credential_reservation_id(
         &self,
         session_id: &DiscoverySessionId,
@@ -6193,13 +5941,6 @@ impl crate::app::Core {
             .begin_curl_with_credential_authority(input, curl, credential_authority)
     }
 
-    pub fn list_provider_discoveries(
-        &self,
-        limit: u32,
-    ) -> CoreResult<Vec<DiscoverySessionSnapshot>> {
-        self.provider_discovery().list(limit)
-    }
-
     /// Returns every session with an unfinished durable operation for backend
     /// startup recovery. Unlike the user-facing history query, this scan is
     /// complete and is not capped to the latest sessions.
@@ -6217,32 +5958,11 @@ impl crate::app::Core {
         self.provider_discovery().credential_recovery_candidates()
     }
 
-    pub fn get_provider_discovery(
-        &self,
-        session_id: &DiscoverySessionId,
-    ) -> CoreResult<DiscoverySessionSnapshot> {
-        self.provider_discovery().get(session_id)
-    }
-
-    pub fn list_provider_discovery_evidence(
-        &self,
-        session_id: &DiscoverySessionId,
-    ) -> CoreResult<Vec<DiscoveryEvidenceRecord>> {
-        self.provider_discovery().evidence(session_id)
-    }
-
     pub fn list_provider_discovery_approvals(
         &self,
         session_id: &DiscoverySessionId,
     ) -> CoreResult<Vec<DiscoveryApprovalRecord>> {
         self.provider_discovery().approvals(session_id)
-    }
-
-    pub fn get_provider_discovery_review(
-        &self,
-        session_id: &DiscoverySessionId,
-    ) -> CoreResult<Option<DiscoveryReviewDiff>> {
-        self.provider_discovery().review(session_id)
     }
 
     pub fn get_provider_discovery_approval_proposal(
@@ -6472,32 +6192,6 @@ impl crate::app::Core {
                 expected_connection_id,
                 expected_connection_binding_sha256,
             )
-    }
-
-    pub fn poll_provider_discovery_events(
-        &self,
-        limit: u32,
-        available_at: DateTime<Utc>,
-    ) -> CoreResult<Vec<DiscoveryOutboxEvent>> {
-        self.provider_discovery().poll_outbox(limit, available_at)
-    }
-
-    pub fn poll_provider_discovery_events_for_session(
-        &self,
-        session_id: &DiscoverySessionId,
-        limit: u32,
-        available_at: DateTime<Utc>,
-    ) -> CoreResult<Vec<DiscoveryOutboxEvent>> {
-        self.provider_discovery()
-            .poll_outbox_for_session(session_id, limit, available_at)
-    }
-
-    pub fn ack_provider_discovery_event(
-        &self,
-        event_id: &DiscoveryEventId,
-        delivered_at: DateTime<Utc>,
-    ) -> CoreResult<bool> {
-        self.provider_discovery().ack_outbox(event_id, delivered_at)
     }
 
     pub fn recover_provider_discovery(
