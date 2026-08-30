@@ -1115,6 +1115,8 @@
           "crates/storage/src/database/finalize.rs",
           "crates/storage/src/interaction_repository/effects.rs",
           "crates/storage/src/interaction_repository/event_transactions.rs",
+          "crates/storage/src/interaction_repository/proposal_records.rs",
+          "crates/storage/src/interaction_repository/proposals.rs",
           "crates/storage/src/message_display_projection.rs"
         ],
         "tests": [
