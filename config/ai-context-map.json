@@ -1005,7 +1005,7 @@
       }
     },
     "STOR-DISC-003": {
-      "baseline_context_bytes": 507785,
+      "baseline_context_bytes": 484805,
       "commands": [
         "cargo test -p lorepia-storage --lib discovery_repository::tests",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
@@ -1020,13 +1020,16 @@
           "crates/storage/src/discovery_repository.rs"
         ],
         "implementation": [
-          "crates/storage/src/discovery_repository/queries.rs",
-          "crates/storage/src/discovery_repository/row_mapping.rs",
+          "crates/storage/src/discovery_repository/approval_store.rs",
+          "crates/storage/src/discovery_repository/event_outbox.rs",
+          "crates/storage/src/discovery_repository/transition_store.rs",
+          "crates/storage/src/discovery_repository/transition_store/artifacts.rs",
           "crates/storage/src/discovery_repository/types.rs",
           "crates/storage/src/discovery_repository/validation.rs"
         ],
         "tests": [
           "crates/storage/src/discovery_repository/tests/approvals.rs",
+          "crates/storage/src/discovery_repository/tests/begin.rs",
           "crates/storage/src/discovery_repository/tests/evidence.rs",
           "crates/storage/src/discovery_repository/tests/transitions.rs"
         ]
