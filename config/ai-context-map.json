@@ -1092,7 +1092,7 @@
       }
     },
     "STOR-INT-002": {
-      "baseline_context_bytes": 670434,
+      "baseline_context_bytes": null,
       "commands": [
         "cargo test -p lorepia-storage --lib database::tests",
         "cargo test -p lorepia-storage --lib interaction_repository::tests",
@@ -1100,7 +1100,7 @@
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
       "max_context_bytes": 250000,
-      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "over_budget_reason": null,
       "paths": {
         "documents": [
           "crates/storage/AGENTS.md",
@@ -1111,18 +1111,13 @@
           "crates/storage/src/interaction_repository.rs"
         ],
         "implementation": [
-          "crates/storage/src/interaction_repository/event_transactions.rs",
-          "crates/storage/src/interaction_repository/generation_proposal_persistence.rs",
-          "crates/storage/src/interaction_repository/generation_proposal_queries.rs",
           "crates/storage/src/interaction_repository/generation_proposals.rs",
-          "crates/storage/src/interaction_repository/generation_review.rs",
-          "crates/storage/src/interaction_repository/generation_review_authority.rs",
-          "crates/storage/src/interaction_repository/proposal_records.rs"
+          "crates/storage/src/interaction_repository/generation_materialization.rs",
+          "crates/storage/src/interaction_repository/replay.rs"
         ],
         "tests": [
-          "crates/storage/src/database/tests/conversation_and_import.rs",
-          "crates/storage/src/database/tests/generation_completion.rs",
-          "crates/storage/tests/interaction_derived_event_storage.rs"
+          "crates/storage/src/interaction_repository/tests/generation_materialization.rs",
+          "crates/storage/src/interaction_repository/tests/recovery.rs"
         ]
       }
     },
