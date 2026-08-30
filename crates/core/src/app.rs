@@ -8,10 +8,8 @@ use std::{
 };
 
 use crate::{
-    CoreConfig, DiscoveryRecoveryOwner, Revisioned,
-    catalog::{CatalogRouteProjection, PendingProviderCatalogImportPlan},
-    core_version,
-    revision::project_revision,
+    CoreConfig, DiscoveryRecoveryOwner, Revisioned, catalog::PendingProviderCatalogImportPlan,
+    core_version, revision::project_revision,
 };
 use chrono::{DateTime, Utc};
 #[cfg(test)]
@@ -21,38 +19,38 @@ use lorepia_chat::{
 };
 use lorepia_content::{StagedAsset, prepare_import};
 use lorepia_domain::{
-    ApiFamily, AppSettings, BoundedJson, CanonicalOrigin, CapabilityKey, CapabilityObservation,
-    CapabilityValue, Character, CharacterContentV1, Confidence, ConnectionStatus, Conversation,
-    ConversationBranch, ConversationBranchId, ConversationId, ConversationMode, ConversationState,
-    CoreError, CoreErrorCode, CoreResult, EndpointPath, GenerationPreset, GenerationPresetId,
-    GenerationStatus, GenerationTarget, HealthReport, ImportInspection, ImportLimits, InspectionId,
-    Message, MessageId, MessageStatus, ModelMetadataSource, ModelRoute, ModelRouteConfig,
-    ModelRouteId, ObservationId, ObservationSource, OpaqueReasoningState, ProviderConnection,
-    ProviderConnectionId, ProviderProfile, ProviderTemplate, Sha256Digest, SupportStatus,
-    TransformPhase,
+    ApiFamily, AppSettings, BoundedJson, CanonicalOrigin, Character, CharacterContentV1,
+    ConnectionStatus, Conversation, ConversationBranch, ConversationBranchId, ConversationId,
+    ConversationMode, ConversationState, CoreError, CoreErrorCode, CoreResult, EndpointPath,
+    GenerationPreset, GenerationPresetId, GenerationStatus, HealthReport, ImportInspection,
+    ImportLimits, InspectionId, Message, MessageId, MessageStatus, ModelMetadataSource, ModelRoute,
+    ModelRouteConfig, ModelRouteId, OpaqueReasoningState, ProviderConnection, ProviderConnectionId,
+    ProviderTemplate, Sha256Digest, TransformPhase,
 };
 #[cfg(test)]
 use lorepia_domain::{
-    CredentialRef, GenerationId, GenerationProviderProvenance, GenerationRecord, GenerationRequest,
-    MessageRole, ModelAvailability, OpaqueReasoningContext, ParameterId, ParameterType,
-    ProviderConnectionDraft, ProviderLocalNetworkApproval, ProviderNetworkMode, TransformSet,
-    UiParameterLevel, VariableMap,
+    CapabilityKey, CapabilityObservation, CapabilityValue, Confidence, CredentialRef, GenerationId,
+    GenerationProviderProvenance, GenerationRecord, GenerationRequest, GenerationTarget,
+    MessageRole, ModelAvailability, ObservationId, ObservationSource, OpaqueReasoningContext,
+    ParameterId, ParameterType, ProviderConnectionDraft, ProviderLocalNetworkApproval,
+    ProviderNetworkMode, ProviderProfile, SupportStatus, TransformSet, UiParameterLevel,
+    VariableMap,
 };
+use lorepia_providers::parameter_mapping::ParameterEngine;
+#[cfg(test)]
+use lorepia_providers::parameter_mapping::ReasoningWireDialect;
 #[cfg(test)]
 use lorepia_providers::parameter_mapping::{
     GEMINI_OPAQUE_REASONING_TOPOLOGY_ERROR, PromptCacheWireDialect,
 };
-use lorepia_providers::parameter_mapping::{
-    OpenRouterReasoningWireStyle, ParameterEngine, ReasoningWireDialect,
-};
-use lorepia_providers::{
-    AdapterRegistry, ListedModel, ListedModelCapabilities, ListedModelCapability,
-    ListedModelReasoningCapability, ModelListResult, ModelRecordSource,
-    OpenRouterReasoningEffortSupport, OpenRouterSupportedParameter,
-    OpenRouterSupportedParameterSupport,
-};
+use lorepia_providers::{AdapterRegistry, ListedModel, ModelListResult, ModelRecordSource};
 #[cfg(test)]
-use lorepia_providers::{BuiltInTemplateId, OPAQUE_REASONING_STATE_UNSUPPORTED_ERROR, Provider};
+use lorepia_providers::{
+    BuiltInTemplateId, ListedModelCapabilities, ListedModelCapability,
+    ListedModelReasoningCapability, OPAQUE_REASONING_STATE_UNSUPPORTED_ERROR,
+    OpenRouterReasoningEffortSupport, OpenRouterSupportedParameter,
+    OpenRouterSupportedParameterSupport, Provider,
+};
 use lorepia_storage::{
     DatabaseStats, MessageDisplayProjectionWrite, MessageTransformApplicationWrite,
     MessageTransformDisposition, MessageTransformPipelineFailureWrite, MessageTransformStage,
@@ -122,12 +120,16 @@ use generation_workflow::{
 use runtime_control::RuntimeControl;
 
 pub use providers::ProviderTemplateView;
-use providers::validate_provider_template;
+pub(crate) use providers::provider_api_capability_observations;
 #[cfg(test)]
 use providers::{
     MAX_PROVIDER_BASE_URL_BYTES, MAX_PROVIDER_BASE_URL_CHARS, MAX_PROVIDER_DISPLAY_NAME_BYTES,
     MAX_PROVIDER_DISPLAY_NAME_CHARS, MAX_PROVIDER_ID_BYTES, MAX_PROVIDER_ID_CHARS,
     MAX_PROVIDER_MODEL_BYTES, MAX_PROVIDER_MODEL_CHARS,
+};
+use providers::{
+    PROVIDER_API_CAPABILITY_FRESHNESS, openrouter_reasoning_dialect_from_capabilities,
+    validate_provider_template, validate_settings_generation_target,
 };
 
 pub use portable_runtime_state::{
@@ -167,7 +169,6 @@ const MAX_CONVERSATION_TITLE_BYTES: usize = 1_024;
 const MAX_CONVERSATION_TITLE_CHARS: usize = 256;
 const MAX_BRANCH_TITLE_BYTES: usize = 1_024;
 const MAX_BRANCH_TITLE_CHARS: usize = 256;
-const PROVIDER_API_CAPABILITY_FRESHNESS: chrono::Duration = chrono::Duration::hours(24);
 const GENERATION_PERSISTENCE_FAILURE_MESSAGE: &str =
     "generation state could not be saved; retry the message";
 const INTERACTION_DERIVED_SUPERVISOR_IDLE_POLL: Duration = Duration::from_secs(30);
@@ -198,12 +199,6 @@ struct PendingImport {
     character_content: CharacterContentV1,
     plan_hash: String,
     staged_assets: Vec<StagedAsset>,
-}
-
-enum MigratedLegacyTargetClassification {
-    Ordinary,
-    Current { profile_id: String },
-    Alias,
 }
 
 /// Non-secret provenance for one successful provider model-list request.
@@ -815,13 +810,6 @@ impl Core {
         self.inner.storage.save_settings(settings)
     }
 
-    pub fn list_model_routes(
-        &self,
-        connection_id: &ProviderConnectionId,
-    ) -> CoreResult<Vec<ModelRoute>> {
-        self.inner.storage.list_model_routes(connection_id)
-    }
-
     /// Legacy immediate-refresh entry point.
     ///
     /// Model catalog writes now require a durable diff and explicit hash
@@ -839,454 +827,6 @@ impl Core {
         Err(CoreError::invalid(
             "immediate model refresh is disabled; start a durable model synchronization and approve its review hash",
         ))
-    }
-
-    pub fn upsert_model_route(&self, mut route: ModelRoute) -> CoreResult<ModelRoute> {
-        if self
-            .retained_legacy_profile_for_connection(&route.connection_id)?
-            .is_some()
-        {
-            return Err(CoreError::invalid(
-                "migrated legacy model routes are managed through their retained provider profile",
-            ));
-        }
-        match self.inner.storage.get_model_route(&route.id) {
-            Ok(existing) => {
-                if route.connection_id != existing.connection_id
-                    || route.api_family != existing.api_family
-                    || route.model_id != existing.model_id
-                    || route.route_config != existing.route_config
-                    || route.first_seen_at != existing.first_seen_at
-                {
-                    return Err(CoreError::invalid(
-                        "an existing model route cannot be rebound to another provider, model, or route discriminator",
-                    ));
-                }
-                // Refresh/catalog provenance is owned by trusted Rust
-                // ingestion paths. A native edit may change only the
-                // user-facing label and availability.
-                route.miss_count = existing.miss_count;
-                route.raw_metadata = existing.raw_metadata;
-                route.metadata_source = existing.metadata_source;
-                route.metadata_observed_at = existing.metadata_observed_at;
-                route.last_reconciled_sync_job_id = existing.last_reconciled_sync_job_id;
-                route.metadata_sync_job_id = existing.metadata_sync_job_id;
-                route.last_seen_at = existing.last_seen_at;
-            }
-            Err(error) if error.code == CoreErrorCode::NotFound => {
-                let connection = self
-                    .inner
-                    .storage
-                    .get_provider_connection(&route.connection_id)?;
-                let template = self
-                    .inner
-                    .storage
-                    .get_provider_template(&connection.template_id, connection.template_version)?;
-                if route.api_family != template.api_family {
-                    return Err(CoreError::invalid(
-                        "model route API family does not match its provider template",
-                    ));
-                }
-                if route.miss_count != 0
-                    || route.raw_metadata.is_some()
-                    || !matches!(
-                        route.metadata_source,
-                        ModelMetadataSource::Legacy | ModelMetadataSource::UserOverride
-                    )
-                    || route.metadata_observed_at.is_some()
-                    || route.last_reconciled_sync_job_id.is_some()
-                    || route.metadata_sync_job_id.is_some()
-                {
-                    return Err(CoreError::invalid(
-                        "a native-created model route cannot claim provider, catalog, probe, or synchronization provenance",
-                    ));
-                }
-            }
-            Err(error) => return Err(error),
-        }
-        self.inner.storage.save_model_route(&route)?;
-        Ok(route)
-    }
-
-    pub fn delete_model_route(&self, id: &ModelRouteId) -> CoreResult<()> {
-        let route = self.inner.storage.get_model_route(id)?;
-        if self.is_current_migrated_legacy_route(&route)? {
-            return Err(CoreError::invalid(
-                "the migrated legacy profile's current model route cannot be deleted independently",
-            ));
-        }
-        self.inner.storage.delete_model_route(id)
-    }
-
-    pub fn upsert_capability_observation(
-        &self,
-        observation: CapabilityObservation,
-    ) -> CoreResult<CapabilityObservation> {
-        if observation.source == ObservationSource::SignedLorepiaCatalog {
-            return Err(CoreError::invalid(
-                "signed catalog observations are derived from the active verified catalog and cannot be stored independently",
-            ));
-        }
-        let route = self
-            .inner
-            .storage
-            .get_model_route(&observation.model_route_id)?;
-        let connection = self
-            .inner
-            .storage
-            .get_provider_connection(&route.connection_id)?;
-        let template = self
-            .inner
-            .storage
-            .get_provider_template(&connection.template_id, connection.template_version)?;
-        validate_capability_wire_metadata(&route, &template, &observation)?;
-        self.inner
-            .storage
-            .upsert_capability_observation(&observation)?;
-        Ok(observation)
-    }
-
-    /// Stores a capability override explicitly authored by the local user.
-    ///
-    /// Provider API, signed catalog, probe, documentation, and assistant
-    /// observations have dedicated trusted ingestion paths and cannot be
-    /// impersonated through a native binding.
-    pub fn upsert_user_capability_override(
-        &self,
-        mut observation: CapabilityObservation,
-    ) -> CoreResult<CapabilityObservation> {
-        if observation.source != ObservationSource::UserOverride {
-            return Err(CoreError::invalid(
-                "the user override API only accepts user_override observations",
-            ));
-        }
-        if matches!(observation.value, CapabilityValue::Structured(_)) {
-            return Err(CoreError::invalid(
-                "structured provider wire metadata cannot be authored as a user override",
-            ));
-        }
-        if !matches!(
-            observation.status,
-            SupportStatus::Verified
-                | SupportStatus::Unsupported
-                | SupportStatus::Unknown
-                | SupportStatus::Conditional
-        ) {
-            return Err(CoreError::invalid(
-                "user override status must be verified, unsupported, unknown, or conditional",
-            ));
-        }
-        observation.confidence = Confidence::High;
-        observation.observed_at = Utc::now();
-        observation.evidence_ref = None;
-        if observation
-            .expires_at
-            .is_some_and(|expires_at| expires_at <= observation.observed_at)
-        {
-            return Err(CoreError::invalid(
-                "a user capability override expiry must be in the future",
-            ));
-        }
-        self.upsert_capability_observation(observation)
-    }
-
-    pub fn list_capability_observations(
-        &self,
-        model_route_id: &ModelRouteId,
-    ) -> CoreResult<Vec<CapabilityObservation>> {
-        let now = Utc::now();
-        let route = self.inner.storage.get_model_route(model_route_id)?;
-        let catalog = self.catalog_route_projection_at(&route, now)?;
-        let mut observations = self
-            .inner
-            .storage
-            .list_capability_observations(model_route_id)?
-            .into_iter()
-            .filter(|observation| observation.source != ObservationSource::SignedLorepiaCatalog)
-            .map(|observation| (observation.id.clone(), observation))
-            .collect::<HashMap<_, _>>();
-        for observation in catalog.capability_observations {
-            observations.insert(observation.id.clone(), observation);
-        }
-        let mut observations = observations.into_values().collect::<Vec<_>>();
-        observations.sort_by(|left, right| {
-            capability_key_identity(left.key)
-                .cmp(capability_key_identity(right.key))
-                .then_with(|| left.id.cmp(&right.id))
-        });
-        Ok(observations)
-    }
-
-    pub fn delete_capability_observation(&self, id: &ObservationId) -> CoreResult<()> {
-        self.inner.storage.delete_capability_observation(id)
-    }
-
-    pub fn delete_user_capability_override(
-        &self,
-        model_route_id: &ModelRouteId,
-        id: &ObservationId,
-    ) -> CoreResult<()> {
-        let observation = self
-            .inner
-            .storage
-            .list_capability_observations(model_route_id)?
-            .into_iter()
-            .find(|observation| observation.id == *id)
-            .ok_or_else(|| {
-                CoreError::new(
-                    CoreErrorCode::NotFound,
-                    "capability observation was not found",
-                    false,
-                )
-            })?;
-        if observation.source != ObservationSource::UserOverride {
-            return Err(CoreError::invalid(
-                "only user_override observations can be deleted through this API",
-            ));
-        }
-        self.inner.storage.delete_capability_observation(id)
-    }
-
-    pub fn effective_capability(
-        &self,
-        model_route_id: &ModelRouteId,
-        key: CapabilityKey,
-    ) -> CoreResult<Option<EffectiveCapability>> {
-        let now = Utc::now();
-        let route = self.inner.storage.get_model_route(model_route_id)?;
-        let catalog = self.catalog_route_projection_at(&route, now)?;
-        effective_capability_at(
-            &self.inner.storage,
-            &catalog.capability_observations,
-            model_route_id,
-            key,
-            now,
-        )
-    }
-
-    /// Return the fresh model-specific parameter contract in effect now.
-    ///
-    /// Signed exact/glob entries override the family fallback by stable
-    /// parameter ID. Stale signed mappings are not allowed to alter a request;
-    /// expired layers have already been removed from the active projection.
-    pub fn effective_parameter_specs(
-        &self,
-        model_route_id: &ModelRouteId,
-    ) -> CoreResult<Vec<lorepia_domain::ParameterSpec>> {
-        let now = Utc::now();
-        let route = self.inner.storage.get_model_route(model_route_id)?;
-        let connection = self
-            .inner
-            .storage
-            .get_provider_connection(&route.connection_id)?;
-        let template = self
-            .inner
-            .storage
-            .get_provider_template(&connection.template_id, connection.template_version)?;
-        let catalog = self
-            .operational_provider_catalog_projection_at(now)?
-            .route_projection(&route, &connection.template_id);
-        let base = if catalog.matched {
-            catalog.parameters
-        } else {
-            template.default_manifest.parameters.clone()
-        };
-        effective_route_parameter_specs(&route, &template, &base, &catalog.signed_parameters, now)
-    }
-
-    fn catalog_route_projection_at(
-        &self,
-        route: &ModelRoute,
-        now: DateTime<Utc>,
-    ) -> CoreResult<CatalogRouteProjection> {
-        let connection = self
-            .inner
-            .storage
-            .get_provider_connection(&route.connection_id)?;
-        Ok(self
-            .operational_provider_catalog_projection_at(now)?
-            .route_projection(route, &connection.template_id))
-    }
-
-    /// Atomic ingestion point for direct provider model metadata.
-    pub fn record_provider_api_capability_observations(
-        &self,
-        observations: Vec<CapabilityObservation>,
-    ) -> CoreResult<Vec<CapabilityObservation>> {
-        self.record_capability_observations_from_source(
-            observations,
-            ObservationSource::ProviderApi,
-        )
-    }
-
-    /// Atomic ingestion point for one-shot probe results.
-    pub fn record_probe_capability_observations(
-        &self,
-        observations: Vec<CapabilityObservation>,
-    ) -> CoreResult<Vec<CapabilityObservation>> {
-        self.record_capability_observations_from_source(
-            observations,
-            ObservationSource::CapabilityProbe,
-        )
-    }
-
-    fn record_capability_observations_from_source(
-        &self,
-        observations: Vec<CapabilityObservation>,
-        expected_source: ObservationSource,
-    ) -> CoreResult<Vec<CapabilityObservation>> {
-        let mut routes = HashMap::<ModelRouteId, (ModelRoute, ProviderTemplate)>::new();
-        for observation in &observations {
-            if observation.source != expected_source {
-                return Err(CoreError::invalid(
-                    "capability observation source does not match the ingestion path",
-                ));
-            }
-            let (route, template) = if let Some(route) = routes.get(&observation.model_route_id) {
-                route
-            } else {
-                let route = self
-                    .inner
-                    .storage
-                    .get_model_route(&observation.model_route_id)?;
-                let connection = self
-                    .inner
-                    .storage
-                    .get_provider_connection(&route.connection_id)?;
-                let template = self
-                    .inner
-                    .storage
-                    .get_provider_template(&connection.template_id, connection.template_version)?;
-                routes.insert(observation.model_route_id.clone(), (route, template));
-                routes
-                    .get(&observation.model_route_id)
-                    .expect("inserted capability route")
-            };
-            validate_capability_wire_metadata(route, template, observation)?;
-        }
-        self.inner
-            .storage
-            .upsert_capability_observations(&observations)?;
-        Ok(observations)
-    }
-
-    pub fn list_generation_presets(
-        &self,
-        model_route_id: &ModelRouteId,
-    ) -> CoreResult<Vec<GenerationPreset>> {
-        self.inner.storage.list_generation_presets(model_route_id)
-    }
-
-    pub fn upsert_generation_preset(
-        &self,
-        preset: GenerationPreset,
-    ) -> CoreResult<GenerationPreset> {
-        let route = self.inner.storage.get_model_route(&preset.model_route_id)?;
-        if self
-            .retained_legacy_profile_for_connection(&route.connection_id)?
-            .is_some()
-        {
-            return Err(CoreError::invalid(
-                "migrated legacy generation presets are managed through their retained provider profile",
-            ));
-        }
-        self.validate_generation_preset_candidate(&preset)?;
-        self.inner.storage.save_generation_preset(&preset)?;
-        Ok(preset)
-    }
-
-    pub fn delete_generation_preset(&self, id: &GenerationPresetId) -> CoreResult<()> {
-        let preset = self.inner.storage.get_generation_preset(id)?;
-        let route = self.inner.storage.get_model_route(&preset.model_route_id)?;
-        if preset.id.as_str() == route.id.as_str()
-            && self.is_current_migrated_legacy_route(&route)?
-        {
-            return Err(CoreError::invalid(
-                "the migrated legacy profile's current generation preset cannot be deleted independently",
-            ));
-        }
-        self.inner.storage.delete_generation_preset(id)
-    }
-
-    pub fn select_generation_target(
-        &self,
-        target: Option<GenerationTarget>,
-    ) -> CoreResult<AppSettings> {
-        let (selected_provider_profile_id, selected_model_route_id, selected_generation_preset_id) =
-            if let Some(target) = target {
-                validate_generation_target_plan(self, &target)?;
-                let selected_provider_profile_id = match self
-                    .classify_migrated_legacy_target(&target)?
-                {
-                    MigratedLegacyTargetClassification::Ordinary => None,
-                    MigratedLegacyTargetClassification::Current { profile_id } => Some(profile_id),
-                    MigratedLegacyTargetClassification::Alias => {
-                        return Err(CoreError::invalid(
-                            "select the retained legacy provider profile instead of a custom target from its migrated connection",
-                        ));
-                    }
-                };
-                (
-                    selected_provider_profile_id,
-                    Some(target.model_route_id),
-                    Some(target.generation_preset_id),
-                )
-            } else {
-                (None, None, None)
-            };
-        self.inner.storage.save_generation_target_selection(
-            selected_provider_profile_id,
-            selected_model_route_id,
-            selected_generation_preset_id,
-        )
-    }
-
-    fn retained_legacy_profile_for_connection(
-        &self,
-        connection_id: &ProviderConnectionId,
-    ) -> CoreResult<Option<ProviderProfile>> {
-        match self
-            .inner
-            .storage
-            .get_provider_profile(connection_id.as_str())
-        {
-            Ok(profile) => Ok(Some(profile)),
-            Err(error) if error.code == CoreErrorCode::NotFound => Ok(None),
-            Err(error) => Err(error),
-        }
-    }
-
-    fn is_current_migrated_legacy_route(&self, route: &ModelRoute) -> CoreResult<bool> {
-        Ok(self
-            .retained_legacy_profile_for_connection(&route.connection_id)?
-            .is_some_and(|profile| {
-                route.api_family == ApiFamily::OpenAiChatCompletions
-                    && route.model_id == profile.model
-                    && route.route_config == ModelRouteConfig::default()
-                    && route.metadata_source == ModelMetadataSource::Legacy
-            }))
-    }
-
-    fn classify_migrated_legacy_target(
-        &self,
-        target: &GenerationTarget,
-    ) -> CoreResult<MigratedLegacyTargetClassification> {
-        let route = self.inner.storage.get_model_route(&target.model_route_id)?;
-        let Some(profile) = self.retained_legacy_profile_for_connection(&route.connection_id)?
-        else {
-            return Ok(MigratedLegacyTargetClassification::Ordinary);
-        };
-        if route.api_family == ApiFamily::OpenAiChatCompletions
-            && route.model_id == profile.model
-            && route.route_config == ModelRouteConfig::default()
-            && route.metadata_source == ModelMetadataSource::Legacy
-            && target.generation_preset_id.as_str() == route.id.as_str()
-        {
-            return Ok(MigratedLegacyTargetClassification::Current {
-                profile_id: profile.id,
-            });
-        }
-        Ok(MigratedLegacyTargetClassification::Alias)
     }
 
     pub fn database_stats(&self) -> CoreResult<DatabaseStats> {
@@ -1315,250 +855,6 @@ impl Core {
 }
 
 pub(crate) type ReconciledModelRoutes = (Vec<ModelRoute>, Vec<ModelRouteId>, Vec<ModelRouteId>);
-
-pub(crate) fn provider_api_capability_observations(
-    routes: &[ModelRoute],
-    listed_models: &[ListedModel],
-    observed_at: DateTime<Utc>,
-) -> CoreResult<Vec<CapabilityObservation>> {
-    let routes_by_model = routes
-        .iter()
-        .map(|route| (route.model_id.as_str(), route))
-        .collect::<HashMap<_, _>>();
-    let expires_at = observed_at.checked_add_signed(PROVIDER_API_CAPABILITY_FRESHNESS);
-    let mut observations = Vec::new();
-    for model in listed_models {
-        let route = routes_by_model
-            .get(model.model_id.as_str())
-            .ok_or_else(|| {
-                CoreError::internal("reconciled model route is missing from capability ingestion")
-            })?;
-        for (key, value) in [
-            (CapabilityKey::ContextWindow, model.max_input_tokens),
-            (CapabilityKey::MaxOutputTokens, model.max_output_tokens),
-        ] {
-            let Some(value) = value else {
-                continue;
-            };
-            if value == 0 {
-                return Err(CoreError::new(
-                    CoreErrorCode::ProviderUnavailable,
-                    "provider model metadata contains a zero token limit",
-                    false,
-                ));
-            }
-            observations.push(CapabilityObservation {
-                id: deterministic_capability_observation_id(
-                    &route.id,
-                    key,
-                    ObservationSource::ProviderApi,
-                ),
-                model_route_id: route.id.clone(),
-                key,
-                value: CapabilityValue::Integer(value),
-                status: SupportStatus::Verified,
-                source: ObservationSource::ProviderApi,
-                confidence: Confidence::High,
-                observed_at,
-                expires_at,
-                evidence_ref: None,
-            });
-        }
-        append_listed_model_capability_observations(
-            model,
-            &route.id,
-            observed_at,
-            expires_at,
-            &mut observations,
-        )?;
-    }
-    observations.sort_by(|left, right| left.id.cmp(&right.id));
-    Ok(observations)
-}
-
-fn append_listed_model_capability_observations(
-    model: &ListedModel,
-    route_id: &ModelRouteId,
-    observed_at: DateTime<Utc>,
-    expires_at: Option<DateTime<Utc>>,
-    observations: &mut Vec<CapabilityObservation>,
-) -> CoreResult<()> {
-    let mut supported = model.capabilities.supported.clone();
-    supported.sort();
-    supported.dedup();
-    let authoritative = matches!(
-        model.capabilities.parameters,
-        OpenRouterSupportedParameterSupport::Exact(_)
-    );
-    let capabilities = if authoritative {
-        vec![
-            ListedModelCapability::Reasoning,
-            ListedModelCapability::ToolCalling,
-            ListedModelCapability::ParallelToolCalling,
-            ListedModelCapability::StructuredOutput,
-            ListedModelCapability::JsonMode,
-            ListedModelCapability::Logprobs,
-            ListedModelCapability::Seed,
-        ]
-    } else {
-        supported.clone()
-    };
-    for capability in capabilities {
-        let key = match capability {
-            ListedModelCapability::Reasoning => CapabilityKey::Reasoning,
-            ListedModelCapability::ToolCalling => CapabilityKey::ToolCalling,
-            ListedModelCapability::ParallelToolCalling => CapabilityKey::ParallelToolCalling,
-            ListedModelCapability::StructuredOutput => CapabilityKey::StructuredOutput,
-            ListedModelCapability::JsonMode => CapabilityKey::JsonMode,
-            ListedModelCapability::Logprobs => CapabilityKey::Logprobs,
-            ListedModelCapability::Seed => CapabilityKey::Seed,
-        };
-        let is_supported = supported.contains(&capability);
-        let value = if !is_supported {
-            CapabilityValue::Boolean(false)
-        } else if capability == ListedModelCapability::Reasoning {
-            openrouter_reasoning_capability_value(model)?
-        } else {
-            CapabilityValue::Boolean(true)
-        };
-        observations.push(CapabilityObservation {
-            id: deterministic_capability_observation_id(
-                route_id,
-                key,
-                ObservationSource::ProviderApi,
-            ),
-            model_route_id: route_id.clone(),
-            key,
-            value,
-            status: if is_supported {
-                SupportStatus::Verified
-            } else {
-                SupportStatus::Unsupported
-            },
-            source: ObservationSource::ProviderApi,
-            confidence: Confidence::High,
-            observed_at,
-            expires_at,
-            evidence_ref: None,
-        });
-    }
-    Ok(())
-}
-
-fn openrouter_reasoning_capability_value(model: &ListedModel) -> CoreResult<CapabilityValue> {
-    let Some(dialect) = openrouter_reasoning_dialect_from_capabilities(&model.capabilities) else {
-        return Ok(CapabilityValue::Boolean(true));
-    };
-    serialize_reasoning_capability(dialect)
-}
-
-fn openrouter_reasoning_dialect_from_capabilities(
-    capabilities: &ListedModelCapabilities,
-) -> Option<ReasoningWireDialect> {
-    let parameters = match &capabilities.parameters {
-        OpenRouterSupportedParameterSupport::Exact(parameters) => parameters,
-        OpenRouterSupportedParameterSupport::NotExposed => return None,
-    };
-    if parameters.contains(&OpenRouterSupportedParameter::Reasoning) {
-        let reasoning = capabilities
-            .reasoning
-            .clone()
-            .unwrap_or(ListedModelReasoningCapability {
-                supported_efforts: OpenRouterReasoningEffortSupport::NotExposed,
-                default_effort: None,
-                default_enabled: None,
-                supports_max_tokens: None,
-                mandatory: None,
-            });
-        return Some(ReasoningWireDialect::OpenRouter {
-            style: OpenRouterReasoningWireStyle::Unified,
-            supported_efforts: reasoning.supported_efforts,
-            default_effort: reasoning.default_effort,
-            default_enabled: reasoning.default_enabled,
-            supports_max_tokens: reasoning.supports_max_tokens,
-            mandatory: reasoning.mandatory,
-        });
-    }
-    if !parameters.contains(&OpenRouterSupportedParameter::ReasoningEffort) {
-        return None;
-    }
-    let reasoning = capabilities.reasoning.as_ref()?;
-    if matches!(
-        reasoning.supported_efforts,
-        OpenRouterReasoningEffortSupport::NotExposed
-    ) || matches!(
-        &reasoning.supported_efforts,
-        OpenRouterReasoningEffortSupport::Exact(efforts) if efforts.is_empty()
-    ) {
-        return None;
-    }
-    Some(ReasoningWireDialect::OpenRouter {
-        style: OpenRouterReasoningWireStyle::LegacyReasoningEffort,
-        supported_efforts: reasoning.supported_efforts.clone(),
-        default_effort: reasoning.default_effort,
-        default_enabled: reasoning.default_enabled,
-        supports_max_tokens: reasoning.supports_max_tokens,
-        mandatory: reasoning.mandatory,
-    })
-}
-
-fn serialize_reasoning_capability(dialect: ReasoningWireDialect) -> CoreResult<CapabilityValue> {
-    serde_json::to_value(dialect)
-        .map(CapabilityValue::Structured)
-        .map_err(|error| {
-            CoreError::new(
-                CoreErrorCode::ProviderUnavailable,
-                format!("OpenRouter reasoning metadata could not be normalized: {error}"),
-                false,
-            )
-        })
-}
-
-fn deterministic_capability_observation_id(
-    model_route_id: &ModelRouteId,
-    key: CapabilityKey,
-    source: ObservationSource,
-) -> ObservationId {
-    let identity = format!(
-        "lorepia:capability-observation:v1\u{0}{}\u{0}{}\u{0}{}",
-        model_route_id.as_str(),
-        capability_key_identity(key),
-        observation_source_identity(source),
-    );
-    ObservationId::from(Uuid::new_v5(&Uuid::NAMESPACE_URL, identity.as_bytes()).to_string())
-}
-
-const fn capability_key_identity(key: CapabilityKey) -> &'static str {
-    match key {
-        CapabilityKey::Streaming => "streaming",
-        CapabilityKey::Reasoning => "reasoning",
-        CapabilityKey::PromptCaching => "prompt_caching",
-        CapabilityKey::ToolCalling => "tool_calling",
-        CapabilityKey::ParallelToolCalling => "parallel_tool_calling",
-        CapabilityKey::StructuredOutput => "structured_output",
-        CapabilityKey::JsonMode => "json_mode",
-        CapabilityKey::ImageInput => "image_input",
-        CapabilityKey::AudioInput => "audio_input",
-        CapabilityKey::AudioOutput => "audio_output",
-        CapabilityKey::Logprobs => "logprobs",
-        CapabilityKey::Seed => "seed",
-        CapabilityKey::Batch => "batch",
-        CapabilityKey::Background => "background",
-        CapabilityKey::ContextWindow => "context_window",
-        CapabilityKey::MaxOutputTokens => "max_output_tokens",
-    }
-}
-
-const fn observation_source_identity(source: ObservationSource) -> &'static str {
-    match source {
-        ObservationSource::ProviderApi => "provider_api",
-        ObservationSource::OfficialDocumentation => "official_documentation",
-        ObservationSource::SignedLorepiaCatalog => "signed_lorepia_catalog",
-        ObservationSource::CapabilityProbe => "capability_probe",
-        ObservationSource::UserOverride => "user_override",
-        ObservationSource::LlmInference => "llm_inference",
-    }
-}
 
 pub(crate) fn reconcile_input_routes(
     connection_id: &ProviderConnectionId,
@@ -1801,28 +1097,6 @@ fn canonical_value_sha256(value: &impl Serialize, label: &str) -> CoreResult<Str
     let encoded = serde_json::to_vec(value)
         .map_err(|error| CoreError::internal(format!("cannot encode {label}: {error}")))?;
     Ok(format!("{:x}", Sha256::digest(encoded)))
-}
-
-fn validate_settings_generation_target(core: &Core, settings: &AppSettings) -> CoreResult<()> {
-    match (
-        settings.selected_model_route_id.as_ref(),
-        settings.selected_generation_preset_id.as_ref(),
-    ) {
-        (None, None) => Ok(()),
-        (Some(model_route_id), Some(generation_preset_id)) => {
-            validate_generation_target_plan(
-                core,
-                &GenerationTarget {
-                    model_route_id: model_route_id.clone(),
-                    generation_preset_id: generation_preset_id.clone(),
-                },
-            )?;
-            Ok(())
-        }
-        _ => Err(CoreError::invalid(
-            "model route and generation preset must be selected together",
-        )),
-    }
 }
 
 fn normalize_bounded_text(
