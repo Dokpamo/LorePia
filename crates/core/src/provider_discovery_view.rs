@@ -1,5 +1,5 @@
 use lorepia_domain::{CoreResult, DiscoverySessionId, discovery::DiscoveryCandidate};
-use lorepia_storage::StoredDiscoveryCandidate;
+use lorepia_storage::DiscoveryCandidateSnapshot;
 
 use crate::app::Core;
 
@@ -13,7 +13,7 @@ pub struct ProviderDiscoveryCandidateView {
     pub proposed_revision: u64,
 }
 
-fn project_stored_candidate(value: StoredDiscoveryCandidate) -> ProviderDiscoveryCandidateView {
+fn project_candidate(value: DiscoveryCandidateSnapshot) -> ProviderDiscoveryCandidateView {
     ProviderDiscoveryCandidateView {
         candidate: value.candidate,
         proposed_revision: value.proposed_revision,
@@ -27,11 +27,6 @@ impl Core {
     ) -> CoreResult<Vec<ProviderDiscoveryCandidateView>> {
         self.provider_discovery()
             .candidates(session_id)
-            .map(|candidates| {
-                candidates
-                    .into_iter()
-                    .map(project_stored_candidate)
-                    .collect()
-            })
+            .map(|candidates| candidates.into_iter().map(project_candidate).collect())
     }
 }

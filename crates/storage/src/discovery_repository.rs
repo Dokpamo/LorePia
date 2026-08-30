@@ -255,12 +255,6 @@ pub struct DiscoveryEvidenceRecord {
     pub fetched_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StoredDiscoveryCandidate {
-    pub candidate: DiscoveryCandidate,
-    pub proposed_revision: u64,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiscoveryOperationStatus {
     Prepared,
@@ -10731,6 +10725,9 @@ fn validate_commit_phase_preconditions(
 pub(crate) mod contract_codec;
 mod errors;
 mod repository_io;
+mod semantic_view;
+
+pub use semantic_view::{DiscoveryCandidateSnapshot, StoredDiscoveryCandidate};
 
 use contract_codec::{
     append_audit, candidate_kind, canonical_json_result, canonical_typed_json_result,

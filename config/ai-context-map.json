@@ -839,11 +839,13 @@
           "docs/architecture/storage-public-api-audit.md"
         ],
         "entrypoints": [
-          "crates/storage/src/lib.rs",
-          "crates/core/src/provider_discovery_view.rs"
+          "crates/core/src/lib.rs",
+          "crates/core/src/provider_discovery_view.rs",
+          "crates/storage/src/lib.rs"
         ],
         "implementation": [
-          "config/core-storage-public-api-baseline.json"
+          "config/core-storage-public-api-baseline.json",
+          "crates/storage/src/discovery_repository/semantic_view.rs"
         ],
         "tests": [
           "crates/core/tests/provider_discovery_integration.rs"
@@ -925,7 +927,7 @@
       }
     },
     "STOR-DISC-001": {
-      "baseline_context_bytes": 910501,
+      "baseline_context_bytes": 570556,
       "commands": [
         "cargo test -p lorepia-storage --lib discovery_repository::tests",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
@@ -941,7 +943,8 @@
         ],
         "implementation": [
           "crates/storage/src/discovery_repository/contract_codec.rs",
-          "crates/storage/src/discovery_repository/errors.rs"
+          "crates/storage/src/discovery_repository/errors.rs",
+          "crates/storage/src/discovery_repository/semantic_view.rs"
         ],
         "tests": [
           "crates/storage/tests/discovery_state_storage.rs"
@@ -949,7 +952,7 @@
       }
     },
     "STOR-DISC-002": {
-      "baseline_context_bytes": 924122,
+      "baseline_context_bytes": 584177,
       "commands": [
         "cargo test -p lorepia-storage --test discovery_state_storage",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
@@ -964,7 +967,8 @@
           "crates/storage/src/discovery_repository.rs"
         ],
         "implementation": [
-          "crates/storage/src/discovery_repository/repository_io.rs"
+          "crates/storage/src/discovery_repository/repository_io.rs",
+          "crates/storage/src/discovery_repository/semantic_view.rs"
         ],
         "tests": [
           "crates/storage/tests/discovery_state_storage.rs"

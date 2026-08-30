@@ -35,10 +35,10 @@ pub use database::{
 };
 pub use discovery::{DurableOperationOutcome, PersistDiscoveryTransition};
 pub use discovery_repository::{
-    DiscoveredProviderGraph, DiscoveryActionReplay, DiscoveryCommitAttemptRecord,
-    DiscoveryCommitPhase, DiscoveryCompensationRecord, DiscoveryCompensationStatus,
-    DiscoveryCompletedOperationWrite, DiscoveryEvidenceKind, DiscoveryEvidenceRecord,
-    DiscoveryJsonUpdate, DiscoveryNativeCredentialExecutionRecord,
+    DiscoveredProviderGraph, DiscoveryActionReplay, DiscoveryCandidateSnapshot,
+    DiscoveryCommitAttemptRecord, DiscoveryCommitPhase, DiscoveryCompensationRecord,
+    DiscoveryCompensationStatus, DiscoveryCompletedOperationWrite, DiscoveryEvidenceKind,
+    DiscoveryEvidenceRecord, DiscoveryJsonUpdate, DiscoveryNativeCredentialExecutionRecord,
     DiscoveryNativeCredentialExecutionReservation, DiscoveryNativeCredentialStoreAttemptStart,
     DiscoveryNativeNoEffectAttestationKind, DiscoveryNativeNoEffectAttestationRecord,
     DiscoveryNativeNoEffectAttestationWrite, DiscoveryNativeRecoveryOwner,

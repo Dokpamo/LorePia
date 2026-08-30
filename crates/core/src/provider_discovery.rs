@@ -53,14 +53,14 @@ use lorepia_providers::{
     validate_connection_fields, validate_manifest,
 };
 use lorepia_storage::{
-    DiscoveredProviderGraph, DiscoveryCommitPhase, DiscoveryCompletedOperationWrite,
-    DiscoveryEvidenceKind, DiscoveryEvidenceRecord, DiscoveryJsonUpdate,
-    DiscoveryNativeCredentialExecutionRecord, DiscoveryNativeCredentialExecutionReservation,
-    DiscoveryNativeCredentialStoreAttemptStart, DiscoveryNativeNoEffectAttestationWrite,
-    DiscoveryOperationStatus, DiscoveryOutboxEvent, DiscoveryRecoveryResult,
-    DiscoverySessionSnapshot, DiscoveryTransitionWrite, DurableOperationOutcome,
-    PreparedDiscoveryCommit, PreparedDiscoveryCompensationStep, ProviderCredentialAccessAuthority,
-    Storage, StoredDiscoveryCandidate,
+    DiscoveredProviderGraph, DiscoveryCandidateSnapshot as CandidateView, DiscoveryCommitPhase,
+    DiscoveryCompletedOperationWrite, DiscoveryEvidenceKind, DiscoveryEvidenceRecord,
+    DiscoveryJsonUpdate, DiscoveryNativeCredentialExecutionRecord,
+    DiscoveryNativeCredentialExecutionReservation, DiscoveryNativeCredentialStoreAttemptStart,
+    DiscoveryNativeNoEffectAttestationWrite, DiscoveryOperationStatus, DiscoveryOutboxEvent,
+    DiscoveryRecoveryResult, DiscoverySessionSnapshot, DiscoveryTransitionWrite,
+    DurableOperationOutcome, PreparedDiscoveryCommit, PreparedDiscoveryCompensationStep,
+    ProviderCredentialAccessAuthority, Storage, StoredDiscoveryCandidate,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -538,12 +538,9 @@ impl<'a> ProviderDiscoveryOrchestrator<'a> {
         self.storage.get_discovery_session(session_id)
     }
 
-    pub fn candidates(
-        &self,
-        session_id: &DiscoverySessionId,
-    ) -> CoreResult<Vec<StoredDiscoveryCandidate>> {
+    pub fn candidates(&self, session_id: &DiscoverySessionId) -> CoreResult<Vec<CandidateView>> {
         self.storage
-            .list_discovery_candidates(session_id, MAX_DISCOVERY_ROWS)
+            .read_discovery_candidates(session_id, MAX_DISCOVERY_ROWS)
     }
 
     pub fn evidence(
@@ -2513,11 +2510,11 @@ impl<'a> ProviderDiscoveryOrchestrator<'a> {
                 })
             }
             AssistantToolCall::FetchDiscoveryDocument { candidate_id } => {
-                let candidate = self
+                let entry = self
                     .storage
-                    .list_discovery_candidates(session_id, MAX_DISCOVERY_ROWS)?
+                    .read_discovery_candidates(session_id, MAX_DISCOVERY_ROWS)?
                     .into_iter()
-                    .find(|candidate| candidate.candidate.id == *candidate_id)
+                    .find(|entry| entry.candidate.id == *candidate_id)
                     .ok_or_else(|| {
                         CoreError::new(
                             CoreErrorCode::NotFound,
@@ -2525,7 +2522,7 @@ impl<'a> ProviderDiscoveryOrchestrator<'a> {
                             false,
                         )
                     })?;
-                let evidence_ids = candidate
+                let evidence_ids = entry
                     .candidate
                     .evidence_ids
                     .into_iter()
@@ -5060,10 +5057,10 @@ fn select_candidate(
     candidate_id: &DiscoveryCandidateId,
     observed_at: DateTime<Utc>,
 ) -> CoreResult<()> {
-    let candidate = storage
-        .list_discovery_candidates(&snapshot.session.id, MAX_DISCOVERY_ROWS)?
+    let entry = storage
+        .read_discovery_candidates(&snapshot.session.id, MAX_DISCOVERY_ROWS)?
         .into_iter()
-        .find(|stored| stored.candidate.id == *candidate_id)
+        .find(|entry| entry.candidate.id == *candidate_id)
         .ok_or_else(|| {
             CoreError::new(
                 CoreErrorCode::NotFound,
@@ -5074,7 +5071,7 @@ fn select_candidate(
     let DiscoveryCandidateSummary::ProviderTemplate {
         template_id,
         template_version,
-    } = candidate.candidate.summary
+    } = entry.candidate.summary
     else {
         return Err(CoreError::invalid(
             "selected discovery candidate is not a provider template",

@@ -35,8 +35,10 @@ transaction command와 hash helper가 함께 노출돼 있다. 현재 Core와 �
 - 사용처가 없던 `StoredPromptMessage`, `StoredGenerationAttempt` 재노출을 제거했다.
 - discovery 후보 목록은 Core 소유 `ProviderDiscoveryCandidateView`를 반환하므로
   `StoredDiscoveryCandidate`를 Core에서 재노출하지 않는다.
-- Storage의 discovery transaction API와 Core 내부 adapter는 여전히
-  `StoredDiscoveryCandidate`를 사용하므로 Storage 타입 자체는 아직 공개 상태다.
+- Core의 discovery read path는 `DiscoveryCandidateSnapshot`과
+  `Storage::read_discovery_candidates`를 사용한다. 기존 transaction input과
+  호환 호출자를 위해 `StoredDiscoveryCandidate`와 `list_discovery_candidates`는
+  아직 공개 상태로 유지한다.
 - derived-event drain은 content-free `InteractionDerivedDrainReceipt`만 반환하므로
   `StoredInteractionEvent`를 Core에서 재노출하지 않는다.
 - provider credential journal은 Core 소유 `ProviderCredentialOperationView`로 투영하므로
