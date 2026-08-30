@@ -27,6 +27,31 @@ class I18nLiteralBaselineTests(unittest.TestCase):
         )
         self.assertEqual(len(failures), 1)
 
+    def test_base_comparison_allows_exact_lines_to_move_or_split_paths(self) -> None:
+        base = {
+            "src/legacy.test.ts": [
+                "it('첫 테스트', () => {});",
+                "it('둘째 테스트', () => {});",
+            ]
+        }
+        moved = {
+            "src/tests/first.test.ts": ["it('첫 테스트', () => {});"],
+            "src/tests/second.test.ts": ["it('둘째 테스트', () => {});"],
+        }
+        self.assertEqual(MODULE.compare_to_base(moved, base), [])
+
+    def test_base_comparison_rejects_duplicates_after_a_path_move(self) -> None:
+        line = "it('기존 테스트', () => {});"
+        base = {"src/legacy.test.ts": [line]}
+        duplicated = {
+            "src/legacy.test.ts": [line],
+            "src/tests/moved.test.ts": [line],
+        }
+        failures = MODULE.compare_to_base(duplicated, base)
+        self.assertEqual(failures, [
+            "src/tests/moved.test.ts: 1 Hangul source line(s) are not in the base revision"
+        ])
+
     def test_baseline_reports_new_changed_and_removed_debt(self) -> None:
         expected = MODULE.baseline_payload({"src/a.ts": ["const a = '기존';"]})
         changed = MODULE.baseline_payload({"src/a.ts": ["const a = '변경';"]})

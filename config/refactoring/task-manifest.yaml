@@ -4,13 +4,14 @@
     "canonical_manifest_path": "config/refactoring/task-manifest.yaml",
     "normative_plan_path": "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
     "task_count": 59,
-    "task_unit": "One Task ID remains one reviewable change unit. Authorization to execute the full plan removes the stop-after-each-task pause but does not merge task scopes or grant semantic changes.",
-    "dependency_resolution": "The plan defines phase order but not a complete DAG. depends_on below is a conservative acyclic ordering; feature tasks wait for their relevant characterization tests and lower-layer boundaries, and CORE-APP-001 is the final Core facade task despite its table position.",
+    "task_unit": "One Task ID per reviewable change; full-plan authorization removes pauses, not task scope or semantic gates.",
+    "dependency_resolution": "depends_on is the conservative acyclic task order; CORE-APP-001 remains the final Core facade task.",
     "path_resolution": "read_first contains only paths present at this bootstrap revision, plus this manifest and plan being added in the same change. allowed_paths are repo-relative exact paths or glob patterns and are edit boundaries, not permission to change behavior.",
     "context_resolution": "Tasks that must inspect a legacy giant parent may temporarily exceed the 250KB target only through an explicit non-growth context baseline in config/ai-context-map.json; required sources must never be omitted to make a budget appear green.",
     "api_resolution": "STOR-API-001 may add compatible meaning-based views and methods, but public removals require separately proven compatibility. All other refactoring tasks preserve public contracts.",
     "test_resolution": "Inline tests remain part of their production parent until a TEST task moves them. Test moves preserve names, assertions, fixture meaning, and count.",
-    "status_resolution": "This manifest records executable scope, not completion state. ENF-004 owns durable completion reporting after evidence from every gate exists."
+    "status_resolution": "This manifest defines scope; ENF-004 records durable completion evidence.",
+    "validation_ledger_resolution": "For B-E tasks, config/ai-context-map.json is an implicit allowed_path when a tracked path moves; for frontend tasks, config/i18n-literal-baseline.json is implicit only to migrate existing literals."
   },
   "global_constraints": [
     "Use the Rust and Node versions pinned by rust-toolchain.toml and .node-version.",

@@ -141,14 +141,26 @@ def collect_git_lines(base_ref: str) -> dict[str, list[str]]:
 def compare_to_base(
     current: dict[str, list[str]], base: dict[str, list[str]]
 ) -> list[str]:
+    """Reject new Hangul source lines while allowing exact path-only moves.
+
+    Refactors may split a source file without changing any literal-bearing line.
+    Consume the base revision's workspace-wide multiset deterministically so an
+    existing line may move paths, but a duplicate or changed line still fails.
+    """
     failures: list[str] = []
+    remaining = Counter(
+        line for path in sorted(base) for line in base[path]
+    )
     for path, lines in sorted(current.items()):
-        current_counts = Counter(lines)
-        base_counts = Counter(base.get(path, []))
-        additions = current_counts - base_counts
+        additions = 0
+        for line in lines:
+            if remaining[line] > 0:
+                remaining[line] -= 1
+            else:
+                additions += 1
         if additions:
             failures.append(
-                f"{path}: {sum(additions.values())} Hangul source line(s) are not in the base revision"
+                f"{path}: {additions} Hangul source line(s) are not in the base revision"
             )
     return failures
 
