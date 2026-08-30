@@ -1221,13 +1221,11 @@
       }
     },
     "STOR-PKG-001": {
-      "baseline_context_bytes": 1518328,
       "commands": [
         "cargo test -p lorepia-storage --lib package_repository::tests",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
       "max_context_bytes": 250000,
-      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
       "paths": {
         "documents": [
           "crates/storage/AGENTS.md",
@@ -1237,12 +1235,15 @@
           "crates/storage/src/package_repository.rs"
         ],
         "implementation": [
-          "crates/storage/src/database.rs",
-          "crates/storage/src/orchestration.rs"
+          "crates/storage/src/package_repository/commit.rs",
+          "crates/storage/src/database/character_import.rs",
+          "crates/storage/src/database/package_cas/promotion.rs",
+          "crates/storage/src/database/package_cas/journal.rs",
+          "crates/storage/src/database/package_cas/recovery.rs"
         ],
         "tests": [
-          "crates/core/tests/orchestration_content_import.rs",
-          "crates/storage/tests/private_storage_permissions.rs"
+          "crates/storage/src/package_repository/tests.rs",
+          "crates/storage/src/database/tests/package_cas_recovery.rs"
         ]
       }
     },

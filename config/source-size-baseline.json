@@ -54,7 +54,7 @@
     "crates/shell-api/src/provider.rs": {"bytes": 114834, "lines": 3040},
     "crates/storage/src/catalog.rs": {"bytes": 85986, "lines": 2410},
     "crates/storage/src/cutover.rs": {"bytes": 82294, "lines": 2110},
-    "crates/storage/src/database.rs": {"bytes": 112507, "lines": 3039},
+    "crates/storage/src/database.rs": {"bytes": 43274, "lines": 1123},
     "crates/storage/src/discovery_repository.rs": {"bytes": 8217, "lines": 161},
     "crates/storage/src/generation_attempt.rs": {"bytes": 163943, "lines": 4150},
     "crates/storage/src/interaction_repository.rs": {"bytes": 30474, "lines": 813},

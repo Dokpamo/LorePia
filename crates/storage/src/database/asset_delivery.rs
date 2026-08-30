@@ -12,10 +12,25 @@ use crate::verified_asset_cache::{
     AssetFileSnapshot, CacheLookup, VerifiedAssetCache, open_asset_file,
 };
 
+const MAX_APPROVED_ASSET_READ_BYTES: u64 = 64 * 1_024 * 1_024;
+
+/// One verified, bounded byte range from an approved content-addressed asset.
+///
+/// The storage-owned path and database row never leave this crate. Callers
+/// receive only immutable descriptor metadata and bytes from the exact
+/// digest-addressed file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApprovedAssetRange {
+    pub descriptor: AssetDescriptor,
+    pub start: u64,
+    pub bytes: Vec<u8>,
+}
+
+use super::package_cas::{validate_renderer_media_type, verify_open_file_media_type_signature};
+
 use super::{
-    ApprovedAssetRange, MAX_APPROVED_ASSET_READ_BYTES, Storage, content_relative_path,
-    ensure_real_directory, hash_open_file, i64_to_u64, storage_corrupted, storage_db_error,
-    storage_io_error, validate_renderer_media_type, verify_open_file_media_type_signature,
+    Storage, content_relative_path, ensure_real_directory, hash_open_file, i64_to_u64,
+    storage_corrupted, storage_db_error, storage_io_error,
 };
 
 impl Storage {
