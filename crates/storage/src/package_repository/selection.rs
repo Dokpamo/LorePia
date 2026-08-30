@@ -2,17 +2,16 @@
 
 use super::{
     BTreeMap, BTreeSet, Connection, ContentCapability, CoreError, CoreResult, OptionalExtension,
-    PackageCapability, PackageCapabilitySupport, PackageComponentDisposition, PackageComponentKind,
+    PackageCapability, PackageComponentDisposition, PackageComponentKind,
     PackageDocumentCommitBinding, PackageDocumentTargetDisposition, PackageDocumentTargetReview,
     PackageImportRecord, PackageImportStatus, PackageInspectionExpectation, PackageReview,
     SelectiveImportPlan, Serialize, Storage, StoredImportState, Transaction, TransactionBehavior,
     Utc, VersionedJson, append_audit, component_kind_str, encode_json, i64_from_u64,
     insert_document_target_reviews, json, load_document_target_reviews,
-    package_import_target_review_sha256, params, read_capability_review, read_import_state,
-    read_source_hash, reviewed_document_target, revision_conflict, sha256_hex, storage_corrupted,
-    storage_db_error, validate_audit_replay, validate_binding_snapshot_shape,
-    validate_document_target_reviews, validate_identifier, validate_inspection_expectation,
-    validate_selection_target_review_replay,
+    package_import_target_review_sha256, params, read_import_state, read_source_hash,
+    reviewed_document_target, revision_conflict, sha256_hex, storage_corrupted, storage_db_error,
+    validate_audit_replay, validate_binding_snapshot_shape, validate_document_target_reviews,
+    validate_identifier, validate_inspection_expectation, validate_selection_target_review_replay,
 };
 
 impl Storage {
@@ -194,53 +193,6 @@ pub(super) fn validate_stored_capability_decisions(
                 capability.as_str()
             )));
         }
-    }
-    Ok(())
-}
-
-pub(super) fn validate_capability_approval_snapshot(
-    connection: &Connection,
-    import_id: &str,
-    required: &[ContentCapability],
-    approved: &[PackageCapability],
-) -> CoreResult<()> {
-    let review = read_capability_review(connection, import_id)?;
-    let required_set = required
-        .iter()
-        .copied()
-        .map(PackageCapability::from)
-        .collect::<BTreeSet<_>>();
-    let mut expected_approvals = BTreeSet::new();
-    for capability in required_set {
-        let decision = review
-            .decisions
-            .iter()
-            .find(|decision| decision.capability == capability)
-            .ok_or_else(|| {
-                storage_corrupted("required package capability review decision is missing")
-            })?;
-        match decision.support {
-            PackageCapabilitySupport::Supported => {}
-            PackageCapabilitySupport::ApprovalRequired => {
-                if capability.is_never_approvable() {
-                    return Err(CoreError::invalid(
-                        "unsafe package capability cannot be approved",
-                    ));
-                }
-                expected_approvals.insert(capability);
-            }
-            PackageCapabilitySupport::Unsupported => {
-                return Err(CoreError::invalid(
-                    "unsupported package capability cannot be approved",
-                ));
-            }
-        }
-    }
-    let supplied = approved.iter().copied().collect::<BTreeSet<_>>();
-    if supplied.len() != approved.len() || supplied != expected_approvals {
-        return Err(CoreError::invalid(
-            "package capability approval does not match the exact required review",
-        ));
     }
     Ok(())
 }
