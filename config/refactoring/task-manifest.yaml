@@ -4,12 +4,12 @@
     "canonical_manifest_path": "config/refactoring/task-manifest.yaml",
     "normative_plan_path": "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
     "task_count": 59,
-    "task_unit": "One Task ID per reviewable change; full-plan authorization removes pauses, not task scope or semantic gates.",
+    "task_unit": "Reviewable Task/change; scope/semantic gates hold. Production: <=11 files/commit; >11-file Tasks: sequential <=11-file sub-bundle commits, same ID.",
     "dependency_resolution": "depends_on is conservative acyclic task order; CORE-APP-001 remains the final Core facade task.",
     "path_resolution": "read_first lists bootstrap-present paths plus this same-change plan/manifest; allowed_paths are repo-relative exact/glob edit bounds, not behavior permission.",
-    "context_resolution": "A task inspecting a legacy giant parent may temporarily exceed 250KB only via an explicit non-growth baseline in config/ai-context-map.json; required sources cannot be omitted to feign compliance.",
+    "context_resolution": "Legacy contexts: complete/non-growth; ENF-003 non-strict base-ref; only post-legacy ENF-004 strict.",
     "api_resolution": "STOR-API-001 alone may add compatible semantic views/methods; removals require proven compatibility; all other refactors preserve public contracts.",
-    "test_resolution": "Inline tests stay in their production parent until a TEST task moves them; moves preserve names, assertions, fixture meaning, and count.",
+    "test_resolution": "TEST tasks own named parents; else first owner moves/splits inline/source-sensitive tests in a separate test-only commit; keep module/test paths/names/assertions/fixtures/cfg/count within 61440B/1200 lines.",
     "status_resolution": "Manifest defines scope; ENF-004 records durable completion evidence.",
     "validation_ledger_resolution": "During B-E tracked path moves, config/ai-context-map.json is implicitly allowed; frontend moves may likewise migrate only existing entries in config/i18n-literal-baseline.json."
   },
@@ -380,11 +380,10 @@
         "config/refactoring/task-manifest.yaml",
         "AGENTS.md",
         "apps/lorepia/src/AGENTS.md",
-        "apps/lorepia/src/app/app-controller.test.ts",
+        "apps/lorepia/src/app/tests/app-controller.bootstrap.test.ts",
         "apps/lorepia/src/features/providers/ProviderSettings.test.ts"
       ],
       "allowed_paths": [
-        "apps/lorepia/src/app/app-controller.test.ts",
         "apps/lorepia/src/features/providers/ProviderSettings.test.ts",
         "apps/lorepia/src/app/tests/**",
         "apps/lorepia/src/app/**/*.test.ts",
@@ -398,7 +397,7 @@
       ],
       "validation": [
         "npm run check --prefix apps/lorepia",
-        "npm run test --prefix apps/lorepia -- apps/lorepia/src/app/app-controller.test.ts",
+        "npm run test --prefix apps/lorepia -- src/app/tests",
         "python3 -m unittest scripts/test_check_source_architecture.py",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
@@ -438,7 +437,7 @@
       ],
       "validation": [
         "npm run check --prefix apps/lorepia",
-        "npm run test --prefix apps/lorepia -- apps/lorepia/src/features/chat/ChatPane.test.ts",
+        "npm run test --prefix apps/lorepia -- src/features/chat/ChatPane.test.ts",
         "python3 -m unittest scripts/test_check_source_architecture.py",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
@@ -450,7 +449,7 @@
     },
     "TEST-FE-003": {
       "phase": "B",
-      "summary": "Split OrchestrationUI tests by studio section.",
+      "summary": "Section-split OrchestrationStudio tests.",
       "depends_on": [
         "GOV-003",
         "GOV-004"
@@ -460,11 +459,10 @@
         "config/refactoring/task-manifest.yaml",
         "AGENTS.md",
         "apps/lorepia/src/AGENTS.md",
-        "apps/lorepia/src/features/orchestration/OrchestrationUI.test.ts",
+        "apps/lorepia/src/features/orchestration/OrchestrationStudio.navigation.test.ts",
         "apps/lorepia/src/features/orchestration/orchestration-controller.test.ts"
       ],
       "allowed_paths": [
-        "apps/lorepia/src/features/orchestration/OrchestrationUI.test.ts",
         "apps/lorepia/src/features/orchestration/orchestration-controller.test.ts",
         "apps/lorepia/src/features/orchestration/tests/**",
         "apps/lorepia/src/features/orchestration/**/*.test.ts",
@@ -478,7 +476,7 @@
       ],
       "validation": [
         "npm run check --prefix apps/lorepia",
-        "npm run test --prefix apps/lorepia -- apps/lorepia/src/features/orchestration/OrchestrationUI.test.ts",
+        "npm run test --prefix apps/lorepia -- src/features/orchestration",
         "python3 -m unittest scripts/test_check_source_architecture.py",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
@@ -1505,13 +1503,12 @@
         "AGENTS.md",
         "crates/core/AGENTS.md",
         "crates/core/src/orchestration_runtime.rs",
-        "crates/core/tests/orchestration_core_contract.rs",
+        "crates/core/tests/ordinary_interaction_sealed_replay.rs",
         "config/source-size-baseline.json"
       ],
       "allowed_paths": [
         "crates/core/src/orchestration_runtime.rs",
         "crates/core/src/orchestration_runtime/**",
-        "crates/core/tests/orchestration_core_contract.rs",
         "config/source-size-baseline.json",
         "config/test-source-size-baseline.json"
       ],
@@ -1546,13 +1543,12 @@
         "AGENTS.md",
         "crates/core/AGENTS.md",
         "crates/core/src/orchestration_runtime.rs",
-        "crates/core/tests/orchestration_core_contract.rs",
+        "crates/core/tests/memory_auxiliary_fallback.rs",
         "config/source-size-baseline.json"
       ],
       "allowed_paths": [
         "crates/core/src/orchestration_runtime.rs",
         "crates/core/src/orchestration_runtime/**",
-        "crates/core/tests/orchestration_core_contract.rs",
         "config/source-size-baseline.json",
         "config/test-source-size-baseline.json"
       ],
@@ -1588,14 +1584,13 @@
         "AGENTS.md",
         "crates/core/AGENTS.md",
         "crates/core/src/content_package.rs",
-        "crates/core/tests/orchestration_content_import.rs",
+        "crates/core/tests/content_source_export_round_trip.rs",
         "docs/adr/0005-asset-delivery-verification.md",
         "config/source-size-baseline.json"
       ],
       "allowed_paths": [
         "crates/core/src/content_package.rs",
         "crates/core/src/content_package/**",
-        "crates/core/tests/orchestration_content_import.rs",
         "config/source-size-baseline.json",
         "config/test-source-size-baseline.json"
       ],
@@ -1878,13 +1873,13 @@
         "AGENTS.md",
         "apps/lorepia/src/AGENTS.md",
         "apps/lorepia/src/app/app-controller.ts",
-        "apps/lorepia/src/app/app-controller.test.ts",
+        "apps/lorepia/src/app/tests/app-controller.generation-identity.test.ts",
         "config/source-size-baseline.json"
       ],
       "allowed_paths": [
         "apps/lorepia/src/app/app-controller.ts",
         "apps/lorepia/src/app/operations/**",
-        "apps/lorepia/src/app/app-controller.test.ts",
+        "apps/lorepia/src/app/tests/**",
         "config/source-size-baseline.json",
         "config/test-source-size-baseline.json"
       ],
@@ -1896,7 +1891,7 @@
       ],
       "validation": [
         "npm run check --prefix apps/lorepia",
-        "npm run test --prefix apps/lorepia -- apps/lorepia/src/app/app-controller.test.ts",
+        "npm run test --prefix apps/lorepia -- src/app/tests",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
       "done_when": [
@@ -1917,13 +1912,13 @@
         "AGENTS.md",
         "apps/lorepia/src/AGENTS.md",
         "apps/lorepia/src/app/app-controller.ts",
-        "apps/lorepia/src/app/app-controller.test.ts",
+        "apps/lorepia/src/app/tests/app-controller.conversations.test.ts",
         "config/source-size-baseline.json"
       ],
       "allowed_paths": [
         "apps/lorepia/src/app/app-controller.ts",
         "apps/lorepia/src/app/controllers/**",
-        "apps/lorepia/src/app/app-controller.test.ts",
+        "apps/lorepia/src/app/tests/**",
         "config/source-size-baseline.json",
         "config/test-source-size-baseline.json"
       ],
@@ -1935,7 +1930,7 @@
       ],
       "validation": [
         "npm run check --prefix apps/lorepia",
-        "npm run test --prefix apps/lorepia -- apps/lorepia/src/app/app-controller.test.ts",
+        "npm run test --prefix apps/lorepia -- src/app/tests",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
       "done_when": [
@@ -1975,7 +1970,7 @@
       ],
       "validation": [
         "npm run check --prefix apps/lorepia",
-        "npm run test --prefix apps/lorepia -- apps/lorepia/src/features/chat/chat-stream.test.ts",
+        "npm run test --prefix apps/lorepia -- src/features/chat/chat-stream.test.ts",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
       "done_when": [
@@ -1996,13 +1991,13 @@
         "AGENTS.md",
         "apps/lorepia/src/AGENTS.md",
         "apps/lorepia/src/app/app-controller.ts",
-        "apps/lorepia/src/app/app-controller.providers.test.ts",
+        "apps/lorepia/src/app/tests/app-controller.provider-selection.test.ts",
         "config/source-size-baseline.json"
       ],
       "allowed_paths": [
         "apps/lorepia/src/app/app-controller.ts",
         "apps/lorepia/src/app/controllers/**",
-        "apps/lorepia/src/app/app-controller.providers.test.ts",
+        "apps/lorepia/src/app/tests/**",
         "config/source-size-baseline.json",
         "config/test-source-size-baseline.json"
       ],
@@ -2014,7 +2009,7 @@
       ],
       "validation": [
         "npm run check --prefix apps/lorepia",
-        "npm run test --prefix apps/lorepia -- apps/lorepia/src/app/app-controller.providers.test.ts",
+        "npm run test --prefix apps/lorepia -- src/app/tests",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
       "done_when": [
@@ -2054,7 +2049,7 @@
       ],
       "validation": [
         "npm run check --prefix apps/lorepia",
-        "npm run test --prefix apps/lorepia -- apps/lorepia/src/features/chat/virtual-window.test.ts",
+        "npm run test --prefix apps/lorepia -- src/features/chat/virtual-window.test.ts",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
       "done_when": [
@@ -2093,7 +2088,7 @@
       ],
       "validation": [
         "npm run check --prefix apps/lorepia",
-        "npm run test --prefix apps/lorepia -- apps/lorepia/src/features/chat/composer.test.ts",
+        "npm run test --prefix apps/lorepia -- src/features/chat/composer.test.ts",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
       "done_when": [
@@ -2132,7 +2127,7 @@
       ],
       "validation": [
         "npm run check --prefix apps/lorepia",
-        "npm run test --prefix apps/lorepia -- apps/lorepia/src/features/chat/portable-runtime.test.ts",
+        "npm run test --prefix apps/lorepia -- src/features/chat/portable-runtime.test.ts",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
       "done_when": [
@@ -2172,7 +2167,7 @@
       ],
       "validation": [
         "npm run check --prefix apps/lorepia",
-        "npm run test --prefix apps/lorepia -- apps/lorepia/src/features/orchestration/orchestration-controller.test.ts",
+        "npm run test --prefix apps/lorepia -- src/features/orchestration/orchestration-controller.test.ts",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
       "done_when": [
@@ -2193,13 +2188,17 @@
         "AGENTS.md",
         "apps/lorepia/src/AGENTS.md",
         "apps/lorepia/src/features/orchestration/OrchestrationStudio.svelte",
-        "apps/lorepia/src/features/orchestration/OrchestrationUI.test.ts",
+        "apps/lorepia/src/app/titlebar-contract.test.ts",
         "config/source-size-baseline.json"
       ],
       "allowed_paths": [
         "apps/lorepia/src/features/orchestration/OrchestrationStudio.svelte",
         "apps/lorepia/src/features/orchestration/studio/**",
-        "apps/lorepia/src/features/orchestration/OrchestrationUI.test.ts",
+        "apps/lorepia/src/features/orchestration/Orchestration*.test.ts",
+        "apps/lorepia/src/features/orchestration/studio-shell-contract.test.ts",
+        "apps/lorepia/src/app/titlebar-contract.test.ts",
+        "apps/lorepia/src/styles/hover-contract.test.ts",
+        "apps/lorepia/src/styles/semantic-state-contract.test.ts",
         "config/source-size-baseline.json",
         "config/test-source-size-baseline.json"
       ],
@@ -2211,7 +2210,7 @@
       ],
       "validation": [
         "npm run check --prefix apps/lorepia",
-        "npm run test --prefix apps/lorepia -- apps/lorepia/src/features/orchestration/OrchestrationUI.test.ts",
+        "npm run test --prefix apps/lorepia -- src/{features/orchestration,app,styles}",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
       "done_when": [
@@ -2239,7 +2238,9 @@
       "allowed_paths": [
         "apps/lorepia/src/features/providers/ProviderSettings.svelte",
         "apps/lorepia/src/features/providers/settings/**",
-        "apps/lorepia/src/features/providers/ProviderSettings.test.ts",
+        "apps/lorepia/src/features/providers/*Panel.svelte",
+        "apps/lorepia/src/features/providers/DesktopSettingsSidebar.svelte",
+        "apps/lorepia/src/features/providers/*.test.ts",
         "config/source-size-baseline.json",
         "config/test-source-size-baseline.json"
       ],
@@ -2251,7 +2252,7 @@
       ],
       "validation": [
         "npm run check --prefix apps/lorepia",
-        "npm run test --prefix apps/lorepia -- apps/lorepia/src/features/providers/ProviderSettings.test.ts",
+        "npm run test --prefix apps/lorepia -- src/features/providers",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
       "done_when": [
@@ -2292,7 +2293,7 @@
       ],
       "validation": [
         "npm run check --prefix apps/lorepia",
-        "npm run test --prefix apps/lorepia -- apps/lorepia/src/styles/hover-contract.test.ts",
+        "npm run test --prefix apps/lorepia -- src/styles/hover-contract.test.ts",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
       "done_when": [
@@ -2306,6 +2307,7 @@
       "summary": "Upgrade source-size enforcement to v2 language/file-kind limits and directory aggregates.",
       "depends_on": [
         "CORE-APP-001",
+        "TAURI-001",
         "TAURI-002",
         "FE-CSS-001",
         "STOR-PKG-001"
@@ -2385,7 +2387,7 @@
     },
     "ENF-003": {
       "phase": "F",
-      "summary": "Enforce AI context-map drift and print targeted commands.",
+      "summary": "Non-strict base-ref drift.",
       "depends_on": [
         "ENF-002"
       ],
@@ -2394,12 +2396,14 @@
         "config/refactoring/task-manifest.yaml",
         "AGENTS.md",
         "scripts/check_ai_context_map.py",
-        "scripts/test_check_ai_context_map.py"
+        "scripts/test_check_ai_context_map.py",
+        "scripts/check_github_workflow_security.py"
       ],
       "allowed_paths": [
         "config/ai-context-map.json",
         "scripts/check_ai_context_map.py",
         "scripts/test_check_ai_context_map.py",
+        "scripts/*check_github_workflow_security.py",
         ".github/workflows/ci.yml"
       ],
       "forbidden_changes": [
@@ -2409,19 +2413,19 @@
         "public API, schema, serialized DTO, error code, or IPC command changes"
       ],
       "validation": [
-        "python3 -m unittest scripts/test_check_ai_context_map.py",
-        "python3 scripts/check_ai_context_map.py",
+        "python3 -m unittest scripts/test_check_ai_context_map.py scripts/test_check_github_workflow_security.py",
+        "python3 scripts/check_ai_context_map.py --base-ref \"$(git merge-base HEAD main)\"",
+        "python3 scripts/check_ai_context_map.py --print-commands ENF-003",
         "python3 scripts/check_github_workflow_security.py"
       ],
       "done_when": [
-        "context entries cannot silently disappear or exceed their ratchet",
-        "missing and duplicate paths fail",
-        "each task prints its targeted commands"
+        "entry loss/ratchet growth; missing/duplicate paths fail",
+        "workflow passes; all tasks print targeted commands; ENF-004 DAG reaches all 59"
       ]
     },
     "ENF-004": {
       "phase": "F",
-      "summary": "Report plan/manifest completion and remaining hotspots.",
+      "summary": "Strict post-legacy budget/completion report.",
       "depends_on": [
         "ENF-003"
       ],
@@ -2452,16 +2456,15 @@
       ],
       "validation": [
         "python3 -m json.tool config/refactoring/task-manifest.yaml",
-        "python3 -m unittest scripts/test_report_refactoring_baseline.py scripts/test_check_ai_context_map.py",
+        "python3 -m unittest scripts/test_report_refactoring_baseline.py scripts/test_check_ai_context_map.py scripts/test_check_github_workflow_security.py",
         "python3 scripts/report_refactoring_baseline.py --check",
-        "python3 scripts/check_ai_context_map.py",
-        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+        "python3 scripts/check_ai_context_map.py --strict-budget --base-ref \"$(git merge-base HEAD main)\"",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\"",
+        "python3 scripts/check_github_workflow_security.py"
       ],
       "done_when": [
-        "all 59 task statuses and phase gates are reported",
-        "remaining hotspots and approved exceptions are explicit",
-        "the default context bundle is at most 250KB",
-        "all final completion criteria have evidence or are reported incomplete"
+        "59 statuses/gates; hotspots/approved exceptions explicit",
+        "contexts <=250KB/no legacy metadata; workflow/evidence pass or incomplete"
       ]
     }
   }
