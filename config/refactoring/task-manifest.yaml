@@ -1,0 +1,2472 @@
+{
+  "version": 1,
+  "decisions": {
+    "canonical_manifest_path": "config/refactoring/task-manifest.yaml",
+    "normative_plan_path": "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+    "task_count": 59,
+    "task_unit": "One Task ID remains one reviewable change unit. Authorization to execute the full plan removes the stop-after-each-task pause but does not merge task scopes or grant semantic changes.",
+    "dependency_resolution": "The plan defines phase order but not a complete DAG. depends_on below is a conservative acyclic ordering; feature tasks wait for their relevant characterization tests and lower-layer boundaries, and CORE-APP-001 is the final Core facade task despite its table position.",
+    "path_resolution": "read_first contains only paths present at this bootstrap revision, plus this manifest and plan being added in the same change. allowed_paths are repo-relative exact paths or glob patterns and are edit boundaries, not permission to change behavior.",
+    "context_resolution": "Tasks that must inspect a legacy giant parent may temporarily exceed the 250KB target only through an explicit non-growth context baseline in config/ai-context-map.json; required sources must never be omitted to make a budget appear green.",
+    "api_resolution": "STOR-API-001 may add compatible meaning-based views and methods, but public removals require separately proven compatibility. All other refactoring tasks preserve public contracts.",
+    "test_resolution": "Inline tests remain part of their production parent until a TEST task moves them. Test moves preserve names, assertions, fixture meaning, and count.",
+    "status_resolution": "This manifest records executable scope, not completion state. ENF-004 owns durable completion reporting after evidence from every gate exists."
+  },
+  "global_constraints": [
+    "Use the Rust and Node versions pinned by rust-toolchain.toml and .node-version.",
+    "Start each task from the latest green main and record HEAD, merge-base, worktree state, symbols, invariants, tests, expected size delta, and semantic risks before editing.",
+    "Do not change behavior, public contracts, schema, serialization, errors, IPC names, security boundaries, or deterministic ordering unless the task explicitly authorizes that exact change.",
+    "Do not add or upgrade dependencies in a refactoring task.",
+    "Existing source-size and context baselines may only shrink; do not add a giant-file exception to hide extraction output.",
+    "Stop and report when a required edit falls outside allowed_paths or when a task needs an unapproved contract, schema, security, dependency, or semantic change."
+  ],
+  "tasks": {
+    "GOV-001": {
+      "phase": "A",
+      "summary": "Generate a reproducible hotspot, source-size, and public-surface baseline report.",
+      "depends_on": [],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "config/source-size-baseline.json",
+        "config/core-storage-public-api-baseline.json",
+        "scripts/check_source_architecture.py",
+        "scripts/report_refactoring_baseline.py",
+        "scripts/test_report_refactoring_baseline.py"
+      ],
+      "allowed_paths": [
+        "scripts/report_refactoring_baseline.py",
+        "scripts/test_report_refactoring_baseline.py",
+        "config/refactoring/baseline-report.json",
+        ".github/workflows/ci.yml"
+      ],
+      "forbidden_changes": [
+        "production logic or runtime behavior changes",
+        "public API, serialized DTO, schema, migration, error code, or IPC command changes",
+        "dependency additions or upgrades",
+        "source-size or context-budget cap increases"
+      ],
+      "validation": [
+        "python3 -m unittest scripts/test_report_refactoring_baseline.py",
+        "python3 scripts/report_refactoring_baseline.py --check",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "the report script produces deterministic repo-relative output",
+        "the committed snapshot matches the current baseline commit",
+        "hotspot sizes and conservative public-surface anchors are recorded without production changes"
+      ]
+    },
+    "GOV-002": {
+      "phase": "A",
+      "summary": "Add repository, Core, Storage, and frontend AI code maps.",
+      "depends_on": [],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "docs/adr/0001-layer-boundaries.md",
+        "docs/adr/0002-storage-transaction-boundaries.md",
+        "docs/adr/0003-credential-and-secret-boundary.md",
+        "docs/adr/0004-ipc-command-registry.md",
+        "docs/adr/0005-asset-delivery-verification.md"
+      ],
+      "allowed_paths": [
+        "AGENTS.md",
+        "crates/core/AGENTS.md",
+        "crates/storage/AGENTS.md",
+        "apps/lorepia/src/AGENTS.md"
+      ],
+      "forbidden_changes": [
+        "production logic or runtime behavior changes",
+        "public API, serialized DTO, schema, migration, error code, or IPC command changes",
+        "dependency additions or upgrades",
+        "source-size or context-budget cap increases"
+      ],
+      "validation": [
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "all four guides are at most 200 lines",
+        "each guide states boundaries, tests, and forbidden changes",
+        "nearer guides do not weaken repository invariants"
+      ]
+    },
+    "GOV-003": {
+      "phase": "A",
+      "summary": "Commit the canonical plan/task manifest and add a validated per-task AI context map.",
+      "depends_on": [
+        "GOV-001",
+        "GOV-002"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "config/refactoring/baseline-report.json",
+        "scripts/check_source_architecture.py"
+      ],
+      "allowed_paths": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "config/ai-context-map.json",
+        "scripts/check_ai_context_map.py",
+        "scripts/test_check_ai_context_map.py",
+        ".github/workflows/ci.yml"
+      ],
+      "forbidden_changes": [
+        "production logic or runtime behavior changes",
+        "public API, serialized DTO, schema, migration, error code, or IPC command changes",
+        "dependency additions or upgrades",
+        "source-size or context-budget cap increases"
+      ],
+      "validation": [
+        "python3 -m json.tool config/refactoring/task-manifest.yaml",
+        "python3 -m unittest scripts/test_check_ai_context_map.py",
+        "python3 scripts/check_ai_context_map.py",
+        "python3 scripts/check_github_workflow_security.py"
+      ],
+      "done_when": [
+        "the plan uses one canonical manifest path",
+        "the manifest contains exactly the 59 planned Task IDs",
+        "every context path exists, is unique within its task bundle, and has a deterministic byte total",
+        "Gate A CI invokes the context-map tests and checker"
+      ]
+    },
+    "GOV-004": {
+      "phase": "A",
+      "summary": "Measure frontend and native test sources with a separate non-growth size ratchet.",
+      "depends_on": [
+        "GOV-001"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "config/source-size-baseline.json",
+        "scripts/check_source_architecture.py",
+        "scripts/test_check_source_architecture.py"
+      ],
+      "allowed_paths": [
+        "config/test-source-size-baseline.json",
+        "scripts/check_source_architecture.py",
+        "scripts/test_check_source_architecture.py",
+        ".github/workflows/ci.yml"
+      ],
+      "forbidden_changes": [
+        "production logic or runtime behavior changes",
+        "public API, serialized DTO, schema, migration, error code, or IPC command changes",
+        "dependency additions or upgrades",
+        "source-size or context-budget cap increases"
+      ],
+      "validation": [
+        "python3 -m unittest scripts/test_check_source_architecture.py",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "frontend test/spec files and Rust external/child tests are classified without production double-counting",
+        "legacy oversized tests are baselined and cannot grow",
+        "new tests use the configured test-source limits"
+      ]
+    },
+    "TEST-CORE-001": {
+      "phase": "B",
+      "summary": "Move app.rs inline tests and test-only helpers into feature-grouped app/tests modules.",
+      "depends_on": [
+        "GOV-003",
+        "GOV-004"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "crates/core/AGENTS.md",
+        "crates/core/src/app.rs",
+        "crates/core/tests/chat_vertical_slice.rs",
+        "config/source-size-baseline.json"
+      ],
+      "allowed_paths": [
+        "crates/core/src/app.rs",
+        "crates/core/src/app/tests/**",
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "production behavior or public signature changes",
+        "test name, assertion, fixture meaning, or test-count reduction",
+        "dependency additions or upgrades",
+        "source-size baseline increases or new giant-file exceptions"
+      ],
+      "validation": [
+        "cargo fmt --all --check",
+        "cargo clippy -p lorepia-core --all-targets -- -D warnings",
+        "cargo test -p lorepia-core",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "app tests and test-only helpers are grouped below app/tests",
+        "test names, assertions, fixtures, and count are preserved",
+        "app.rs size caps decrease by the measured reduction"
+      ]
+    },
+    "TEST-STOR-001": {
+      "phase": "B",
+      "summary": "Split discovery_repository tests by discovery behavior.",
+      "depends_on": [
+        "GOV-003",
+        "GOV-004"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "crates/storage/AGENTS.md",
+        "crates/storage/src/discovery_repository.rs",
+        "config/source-size-baseline.json"
+      ],
+      "allowed_paths": [
+        "crates/storage/src/discovery_repository.rs",
+        "crates/storage/src/discovery_repository/tests/**",
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "production behavior or public signature changes",
+        "test name, assertion, fixture meaning, or test-count reduction",
+        "dependency additions or upgrades",
+        "source-size baseline increases or new giant-file exceptions"
+      ],
+      "validation": [
+        "cargo fmt --all --check",
+        "cargo clippy -p lorepia-storage --all-targets -- -D warnings",
+        "cargo test -p lorepia-storage",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "tests are grouped by bounded behavior",
+        "test names, assertions, fixtures, and count are preserved",
+        "parent and test baselines only decrease"
+      ]
+    },
+    "TEST-STOR-002": {
+      "phase": "B",
+      "summary": "Split database tests by bootstrap, migration, health, and recovery behavior.",
+      "depends_on": [
+        "GOV-003",
+        "GOV-004"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "crates/storage/AGENTS.md",
+        "crates/storage/src/database.rs",
+        "config/source-size-baseline.json"
+      ],
+      "allowed_paths": [
+        "crates/storage/src/database.rs",
+        "crates/storage/src/database/tests/**",
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "production behavior or public signature changes",
+        "test name, assertion, fixture meaning, or test-count reduction",
+        "dependency additions or upgrades",
+        "source-size baseline increases or new giant-file exceptions"
+      ],
+      "validation": [
+        "cargo fmt --all --check",
+        "cargo clippy -p lorepia-storage --all-targets -- -D warnings",
+        "cargo test -p lorepia-storage",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "tests are grouped by bounded behavior",
+        "test names, assertions, fixtures, and count are preserved",
+        "parent and test baselines only decrease"
+      ]
+    },
+    "TEST-STOR-003": {
+      "phase": "B",
+      "summary": "Split interaction_repository tests by conversation and effect behavior.",
+      "depends_on": [
+        "GOV-003",
+        "GOV-004"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "crates/storage/AGENTS.md",
+        "crates/storage/src/interaction_repository.rs",
+        "config/source-size-baseline.json"
+      ],
+      "allowed_paths": [
+        "crates/storage/src/interaction_repository.rs",
+        "crates/storage/src/interaction_repository/tests/**",
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "production behavior or public signature changes",
+        "test name, assertion, fixture meaning, or test-count reduction",
+        "dependency additions or upgrades",
+        "source-size baseline increases or new giant-file exceptions"
+      ],
+      "validation": [
+        "cargo fmt --all --check",
+        "cargo clippy -p lorepia-storage --all-targets -- -D warnings",
+        "cargo test -p lorepia-storage",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "tests are grouped by bounded behavior",
+        "test names, assertions, fixtures, and count are preserved",
+        "parent and test baselines only decrease"
+      ]
+    },
+    "TEST-STOR-004": {
+      "phase": "B",
+      "summary": "Split Storage orchestration tests into feature-grouped child modules.",
+      "depends_on": [
+        "GOV-003",
+        "GOV-004"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "crates/storage/AGENTS.md",
+        "crates/storage/src/orchestration.rs",
+        "config/source-size-baseline.json",
+        "crates/storage/src/orchestration/tests.rs"
+      ],
+      "allowed_paths": [
+        "crates/storage/src/orchestration.rs",
+        "crates/storage/src/orchestration/tests/**",
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "production behavior or public signature changes",
+        "test name, assertion, fixture meaning, or test-count reduction",
+        "dependency additions or upgrades",
+        "source-size baseline increases or new giant-file exceptions"
+      ],
+      "validation": [
+        "cargo fmt --all --check",
+        "cargo clippy -p lorepia-storage --all-targets -- -D warnings",
+        "cargo test -p lorepia-storage",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "tests are grouped by bounded behavior",
+        "test names, assertions, fixtures, and count are preserved",
+        "parent and test baselines only decrease"
+      ]
+    },
+    "TEST-FE-001": {
+      "phase": "B",
+      "summary": "Split app-controller and provider tests into feature-focused files.",
+      "depends_on": [
+        "GOV-003",
+        "GOV-004"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "apps/lorepia/src/AGENTS.md",
+        "apps/lorepia/src/app/app-controller.test.ts",
+        "apps/lorepia/src/features/providers/ProviderSettings.test.ts"
+      ],
+      "allowed_paths": [
+        "apps/lorepia/src/app/app-controller.test.ts",
+        "apps/lorepia/src/features/providers/ProviderSettings.test.ts",
+        "apps/lorepia/src/app/tests/**",
+        "apps/lorepia/src/app/**/*.test.ts",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "production behavior or public signature changes",
+        "test name, assertion, fixture meaning, or test-count reduction",
+        "dependency additions or upgrades",
+        "source-size baseline increases or new giant-file exceptions"
+      ],
+      "validation": [
+        "npm run check --prefix apps/lorepia",
+        "npm run test --prefix apps/lorepia -- apps/lorepia/src/app/app-controller.test.ts",
+        "python3 -m unittest scripts/test_check_source_architecture.py",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "tests are split by user-visible behavior",
+        "test names, assertions, fixtures, and count are preserved",
+        "test baselines only decrease"
+      ]
+    },
+    "TEST-FE-002": {
+      "phase": "B",
+      "summary": "Split ChatPane tests into rendering, scroll, composer, actions, and runtime groups.",
+      "depends_on": [
+        "GOV-003",
+        "GOV-004"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "apps/lorepia/src/AGENTS.md",
+        "apps/lorepia/src/features/chat/ChatPane.test.ts",
+        "apps/lorepia/src/features/chat/portable-runtime.test.ts"
+      ],
+      "allowed_paths": [
+        "apps/lorepia/src/features/chat/ChatPane.test.ts",
+        "apps/lorepia/src/features/chat/portable-runtime.test.ts",
+        "apps/lorepia/src/features/chat/tests/**",
+        "apps/lorepia/src/features/chat/**/*.test.ts",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "production behavior or public signature changes",
+        "test name, assertion, fixture meaning, or test-count reduction",
+        "dependency additions or upgrades",
+        "source-size baseline increases or new giant-file exceptions"
+      ],
+      "validation": [
+        "npm run check --prefix apps/lorepia",
+        "npm run test --prefix apps/lorepia -- apps/lorepia/src/features/chat/ChatPane.test.ts",
+        "python3 -m unittest scripts/test_check_source_architecture.py",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "tests are split by user-visible behavior",
+        "test names, assertions, fixtures, and count are preserved",
+        "test baselines only decrease"
+      ]
+    },
+    "TEST-FE-003": {
+      "phase": "B",
+      "summary": "Split OrchestrationUI tests by studio section.",
+      "depends_on": [
+        "GOV-003",
+        "GOV-004"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "apps/lorepia/src/AGENTS.md",
+        "apps/lorepia/src/features/orchestration/OrchestrationUI.test.ts",
+        "apps/lorepia/src/features/orchestration/orchestration-controller.test.ts"
+      ],
+      "allowed_paths": [
+        "apps/lorepia/src/features/orchestration/OrchestrationUI.test.ts",
+        "apps/lorepia/src/features/orchestration/orchestration-controller.test.ts",
+        "apps/lorepia/src/features/orchestration/tests/**",
+        "apps/lorepia/src/features/orchestration/**/*.test.ts",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "production behavior or public signature changes",
+        "test name, assertion, fixture meaning, or test-count reduction",
+        "dependency additions or upgrades",
+        "source-size baseline increases or new giant-file exceptions"
+      ],
+      "validation": [
+        "npm run check --prefix apps/lorepia",
+        "npm run test --prefix apps/lorepia -- apps/lorepia/src/features/orchestration/OrchestrationUI.test.ts",
+        "python3 -m unittest scripts/test_check_source_architecture.py",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "tests are split by user-visible behavior",
+        "test names, assertions, fixtures, and count are preserved",
+        "test baselines only decrease"
+      ]
+    },
+    "STOR-API-001": {
+      "phase": "C",
+      "summary": "Define discovery semantic views/methods required by Core without exposing persistence rows.",
+      "depends_on": [
+        "TEST-STOR-001"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "crates/storage/AGENTS.md",
+        "docs/adr/0002-storage-transaction-boundaries.md",
+        "docs/architecture/storage-public-api-audit.md",
+        "crates/storage/src/lib.rs",
+        "crates/storage/src/discovery_repository.rs",
+        "crates/core/src/provider_discovery.rs",
+        "config/core-storage-public-api-baseline.json"
+      ],
+      "allowed_paths": [
+        "crates/storage/src/lib.rs",
+        "crates/storage/src/discovery_repository.rs",
+        "crates/storage/src/discovery_repository/**",
+        "crates/core/src/provider_discovery.rs",
+        "crates/core/src/provider_discovery/**",
+        "docs/architecture/storage-public-api-audit.md",
+        "config/core-storage-public-api-baseline.json",
+        "config/source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "database schema or applied migration changes",
+        "transaction scope, TransactionBehavior, lock order, fsync order, journal phase, or recovery behavior changes",
+        "public API or serialized contract changes not explicitly authorized by this task",
+        "dependency additions or upgrades",
+        "source-size baseline increases or unrelated cleanup",
+        "removal or narrowing of an existing public item without compatibility proof",
+        "new Core or Shell re-export of a Storage Stored* type"
+      ],
+      "validation": [
+        "cargo fmt --all --check",
+        "cargo clippy -p lorepia-storage -p lorepia-core --all-targets -- -D warnings",
+        "cargo test -p lorepia-storage",
+        "cargo test -p lorepia-core --test provider_discovery_integration",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "Core consumes a meaning-based discovery view or method",
+        "no new persistence row crosses Core or Shell",
+        "existing public callers remain compatible"
+      ]
+    },
+    "STOR-DISC-001": {
+      "phase": "C",
+      "summary": "Extract discovery types, validation, and contract codec.",
+      "depends_on": [
+        "STOR-API-001",
+        "TEST-STOR-001"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "crates/storage/AGENTS.md",
+        "docs/adr/0002-storage-transaction-boundaries.md",
+        "crates/storage/src/discovery_repository.rs",
+        "crates/storage/tests/discovery_state_storage.rs",
+        "config/source-size-baseline.json"
+      ],
+      "allowed_paths": [
+        "crates/storage/src/discovery_repository.rs",
+        "crates/storage/src/discovery_repository/**",
+        "crates/storage/tests/discovery_state_storage.rs",
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "database schema or applied migration changes",
+        "transaction scope, TransactionBehavior, lock order, fsync order, journal phase, or recovery behavior changes",
+        "public API or serialized contract changes not explicitly authorized by this task",
+        "dependency additions or upgrades",
+        "source-size baseline increases or unrelated cleanup"
+      ],
+      "validation": [
+        "cargo fmt --all --check",
+        "cargo clippy -p lorepia-storage --all-targets -- -D warnings",
+        "cargo test -p lorepia-storage",
+        "cargo test -p lorepia-core",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "the named bounded context is delegated to focused child modules",
+        "Storage retains transaction and recovery ownership",
+        "public callers and storage semantics are unchanged",
+        "the parent baseline decreases by the measured reduction"
+      ]
+    },
+    "STOR-DISC-002": {
+      "phase": "C",
+      "summary": "Extract discovery read queries and row mapping.",
+      "depends_on": [
+        "STOR-DISC-001"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "crates/storage/AGENTS.md",
+        "docs/adr/0002-storage-transaction-boundaries.md",
+        "crates/storage/src/discovery_repository.rs",
+        "crates/storage/tests/discovery_state_storage.rs",
+        "config/source-size-baseline.json"
+      ],
+      "allowed_paths": [
+        "crates/storage/src/discovery_repository.rs",
+        "crates/storage/src/discovery_repository/**",
+        "crates/storage/tests/discovery_state_storage.rs",
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "database schema or applied migration changes",
+        "transaction scope, TransactionBehavior, lock order, fsync order, journal phase, or recovery behavior changes",
+        "public API or serialized contract changes not explicitly authorized by this task",
+        "dependency additions or upgrades",
+        "source-size baseline increases or unrelated cleanup"
+      ],
+      "validation": [
+        "cargo fmt --all --check",
+        "cargo clippy -p lorepia-storage --all-targets -- -D warnings",
+        "cargo test -p lorepia-storage",
+        "cargo test -p lorepia-core",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "the named bounded context is delegated to focused child modules",
+        "Storage retains transaction and recovery ownership",
+        "public callers and storage semantics are unchanged",
+        "the parent baseline decreases by the measured reduction"
+      ]
+    },
+    "STOR-DISC-003": {
+      "phase": "C",
+      "summary": "Extract discovery transition and approval persistence.",
+      "depends_on": [
+        "STOR-DISC-002"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "crates/storage/AGENTS.md",
+        "docs/adr/0002-storage-transaction-boundaries.md",
+        "crates/storage/src/discovery_repository.rs",
+        "crates/storage/tests/discovery_state_storage.rs",
+        "crates/storage/tests/discovery_wal_purge.rs",
+        "config/source-size-baseline.json"
+      ],
+      "allowed_paths": [
+        "crates/storage/src/discovery_repository.rs",
+        "crates/storage/src/discovery_repository/**",
+        "crates/storage/tests/discovery_state_storage.rs",
+        "crates/storage/tests/discovery_wal_purge.rs",
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "database schema or applied migration changes",
+        "transaction scope, TransactionBehavior, lock order, fsync order, journal phase, or recovery behavior changes",
+        "public API or serialized contract changes not explicitly authorized by this task",
+        "dependency additions or upgrades",
+        "source-size baseline increases or unrelated cleanup"
+      ],
+      "validation": [
+        "cargo fmt --all --check",
+        "cargo clippy -p lorepia-storage --all-targets -- -D warnings",
+        "cargo test -p lorepia-storage",
+        "cargo test -p lorepia-core",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "the named bounded context is delegated to focused child modules",
+        "Storage retains transaction and recovery ownership",
+        "public callers and storage semantics are unchanged",
+        "the parent baseline decreases by the measured reduction"
+      ]
+    },
+    "STOR-DISC-004": {
+      "phase": "C",
+      "summary": "Extract discovery commit, credential execution, and recovery.",
+      "depends_on": [
+        "STOR-DISC-003"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "crates/storage/AGENTS.md",
+        "docs/adr/0002-storage-transaction-boundaries.md",
+        "crates/storage/src/discovery_repository.rs",
+        "crates/storage/tests/discovery_state_storage.rs",
+        "crates/storage/tests/provider_credential_operations.rs",
+        "config/source-size-baseline.json"
+      ],
+      "allowed_paths": [
+        "crates/storage/src/discovery_repository.rs",
+        "crates/storage/src/discovery_repository/**",
+        "crates/storage/tests/discovery_state_storage.rs",
+        "crates/storage/tests/provider_credential_operations.rs",
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "database schema or applied migration changes",
+        "transaction scope, TransactionBehavior, lock order, fsync order, journal phase, or recovery behavior changes",
+        "public API or serialized contract changes not explicitly authorized by this task",
+        "dependency additions or upgrades",
+        "source-size baseline increases or unrelated cleanup"
+      ],
+      "validation": [
+        "cargo fmt --all --check",
+        "cargo clippy -p lorepia-storage --all-targets -- -D warnings",
+        "cargo test -p lorepia-storage",
+        "cargo test -p lorepia-core",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "the named bounded context is delegated to focused child modules",
+        "Storage retains transaction and recovery ownership",
+        "public callers and storage semantics are unchanged",
+        "the parent baseline decreases by the measured reduction"
+      ]
+    },
+    "STOR-DB-001": {
+      "phase": "C",
+      "summary": "Extract database connection, pragmas, and bootstrap.",
+      "depends_on": [
+        "TEST-STOR-002"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "crates/storage/AGENTS.md",
+        "docs/adr/0002-storage-transaction-boundaries.md",
+        "crates/storage/src/database.rs",
+        "crates/storage/tests/private_storage_permissions.rs",
+        "config/source-size-baseline.json"
+      ],
+      "allowed_paths": [
+        "crates/storage/src/database.rs",
+        "crates/storage/src/database/**",
+        "crates/storage/tests/private_storage_permissions.rs",
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "database schema or applied migration changes",
+        "transaction scope, TransactionBehavior, lock order, fsync order, journal phase, or recovery behavior changes",
+        "public API or serialized contract changes not explicitly authorized by this task",
+        "dependency additions or upgrades",
+        "source-size baseline increases or unrelated cleanup"
+      ],
+      "validation": [
+        "cargo fmt --all --check",
+        "cargo clippy -p lorepia-storage --all-targets -- -D warnings",
+        "cargo test -p lorepia-storage",
+        "cargo test -p lorepia-core",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "the named bounded context is delegated to focused child modules",
+        "Storage retains transaction and recovery ownership",
+        "public callers and storage semantics are unchanged",
+        "the parent baseline decreases by the measured reduction"
+      ]
+    },
+    "STOR-DB-002": {
+      "phase": "C",
+      "summary": "Extract schema and migration registry, runner, and verification.",
+      "depends_on": [
+        "STOR-DB-001"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "crates/storage/AGENTS.md",
+        "docs/adr/0002-storage-transaction-boundaries.md",
+        "crates/storage/src/database.rs",
+        "crates/storage/tests/migration_cutpoint_matrix.rs",
+        "crates/storage/tests/schema_registry_integrity.rs",
+        "config/source-size-baseline.json"
+      ],
+      "allowed_paths": [
+        "crates/storage/src/database.rs",
+        "crates/storage/src/database/**",
+        "crates/storage/tests/migration_cutpoint_matrix.rs",
+        "crates/storage/tests/schema_registry_integrity.rs",
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "database schema or applied migration changes",
+        "transaction scope, TransactionBehavior, lock order, fsync order, journal phase, or recovery behavior changes",
+        "public API or serialized contract changes not explicitly authorized by this task",
+        "dependency additions or upgrades",
+        "source-size baseline increases or unrelated cleanup"
+      ],
+      "validation": [
+        "cargo fmt --all --check",
+        "cargo clippy -p lorepia-storage --all-targets -- -D warnings",
+        "cargo test -p lorepia-storage",
+        "cargo test -p lorepia-core",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "the named bounded context is delegated to focused child modules",
+        "Storage retains transaction and recovery ownership",
+        "public callers and storage semantics are unchanged",
+        "the parent baseline decreases by the measured reduction"
+      ]
+    },
+    "STOR-DB-003": {
+      "phase": "C",
+      "summary": "Extract database health, stats, and test support.",
+      "depends_on": [
+        "STOR-DB-002"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "crates/storage/AGENTS.md",
+        "docs/adr/0002-storage-transaction-boundaries.md",
+        "crates/storage/src/database.rs",
+        "crates/storage/tests/schema11_release_cutover.rs",
+        "config/source-size-baseline.json"
+      ],
+      "allowed_paths": [
+        "crates/storage/src/database.rs",
+        "crates/storage/src/database/**",
+        "crates/storage/tests/schema11_release_cutover.rs",
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "database schema or applied migration changes",
+        "transaction scope, TransactionBehavior, lock order, fsync order, journal phase, or recovery behavior changes",
+        "public API or serialized contract changes not explicitly authorized by this task",
+        "dependency additions or upgrades",
+        "source-size baseline increases or unrelated cleanup"
+      ],
+      "validation": [
+        "cargo fmt --all --check",
+        "cargo clippy -p lorepia-storage --all-targets -- -D warnings",
+        "cargo test -p lorepia-storage",
+        "cargo test -p lorepia-core",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "the named bounded context is delegated to focused child modules",
+        "Storage retains transaction and recovery ownership",
+        "public callers and storage semantics are unchanged",
+        "the parent baseline decreases by the measured reduction"
+      ]
+    },
+    "STOR-INT-001": {
+      "phase": "C",
+      "summary": "Extract conversation, branch, message reads, and projections.",
+      "depends_on": [
+        "TEST-STOR-003"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "crates/storage/AGENTS.md",
+        "docs/adr/0002-storage-transaction-boundaries.md",
+        "crates/storage/src/interaction_repository.rs",
+        "crates/storage/tests/greeting_conversation_start.rs",
+        "config/source-size-baseline.json"
+      ],
+      "allowed_paths": [
+        "crates/storage/src/interaction_repository.rs",
+        "crates/storage/src/interaction_repository/**",
+        "crates/storage/tests/greeting_conversation_start.rs",
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "database schema or applied migration changes",
+        "transaction scope, TransactionBehavior, lock order, fsync order, journal phase, or recovery behavior changes",
+        "public API or serialized contract changes not explicitly authorized by this task",
+        "dependency additions or upgrades",
+        "source-size baseline increases or unrelated cleanup"
+      ],
+      "validation": [
+        "cargo fmt --all --check",
+        "cargo clippy -p lorepia-storage --all-targets -- -D warnings",
+        "cargo test -p lorepia-storage",
+        "cargo test -p lorepia-core",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "the named bounded context is delegated to focused child modules",
+        "Storage retains transaction and recovery ownership",
+        "public callers and storage semantics are unchanged",
+        "the parent baseline decreases by the measured reduction"
+      ]
+    },
+    "STOR-INT-002": {
+      "phase": "C",
+      "summary": "Extract proposal, effect, and checkpoint writes.",
+      "depends_on": [
+        "STOR-INT-001"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "crates/storage/AGENTS.md",
+        "docs/adr/0002-storage-transaction-boundaries.md",
+        "crates/storage/src/interaction_repository.rs",
+        "crates/storage/tests/interaction_derived_event_storage.rs",
+        "config/source-size-baseline.json"
+      ],
+      "allowed_paths": [
+        "crates/storage/src/interaction_repository.rs",
+        "crates/storage/src/interaction_repository/**",
+        "crates/storage/tests/interaction_derived_event_storage.rs",
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "database schema or applied migration changes",
+        "transaction scope, TransactionBehavior, lock order, fsync order, journal phase, or recovery behavior changes",
+        "public API or serialized contract changes not explicitly authorized by this task",
+        "dependency additions or upgrades",
+        "source-size baseline increases or unrelated cleanup"
+      ],
+      "validation": [
+        "cargo fmt --all --check",
+        "cargo clippy -p lorepia-storage --all-targets -- -D warnings",
+        "cargo test -p lorepia-storage",
+        "cargo test -p lorepia-core",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "the named bounded context is delegated to focused child modules",
+        "Storage retains transaction and recovery ownership",
+        "public callers and storage semantics are unchanged",
+        "the parent baseline decreases by the measured reduction"
+      ]
+    },
+    "STOR-INT-003": {
+      "phase": "C",
+      "summary": "Extract derived outbox and interaction recovery.",
+      "depends_on": [
+        "STOR-INT-002"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "crates/storage/AGENTS.md",
+        "docs/adr/0002-storage-transaction-boundaries.md",
+        "crates/storage/src/interaction_repository.rs",
+        "crates/storage/tests/interaction_derived_event_storage.rs",
+        "config/source-size-baseline.json"
+      ],
+      "allowed_paths": [
+        "crates/storage/src/interaction_repository.rs",
+        "crates/storage/src/interaction_repository/**",
+        "crates/storage/tests/interaction_derived_event_storage.rs",
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "database schema or applied migration changes",
+        "transaction scope, TransactionBehavior, lock order, fsync order, journal phase, or recovery behavior changes",
+        "public API or serialized contract changes not explicitly authorized by this task",
+        "dependency additions or upgrades",
+        "source-size baseline increases or unrelated cleanup"
+      ],
+      "validation": [
+        "cargo fmt --all --check",
+        "cargo clippy -p lorepia-storage --all-targets -- -D warnings",
+        "cargo test -p lorepia-storage",
+        "cargo test -p lorepia-core",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "the named bounded context is delegated to focused child modules",
+        "Storage retains transaction and recovery ownership",
+        "public callers and storage semantics are unchanged",
+        "the parent baseline decreases by the measured reduction"
+      ]
+    },
+    "STOR-ORCH-001": {
+      "phase": "C",
+      "summary": "Extract prompt documents, presets, variables, and transforms.",
+      "depends_on": [
+        "TEST-STOR-004"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "crates/storage/AGENTS.md",
+        "docs/adr/0002-storage-transaction-boundaries.md",
+        "crates/storage/src/orchestration.rs",
+        "crates/storage/tests/orchestration_migrations.rs",
+        "config/source-size-baseline.json"
+      ],
+      "allowed_paths": [
+        "crates/storage/src/orchestration.rs",
+        "crates/storage/src/orchestration/**",
+        "crates/storage/tests/orchestration_migrations.rs",
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "database schema or applied migration changes",
+        "transaction scope, TransactionBehavior, lock order, fsync order, journal phase, or recovery behavior changes",
+        "public API or serialized contract changes not explicitly authorized by this task",
+        "dependency additions or upgrades",
+        "source-size baseline increases or unrelated cleanup"
+      ],
+      "validation": [
+        "cargo fmt --all --check",
+        "cargo clippy -p lorepia-storage --all-targets -- -D warnings",
+        "cargo test -p lorepia-storage",
+        "cargo test -p lorepia-core",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "the named bounded context is delegated to focused child modules",
+        "Storage retains transaction and recovery ownership",
+        "public callers and storage semantics are unchanged",
+        "the parent baseline decreases by the measured reduction"
+      ]
+    },
+    "STOR-ORCH-002": {
+      "phase": "C",
+      "summary": "Extract memory, knowledge, modules, and runtime plans.",
+      "depends_on": [
+        "STOR-ORCH-001"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "crates/storage/AGENTS.md",
+        "docs/adr/0002-storage-transaction-boundaries.md",
+        "crates/storage/src/orchestration.rs",
+        "crates/storage/tests/knowledge_embedding_storage.rs",
+        "config/source-size-baseline.json"
+      ],
+      "allowed_paths": [
+        "crates/storage/src/orchestration.rs",
+        "crates/storage/src/orchestration/**",
+        "crates/storage/tests/knowledge_embedding_storage.rs",
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "database schema or applied migration changes",
+        "transaction scope, TransactionBehavior, lock order, fsync order, journal phase, or recovery behavior changes",
+        "public API or serialized contract changes not explicitly authorized by this task",
+        "dependency additions or upgrades",
+        "source-size baseline increases or unrelated cleanup"
+      ],
+      "validation": [
+        "cargo fmt --all --check",
+        "cargo clippy -p lorepia-storage --all-targets -- -D warnings",
+        "cargo test -p lorepia-storage",
+        "cargo test -p lorepia-core",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "the named bounded context is delegated to focused child modules",
+        "Storage retains transaction and recovery ownership",
+        "public callers and storage semantics are unchanged",
+        "the parent baseline decreases by the measured reduction"
+      ]
+    },
+    "STOR-PKG-001": {
+      "phase": "C",
+      "summary": "Split package query, review, commit, CAS promotion, lifecycle, and recovery.",
+      "depends_on": [
+        "STOR-API-001"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "crates/storage/AGENTS.md",
+        "docs/adr/0002-storage-transaction-boundaries.md",
+        "crates/storage/src/package_repository.rs",
+        "crates/core/tests/orchestration_content_import.rs",
+        "config/source-size-baseline.json"
+      ],
+      "allowed_paths": [
+        "crates/storage/src/package_repository.rs",
+        "crates/storage/src/package_repository/**",
+        "crates/core/tests/orchestration_content_import.rs",
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "database schema or applied migration changes",
+        "transaction scope, TransactionBehavior, lock order, fsync order, journal phase, or recovery behavior changes",
+        "public API or serialized contract changes not explicitly authorized by this task",
+        "dependency additions or upgrades",
+        "source-size baseline increases or unrelated cleanup"
+      ],
+      "validation": [
+        "cargo fmt --all --check",
+        "cargo clippy -p lorepia-storage --all-targets -- -D warnings",
+        "cargo test -p lorepia-storage",
+        "cargo test -p lorepia-core",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "the named bounded context is delegated to focused child modules",
+        "Storage retains transaction and recovery ownership",
+        "public callers and storage semantics are unchanged",
+        "the parent baseline decreases by the measured reduction"
+      ]
+    },
+    "CORE-GEN-001": {
+      "phase": "D",
+      "summary": "Extract generation types, operation identity, credential handling, and admission.",
+      "depends_on": [
+        "TEST-CORE-001",
+        "STOR-INT-003"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "crates/core/AGENTS.md",
+        "crates/core/src/app.rs",
+        "crates/core/tests/generation_attempt_derived_closure.rs",
+        "docs/adr/0003-credential-and-secret-boundary.md",
+        "config/source-size-baseline.json"
+      ],
+      "allowed_paths": [
+        "crates/core/src/app.rs",
+        "crates/core/src/app/generation/**",
+        "crates/core/tests/generation_attempt_derived_closure.rs",
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "public Core API, Shell DTO, schema, error code, or IPC command changes",
+        "credential lifetime, redaction, zeroization, dispatch lease, or drop-order changes",
+        "generation admission, durable-attempt ordering, cancellation, checkpoint, stream ordering, or recovery changes",
+        "dependency additions or upgrades",
+        "source-size baseline increases or unrelated cleanup"
+      ],
+      "validation": [
+        "cargo fmt --all --check",
+        "cargo clippy -p lorepia-core --all-targets -- -D warnings",
+        "cargo test -p lorepia-core",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "the named use cases delegate to focused child modules",
+        "public Core signatures and security/determinism invariants are unchanged",
+        "the parent baseline decreases by the measured reduction"
+      ]
+    },
+    "CORE-GEN-002": {
+      "phase": "D",
+      "summary": "Extract generation target resolution, preset validation, and prompt preparation.",
+      "depends_on": [
+        "CORE-GEN-001",
+        "STOR-ORCH-002"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "crates/core/AGENTS.md",
+        "crates/core/src/app.rs",
+        "crates/core/tests/chat_vertical_slice.rs",
+        "config/source-size-baseline.json"
+      ],
+      "allowed_paths": [
+        "crates/core/src/app.rs",
+        "crates/core/src/app/generation/**",
+        "crates/core/tests/chat_vertical_slice.rs",
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "public Core API, Shell DTO, schema, error code, or IPC command changes",
+        "credential lifetime, redaction, zeroization, dispatch lease, or drop-order changes",
+        "generation admission, durable-attempt ordering, cancellation, checkpoint, stream ordering, or recovery changes",
+        "dependency additions or upgrades",
+        "source-size baseline increases or unrelated cleanup"
+      ],
+      "validation": [
+        "cargo fmt --all --check",
+        "cargo clippy -p lorepia-core --all-targets -- -D warnings",
+        "cargo test -p lorepia-core",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "the named use cases delegate to focused child modules",
+        "public Core signatures and security/determinism invariants are unchanged",
+        "the parent baseline decreases by the measured reduction"
+      ]
+    },
+    "CORE-GEN-003": {
+      "phase": "D",
+      "summary": "Extract generation dispatch, events, checkpoints, and recovery.",
+      "depends_on": [
+        "CORE-GEN-002"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "crates/core/AGENTS.md",
+        "crates/core/src/app.rs",
+        "crates/core/tests/generation_attempt_derived_closure.rs",
+        "config/source-size-baseline.json"
+      ],
+      "allowed_paths": [
+        "crates/core/src/app.rs",
+        "crates/core/src/app/generation/**",
+        "crates/core/tests/generation_attempt_derived_closure.rs",
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "public Core API, Shell DTO, schema, error code, or IPC command changes",
+        "credential lifetime, redaction, zeroization, dispatch lease, or drop-order changes",
+        "generation admission, durable-attempt ordering, cancellation, checkpoint, stream ordering, or recovery changes",
+        "dependency additions or upgrades",
+        "source-size baseline increases or unrelated cleanup"
+      ],
+      "validation": [
+        "cargo fmt --all --check",
+        "cargo clippy -p lorepia-core --all-targets -- -D warnings",
+        "cargo test -p lorepia-core",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "the named use cases delegate to focused child modules",
+        "public Core signatures and security/determinism invariants are unchanged",
+        "the parent baseline decreases by the measured reduction"
+      ]
+    },
+    "CORE-PROV-001": {
+      "phase": "D",
+      "summary": "Extract provider connection, credential, catalog, model sync, and routing coordination.",
+      "depends_on": [
+        "TEST-CORE-001",
+        "STOR-API-001"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "crates/core/AGENTS.md",
+        "crates/core/src/app.rs",
+        "crates/core/tests/semantic_provider_vertical.rs",
+        "docs/adr/0003-credential-and-secret-boundary.md",
+        "config/source-size-baseline.json"
+      ],
+      "allowed_paths": [
+        "crates/core/src/app.rs",
+        "crates/core/src/app/providers/**",
+        "crates/core/tests/semantic_provider_vertical.rs",
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "public Core API, Shell DTO, schema, error code, or IPC command changes",
+        "credential lifetime, redaction, zeroization, dispatch lease, or drop-order changes",
+        "generation admission, durable-attempt ordering, cancellation, checkpoint, stream ordering, or recovery changes",
+        "dependency additions or upgrades",
+        "source-size baseline increases or unrelated cleanup"
+      ],
+      "validation": [
+        "cargo fmt --all --check",
+        "cargo clippy -p lorepia-core --all-targets -- -D warnings",
+        "cargo test -p lorepia-core",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "the named use cases delegate to focused child modules",
+        "public Core signatures and security/determinism invariants are unchanged",
+        "the parent baseline decreases by the measured reduction"
+      ]
+    },
+    "CORE-IMPORT-001": {
+      "phase": "D",
+      "summary": "Extract pending import inspection and commit coordination.",
+      "depends_on": [
+        "TEST-CORE-001",
+        "STOR-PKG-001"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "crates/core/AGENTS.md",
+        "crates/core/src/app.rs",
+        "crates/core/tests/import_vertical_slice.rs",
+        "docs/adr/0005-asset-delivery-verification.md",
+        "config/source-size-baseline.json"
+      ],
+      "allowed_paths": [
+        "crates/core/src/app.rs",
+        "crates/core/src/app/imports/**",
+        "crates/core/tests/import_vertical_slice.rs",
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "public Core API, Shell DTO, schema, error code, or IPC command changes",
+        "credential lifetime, redaction, zeroization, dispatch lease, or drop-order changes",
+        "generation admission, durable-attempt ordering, cancellation, checkpoint, stream ordering, or recovery changes",
+        "dependency additions or upgrades",
+        "source-size baseline increases or unrelated cleanup"
+      ],
+      "validation": [
+        "cargo fmt --all --check",
+        "cargo clippy -p lorepia-core --all-targets -- -D warnings",
+        "cargo test -p lorepia-core",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "the named use cases delegate to focused child modules",
+        "public Core signatures and security/determinism invariants are unchanged",
+        "the parent baseline decreases by the measured reduction"
+      ]
+    },
+    "CORE-DISC-001": {
+      "phase": "D",
+      "summary": "Extract discovery types, views, begin, and action flows.",
+      "depends_on": [
+        "TEST-CORE-001",
+        "STOR-DISC-004"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "crates/core/AGENTS.md",
+        "crates/core/src/provider_discovery.rs",
+        "crates/core/tests/provider_discovery_integration.rs",
+        "config/source-size-baseline.json"
+      ],
+      "allowed_paths": [
+        "crates/core/src/provider_discovery.rs",
+        "crates/core/src/provider_discovery/**",
+        "crates/core/tests/provider_discovery_integration.rs",
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "public Core API, Shell DTO, schema, error code, or IPC command changes",
+        "credential lifetime, redaction, zeroization, dispatch lease, or drop-order changes",
+        "generation admission, durable-attempt ordering, cancellation, checkpoint, stream ordering, or recovery changes",
+        "dependency additions or upgrades",
+        "source-size baseline increases or unrelated cleanup"
+      ],
+      "validation": [
+        "cargo fmt --all --check",
+        "cargo clippy -p lorepia-core --all-targets -- -D warnings",
+        "cargo test -p lorepia-core",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "the named use cases delegate to focused child modules",
+        "public Core signatures and security/determinism invariants are unchanged",
+        "the parent baseline decreases by the measured reduction"
+      ]
+    },
+    "CORE-DISC-002": {
+      "phase": "D",
+      "summary": "Extract known-provider, deterministic, and assistant discovery resolution.",
+      "depends_on": [
+        "CORE-DISC-001"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "crates/core/AGENTS.md",
+        "crates/core/src/provider_discovery.rs",
+        "crates/core/src/provider_discovery_deterministic.rs",
+        "crates/core/tests/provider_discovery_integration.rs",
+        "config/source-size-baseline.json"
+      ],
+      "allowed_paths": [
+        "crates/core/src/provider_discovery.rs",
+        "crates/core/src/provider_discovery/**",
+        "crates/core/src/provider_discovery_deterministic.rs",
+        "crates/core/tests/provider_discovery_integration.rs",
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "public Core API, Shell DTO, schema, error code, or IPC command changes",
+        "credential lifetime, redaction, zeroization, dispatch lease, or drop-order changes",
+        "generation admission, durable-attempt ordering, cancellation, checkpoint, stream ordering, or recovery changes",
+        "dependency additions or upgrades",
+        "source-size baseline increases or unrelated cleanup"
+      ],
+      "validation": [
+        "cargo fmt --all --check",
+        "cargo clippy -p lorepia-core --all-targets -- -D warnings",
+        "cargo test -p lorepia-core",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "the named use cases delegate to focused child modules",
+        "public Core signatures and security/determinism invariants are unchanged",
+        "the parent baseline decreases by the measured reduction"
+      ]
+    },
+    "CORE-DISC-003": {
+      "phase": "D",
+      "summary": "Extract discovery approval, commit, credential, and recovery flows.",
+      "depends_on": [
+        "CORE-DISC-002"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "crates/core/AGENTS.md",
+        "crates/core/src/provider_discovery.rs",
+        "crates/core/tests/provider_discovery_integration.rs",
+        "docs/adr/0003-credential-and-secret-boundary.md",
+        "config/source-size-baseline.json"
+      ],
+      "allowed_paths": [
+        "crates/core/src/provider_discovery.rs",
+        "crates/core/src/provider_discovery/**",
+        "crates/core/tests/provider_discovery_integration.rs",
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "public Core API, Shell DTO, schema, error code, or IPC command changes",
+        "credential lifetime, redaction, zeroization, dispatch lease, or drop-order changes",
+        "generation admission, durable-attempt ordering, cancellation, checkpoint, stream ordering, or recovery changes",
+        "dependency additions or upgrades",
+        "source-size baseline increases or unrelated cleanup"
+      ],
+      "validation": [
+        "cargo fmt --all --check",
+        "cargo clippy -p lorepia-core --all-targets -- -D warnings",
+        "cargo test -p lorepia-core",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "the named use cases delegate to focused child modules",
+        "public Core signatures and security/determinism invariants are unchanged",
+        "the parent baseline decreases by the measured reduction"
+      ]
+    },
+    "CORE-ORCH-001": {
+      "phase": "D",
+      "summary": "Extract orchestration document use cases.",
+      "depends_on": [
+        "TEST-CORE-001",
+        "STOR-ORCH-002"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "crates/core/AGENTS.md",
+        "crates/core/src/orchestration.rs",
+        "crates/core/tests/orchestration_core_contract.rs",
+        "config/source-size-baseline.json"
+      ],
+      "allowed_paths": [
+        "crates/core/src/orchestration.rs",
+        "crates/core/src/orchestration/**",
+        "crates/core/tests/orchestration_core_contract.rs",
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "public Core API, Shell DTO, schema, error code, or IPC command changes",
+        "credential lifetime, redaction, zeroization, dispatch lease, or drop-order changes",
+        "generation admission, durable-attempt ordering, cancellation, checkpoint, stream ordering, or recovery changes",
+        "dependency additions or upgrades",
+        "source-size baseline increases or unrelated cleanup"
+      ],
+      "validation": [
+        "cargo fmt --all --check",
+        "cargo clippy -p lorepia-core --all-targets -- -D warnings",
+        "cargo test -p lorepia-core",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "the named use cases delegate to focused child modules",
+        "public Core signatures and security/determinism invariants are unchanged",
+        "the parent baseline decreases by the measured reduction"
+      ]
+    },
+    "CORE-ORCH-002": {
+      "phase": "D",
+      "summary": "Extract runtime plan, interaction, and module runtime coordination.",
+      "depends_on": [
+        "CORE-ORCH-001"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "crates/core/AGENTS.md",
+        "crates/core/src/orchestration_runtime.rs",
+        "crates/core/tests/orchestration_core_contract.rs",
+        "config/source-size-baseline.json"
+      ],
+      "allowed_paths": [
+        "crates/core/src/orchestration_runtime.rs",
+        "crates/core/src/orchestration_runtime/**",
+        "crates/core/tests/orchestration_core_contract.rs",
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "public Core API, Shell DTO, schema, error code, or IPC command changes",
+        "credential lifetime, redaction, zeroization, dispatch lease, or drop-order changes",
+        "generation admission, durable-attempt ordering, cancellation, checkpoint, stream ordering, or recovery changes",
+        "dependency additions or upgrades",
+        "source-size baseline increases or unrelated cleanup"
+      ],
+      "validation": [
+        "cargo fmt --all --check",
+        "cargo clippy -p lorepia-core --all-targets -- -D warnings",
+        "cargo test -p lorepia-core",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "the named use cases delegate to focused child modules",
+        "public Core signatures and security/determinism invariants are unchanged",
+        "the parent baseline decreases by the measured reduction"
+      ]
+    },
+    "CORE-ORCH-003": {
+      "phase": "D",
+      "summary": "Extract orchestration auxiliary tasks, persistence, and recovery.",
+      "depends_on": [
+        "CORE-ORCH-002"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "crates/core/AGENTS.md",
+        "crates/core/src/orchestration_runtime.rs",
+        "crates/core/tests/orchestration_core_contract.rs",
+        "config/source-size-baseline.json"
+      ],
+      "allowed_paths": [
+        "crates/core/src/orchestration_runtime.rs",
+        "crates/core/src/orchestration_runtime/**",
+        "crates/core/tests/orchestration_core_contract.rs",
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "public Core API, Shell DTO, schema, error code, or IPC command changes",
+        "credential lifetime, redaction, zeroization, dispatch lease, or drop-order changes",
+        "generation admission, durable-attempt ordering, cancellation, checkpoint, stream ordering, or recovery changes",
+        "dependency additions or upgrades",
+        "source-size baseline increases or unrelated cleanup"
+      ],
+      "validation": [
+        "cargo fmt --all --check",
+        "cargo clippy -p lorepia-core --all-targets -- -D warnings",
+        "cargo test -p lorepia-core",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "the named use cases delegate to focused child modules",
+        "public Core signatures and security/determinism invariants are unchanged",
+        "the parent baseline decreases by the measured reduction"
+      ]
+    },
+    "CORE-CONTENT-001": {
+      "phase": "D",
+      "summary": "Split content package inspect, review, commit, and lifecycle coordination.",
+      "depends_on": [
+        "TEST-CORE-001",
+        "STOR-PKG-001"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "crates/core/AGENTS.md",
+        "crates/core/src/content_package.rs",
+        "crates/core/tests/orchestration_content_import.rs",
+        "docs/adr/0005-asset-delivery-verification.md",
+        "config/source-size-baseline.json"
+      ],
+      "allowed_paths": [
+        "crates/core/src/content_package.rs",
+        "crates/core/src/content_package/**",
+        "crates/core/tests/orchestration_content_import.rs",
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "public Core API, Shell DTO, schema, error code, or IPC command changes",
+        "credential lifetime, redaction, zeroization, dispatch lease, or drop-order changes",
+        "generation admission, durable-attempt ordering, cancellation, checkpoint, stream ordering, or recovery changes",
+        "dependency additions or upgrades",
+        "source-size baseline increases or unrelated cleanup"
+      ],
+      "validation": [
+        "cargo fmt --all --check",
+        "cargo clippy -p lorepia-core --all-targets -- -D warnings",
+        "cargo test -p lorepia-core",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "the named use cases delegate to focused child modules",
+        "public Core signatures and security/determinism invariants are unchanged",
+        "the parent baseline decreases by the measured reduction"
+      ]
+    },
+    "CORE-APP-001": {
+      "phase": "D",
+      "summary": "Reduce app.rs to Core/CoreInner composition, lifecycle, and child-service delegation.",
+      "depends_on": [
+        "CORE-GEN-003",
+        "CORE-PROV-001",
+        "CORE-IMPORT-001",
+        "CORE-DISC-003",
+        "CORE-ORCH-003",
+        "CORE-CONTENT-001"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "crates/core/AGENTS.md",
+        "crates/core/src/lib.rs",
+        "crates/core/src/app.rs",
+        "crates/core/tests/core_smoke.rs",
+        "config/source-size-baseline.json"
+      ],
+      "allowed_paths": [
+        "crates/core/src/app.rs",
+        "crates/core/src/app/**",
+        "crates/core/src/lib.rs",
+        "crates/core/tests/**",
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "public Core API, Shell DTO, schema, error code, or IPC command changes",
+        "credential lifetime, redaction, zeroization, dispatch lease, or drop-order changes",
+        "generation admission, durable-attempt ordering, cancellation, checkpoint, stream ordering, or recovery changes",
+        "dependency additions or upgrades",
+        "source-size baseline increases or unrelated cleanup"
+      ],
+      "validation": [
+        "cargo fmt --all --check",
+        "cargo clippy -p lorepia-core --all-targets -- -D warnings",
+        "cargo test -p lorepia-core",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "app.rs contains only stable composition, lifecycle, and delegation responsibilities",
+        "Core public signatures are unchanged",
+        "the app.rs facade meets its approved size target or a separately approved exception exists"
+      ]
+    },
+    "SHELL-001": {
+      "phase": "E",
+      "summary": "Organize Shell API DTOs by bounded context while preserving existing re-exports.",
+      "depends_on": [
+        "CORE-APP-001"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "crates/shell-api/src/lib.rs",
+        "crates/shell-api/src/api.rs"
+      ],
+      "allowed_paths": [
+        "crates/shell-api/src/lib.rs",
+        "crates/shell-api/src/**"
+      ],
+      "forbidden_changes": [
+        "public Core API, Shell DTO, schema, error code, or IPC command changes",
+        "credential lifetime, redaction, zeroization, dispatch lease, or drop-order changes",
+        "generation admission, durable-attempt ordering, cancellation, checkpoint, stream ordering, or recovery changes",
+        "dependency additions or upgrades",
+        "source-size baseline increases or unrelated cleanup"
+      ],
+      "validation": [
+        "cargo fmt --all --check",
+        "cargo clippy -p lorepia-shell-api --all-targets -- -D warnings",
+        "cargo test -p lorepia-shell-api",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "the named facade delegates to bounded child modules",
+        "all outward names, DTOs, permissions, and runtime behavior remain compatible",
+        "the parent baseline decreases by the measured reduction"
+      ]
+    },
+    "TAURI-001": {
+      "phase": "E",
+      "summary": "Split provider command handlers while preserving names, registry, and capabilities.",
+      "depends_on": [
+        "SHELL-001",
+        "CORE-PROV-001",
+        "CORE-DISC-003"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "apps/lorepia/src-tauri/src/provider_commands.rs",
+        "config/ipc-commands.json",
+        "docs/adr/0004-ipc-command-registry.md"
+      ],
+      "allowed_paths": [
+        "apps/lorepia/src-tauri/src/provider_commands.rs",
+        "apps/lorepia/src-tauri/src/provider_commands/**",
+        "apps/lorepia/src-tauri/src/lib.rs",
+        "apps/lorepia/src-tauri/capabilities/**",
+        "apps/lorepia/src-tauri/permissions/**",
+        "config/source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "public Core API, Shell DTO, schema, error code, or IPC command changes",
+        "credential lifetime, redaction, zeroization, dispatch lease, or drop-order changes",
+        "generation admission, durable-attempt ordering, cancellation, checkpoint, stream ordering, or recovery changes",
+        "dependency additions or upgrades",
+        "source-size baseline increases or unrelated cleanup",
+        "Tauri command-name, handler-registry, generated-permission, or capability drift"
+      ],
+      "validation": [
+        "cargo fmt --all --check",
+        "cargo clippy -p lorepia-tauri --all-targets -- -D warnings",
+        "cargo test -p lorepia-tauri --lib",
+        "python3 scripts/generate_ipc_commands.py --check",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "the named facade delegates to bounded child modules",
+        "all outward names, DTOs, permissions, and runtime behavior remain compatible",
+        "the parent baseline decreases by the measured reduction"
+      ]
+    },
+    "TAURI-002": {
+      "phase": "E",
+      "summary": "Split credential operations while preserving authority, lease, cleanup, and drop order.",
+      "depends_on": [
+        "SHELL-001",
+        "CORE-APP-001"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "apps/lorepia/src-tauri/src/credential_operations.rs",
+        "docs/adr/0003-credential-and-secret-boundary.md"
+      ],
+      "allowed_paths": [
+        "apps/lorepia/src-tauri/src/credential_operations.rs",
+        "apps/lorepia/src-tauri/src/credential_operations/**",
+        "config/source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "public Core API, Shell DTO, schema, error code, or IPC command changes",
+        "credential lifetime, redaction, zeroization, dispatch lease, or drop-order changes",
+        "generation admission, durable-attempt ordering, cancellation, checkpoint, stream ordering, or recovery changes",
+        "dependency additions or upgrades",
+        "source-size baseline increases or unrelated cleanup",
+        "Tauri command-name, handler-registry, generated-permission, or capability drift"
+      ],
+      "validation": [
+        "cargo fmt --all --check",
+        "cargo clippy -p lorepia-tauri --all-targets -- -D warnings",
+        "cargo test -p lorepia-tauri --lib",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "the named facade delegates to bounded child modules",
+        "all outward names, DTOs, permissions, and runtime behavior remain compatible",
+        "the parent baseline decreases by the measured reduction"
+      ]
+    },
+    "IPC-001": {
+      "phase": "E",
+      "summary": "Split TypeScript IPC contracts into explicit bounded-context modules with compatible barrel exports.",
+      "depends_on": [
+        "SHELL-001",
+        "TEST-FE-001"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "apps/lorepia/src/AGENTS.md",
+        "apps/lorepia/src/lib/ipc/contracts.ts",
+        "apps/lorepia/src/lib/ipc/client.test.ts",
+        "config/ipc-commands.json"
+      ],
+      "allowed_paths": [
+        "apps/lorepia/src/lib/ipc/contracts.ts",
+        "apps/lorepia/src/lib/ipc/contracts/**",
+        "apps/lorepia/src/lib/ipc/client.test.ts",
+        "config/source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "renderer-visible behavior, focus, scroll, accessibility, or Svelte reactivity changes",
+        "IPC command, DTO, API-version, or backend contract changes",
+        "dependency additions or upgrades",
+        "source-size baseline increases or unrelated redesign"
+      ],
+      "validation": [
+        "npm run check --prefix apps/lorepia",
+        "npm run test --prefix apps/lorepia -- src/lib/ipc/client.test.ts",
+        "python3 scripts/generate_ipc_commands.py --check",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "contracts are grouped by bounded context",
+        "existing imports and serialized DTO shapes remain compatible",
+        "the barrel uses explicit exports and its baseline decreases"
+      ]
+    },
+    "IPC-002": {
+      "phase": "E",
+      "summary": "Split LorepiaClient internals into bounded-context clients while preserving the client facade.",
+      "depends_on": [
+        "IPC-001"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "apps/lorepia/src/AGENTS.md",
+        "apps/lorepia/src/lib/ipc/client.ts",
+        "apps/lorepia/src/lib/ipc/client.test.ts",
+        "config/ipc-commands.json"
+      ],
+      "allowed_paths": [
+        "apps/lorepia/src/lib/ipc/client.ts",
+        "apps/lorepia/src/lib/ipc/clients/**",
+        "apps/lorepia/src/lib/ipc/client.test.ts",
+        "config/source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "renderer-visible behavior, focus, scroll, accessibility, or Svelte reactivity changes",
+        "IPC command, DTO, API-version, or backend contract changes",
+        "dependency additions or upgrades",
+        "source-size baseline increases or unrelated redesign"
+      ],
+      "validation": [
+        "npm run check --prefix apps/lorepia",
+        "npm run test --prefix apps/lorepia -- src/lib/ipc/client.test.ts",
+        "python3 scripts/generate_ipc_commands.py --check",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "LorepiaClient remains the compatible public facade",
+        "command names and response/error mapping are unchanged",
+        "the client baseline decreases"
+      ]
+    },
+    "FE-APP-001": {
+      "phase": "E",
+      "summary": "Extract epoch guards, serialized mutation, and operation identity primitives.",
+      "depends_on": [
+        "IPC-002",
+        "TEST-FE-001"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "apps/lorepia/src/AGENTS.md",
+        "apps/lorepia/src/app/app-controller.ts",
+        "apps/lorepia/src/app/app-controller.test.ts",
+        "config/source-size-baseline.json"
+      ],
+      "allowed_paths": [
+        "apps/lorepia/src/app/app-controller.ts",
+        "apps/lorepia/src/app/operations/**",
+        "apps/lorepia/src/app/app-controller.test.ts",
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "renderer-visible behavior, focus, scroll, accessibility, or Svelte reactivity changes",
+        "IPC command, DTO, API-version, or backend contract changes",
+        "dependency additions or upgrades",
+        "source-size baseline increases or unrelated redesign"
+      ],
+      "validation": [
+        "npm run check --prefix apps/lorepia",
+        "npm run test --prefix apps/lorepia -- apps/lorepia/src/app/app-controller.test.ts",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "the named UI/controller concern is isolated behind a focused module",
+        "visible behavior, reactivity, focus, scroll, and accessibility remain unchanged",
+        "the parent baseline decreases by the measured reduction"
+      ]
+    },
+    "FE-APP-002": {
+      "phase": "E",
+      "summary": "Extract library, import, and conversation controllers.",
+      "depends_on": [
+        "FE-APP-001"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "apps/lorepia/src/AGENTS.md",
+        "apps/lorepia/src/app/app-controller.ts",
+        "apps/lorepia/src/app/app-controller.test.ts",
+        "config/source-size-baseline.json"
+      ],
+      "allowed_paths": [
+        "apps/lorepia/src/app/app-controller.ts",
+        "apps/lorepia/src/app/controllers/**",
+        "apps/lorepia/src/app/app-controller.test.ts",
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "renderer-visible behavior, focus, scroll, accessibility, or Svelte reactivity changes",
+        "IPC command, DTO, API-version, or backend contract changes",
+        "dependency additions or upgrades",
+        "source-size baseline increases or unrelated redesign"
+      ],
+      "validation": [
+        "npm run check --prefix apps/lorepia",
+        "npm run test --prefix apps/lorepia -- apps/lorepia/src/app/app-controller.test.ts",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "the named UI/controller concern is isolated behind a focused module",
+        "visible behavior, reactivity, focus, scroll, and accessibility remain unchanged",
+        "the parent baseline decreases by the measured reduction"
+      ]
+    },
+    "FE-APP-003": {
+      "phase": "E",
+      "summary": "Extract generation and chat-stream controllers.",
+      "depends_on": [
+        "FE-APP-002",
+        "TEST-FE-002"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "apps/lorepia/src/AGENTS.md",
+        "apps/lorepia/src/app/app-controller.ts",
+        "apps/lorepia/src/features/chat/chat-stream.test.ts",
+        "config/source-size-baseline.json"
+      ],
+      "allowed_paths": [
+        "apps/lorepia/src/app/app-controller.ts",
+        "apps/lorepia/src/app/controllers/**",
+        "apps/lorepia/src/features/chat/chat-stream.test.ts",
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "renderer-visible behavior, focus, scroll, accessibility, or Svelte reactivity changes",
+        "IPC command, DTO, API-version, or backend contract changes",
+        "dependency additions or upgrades",
+        "source-size baseline increases or unrelated redesign"
+      ],
+      "validation": [
+        "npm run check --prefix apps/lorepia",
+        "npm run test --prefix apps/lorepia -- apps/lorepia/src/features/chat/chat-stream.test.ts",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "the named UI/controller concern is isolated behind a focused module",
+        "visible behavior, reactivity, focus, scroll, and accessibility remain unchanged",
+        "the parent baseline decreases by the measured reduction"
+      ]
+    },
+    "FE-APP-004": {
+      "phase": "E",
+      "summary": "Extract memory, provider, and discovery controllers.",
+      "depends_on": [
+        "FE-APP-003"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "apps/lorepia/src/AGENTS.md",
+        "apps/lorepia/src/app/app-controller.ts",
+        "apps/lorepia/src/app/app-controller.providers.test.ts",
+        "config/source-size-baseline.json"
+      ],
+      "allowed_paths": [
+        "apps/lorepia/src/app/app-controller.ts",
+        "apps/lorepia/src/app/controllers/**",
+        "apps/lorepia/src/app/app-controller.providers.test.ts",
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "renderer-visible behavior, focus, scroll, accessibility, or Svelte reactivity changes",
+        "IPC command, DTO, API-version, or backend contract changes",
+        "dependency additions or upgrades",
+        "source-size baseline increases or unrelated redesign"
+      ],
+      "validation": [
+        "npm run check --prefix apps/lorepia",
+        "npm run test --prefix apps/lorepia -- apps/lorepia/src/app/app-controller.providers.test.ts",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "the named UI/controller concern is isolated behind a focused module",
+        "visible behavior, reactivity, focus, scroll, and accessibility remain unchanged",
+        "the parent baseline decreases by the measured reduction"
+      ]
+    },
+    "FE-CHAT-001": {
+      "phase": "E",
+      "summary": "Extract chat virtual-scroll, anchor, and lifecycle state.",
+      "depends_on": [
+        "FE-APP-003",
+        "TEST-FE-002"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "apps/lorepia/src/AGENTS.md",
+        "apps/lorepia/src/features/chat/ChatPane.svelte",
+        "apps/lorepia/src/features/chat/virtual-window.test.ts",
+        "config/source-size-baseline.json"
+      ],
+      "allowed_paths": [
+        "apps/lorepia/src/features/chat/ChatPane.svelte",
+        "apps/lorepia/src/features/chat/**",
+        "apps/lorepia/src/features/chat/virtual-window.test.ts",
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "renderer-visible behavior, focus, scroll, accessibility, or Svelte reactivity changes",
+        "IPC command, DTO, API-version, or backend contract changes",
+        "dependency additions or upgrades",
+        "source-size baseline increases or unrelated redesign"
+      ],
+      "validation": [
+        "npm run check --prefix apps/lorepia",
+        "npm run test --prefix apps/lorepia -- apps/lorepia/src/features/chat/virtual-window.test.ts",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "the named UI/controller concern is isolated behind a focused module",
+        "visible behavior, reactivity, focus, scroll, and accessibility remain unchanged",
+        "the parent baseline decreases by the measured reduction"
+      ]
+    },
+    "FE-CHAT-002": {
+      "phase": "E",
+      "summary": "Split composer, fullscreen composer, message actions, and utility drawer components.",
+      "depends_on": [
+        "FE-CHAT-001"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "apps/lorepia/src/AGENTS.md",
+        "apps/lorepia/src/features/chat/ChatPane.svelte",
+        "apps/lorepia/src/features/chat/composer.test.ts",
+        "config/source-size-baseline.json"
+      ],
+      "allowed_paths": [
+        "apps/lorepia/src/features/chat/ChatPane.svelte",
+        "apps/lorepia/src/features/chat/**",
+        "apps/lorepia/src/features/chat/composer.test.ts",
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "renderer-visible behavior, focus, scroll, accessibility, or Svelte reactivity changes",
+        "IPC command, DTO, API-version, or backend contract changes",
+        "dependency additions or upgrades",
+        "source-size baseline increases or unrelated redesign"
+      ],
+      "validation": [
+        "npm run check --prefix apps/lorepia",
+        "npm run test --prefix apps/lorepia -- apps/lorepia/src/features/chat/composer.test.ts",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "the named UI/controller concern is isolated behind a focused module",
+        "visible behavior, reactivity, focus, scroll, and accessibility remain unchanged",
+        "the parent baseline decreases by the measured reduction"
+      ]
+    },
+    "FE-CHAT-003": {
+      "phase": "E",
+      "summary": "Extract portable-runtime lifecycle and interaction-room coordination.",
+      "depends_on": [
+        "FE-CHAT-002"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "apps/lorepia/src/AGENTS.md",
+        "apps/lorepia/src/features/chat/ChatPane.svelte",
+        "apps/lorepia/src/features/chat/portable-runtime.test.ts",
+        "config/source-size-baseline.json"
+      ],
+      "allowed_paths": [
+        "apps/lorepia/src/features/chat/ChatPane.svelte",
+        "apps/lorepia/src/features/chat/**",
+        "apps/lorepia/src/features/chat/portable-runtime.test.ts",
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "renderer-visible behavior, focus, scroll, accessibility, or Svelte reactivity changes",
+        "IPC command, DTO, API-version, or backend contract changes",
+        "dependency additions or upgrades",
+        "source-size baseline increases or unrelated redesign"
+      ],
+      "validation": [
+        "npm run check --prefix apps/lorepia",
+        "npm run test --prefix apps/lorepia -- apps/lorepia/src/features/chat/portable-runtime.test.ts",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "the named UI/controller concern is isolated behind a focused module",
+        "visible behavior, reactivity, focus, scroll, and accessibility remain unchanged",
+        "the parent baseline decreases by the measured reduction"
+      ]
+    },
+    "FE-ORCH-001": {
+      "phase": "E",
+      "summary": "Extract orchestration controller state and use-case controllers.",
+      "depends_on": [
+        "IPC-002",
+        "TEST-FE-003"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "apps/lorepia/src/AGENTS.md",
+        "apps/lorepia/src/features/orchestration/orchestration-controller.ts",
+        "apps/lorepia/src/features/orchestration/orchestration-controller.test.ts",
+        "config/source-size-baseline.json"
+      ],
+      "allowed_paths": [
+        "apps/lorepia/src/features/orchestration/orchestration-controller.ts",
+        "apps/lorepia/src/features/orchestration/controllers/**",
+        "apps/lorepia/src/features/orchestration/orchestration-controller.test.ts",
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "renderer-visible behavior, focus, scroll, accessibility, or Svelte reactivity changes",
+        "IPC command, DTO, API-version, or backend contract changes",
+        "dependency additions or upgrades",
+        "source-size baseline increases or unrelated redesign"
+      ],
+      "validation": [
+        "npm run check --prefix apps/lorepia",
+        "npm run test --prefix apps/lorepia -- apps/lorepia/src/features/orchestration/orchestration-controller.test.ts",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "the named UI/controller concern is isolated behind a focused module",
+        "visible behavior, reactivity, focus, scroll, and accessibility remain unchanged",
+        "the parent baseline decreases by the measured reduction"
+      ]
+    },
+    "FE-ORCH-002": {
+      "phase": "E",
+      "summary": "Split OrchestrationStudio into section components.",
+      "depends_on": [
+        "FE-ORCH-001"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "apps/lorepia/src/AGENTS.md",
+        "apps/lorepia/src/features/orchestration/OrchestrationStudio.svelte",
+        "apps/lorepia/src/features/orchestration/OrchestrationUI.test.ts",
+        "config/source-size-baseline.json"
+      ],
+      "allowed_paths": [
+        "apps/lorepia/src/features/orchestration/OrchestrationStudio.svelte",
+        "apps/lorepia/src/features/orchestration/studio/**",
+        "apps/lorepia/src/features/orchestration/OrchestrationUI.test.ts",
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "renderer-visible behavior, focus, scroll, accessibility, or Svelte reactivity changes",
+        "IPC command, DTO, API-version, or backend contract changes",
+        "dependency additions or upgrades",
+        "source-size baseline increases or unrelated redesign"
+      ],
+      "validation": [
+        "npm run check --prefix apps/lorepia",
+        "npm run test --prefix apps/lorepia -- apps/lorepia/src/features/orchestration/OrchestrationUI.test.ts",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "the named UI/controller concern is isolated behind a focused module",
+        "visible behavior, reactivity, focus, scroll, and accessibility remain unchanged",
+        "the parent baseline decreases by the measured reduction"
+      ]
+    },
+    "FE-PROV-001": {
+      "phase": "E",
+      "summary": "Split ProviderSettings into bounded settings sections.",
+      "depends_on": [
+        "FE-APP-004",
+        "TEST-FE-001"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "apps/lorepia/src/AGENTS.md",
+        "apps/lorepia/src/features/providers/ProviderSettings.svelte",
+        "apps/lorepia/src/features/providers/ProviderSettings.test.ts",
+        "config/source-size-baseline.json"
+      ],
+      "allowed_paths": [
+        "apps/lorepia/src/features/providers/ProviderSettings.svelte",
+        "apps/lorepia/src/features/providers/settings/**",
+        "apps/lorepia/src/features/providers/ProviderSettings.test.ts",
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "renderer-visible behavior, focus, scroll, accessibility, or Svelte reactivity changes",
+        "IPC command, DTO, API-version, or backend contract changes",
+        "dependency additions or upgrades",
+        "source-size baseline increases or unrelated redesign"
+      ],
+      "validation": [
+        "npm run check --prefix apps/lorepia",
+        "npm run test --prefix apps/lorepia -- apps/lorepia/src/features/providers/ProviderSettings.test.ts",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "the named UI/controller concern is isolated behind a focused module",
+        "visible behavior, reactivity, focus, scroll, and accessibility remain unchanged",
+        "the parent baseline decreases by the measured reduction"
+      ]
+    },
+    "FE-CSS-001": {
+      "phase": "E",
+      "summary": "Move app.css rules into app, chat, orchestration, provider, and shared stylesheets.",
+      "depends_on": [
+        "FE-CHAT-003",
+        "FE-ORCH-002",
+        "FE-PROV-001"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "apps/lorepia/src/AGENTS.md",
+        "apps/lorepia/src/styles/app.css",
+        "apps/lorepia/src/styles/hover-contract.test.ts",
+        "config/source-size-baseline.json"
+      ],
+      "allowed_paths": [
+        "apps/lorepia/src/styles/app.css",
+        "apps/lorepia/src/styles/**",
+        "apps/lorepia/src/styles/hover-contract.test.ts",
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json"
+      ],
+      "forbidden_changes": [
+        "renderer-visible behavior, focus, scroll, accessibility, or Svelte reactivity changes",
+        "IPC command, DTO, API-version, or backend contract changes",
+        "dependency additions or upgrades",
+        "source-size baseline increases or unrelated redesign"
+      ],
+      "validation": [
+        "npm run check --prefix apps/lorepia",
+        "npm run test --prefix apps/lorepia -- apps/lorepia/src/styles/hover-contract.test.ts",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "the named UI/controller concern is isolated behind a focused module",
+        "visible behavior, reactivity, focus, scroll, and accessibility remain unchanged",
+        "the parent baseline decreases by the measured reduction"
+      ]
+    },
+    "ENF-001": {
+      "phase": "F",
+      "summary": "Upgrade source-size enforcement to v2 language/file-kind limits and directory aggregates.",
+      "depends_on": [
+        "CORE-APP-001",
+        "TAURI-002",
+        "FE-CSS-001",
+        "STOR-PKG-001"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "config/source-size-baseline.json",
+        "scripts/check_source_architecture.py",
+        "scripts/test_check_source_architecture.py",
+        "config/refactoring/baseline-report.json"
+      ],
+      "allowed_paths": [
+        "config/source-size-baseline.json",
+        "config/test-source-size-baseline.json",
+        "scripts/check_source_architecture.py",
+        "scripts/test_check_source_architecture.py",
+        ".github/workflows/ci.yml"
+      ],
+      "forbidden_changes": [
+        "production runtime behavior changes",
+        "dependency additions or upgrades",
+        "ratchet limit increases, unreviewed exceptions, or silent path exclusions",
+        "public API, schema, serialized DTO, error code, or IPC command changes"
+      ],
+      "validation": [
+        "python3 -m unittest scripts/test_check_source_architecture.py",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\"",
+        "python3 scripts/check_github_workflow_security.py"
+      ],
+      "done_when": [
+        "production, test, generated, facade, and language classes have explicit limits",
+        "baseline increases and new giant exceptions fail",
+        "parent/child and directory aggregate deltas are reported"
+      ]
+    },
+    "ENF-002": {
+      "phase": "F",
+      "summary": "Strengthen public API diff and forbidden dependency checks.",
+      "depends_on": [
+        "ENF-001"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "config/core-storage-public-api-baseline.json",
+        "scripts/check_source_architecture.py",
+        "scripts/test_check_source_architecture.py",
+        "docs/architecture/storage-public-api-audit.md"
+      ],
+      "allowed_paths": [
+        "config/core-storage-public-api-baseline.json",
+        "config/refactoring/**",
+        "scripts/check_source_architecture.py",
+        "scripts/test_check_source_architecture.py",
+        ".github/workflows/ci.yml",
+        "docs/architecture/storage-public-api-audit.md"
+      ],
+      "forbidden_changes": [
+        "production runtime behavior changes",
+        "dependency additions or upgrades",
+        "ratchet limit increases, unreviewed exceptions, or silent path exclusions",
+        "public API, schema, serialized DTO, error code, or IPC command changes"
+      ],
+      "validation": [
+        "python3 -m unittest scripts/test_check_source_architecture.py",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\"",
+        "cargo metadata --no-deps --format-version 1"
+      ],
+      "done_when": [
+        "unapproved public-surface growth fails deterministically",
+        "forbidden workspace dependency edges fail",
+        "legacy API exceptions can only shrink"
+      ]
+    },
+    "ENF-003": {
+      "phase": "F",
+      "summary": "Enforce AI context-map drift and print targeted commands.",
+      "depends_on": [
+        "ENF-002"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "scripts/check_ai_context_map.py",
+        "scripts/test_check_ai_context_map.py"
+      ],
+      "allowed_paths": [
+        "config/ai-context-map.json",
+        "scripts/check_ai_context_map.py",
+        "scripts/test_check_ai_context_map.py",
+        ".github/workflows/ci.yml"
+      ],
+      "forbidden_changes": [
+        "production runtime behavior changes",
+        "dependency additions or upgrades",
+        "ratchet limit increases, unreviewed exceptions, or silent path exclusions",
+        "public API, schema, serialized DTO, error code, or IPC command changes"
+      ],
+      "validation": [
+        "python3 -m unittest scripts/test_check_ai_context_map.py",
+        "python3 scripts/check_ai_context_map.py",
+        "python3 scripts/check_github_workflow_security.py"
+      ],
+      "done_when": [
+        "context entries cannot silently disappear or exceed their ratchet",
+        "missing and duplicate paths fail",
+        "each task prints its targeted commands"
+      ]
+    },
+    "ENF-004": {
+      "phase": "F",
+      "summary": "Report plan/manifest completion and remaining hotspots.",
+      "depends_on": [
+        "ENF-003"
+      ],
+      "read_first": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "AGENTS.md",
+        "config/refactoring/baseline-report.json",
+        "scripts/report_refactoring_baseline.py"
+      ],
+      "allowed_paths": [
+        "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+        "config/refactoring/task-manifest.yaml",
+        "config/ai-context-map.json",
+        "config/refactoring/**",
+        "scripts/report_refactoring_baseline.py",
+        "scripts/test_report_refactoring_baseline.py",
+        "scripts/check_ai_context_map.py",
+        "scripts/test_check_ai_context_map.py",
+        "docs/refactoring/**",
+        ".github/workflows/ci.yml"
+      ],
+      "forbidden_changes": [
+        "production runtime behavior changes",
+        "dependency additions or upgrades",
+        "ratchet limit increases, unreviewed exceptions, or silent path exclusions",
+        "public API, schema, serialized DTO, error code, or IPC command changes"
+      ],
+      "validation": [
+        "python3 -m json.tool config/refactoring/task-manifest.yaml",
+        "python3 -m unittest scripts/test_report_refactoring_baseline.py scripts/test_check_ai_context_map.py",
+        "python3 scripts/report_refactoring_baseline.py --check",
+        "python3 scripts/check_ai_context_map.py",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "done_when": [
+        "all 59 task statuses and phase gates are reported",
+        "remaining hotspots and approved exceptions are explicit",
+        "the default context bundle is at most 250KB",
+        "all final completion criteria have evidence or are reported incomplete"
+      ]
+    }
+  }
+}

@@ -1,0 +1,1390 @@
+{
+  "contexts": {
+    "CORE-APP-001": {
+      "baseline_context_bytes": 844540,
+      "commands": [
+        "cargo test -p lorepia-core",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "paths": {
+        "documents": [
+          "crates/core/AGENTS.md"
+        ],
+        "entrypoints": [
+          "crates/core/src/app.rs",
+          "crates/core/src/lib.rs"
+        ],
+        "implementation": [
+          "crates/core/src/app/runtime_control.rs"
+        ],
+        "tests": [
+          "crates/core/tests/core_smoke.rs",
+          "crates/core/tests/interaction_derived_supervisor.rs"
+        ]
+      }
+    },
+    "CORE-CONTENT-001": {
+      "baseline_context_bytes": 397600,
+      "commands": [
+        "cargo test -p lorepia-core --test orchestration_content_import",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "paths": {
+        "documents": [
+          "crates/core/AGENTS.md",
+          "docs/adr/0005-asset-delivery-verification.md"
+        ],
+        "entrypoints": [
+          "crates/core/src/content_package.rs"
+        ],
+        "implementation": [
+          "crates/content/src/package.rs"
+        ],
+        "tests": [
+          "crates/core/tests/orchestration_content_import.rs",
+          "crates/core/tests/content_source_export_round_trip.rs"
+        ]
+      }
+    },
+    "CORE-DISC-001": {
+      "baseline_context_bytes": 594313,
+      "commands": [
+        "cargo test -p lorepia-core --test provider_discovery_integration",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "paths": {
+        "documents": [
+          "crates/core/AGENTS.md"
+        ],
+        "entrypoints": [
+          "crates/core/src/provider_discovery.rs"
+        ],
+        "implementation": [
+          "crates/core/src/provider_discovery_view.rs"
+        ],
+        "tests": [
+          "crates/core/tests/provider_discovery_integration.rs"
+        ]
+      }
+    },
+    "CORE-DISC-002": {
+      "baseline_context_bytes": 681843,
+      "commands": [
+        "cargo test -p lorepia-core --test provider_discovery_integration",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "paths": {
+        "documents": [
+          "crates/core/AGENTS.md"
+        ],
+        "entrypoints": [
+          "crates/core/src/provider_discovery.rs"
+        ],
+        "implementation": [
+          "crates/core/src/provider_discovery_deterministic.rs",
+          "crates/core/src/provider_discovery/schema_fixture.rs"
+        ],
+        "tests": [
+          "crates/core/tests/provider_discovery_integration.rs"
+        ]
+      }
+    },
+    "CORE-DISC-003": {
+      "baseline_context_bytes": 695107,
+      "commands": [
+        "cargo test -p lorepia-core --test provider_discovery_integration",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "paths": {
+        "documents": [
+          "crates/core/AGENTS.md",
+          "docs/adr/0003-credential-and-secret-boundary.md"
+        ],
+        "entrypoints": [
+          "crates/core/src/provider_discovery.rs"
+        ],
+        "implementation": [
+          "crates/core/src/provider_discovery_view.rs"
+        ],
+        "tests": [
+          "crates/core/tests/provider_discovery_integration.rs",
+          "crates/storage/tests/provider_credential_operations.rs"
+        ]
+      }
+    },
+    "CORE-GEN-001": {
+      "baseline_context_bytes": 997025,
+      "commands": [
+        "cargo test -p lorepia-core --test generation_attempt_derived_closure",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "paths": {
+        "documents": [
+          "crates/core/AGENTS.md",
+          "docs/adr/0003-credential-and-secret-boundary.md"
+        ],
+        "entrypoints": [
+          "crates/core/src/app.rs"
+        ],
+        "implementation": [
+          "crates/core/src/app/generation_events.rs"
+        ],
+        "tests": [
+          "crates/core/tests/generation_attempt_derived_closure.rs"
+        ]
+      }
+    },
+    "CORE-GEN-002": {
+      "baseline_context_bytes": 1194101,
+      "commands": [
+        "cargo test -p lorepia-core --test chat_vertical_slice",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "paths": {
+        "documents": [
+          "crates/core/AGENTS.md"
+        ],
+        "entrypoints": [
+          "crates/core/src/app.rs"
+        ],
+        "implementation": [
+          "crates/core/src/orchestration.rs"
+        ],
+        "tests": [
+          "crates/core/tests/orchestration_core_contract.rs",
+          "crates/core/tests/chat_vertical_slice.rs"
+        ]
+      }
+    },
+    "CORE-GEN-003": {
+      "baseline_context_bytes": 937579,
+      "commands": [
+        "cargo test -p lorepia-core --test ordinary_same_branch_sealed_retry",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "paths": {
+        "documents": [
+          "crates/core/AGENTS.md",
+          "docs/adr/0003-credential-and-secret-boundary.md"
+        ],
+        "entrypoints": [
+          "crates/core/src/app.rs"
+        ],
+        "implementation": [
+          "crates/core/src/app/generation_workflow.rs",
+          "crates/core/src/app/generation_events.rs"
+        ],
+        "tests": [
+          "crates/core/tests/ordinary_same_branch_sealed_retry.rs",
+          "crates/core/tests/chat_vertical_slice.rs"
+        ]
+      }
+    },
+    "CORE-IMPORT-001": {
+      "baseline_context_bytes": 817471,
+      "commands": [
+        "cargo test -p lorepia-core --test import_vertical_slice",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "paths": {
+        "documents": [
+          "crates/core/AGENTS.md",
+          "docs/adr/0005-asset-delivery-verification.md"
+        ],
+        "entrypoints": [
+          "crates/core/src/app.rs"
+        ],
+        "implementation": [],
+        "tests": [
+          "crates/core/tests/import_vertical_slice.rs"
+        ]
+      }
+    },
+    "CORE-ORCH-001": {
+      "baseline_context_bytes": 415575,
+      "commands": [
+        "cargo test -p lorepia-core --test orchestration_core_contract",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "paths": {
+        "documents": [
+          "crates/core/AGENTS.md"
+        ],
+        "entrypoints": [
+          "crates/core/src/orchestration.rs"
+        ],
+        "implementation": [
+          "crates/orchestration/src/lib.rs"
+        ],
+        "tests": [
+          "crates/core/tests/orchestration_core_contract.rs",
+          "crates/orchestration/tests/cross_platform_golden.rs"
+        ]
+      }
+    },
+    "CORE-ORCH-002": {
+      "baseline_context_bytes": 447423,
+      "commands": [
+        "cargo test -p lorepia-core --test ordinary_interaction_sealed_replay",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "paths": {
+        "documents": [
+          "crates/core/AGENTS.md"
+        ],
+        "entrypoints": [
+          "crates/core/src/orchestration_runtime.rs"
+        ],
+        "implementation": [
+          "crates/core/src/module_orchestration.rs"
+        ],
+        "tests": [
+          "crates/core/tests/ordinary_interaction_sealed_replay.rs"
+        ]
+      }
+    },
+    "CORE-ORCH-003": {
+      "baseline_context_bytes": 469771,
+      "commands": [
+        "cargo test -p lorepia-core --test memory_auxiliary_fallback",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "paths": {
+        "documents": [
+          "crates/core/AGENTS.md"
+        ],
+        "entrypoints": [
+          "crates/core/src/orchestration_runtime.rs"
+        ],
+        "implementation": [
+          "crates/core/src/module_orchestration.rs"
+        ],
+        "tests": [
+          "crates/core/tests/memory_auxiliary_fallback.rs",
+          "crates/core/tests/interaction_derived_supervisor.rs"
+        ]
+      }
+    },
+    "CORE-PROV-001": {
+      "baseline_context_bytes": 971902,
+      "commands": [
+        "cargo test -p lorepia-core --test model_refresh_concurrency",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "paths": {
+        "documents": [
+          "crates/core/AGENTS.md"
+        ],
+        "entrypoints": [
+          "crates/core/src/app.rs"
+        ],
+        "implementation": [
+          "crates/core/src/catalog.rs",
+          "crates/core/src/app/model_sync.rs"
+        ],
+        "tests": [
+          "crates/core/tests/model_refresh_concurrency.rs",
+          "crates/core/tests/semantic_provider_vertical.rs"
+        ]
+      }
+    },
+    "ENF-001": {
+      "baseline_context_bytes": null,
+      "commands": [
+        "python3 -m unittest scripts/test_check_source_architecture.py",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": null,
+      "paths": {
+        "documents": [],
+        "entrypoints": [
+          "scripts/check_source_architecture.py"
+        ],
+        "implementation": [
+          "config/source-size-baseline.json"
+        ],
+        "tests": [
+          "scripts/test_check_source_architecture.py"
+        ]
+      }
+    },
+    "ENF-002": {
+      "baseline_context_bytes": null,
+      "commands": [
+        "python3 -m unittest scripts/test_check_source_architecture.py scripts/test_generate_ipc_commands.py",
+        "python3 scripts/generate_ipc_commands.py --check"
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": null,
+      "paths": {
+        "documents": [
+          "docs/adr/0001-layer-boundaries.md",
+          "docs/adr/0004-ipc-command-registry.md"
+        ],
+        "entrypoints": [
+          "scripts/check_source_architecture.py"
+        ],
+        "implementation": [
+          "config/core-storage-public-api-baseline.json",
+          "config/ipc-commands.json",
+          "Cargo.toml"
+        ],
+        "tests": [
+          "scripts/test_check_source_architecture.py",
+          "scripts/test_generate_ipc_commands.py"
+        ]
+      }
+    },
+    "ENF-003": {
+      "baseline_context_bytes": null,
+      "commands": [
+        "python3 -m unittest scripts/test_check_ai_context_map.py",
+        "python3 scripts/check_ai_context_map.py --strict-budget"
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": null,
+      "paths": {
+        "documents": [
+          "config/refactoring/task-manifest.yaml"
+        ],
+        "entrypoints": [
+          "scripts/check_ai_context_map.py"
+        ],
+        "implementation": [
+          "config/ai-context-map.json"
+        ],
+        "tests": [
+          "scripts/test_check_ai_context_map.py"
+        ]
+      }
+    },
+    "ENF-004": {
+      "baseline_context_bytes": 282233,
+      "commands": [
+        "python3 scripts/report_refactoring_baseline.py --check",
+        "python3 scripts/check_ai_context_map.py --strict-budget"
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "paths": {
+        "documents": [
+          "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+          "config/refactoring/task-manifest.yaml"
+        ],
+        "entrypoints": [
+          "scripts/report_refactoring_baseline.py"
+        ],
+        "implementation": [
+          "config/refactoring/baseline-report.json"
+        ],
+        "tests": [
+          "scripts/test_report_refactoring_baseline.py"
+        ]
+      }
+    },
+    "FE-APP-001": {
+      "baseline_context_bytes": 253236,
+      "commands": [
+        "npm run test --prefix apps/lorepia -- src/app/app-controller.test.ts"
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "paths": {
+        "documents": [
+          "apps/lorepia/src/AGENTS.md"
+        ],
+        "entrypoints": [
+          "apps/lorepia/src/app/app-controller.ts"
+        ],
+        "implementation": [
+          "apps/lorepia/src/app/app-state.ts"
+        ],
+        "tests": [
+          "apps/lorepia/src/app/app-controller.test.ts"
+        ]
+      }
+    },
+    "FE-APP-002": {
+      "baseline_context_bytes": null,
+      "commands": [
+        "npm run test --prefix apps/lorepia -- src/app/app-controller.test.ts"
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": null,
+      "paths": {
+        "documents": [
+          "apps/lorepia/src/AGENTS.md"
+        ],
+        "entrypoints": [
+          "apps/lorepia/src/app/app-controller.ts"
+        ],
+        "implementation": [
+          "apps/lorepia/src/app/app-state.ts"
+        ],
+        "tests": [
+          "apps/lorepia/src/features/library/LibraryPane.test.ts",
+          "apps/lorepia/src/features/import/ImportReviewDialog.test.ts"
+        ]
+      }
+    },
+    "FE-APP-003": {
+      "baseline_context_bytes": 269553,
+      "commands": [
+        "npm run test --prefix apps/lorepia -- src/features/chat/chat-stream.test.ts"
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "paths": {
+        "documents": [
+          "apps/lorepia/src/AGENTS.md"
+        ],
+        "entrypoints": [
+          "apps/lorepia/src/app/app-controller.ts"
+        ],
+        "implementation": [
+          "apps/lorepia/src/features/chat/chat-stream.ts"
+        ],
+        "tests": [
+          "apps/lorepia/src/features/chat/chat-stream.test.ts",
+          "apps/lorepia/src/app/app-controller.test.ts"
+        ]
+      }
+    },
+    "FE-APP-004": {
+      "baseline_context_bytes": null,
+      "commands": [
+        "npm run test --prefix apps/lorepia -- src/app/app-controller.providers.test.ts"
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": null,
+      "paths": {
+        "documents": [
+          "apps/lorepia/src/AGENTS.md"
+        ],
+        "entrypoints": [
+          "apps/lorepia/src/app/app-controller.ts"
+        ],
+        "implementation": [
+          "apps/lorepia/src/features/providers/settings-contracts.ts"
+        ],
+        "tests": [
+          "apps/lorepia/src/app/app-controller.providers.test.ts",
+          "apps/lorepia/src/features/providers/ProviderWorkflows.test.ts"
+        ]
+      }
+    },
+    "FE-CHAT-001": {
+      "baseline_context_bytes": 294812,
+      "commands": [
+        "npm run test --prefix apps/lorepia -- src/features/chat/ChatPane.test.ts src/features/chat/virtual-window.test.ts"
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "paths": {
+        "documents": [
+          "apps/lorepia/src/AGENTS.md"
+        ],
+        "entrypoints": [
+          "apps/lorepia/src/features/chat/ChatPane.svelte"
+        ],
+        "implementation": [
+          "apps/lorepia/src/features/chat/virtual-window.ts"
+        ],
+        "tests": [
+          "apps/lorepia/src/features/chat/ChatPane.test.ts",
+          "apps/lorepia/src/features/chat/virtual-window.test.ts"
+        ]
+      }
+    },
+    "FE-CHAT-002": {
+      "baseline_context_bytes": 277508,
+      "commands": [
+        "npm run test --prefix apps/lorepia -- src/features/chat/ChatPane.test.ts"
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "paths": {
+        "documents": [
+          "apps/lorepia/src/AGENTS.md"
+        ],
+        "entrypoints": [
+          "apps/lorepia/src/features/chat/ChatPane.svelte"
+        ],
+        "implementation": [
+          "apps/lorepia/src/features/chat/composer.ts"
+        ],
+        "tests": [
+          "apps/lorepia/src/features/chat/ChatPane.test.ts",
+          "apps/lorepia/src/features/chat/composer.test.ts"
+        ]
+      }
+    },
+    "FE-CHAT-003": {
+      "baseline_context_bytes": 273009,
+      "commands": [
+        "npm run test --prefix apps/lorepia -- src/features/chat/portable-runtime.test.ts"
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "paths": {
+        "documents": [
+          "apps/lorepia/src/AGENTS.md"
+        ],
+        "entrypoints": [
+          "apps/lorepia/src/features/chat/ChatPane.svelte"
+        ],
+        "implementation": [
+          "apps/lorepia/src/features/chat/portable-runtime-lifecycle.svelte.ts",
+          "apps/lorepia/src/features/chat/interaction-room-controller.ts"
+        ],
+        "tests": [
+          "apps/lorepia/src/features/chat/portable-runtime.test.ts",
+          "apps/lorepia/src/features/chat/interaction-room-controller.test.ts"
+        ]
+      }
+    },
+    "FE-CSS-001": {
+      "baseline_context_bytes": null,
+      "commands": [
+        "npm run test --prefix apps/lorepia -- src/styles/hover-contract.test.ts src/styles/semantic-state-contract.test.ts"
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": null,
+      "paths": {
+        "documents": [
+          "apps/lorepia/src/AGENTS.md"
+        ],
+        "entrypoints": [
+          "apps/lorepia/src/styles/app.css"
+        ],
+        "implementation": [
+          "apps/lorepia/src/main.ts"
+        ],
+        "tests": [
+          "apps/lorepia/src/styles/hover-contract.test.ts",
+          "apps/lorepia/src/styles/semantic-state-contract.test.ts"
+        ]
+      }
+    },
+    "FE-ORCH-001": {
+      "baseline_context_bytes": null,
+      "commands": [
+        "npm run test --prefix apps/lorepia -- src/features/orchestration/orchestration-controller.test.ts"
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": null,
+      "paths": {
+        "documents": [
+          "apps/lorepia/src/AGENTS.md"
+        ],
+        "entrypoints": [
+          "apps/lorepia/src/features/orchestration/orchestration-controller.ts"
+        ],
+        "implementation": [
+          "apps/lorepia/src/features/orchestration/studio-contracts.ts"
+        ],
+        "tests": [
+          "apps/lorepia/src/features/orchestration/orchestration-controller.test.ts"
+        ]
+      }
+    },
+    "FE-ORCH-002": {
+      "baseline_context_bytes": 499487,
+      "commands": [
+        "npm run test --prefix apps/lorepia -- src/features/orchestration/OrchestrationUI.test.ts"
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "paths": {
+        "documents": [
+          "apps/lorepia/src/AGENTS.md"
+        ],
+        "entrypoints": [
+          "apps/lorepia/src/features/orchestration/OrchestrationStudio.svelte"
+        ],
+        "implementation": [
+          "apps/lorepia/src/features/orchestration/CreatorDocumentEditors.svelte",
+          "apps/lorepia/src/features/orchestration/ContentModuleLifecyclePanel.svelte"
+        ],
+        "tests": [
+          "apps/lorepia/src/features/orchestration/OrchestrationUI.test.ts"
+        ]
+      }
+    },
+    "FE-PROV-001": {
+      "baseline_context_bytes": null,
+      "commands": [
+        "npm run test --prefix apps/lorepia -- src/features/providers/ProviderSettings.test.ts"
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": null,
+      "paths": {
+        "documents": [
+          "apps/lorepia/src/AGENTS.md"
+        ],
+        "entrypoints": [
+          "apps/lorepia/src/features/providers/ProviderSettings.svelte"
+        ],
+        "implementation": [
+          "apps/lorepia/src/features/providers/settings-contracts.ts",
+          "apps/lorepia/src/features/providers/ProviderCrudPanel.svelte"
+        ],
+        "tests": [
+          "apps/lorepia/src/features/providers/ProviderSettings.test.ts"
+        ]
+      }
+    },
+    "GOV-001": {
+      "baseline_context_bytes": null,
+      "commands": [
+        "python3 -m unittest scripts/test_report_refactoring_baseline.py",
+        "python3 scripts/report_refactoring_baseline.py --check"
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": null,
+      "paths": {
+        "documents": [],
+        "entrypoints": [
+          "scripts/report_refactoring_baseline.py"
+        ],
+        "implementation": [
+          "config/refactoring/baseline-report.json",
+          ".github/workflows/ci.yml"
+        ],
+        "tests": [
+          "scripts/test_report_refactoring_baseline.py"
+        ]
+      }
+    },
+    "GOV-002": {
+      "baseline_context_bytes": null,
+      "commands": [
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": null,
+      "paths": {
+        "documents": [
+          "crates/core/AGENTS.md",
+          "crates/storage/AGENTS.md",
+          "apps/lorepia/src/AGENTS.md"
+        ],
+        "entrypoints": [],
+        "implementation": [],
+        "tests": []
+      }
+    },
+    "GOV-003": {
+      "baseline_context_bytes": null,
+      "commands": [
+        "python3 -m unittest scripts/test_check_ai_context_map.py",
+        "python3 scripts/check_ai_context_map.py"
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": null,
+      "paths": {
+        "documents": [
+          "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+          "config/refactoring/task-manifest.yaml"
+        ],
+        "entrypoints": [
+          "scripts/check_ai_context_map.py"
+        ],
+        "implementation": [
+          "config/ai-context-map.json",
+          ".github/workflows/ci.yml"
+        ],
+        "tests": [
+          "scripts/test_check_ai_context_map.py"
+        ]
+      }
+    },
+    "GOV-004": {
+      "baseline_context_bytes": null,
+      "commands": [
+        "python3 -m unittest scripts/test_check_source_architecture.py",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": null,
+      "paths": {
+        "documents": [],
+        "entrypoints": [
+          "scripts/check_source_architecture.py"
+        ],
+        "implementation": [
+          "config/source-size-baseline.json"
+        ],
+        "tests": [
+          "scripts/test_check_source_architecture.py"
+        ]
+      }
+    },
+    "IPC-001": {
+      "baseline_context_bytes": null,
+      "commands": [
+        "npm run test --prefix apps/lorepia -- src/lib/ipc/client.test.ts",
+        "python3 scripts/generate_ipc_commands.py --check"
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": null,
+      "paths": {
+        "documents": [
+          "apps/lorepia/src/AGENTS.md",
+          "docs/adr/0004-ipc-command-registry.md"
+        ],
+        "entrypoints": [
+          "apps/lorepia/src/lib/ipc/contracts.ts"
+        ],
+        "implementation": [
+          "config/ipc-commands.json"
+        ],
+        "tests": [
+          "apps/lorepia/src/lib/ipc/client.test.ts"
+        ]
+      }
+    },
+    "IPC-002": {
+      "baseline_context_bytes": 271728,
+      "commands": [
+        "npm run test --prefix apps/lorepia -- src/lib/ipc/client.test.ts"
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "paths": {
+        "documents": [
+          "apps/lorepia/src/AGENTS.md"
+        ],
+        "entrypoints": [
+          "apps/lorepia/src/lib/ipc/client.ts"
+        ],
+        "implementation": [
+          "apps/lorepia/src/lib/ipc/contracts.ts"
+        ],
+        "tests": [
+          "apps/lorepia/src/lib/ipc/client.test.ts"
+        ]
+      }
+    },
+    "SHELL-001": {
+      "baseline_context_bytes": null,
+      "commands": [
+        "cargo test -p lorepia-shell-api",
+        "python3 scripts/generate_ipc_commands.py --check"
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": null,
+      "paths": {
+        "documents": [],
+        "entrypoints": [
+          "crates/shell-api/src/lib.rs",
+          "crates/shell-api/src/api.rs"
+        ],
+        "implementation": [
+          "crates/shell-api/src/dto.rs"
+        ],
+        "tests": [
+          "apps/lorepia/src-tauri/src/contract.rs"
+        ]
+      }
+    },
+    "STOR-API-001": {
+      "baseline_context_bytes": null,
+      "commands": [
+        "cargo test -p lorepia-core --test provider_discovery_integration",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": null,
+      "paths": {
+        "documents": [
+          "crates/storage/AGENTS.md",
+          "docs/architecture/storage-public-api-audit.md"
+        ],
+        "entrypoints": [
+          "crates/storage/src/lib.rs",
+          "crates/core/src/provider_discovery_view.rs"
+        ],
+        "implementation": [
+          "config/core-storage-public-api-baseline.json"
+        ],
+        "tests": [
+          "crates/core/tests/provider_discovery_integration.rs"
+        ]
+      }
+    },
+    "STOR-DB-001": {
+      "baseline_context_bytes": 805944,
+      "commands": [
+        "cargo test -p lorepia-storage --lib database::tests",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "paths": {
+        "documents": [
+          "crates/storage/AGENTS.md",
+          "docs/adr/0002-storage-transaction-boundaries.md"
+        ],
+        "entrypoints": [
+          "crates/storage/src/database.rs"
+        ],
+        "implementation": [
+          "crates/storage/src/cutover.rs",
+          "crates/storage/src/database/private_path.rs"
+        ],
+        "tests": [
+          "crates/storage/tests/private_storage_permissions.rs"
+        ]
+      }
+    },
+    "STOR-DB-002": {
+      "baseline_context_bytes": 855380,
+      "commands": [
+        "cargo test -p lorepia-storage --test schema_registry_integrity",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "paths": {
+        "documents": [
+          "crates/storage/AGENTS.md",
+          "docs/adr/0002-storage-transaction-boundaries.md"
+        ],
+        "entrypoints": [
+          "crates/storage/src/database.rs"
+        ],
+        "implementation": [
+          "crates/storage/src/cutover.rs"
+        ],
+        "tests": [
+          "crates/storage/tests/schema_registry_integrity.rs",
+          "crates/storage/tests/migration_cutpoint_matrix.rs"
+        ]
+      }
+    },
+    "STOR-DB-003": {
+      "baseline_context_bytes": 785573,
+      "commands": [
+        "cargo test -p lorepia-storage --lib database::tests",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "paths": {
+        "documents": [
+          "crates/storage/AGENTS.md"
+        ],
+        "entrypoints": [
+          "crates/storage/src/database.rs"
+        ],
+        "implementation": [
+          "crates/storage/src/database/connection_metrics.rs",
+          "crates/storage/src/database/asset_delivery.rs"
+        ],
+        "tests": [
+          "crates/storage/tests/schema11_release_cutover.rs"
+        ]
+      }
+    },
+    "STOR-DISC-001": {
+      "baseline_context_bytes": 910501,
+      "commands": [
+        "cargo test -p lorepia-storage --lib discovery_repository::tests",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "paths": {
+        "documents": [
+          "crates/storage/AGENTS.md"
+        ],
+        "entrypoints": [
+          "crates/storage/src/discovery_repository.rs"
+        ],
+        "implementation": [
+          "crates/storage/src/discovery_repository/contract_codec.rs",
+          "crates/storage/src/discovery_repository/errors.rs"
+        ],
+        "tests": [
+          "crates/storage/tests/discovery_state_storage.rs"
+        ]
+      }
+    },
+    "STOR-DISC-002": {
+      "baseline_context_bytes": 924122,
+      "commands": [
+        "cargo test -p lorepia-storage --test discovery_state_storage",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "paths": {
+        "documents": [
+          "crates/storage/AGENTS.md"
+        ],
+        "entrypoints": [
+          "crates/storage/src/discovery_repository.rs"
+        ],
+        "implementation": [
+          "crates/storage/src/discovery_repository/repository_io.rs"
+        ],
+        "tests": [
+          "crates/storage/tests/discovery_state_storage.rs"
+        ]
+      }
+    },
+    "STOR-DISC-003": {
+      "baseline_context_bytes": 937421,
+      "commands": [
+        "cargo test -p lorepia-storage --lib discovery_repository::tests",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "paths": {
+        "documents": [
+          "crates/storage/AGENTS.md"
+        ],
+        "entrypoints": [
+          "crates/storage/src/discovery_repository.rs"
+        ],
+        "implementation": [
+          "crates/storage/src/discovery_repository/repository_io.rs"
+        ],
+        "tests": [
+          "crates/storage/tests/discovery_state_storage.rs",
+          "crates/storage/tests/discovery_wal_purge.rs"
+        ]
+      }
+    },
+    "STOR-DISC-004": {
+      "baseline_context_bytes": 1015120,
+      "commands": [
+        "cargo test -p lorepia-storage --test provider_credential_operations",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "paths": {
+        "documents": [
+          "crates/storage/AGENTS.md"
+        ],
+        "entrypoints": [
+          "crates/storage/src/discovery_repository.rs"
+        ],
+        "implementation": [
+          "crates/storage/src/discovery_repository/repository_io.rs"
+        ],
+        "tests": [
+          "crates/storage/tests/provider_credential_operations.rs",
+          "crates/core/tests/provider_discovery_integration.rs"
+        ]
+      }
+    },
+    "STOR-INT-001": {
+      "baseline_context_bytes": 1454824,
+      "commands": [
+        "cargo test -p lorepia-storage --test greeting_conversation_start",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "paths": {
+        "documents": [
+          "crates/storage/AGENTS.md"
+        ],
+        "entrypoints": [
+          "crates/storage/src/interaction_repository.rs",
+          "crates/storage/src/database.rs"
+        ],
+        "implementation": [
+          "crates/storage/src/message_display_projection.rs"
+        ],
+        "tests": [
+          "crates/storage/tests/greeting_conversation_start.rs"
+        ]
+      }
+    },
+    "STOR-INT-002": {
+      "baseline_context_bytes": 841109,
+      "commands": [
+        "cargo test -p lorepia-storage --test interaction_derived_event_storage",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "paths": {
+        "documents": [
+          "crates/storage/AGENTS.md",
+          "docs/adr/0002-storage-transaction-boundaries.md"
+        ],
+        "entrypoints": [
+          "crates/storage/src/interaction_repository.rs"
+        ],
+        "implementation": [
+          "crates/storage/src/message_display_projection.rs"
+        ],
+        "tests": [
+          "crates/storage/tests/interaction_derived_event_storage.rs",
+          "crates/core/tests/ordinary_interaction_sealed_replay.rs"
+        ]
+      }
+    },
+    "STOR-INT-003": {
+      "baseline_context_bytes": 759795,
+      "commands": [
+        "cargo test -p lorepia-core --test interaction_derived_supervisor",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "paths": {
+        "documents": [
+          "crates/storage/AGENTS.md"
+        ],
+        "entrypoints": [
+          "crates/storage/src/interaction_repository.rs"
+        ],
+        "implementation": [
+          "crates/storage/src/interaction_repository/effect_history.rs"
+        ],
+        "tests": [
+          "crates/core/tests/interaction_derived_supervisor.rs"
+        ]
+      }
+    },
+    "STOR-ORCH-001": {
+      "baseline_context_bytes": 641994,
+      "commands": [
+        "cargo test -p lorepia-storage --lib orchestration::tests",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "paths": {
+        "documents": [
+          "crates/storage/AGENTS.md",
+          "docs/adr/0002-storage-transaction-boundaries.md"
+        ],
+        "entrypoints": [
+          "crates/storage/src/orchestration.rs"
+        ],
+        "implementation": [
+          "crates/storage/src/orchestration/builtins.rs"
+        ],
+        "tests": [
+          "crates/storage/tests/orchestration_migrations.rs",
+          "crates/core/tests/prompt_preset_rollback.rs"
+        ]
+      }
+    },
+    "STOR-ORCH-002": {
+      "baseline_context_bytes": 695489,
+      "commands": [
+        "cargo test -p lorepia-storage --lib orchestration::tests",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "paths": {
+        "documents": [
+          "crates/storage/AGENTS.md"
+        ],
+        "entrypoints": [
+          "crates/storage/src/orchestration.rs"
+        ],
+        "implementation": [
+          "crates/storage/src/orchestration/module_authority.rs"
+        ],
+        "tests": [
+          "crates/storage/tests/knowledge_embedding_storage.rs",
+          "crates/core/tests/orchestration_core_contract.rs"
+        ]
+      }
+    },
+    "STOR-PKG-001": {
+      "baseline_context_bytes": 1518328,
+      "commands": [
+        "cargo test -p lorepia-storage --lib package_repository::tests",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "paths": {
+        "documents": [
+          "crates/storage/AGENTS.md",
+          "docs/adr/0002-storage-transaction-boundaries.md"
+        ],
+        "entrypoints": [
+          "crates/storage/src/package_repository.rs"
+        ],
+        "implementation": [
+          "crates/storage/src/database.rs",
+          "crates/storage/src/orchestration.rs"
+        ],
+        "tests": [
+          "crates/core/tests/orchestration_content_import.rs",
+          "crates/storage/tests/private_storage_permissions.rs"
+        ]
+      }
+    },
+    "TAURI-001": {
+      "baseline_context_bytes": 273371,
+      "commands": [
+        "cargo test -p lorepia-tauri --lib provider_commands::tests",
+        "python3 scripts/generate_ipc_commands.py --check"
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "paths": {
+        "documents": [
+          "docs/adr/0004-ipc-command-registry.md"
+        ],
+        "entrypoints": [
+          "apps/lorepia/src-tauri/src/provider_commands.rs"
+        ],
+        "implementation": [
+          "apps/lorepia/src-tauri/src/lib.rs",
+          "config/ipc-commands.json"
+        ],
+        "tests": [
+          "scripts/test_generate_ipc_commands.py"
+        ]
+      }
+    },
+    "TAURI-002": {
+      "baseline_context_bytes": 311342,
+      "commands": [
+        "cargo test -p lorepia-tauri --lib credential_operations::tests",
+        "python3 scripts/generate_ipc_commands.py --check"
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "paths": {
+        "documents": [
+          "docs/adr/0003-credential-and-secret-boundary.md"
+        ],
+        "entrypoints": [
+          "apps/lorepia/src-tauri/src/credential_operations.rs"
+        ],
+        "implementation": [
+          "apps/lorepia/src-tauri/src/state.rs"
+        ],
+        "tests": [
+          "plugins/lorepia-platform/src/lib.rs"
+        ]
+      }
+    },
+    "TEST-CORE-001": {
+      "baseline_context_bytes": 834450,
+      "commands": [
+        "cargo test -p lorepia-core --lib app::tests",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "paths": {
+        "documents": [
+          "crates/core/AGENTS.md"
+        ],
+        "entrypoints": [
+          "crates/core/src/app.rs"
+        ],
+        "implementation": [
+          "crates/core/src/lib.rs"
+        ],
+        "tests": [
+          "crates/core/tests/chat_vertical_slice.rs"
+        ]
+      }
+    },
+    "TEST-FE-001": {
+      "baseline_context_bytes": null,
+      "commands": [
+        "npm run test --prefix apps/lorepia -- src/app/app-controller.test.ts src/app/app-controller.providers.test.ts"
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": null,
+      "paths": {
+        "documents": [
+          "apps/lorepia/src/AGENTS.md"
+        ],
+        "entrypoints": [
+          "apps/lorepia/src/app/app-controller.test.ts"
+        ],
+        "implementation": [
+          "apps/lorepia/src/app/app-controller.providers.test.ts"
+        ],
+        "tests": []
+      }
+    },
+    "TEST-FE-002": {
+      "baseline_context_bytes": null,
+      "commands": [
+        "npm run test --prefix apps/lorepia -- src/features/chat/ChatPane.test.ts"
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": null,
+      "paths": {
+        "documents": [
+          "apps/lorepia/src/AGENTS.md"
+        ],
+        "entrypoints": [
+          "apps/lorepia/src/features/chat/ChatPane.test.ts"
+        ],
+        "implementation": [
+          "apps/lorepia/src/features/chat/virtual-window.test.ts"
+        ],
+        "tests": []
+      }
+    },
+    "TEST-FE-003": {
+      "baseline_context_bytes": null,
+      "commands": [
+        "npm run test --prefix apps/lorepia -- src/features/orchestration/OrchestrationUI.test.ts"
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": null,
+      "paths": {
+        "documents": [
+          "apps/lorepia/src/AGENTS.md"
+        ],
+        "entrypoints": [
+          "apps/lorepia/src/features/orchestration/OrchestrationUI.test.ts"
+        ],
+        "implementation": [
+          "apps/lorepia/src/features/orchestration/orchestration-controller.test.ts"
+        ],
+        "tests": []
+      }
+    },
+    "TEST-STOR-001": {
+      "baseline_context_bytes": 897720,
+      "commands": [
+        "cargo test -p lorepia-storage --lib discovery_repository::tests",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "paths": {
+        "documents": [
+          "crates/storage/AGENTS.md"
+        ],
+        "entrypoints": [
+          "crates/storage/src/discovery_repository.rs"
+        ],
+        "implementation": [
+          "crates/storage/src/discovery_repository/tests/unknown_outcome.rs"
+        ],
+        "tests": [
+          "crates/storage/tests/discovery_state_storage.rs",
+          "crates/storage/tests/discovery_wal_purge.rs"
+        ]
+      }
+    },
+    "TEST-STOR-002": {
+      "baseline_context_bytes": 768354,
+      "commands": [
+        "cargo test -p lorepia-storage --lib database::tests",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "paths": {
+        "documents": [
+          "crates/storage/AGENTS.md"
+        ],
+        "entrypoints": [
+          "crates/storage/src/database.rs"
+        ],
+        "implementation": [
+          "crates/storage/src/database/private_path.rs"
+        ],
+        "tests": [
+          "crates/storage/tests/schema_registry_integrity.rs",
+          "crates/storage/tests/migration_cutpoint_matrix.rs"
+        ]
+      }
+    },
+    "TEST-STOR-003": {
+      "baseline_context_bytes": 789904,
+      "commands": [
+        "cargo test -p lorepia-storage --lib interaction_repository::tests",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "paths": {
+        "documents": [
+          "crates/storage/AGENTS.md"
+        ],
+        "entrypoints": [
+          "crates/storage/src/interaction_repository.rs"
+        ],
+        "implementation": [
+          "crates/storage/src/interaction_repository/effect_history.rs"
+        ],
+        "tests": [
+          "crates/storage/tests/interaction_derived_event_storage.rs"
+        ]
+      }
+    },
+    "TEST-STOR-004": {
+      "baseline_context_bytes": 686169,
+      "commands": [
+        "cargo test -p lorepia-storage --lib orchestration::tests",
+        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
+      ],
+      "max_context_bytes": 250000,
+      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "paths": {
+        "documents": [
+          "crates/storage/AGENTS.md"
+        ],
+        "entrypoints": [
+          "crates/storage/src/orchestration/tests.rs"
+        ],
+        "implementation": [
+          "crates/storage/src/orchestration.rs"
+        ],
+        "tests": [
+          "crates/storage/tests/orchestration_migrations.rs"
+        ]
+      }
+    }
+  },
+  "default_max_context_bytes": 250000,
+  "policy": "Repository-local read starting points, not a security allowlist",
+  "shared_paths": [
+    "AGENTS.md"
+  ],
+  "version": 1
+}
