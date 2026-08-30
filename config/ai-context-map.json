@@ -853,7 +853,7 @@
       }
     },
     "STOR-DB-001": {
-      "baseline_context_bytes": 805944,
+      "baseline_context_bytes": 564430,
       "commands": [
         "cargo test -p lorepia-storage --lib database::tests",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
@@ -870,6 +870,11 @@
         ],
         "implementation": [
           "crates/storage/src/cutover.rs",
+          "crates/storage/src/database/bootstrap.rs",
+          "crates/storage/src/database/cas_filesystem.rs",
+          "crates/storage/src/database/connection.rs",
+          "crates/storage/src/database/data_root.rs",
+          "crates/storage/src/database/pragmas.rs",
           "crates/storage/src/database/private_path.rs"
         ],
         "tests": [
@@ -878,7 +883,7 @@
       }
     },
     "STOR-DB-002": {
-      "baseline_context_bytes": 855380,
+      "baseline_context_bytes": 597571,
       "commands": [
         "cargo test -p lorepia-storage --test schema_registry_integrity",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
@@ -894,7 +899,10 @@
           "crates/storage/src/database.rs"
         ],
         "implementation": [
-          "crates/storage/src/cutover.rs"
+          "crates/storage/src/cutover.rs",
+          "crates/storage/src/database/bootstrap.rs",
+          "crates/storage/src/database/connection.rs",
+          "crates/storage/src/database/pragmas.rs"
         ],
         "tests": [
           "crates/storage/tests/schema_registry_integrity.rs",
@@ -903,7 +911,7 @@
       }
     },
     "STOR-DB-003": {
-      "baseline_context_bytes": 785573,
+      "baseline_context_bytes": 528988,
       "commands": [
         "cargo test -p lorepia-storage --lib database::tests",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
@@ -918,8 +926,10 @@
           "crates/storage/src/database.rs"
         ],
         "implementation": [
-          "crates/storage/src/database/connection_metrics.rs",
-          "crates/storage/src/database/asset_delivery.rs"
+          "crates/storage/src/database/asset_delivery.rs",
+          "crates/storage/src/database/bootstrap.rs",
+          "crates/storage/src/database/connection.rs",
+          "crates/storage/src/database/connection_metrics.rs"
         ],
         "tests": [
           "crates/storage/tests/schema11_release_cutover.rs"

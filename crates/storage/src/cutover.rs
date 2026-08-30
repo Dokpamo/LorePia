@@ -6,19 +6,19 @@ use std::{
     time::Duration,
 };
 
-use lorepia_domain::{CanonicalOrigin, CoreError, CoreErrorCode, CoreResult, HeaderName};
-use rusqlite::{
-    Connection, OpenFlags, OptionalExtension, backup::Backup, functions::FunctionFlags,
-    types::ValueRef,
-};
+use lorepia_domain::{CoreError, CoreErrorCode, CoreResult};
+#[cfg(test)]
+use rusqlite::OpenFlags;
+use rusqlite::{Connection, backup::Backup, types::ValueRef};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::database::{
     FROZEN_NATIVE_MIGRATIONS, FROZEN_NATIVE_SCHEMA_VERSION, SCHEMA_VERSION, apply_migrations,
-    read_current_schema_version, read_pre_migration_schema_version, storage_db_error,
-    truncate_sensitive_migration_wal,
+    open_backup_destination, open_configured, open_cutover_source, read_current_schema_version,
+    read_pre_migration_schema_version, reserve_source_writes, storage_db_error,
+    truncate_sensitive_migration_wal, validate_database_integrity,
 };
 
 const MIN_SUPPORTED_MANIFEST_FORMAT_VERSION: u32 = 2;
@@ -280,35 +280,6 @@ fn create_generation(
     Ok(candidate)
 }
 
-fn reserve_source_writes(path: &Path) -> CoreResult<Connection> {
-    let reservation = Connection::open_with_flags(
-        path,
-        OpenFlags::SQLITE_OPEN_READ_WRITE
-            | OpenFlags::SQLITE_OPEN_NO_MUTEX
-            | OpenFlags::SQLITE_OPEN_PRIVATE_CACHE
-            | OpenFlags::SQLITE_OPEN_NOFOLLOW,
-    )
-    .map_err(storage_db_error)?;
-    reservation
-        .busy_timeout(Duration::from_secs(5))
-        .map_err(storage_db_error)?;
-    reservation
-        .execute_batch("BEGIN IMMEDIATE")
-        .map_err(storage_db_error)?;
-    Ok(reservation)
-}
-
-fn open_cutover_source(path: &Path) -> CoreResult<Connection> {
-    Connection::open_with_flags(
-        path,
-        OpenFlags::SQLITE_OPEN_READ_ONLY
-            | OpenFlags::SQLITE_OPEN_NO_MUTEX
-            | OpenFlags::SQLITE_OPEN_PRIVATE_CACHE
-            | OpenFlags::SQLITE_OPEN_NOFOLLOW,
-    )
-    .map_err(storage_db_error)
-}
-
 fn open_configured_and_migrate(path: &Path) -> CoreResult<Connection> {
     let mut connection = open_configured(path)?;
     apply_migrations(&mut connection)?;
@@ -322,94 +293,6 @@ fn open_configured_current(path: &Path) -> CoreResult<Connection> {
     validate_database_integrity(&connection)?;
     read_current_schema_version(&connection)?;
     Ok(connection)
-}
-
-fn open_configured(path: &Path) -> CoreResult<Connection> {
-    let connection = Connection::open_with_flags(
-        path,
-        OpenFlags::SQLITE_OPEN_READ_WRITE
-            | OpenFlags::SQLITE_OPEN_CREATE
-            | OpenFlags::SQLITE_OPEN_NO_MUTEX
-            | OpenFlags::SQLITE_OPEN_PRIVATE_CACHE
-            | OpenFlags::SQLITE_OPEN_NOFOLLOW,
-    )
-    .map_err(storage_db_error)?;
-    register_integrity_functions(&connection)?;
-    connection
-        .pragma_update(None, "foreign_keys", true)
-        .map_err(storage_db_error)?;
-    connection
-        .pragma_update(None, "journal_mode", "WAL")
-        .map_err(storage_db_error)?;
-    connection
-        .pragma_update(None, "synchronous", "FULL")
-        .map_err(storage_db_error)?;
-    Ok(connection)
-}
-
-pub(crate) fn register_integrity_functions(connection: &Connection) -> CoreResult<()> {
-    let flags = FunctionFlags::SQLITE_UTF8
-        | FunctionFlags::SQLITE_DETERMINISTIC
-        | FunctionFlags::SQLITE_INNOCUOUS;
-    connection
-        .create_scalar_function("lorepia_sha256_hex", 1, flags, |context| {
-            let value = context.get::<String>(0)?;
-            Ok(format!("{:x}", Sha256::digest(value.as_bytes())))
-        })
-        .map_err(storage_db_error)?;
-    connection
-        .create_scalar_function(
-            "lorepia_discovery_commit_plan_sha256",
-            1,
-            flags,
-            |context| {
-                let value = context.get::<String>(0)?;
-                Ok(crate::discovery_repository::contract_codec::canonical_discovery_commit_plan_sha256(
-                    &value,
-                ))
-            },
-        )
-        .map_err(storage_db_error)?;
-    connection
-        .create_scalar_function("lorepia_canonical_origin", 1, flags, |context| {
-            let value = context.get::<String>(0)?;
-            Ok(CanonicalOrigin::parse(&value)
-                .ok()
-                .map(|origin| origin.to_string()))
-        })
-        .map_err(storage_db_error)?;
-    connection
-        .create_scalar_function("lorepia_header_name", 1, flags, |context| {
-            let value = context.get::<String>(0)?;
-            Ok(HeaderName::parse(&value)
-                .ok()
-                .map(|name| name.as_str().to_owned()))
-        })
-        .map_err(storage_db_error)?;
-    connection
-        .create_scalar_function(
-            "lorepia_native_no_effect_evidence_sha256",
-            8,
-            flags,
-            |context| {
-                let evidence = serde_json::json!({
-                    "schema_version": context.get::<i64>(0)?,
-                    "attestation_kind": context.get::<String>(1)?,
-                    "recovery_owner": context.get::<String>(2)?,
-                    "operation_id": context.get::<String>(3)?,
-                    "session_id": context.get::<String>(4)?,
-                    "commit_attempt_id": context.get::<String>(5)?,
-                    "commit_plan_sha256": context.get::<String>(6)?,
-                    "connection_id": context.get::<String>(7)?,
-                });
-                Ok(format!(
-                    "{:x}",
-                    Sha256::digest(evidence.to_string().as_bytes())
-                ))
-            },
-        )
-        .map_err(storage_db_error)?;
-    Ok(())
 }
 
 fn validate_frozen_source(connection: &Connection) -> CoreResult<()> {
@@ -444,28 +327,6 @@ fn validate_current_candidate(
     read_current_schema_version(connection)?;
     validate_database_integrity(connection)?;
     validate_semantic_snapshot(connection, semantic_snapshot)
-}
-
-fn validate_database_integrity(connection: &Connection) -> CoreResult<()> {
-    let foreign_key_violation = connection
-        .query_row("PRAGMA foreign_key_check", [], |_| Ok(()))
-        .optional()
-        .map_err(storage_db_error)?
-        .is_some();
-    if foreign_key_violation {
-        return Err(storage_corrupted(
-            "database cutover foreign-key validation failed",
-        ));
-    }
-    let integrity = connection
-        .query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0))
-        .map_err(storage_db_error)?;
-    if integrity != "ok" {
-        return Err(storage_corrupted(format!(
-            "database cutover integrity validation failed: {integrity}"
-        )));
-    }
-    Ok(())
 }
 
 fn expected_frozen_schema_inventory() -> CoreResult<Vec<SchemaObject>> {
@@ -757,15 +618,7 @@ fn create_real_directory(path: &Path, parent: &Path) -> CoreResult<()> {
 }
 
 fn backup_database(source: &Connection, candidate_path: &Path) -> CoreResult<()> {
-    let mut destination = Connection::open_with_flags(
-        candidate_path,
-        OpenFlags::SQLITE_OPEN_READ_WRITE
-            | OpenFlags::SQLITE_OPEN_CREATE
-            | OpenFlags::SQLITE_OPEN_NO_MUTEX
-            | OpenFlags::SQLITE_OPEN_PRIVATE_CACHE
-            | OpenFlags::SQLITE_OPEN_NOFOLLOW,
-    )
-    .map_err(storage_db_error)?;
+    let mut destination = open_backup_destination(candidate_path)?;
     let backup = Backup::new(source, &mut destination).map_err(storage_db_error)?;
     backup
         .run_to_completion(128, Duration::from_millis(1), None)

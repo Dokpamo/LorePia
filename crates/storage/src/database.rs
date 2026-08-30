@@ -1,11 +1,16 @@
 mod asset_delivery;
+mod bootstrap;
+mod cas_filesystem;
+mod connection;
 mod connection_metrics;
+mod data_root;
+mod pragmas;
 mod private_path;
 
 use std::{
     collections::BTreeSet,
-    fs::{self, File, OpenOptions},
-    io::{BufReader, Read, Seek, Write},
+    fs::{self, File},
+    io::Read,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     path::{Path, PathBuf},
     sync::{Mutex, MutexGuard},
@@ -13,9 +18,6 @@ use std::{
 
 #[cfg(test)]
 use std::sync::atomic::AtomicUsize;
-
-#[cfg(unix)]
-use std::os::unix::fs::OpenOptionsExt;
 
 use chrono::{DateTime, Utc};
 #[cfg(test)]
@@ -46,11 +48,21 @@ use sha2::{Digest, Sha256};
 use url::Url;
 use uuid::Uuid;
 
-use private_path::{harden_owned_tree_permissions, harden_private_path};
-
 pub(crate) use connection_metrics::DatabaseConnectionGuard;
 use connection_metrics::DatabaseConnectionMetricState;
 pub use connection_metrics::DatabaseConnectionMetrics;
+
+#[cfg(test)]
+use cas_filesystem::publish_temp_noclobber;
+use cas_filesystem::{
+    content_relative_path, ensure_real_directory, ensure_regular_file, hash_open_file,
+    store_verified_source, store_verified_source_observed, sync_directory, verify_file,
+};
+pub(crate) use connection::{
+    open_backup_destination, open_configured, open_cutover_source, reserve_source_writes,
+};
+use pragmas::register_integrity_functions;
+pub(crate) use pragmas::validate_database_integrity;
 
 use crate::interaction_repository::{
     InteractionStateKey, clone_interaction_checkpoint_for_branch_transaction,
@@ -293,83 +305,6 @@ struct PackageCasPromotionJournalEntry {
 }
 
 impl Storage {
-    pub fn open(root: impl AsRef<Path>) -> CoreResult<Self> {
-        Self::open_internal(root.as_ref(), true)
-    }
-
-    /// Opens storage while deferring provider-discovery recovery to the Core.
-    ///
-    /// The owning Core or native host must classify validated, secret-free
-    /// assistant checkpoints, reconcile any native credential effects, and
-    /// call `recover_unfinished_discovery_operations_except` before exposing
-    /// the instance. Standalone storage callers should use [`Self::open`],
-    /// which remains conservatively self-recovering.
-    pub fn open_with_deferred_discovery_recovery(root: impl AsRef<Path>) -> CoreResult<Self> {
-        Self::open_internal(root.as_ref(), false)
-    }
-
-    fn open_internal(root: &Path, recover_provider_discovery: bool) -> CoreResult<Self> {
-        let root = prepare_owned_data_root(root)?;
-        let owner_lock = acquire_data_root_owner_lock(&root)?;
-        for relative in [
-            "db",
-            "sources/sha256",
-            "assets/sha256",
-            "cache/thumbnails",
-            "cache/extracted",
-            "staging",
-            "recovery",
-        ] {
-            create_owned_directory_tree(&root, Path::new(relative))?;
-        }
-
-        let database_path = root.join("db/lorepia.sqlite3");
-        let mut connection = crate::cutover::open_database(&root, &database_path)?;
-        crate::discovery_repository::validate_native_no_effect_attestation_integrity(&connection)?;
-        ensure_stable_local_user_settings(&mut connection)?;
-        crate::orchestration::seed_builtin_prompt_presets(&mut connection)?;
-        validate_provider_local_network_approval_integrity(&connection)?;
-        recover_interrupted_work(&root, &mut connection)?;
-        crate::model_sync::recover_interrupted_model_sync_jobs(&mut connection)?;
-        remove_abandoned_staging_files(&root.join("staging"))?;
-
-        let storage = Self {
-            root,
-            cas_mutation: Mutex::new(()),
-            connection_metrics: DatabaseConnectionMetricState::default(),
-            connection: Mutex::new(connection),
-            verified_asset_cache: Mutex::new(VerifiedAssetCache::default()),
-            #[cfg(test)]
-            approved_asset_hash_verifications: AtomicUsize::new(0),
-            _owner_lock: owner_lock,
-        };
-        // Running memory jobs have no trustworthy in-process worker after a
-        // restart. Recover them before the Storage becomes observable so a
-        // durable worker can claim the retryable work exactly once.
-        storage.recover_running_memory_jobs(Utc::now())?;
-        storage.recover_running_memory_query_embeddings(Utc::now())?;
-        storage.recover_all_core_lifecycle_occurrence_leases(Utc::now())?;
-        storage.recover_all_interaction_derived_event_leases(Utc::now())?;
-        storage.recover_started_runtime_model_audits(Utc::now())?;
-        if recover_provider_discovery {
-            storage.recover_unfinished_discovery_operations(Utc::now())?;
-        }
-        harden_owned_tree_permissions(&storage.root)?;
-        Ok(storage)
-    }
-
-    pub fn data_root(&self) -> &Path {
-        &self.root
-    }
-
-    pub fn database_connection_metrics(&self) -> DatabaseConnectionMetrics {
-        self.connection_metrics.snapshot()
-    }
-
-    pub fn staging_dir(&self) -> PathBuf {
-        self.root.join("staging")
-    }
-
     /// Promotes an owned staged package snapshot into durable source CAS.
     ///
     /// The bytes are streamed, hashed, size-checked, fsynced, and registered
@@ -3454,20 +3389,6 @@ impl Storage {
             pending_imports: count(&connection, "import_jobs")?,
         })
     }
-
-    pub(crate) fn connection(&self) -> CoreResult<DatabaseConnectionGuard<'_>> {
-        self.connection_metrics.acquire(&self.connection)
-    }
-
-    pub(super) fn cas_mutation(&self) -> CoreResult<MutexGuard<'_, ()>> {
-        self.cas_mutation.lock().map_err(|_| {
-            CoreError::new(
-                CoreErrorCode::StorageUnavailable,
-                "CAS mutation lock was poisoned",
-                true,
-            )
-        })
-    }
 }
 
 fn insert_conversation_start_rows(
@@ -4862,7 +4783,7 @@ fn link_character_asset(
 
 #[allow(clippy::too_many_lines)]
 pub(crate) fn apply_migrations(connection: &mut Connection) -> CoreResult<()> {
-    crate::cutover::register_integrity_functions(connection)?;
+    register_integrity_functions(connection)?;
     let current_version = read_pre_migration_schema_version(connection)?;
     // Schema five is the boundary that purged arbitrary legacy discovery
     // payloads. Checkpoint before attempting any later migration so a prior
@@ -10250,257 +10171,6 @@ fn stale_branch_error() -> CoreError {
     )
 }
 
-fn prepare_owned_data_root(root: &Path) -> CoreResult<PathBuf> {
-    if root.as_os_str().is_empty() {
-        return Err(CoreError::invalid("data root must not be empty"));
-    }
-    match fs::symlink_metadata(root) {
-        Ok(metadata) if metadata.file_type().is_dir() => {}
-        Ok(_) => {
-            return Err(storage_corrupted(
-                "data root must be a real directory, not a file or symbolic link",
-            ));
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            fs::create_dir_all(root).map_err(storage_io_error)?;
-        }
-        Err(error) => return Err(storage_io_error(error)),
-    }
-    let metadata = fs::symlink_metadata(root).map_err(storage_io_error)?;
-    if !metadata.file_type().is_dir() {
-        return Err(storage_corrupted(
-            "data root must be a real directory, not a file or symbolic link",
-        ));
-    }
-    harden_private_path(root, true)?;
-    fs::canonicalize(root).map_err(storage_io_error)
-}
-
-fn validate_owner_lock_file(file: &File) -> CoreResult<()> {
-    let metadata = file.metadata().map_err(storage_io_error)?;
-    if !metadata.file_type().is_file() {
-        return Err(storage_corrupted(
-            "data root owner lock is not a regular file",
-        ));
-    }
-    Ok(())
-}
-
-#[cfg(any(target_os = "android", target_os = "linux", target_vendor = "apple"))]
-fn reject_non_regular_owner_lock(path: &Path) -> CoreResult<()> {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_file() => Ok(()),
-        Ok(_) => Err(storage_corrupted(
-            "data root owner lock is not a regular file",
-        )),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(storage_io_error(error)),
-    }
-}
-
-fn data_root_already_owned() -> CoreError {
-    CoreError::new(
-        CoreErrorCode::StorageUnavailable,
-        "data root is already owned by another LorePia process",
-        true,
-    )
-}
-
-#[cfg(any(target_os = "android", target_os = "linux", target_vendor = "apple"))]
-fn acquire_data_root_owner_lock(root: &Path) -> CoreResult<File> {
-    use rustix::fs::{FlockOperation, Mode, OFlags, flock, open, openat};
-
-    let lock_path = root.join(".lorepia-owner.lock");
-    reject_non_regular_owner_lock(&lock_path)?;
-    let root_fd = open(
-        root,
-        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
-        Mode::empty(),
-    )
-    .map_err(rustix_storage_io_error)?;
-    let lock_fd = openat(
-        &root_fd,
-        ".lorepia-owner.lock",
-        OFlags::CREATE | OFlags::RDWR | OFlags::CLOEXEC | OFlags::NOFOLLOW,
-        Mode::from_raw_mode(0o600),
-    )
-    .map_err(rustix_storage_io_error)?;
-    let file = File::from(lock_fd);
-    validate_owner_lock_file(&file)?;
-    flock(&file, FlockOperation::NonBlockingLockExclusive).map_err(|error| {
-        let error = std::io::Error::from_raw_os_error(error.raw_os_error());
-        if error.kind() == std::io::ErrorKind::WouldBlock {
-            data_root_already_owned()
-        } else {
-            storage_io_error(error)
-        }
-    })?;
-    Ok(file)
-}
-
-#[cfg(any(target_os = "android", target_os = "linux", target_vendor = "apple"))]
-fn rustix_storage_io_error(error: rustix::io::Errno) -> CoreError {
-    storage_io_error(std::io::Error::from_raw_os_error(error.raw_os_error()))
-}
-
-#[cfg(windows)]
-fn acquire_data_root_owner_lock(root: &Path) -> CoreResult<File> {
-    use std::os::windows::fs::OpenOptionsExt;
-
-    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
-
-    let lock_path = root.join(".lorepia-owner.lock");
-    let file = OpenOptions::new()
-        .create(true)
-        .read(true)
-        .write(true)
-        .share_mode(0)
-        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
-        .open(&lock_path)
-        .map_err(|error| {
-            if matches!(error.raw_os_error(), Some(32 | 33)) {
-                data_root_already_owned()
-            } else if fs::symlink_metadata(&lock_path)
-                .is_ok_and(|metadata| !metadata.file_type().is_file())
-            {
-                storage_corrupted("data root owner lock is not a regular file")
-            } else {
-                storage_io_error(error)
-            }
-        })?;
-    validate_owner_lock_file(&file)?;
-    Ok(file)
-}
-
-#[cfg(not(any(
-    target_os = "android",
-    target_os = "linux",
-    target_vendor = "apple",
-    windows
-)))]
-fn acquire_data_root_owner_lock(root: &Path) -> CoreResult<File> {
-    let _ = root;
-    Err(CoreError::new(
-        CoreErrorCode::StorageUnavailable,
-        "exclusive data root ownership is not supported on this platform",
-        false,
-    ))
-}
-
-fn create_owned_directory_tree(root: &Path, relative: &Path) -> CoreResult<()> {
-    let mut current = root.to_path_buf();
-    for component in relative.components() {
-        let std::path::Component::Normal(component) = component else {
-            return Err(CoreError::internal(
-                "owned storage directory must use a relative normal path",
-            ));
-        };
-        current.push(component);
-        match fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata.file_type().is_dir() => {}
-            Ok(_) => {
-                return Err(storage_corrupted(format!(
-                    "owned storage path is not a real directory: {}",
-                    current.display()
-                )));
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                fs::create_dir(&current).map_err(storage_io_error)?;
-                if let Some(parent) = current.parent() {
-                    sync_directory(parent)?;
-                }
-            }
-            Err(error) => return Err(storage_io_error(error)),
-        }
-        harden_private_path(&current, true)?;
-    }
-    sync_directory(&current)
-}
-
-/// Stores an exact CAS object and returns whether this call published the
-/// destination. Existing or concurrently won destinations return `false`.
-fn store_verified_source(
-    source: &Path,
-    final_path: &Path,
-    cas_root: &Path,
-    expected_sha256: &str,
-    expected_size: u64,
-) -> CoreResult<bool> {
-    store_verified_source_observed(
-        source,
-        final_path,
-        cas_root,
-        expected_sha256,
-        expected_size,
-        || {},
-    )
-}
-
-fn store_verified_source_observed(
-    source: &Path,
-    final_path: &Path,
-    cas_root: &Path,
-    expected_sha256: &str,
-    expected_size: u64,
-    before_file_copy: impl FnOnce(),
-) -> CoreResult<bool> {
-    let parent = final_path
-        .parent()
-        .ok_or_else(|| CoreError::internal("source path has no parent"))?;
-    create_and_sync_cas_directory(cas_root, parent)?;
-
-    match fs::symlink_metadata(final_path) {
-        Ok(metadata) if metadata.file_type().is_file() => {
-            verify_file(final_path, expected_sha256, expected_size)?;
-            sync_file_and_parent(final_path, parent)?;
-            return Ok(false);
-        }
-        Ok(_) => {
-            return Err(storage_corrupted(
-                "content-addressed destination is not a regular file",
-            ));
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(storage_io_error(error)),
-    }
-
-    let temp_path = parent.join(format!(".{}.partial", Uuid::new_v4()));
-    before_file_copy();
-    let copy_result = copy_and_hash(source, &temp_path);
-    let (actual_sha256, actual_size) = match copy_result {
-        Ok(result) => result,
-        Err(error) => {
-            let _ = fs::remove_file(&temp_path);
-            return Err(error);
-        }
-    };
-    if actual_sha256 != expected_sha256 || actual_size != expected_size {
-        let _ = fs::remove_file(&temp_path);
-        return Err(CoreError::new(
-            CoreErrorCode::UnsafeArchive,
-            "staging source changed while it was being committed",
-            false,
-        ));
-    }
-
-    let published = match publish_temp_noclobber(&temp_path, final_path) {
-        Ok(()) => true,
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-            fs::remove_file(&temp_path).map_err(storage_io_error)?;
-            ensure_regular_file(final_path)?;
-            verify_file(final_path, expected_sha256, expected_size)?;
-            false
-        }
-        Err(error) => {
-            let _ = fs::remove_file(&temp_path);
-            return Err(storage_io_error(error));
-        }
-    };
-
-    sync_file_and_parent(final_path, parent)?;
-    Ok(published)
-}
-
 fn validate_owned_staged_file(root: &Path, candidate: &Path) -> CoreResult<PathBuf> {
     let metadata = fs::symlink_metadata(candidate).map_err(storage_io_error)?;
     if !metadata.file_type().is_file() {
@@ -10614,210 +10284,6 @@ fn validate_renderer_media_type(media_type: &str) -> CoreResult<()> {
             false,
         ))
     }
-}
-
-#[cfg(any(target_os = "android", target_os = "linux", target_vendor = "apple"))]
-fn publish_temp_noclobber(temp_path: &Path, final_path: &Path) -> std::io::Result<()> {
-    use rustix::fs::{CWD, RenameFlags, renameat_with};
-
-    renameat_with(CWD, temp_path, CWD, final_path, RenameFlags::NOREPLACE)
-        .map_err(|error| std::io::Error::from_raw_os_error(error.raw_os_error()))
-}
-
-#[cfg(not(any(target_os = "android", target_os = "linux", target_vendor = "apple")))]
-fn publish_temp_noclobber(temp_path: &Path, final_path: &Path) -> std::io::Result<()> {
-    fs::hard_link(temp_path, final_path)?;
-    fs::remove_file(temp_path)
-}
-
-fn create_and_sync_cas_directory(cas_root: &Path, path: &Path) -> CoreResult<()> {
-    let relative = path
-        .strip_prefix(cas_root)
-        .map_err(|_| CoreError::internal("CAS destination escaped its owned root"))?;
-    if relative.components().count() != 1 {
-        return Err(CoreError::internal(
-            "CAS destination must have exactly one hash-prefix directory",
-        ));
-    }
-    ensure_real_directory(cas_root)?;
-    match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_dir() => {}
-        Ok(_) => {
-            return Err(storage_corrupted(
-                "CAS hash-prefix path is not a real directory",
-            ));
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            fs::create_dir(path).map_err(storage_io_error)?;
-            sync_directory(cas_root)?;
-        }
-        Err(error) => return Err(storage_io_error(error)),
-    }
-    ensure_real_directory(path)?;
-    sync_directory(path)
-}
-
-fn ensure_real_directory(path: &Path) -> CoreResult<()> {
-    let metadata = fs::symlink_metadata(path).map_err(storage_io_error)?;
-    if !metadata.file_type().is_dir() {
-        return Err(storage_corrupted(format!(
-            "owned CAS path is not a real directory: {}",
-            path.display()
-        )));
-    }
-    Ok(())
-}
-
-fn ensure_regular_file(path: &Path) -> CoreResult<()> {
-    let metadata = fs::symlink_metadata(path).map_err(storage_io_error)?;
-    if !metadata.file_type().is_file() {
-        return Err(storage_corrupted(
-            "content-addressed destination is not a regular file",
-        ));
-    }
-    Ok(())
-}
-
-fn sync_file_and_parent(file_path: &Path, parent: &Path) -> CoreResult<()> {
-    sync_file(file_path).map_err(storage_io_error)?;
-    sync_directory(parent)
-}
-
-#[cfg(not(windows))]
-fn sync_file(path: &Path) -> std::io::Result<()> {
-    File::open(path).and_then(|file| file.sync_all())
-}
-
-#[cfg(windows)]
-fn sync_file(path: &Path) -> std::io::Result<()> {
-    // FlushFileBuffers requires a handle with write access on Windows.
-    OpenOptions::new()
-        .write(true)
-        .open(path)
-        .and_then(|file| file.sync_all())
-}
-
-#[cfg(unix)]
-fn sync_directory(path: &Path) -> CoreResult<()> {
-    File::open(path)
-        .and_then(|directory| directory.sync_all())
-        .map_err(storage_io_error)
-}
-
-#[cfg(windows)]
-fn sync_directory(path: &Path) -> CoreResult<()> {
-    use std::os::windows::fs::OpenOptionsExt;
-
-    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
-    let result = OpenOptions::new()
-        .read(true)
-        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
-        .open(path)
-        .and_then(|directory| directory.sync_all());
-    match result {
-        Ok(()) => Ok(()),
-        // Windows does not guarantee FlushFileBuffers support for directory
-        // handles on every filesystem. The CAS file itself was synced above.
-        Err(error)
-            if matches!(
-                error.kind(),
-                std::io::ErrorKind::InvalidInput
-                    | std::io::ErrorKind::PermissionDenied
-                    | std::io::ErrorKind::Unsupported
-            ) =>
-        {
-            Ok(())
-        }
-        Err(error) => Err(storage_io_error(error)),
-    }
-}
-
-#[cfg(not(any(unix, windows)))]
-fn sync_directory(_path: &Path) -> CoreResult<()> {
-    Ok(())
-}
-
-fn copy_and_hash(source: &Path, destination: &Path) -> CoreResult<(String, u64)> {
-    let source = File::open(source).map_err(storage_io_error)?;
-    let mut destination_options = OpenOptions::new();
-    destination_options.create_new(true).write(true);
-    #[cfg(unix)]
-    destination_options.mode(0o600);
-    let destination = destination_options
-        .open(destination)
-        .map_err(storage_io_error)?;
-    let mut reader = BufReader::new(source);
-    let mut writer = destination;
-    let mut digest = Sha256::new();
-    let mut size = 0_u64;
-    let mut buffer = vec![0_u8; 64 * 1024];
-    loop {
-        let read = reader.read(&mut buffer).map_err(storage_io_error)?;
-        if read == 0 {
-            break;
-        }
-        writer
-            .write_all(&buffer[..read])
-            .map_err(storage_io_error)?;
-        digest.update(&buffer[..read]);
-        size = size
-            .checked_add(
-                u64::try_from(read)
-                    .map_err(|_| CoreError::internal("source byte count overflow"))?,
-            )
-            .ok_or_else(|| CoreError::internal("source size overflow"))?;
-    }
-    writer.flush().map_err(storage_io_error)?;
-    writer.sync_all().map_err(storage_io_error)?;
-    Ok((hex::encode(digest.finalize()), size))
-}
-
-fn verify_file(path: &Path, expected_sha256: &str, expected_size: u64) -> CoreResult<()> {
-    let (actual_sha256, actual_size) = hash_file(path)?;
-    if actual_sha256 != expected_sha256 || actual_size != expected_size {
-        return Err(CoreError::new(
-            CoreErrorCode::StorageCorrupted,
-            "content-addressed source does not match its recorded digest",
-            false,
-        ));
-    }
-    Ok(())
-}
-
-fn hash_file(path: &Path) -> CoreResult<(String, u64)> {
-    let mut source = File::open(path).map_err(storage_io_error)?;
-    hash_open_file(&mut source)
-}
-
-fn hash_open_file(source: &mut File) -> CoreResult<(String, u64)> {
-    source.rewind().map_err(storage_io_error)?;
-    let mut reader = BufReader::new(source);
-    let mut digest = Sha256::new();
-    let mut size = 0_u64;
-    let mut buffer = vec![0_u8; 64 * 1024];
-    loop {
-        let read = reader.read(&mut buffer).map_err(storage_io_error)?;
-        if read == 0 {
-            break;
-        }
-        digest.update(&buffer[..read]);
-        size = size
-            .checked_add(
-                u64::try_from(read)
-                    .map_err(|_| CoreError::internal("source byte count overflow"))?,
-            )
-            .ok_or_else(|| CoreError::internal("source size overflow"))?;
-    }
-    Ok((hex::encode(digest.finalize()), size))
-}
-
-fn content_relative_path(hash: &str) -> CoreResult<String> {
-    if hash.len() != 64 || !hash.bytes().all(|value| value.is_ascii_hexdigit()) {
-        return Err(CoreError::invalid(
-            "source hash is not a SHA-256 hex digest",
-        ));
-    }
-    Ok(format!("sha256/{}/{}", &hash[..2], &hash[2..]))
 }
 
 fn map_character(row: &rusqlite::Row<'_>) -> rusqlite::Result<Character> {
