@@ -123,30 +123,7 @@
       }
     },
     "CORE-GEN-001": {"baseline_context_bytes": 595390, "commands": ["cargo test -p lorepia-core", "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""], "max_context_bytes": 250000, "over_budget_reason": "app.rs and derived-closure test remain inputs for CORE-GEN-002/003", "paths": {"documents": ["crates/core/AGENTS.md", "docs/adr/0003-credential-and-secret-boundary.md"], "entrypoints": ["crates/core/src/app.rs"], "implementation": ["crates/core/src/app/generation/mod.rs", "crates/core/src/app/generation/types.rs", "crates/core/src/app/generation/operation_identity.rs", "crates/core/src/app/generation/admission.rs", "crates/core/src/app/generation/credential.rs", "crates/core/src/app/generation_events.rs"], "tests": ["crates/core/tests/generation_attempt_derived_closure.rs"]}},
-    "CORE-GEN-002": {
-      "baseline_context_bytes": 1194101,
-      "commands": [
-        "cargo test -p lorepia-core --test chat_vertical_slice",
-        "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
-      ],
-      "max_context_bytes": 250000,
-      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
-      "paths": {
-        "documents": [
-          "crates/core/AGENTS.md"
-        ],
-        "entrypoints": [
-          "crates/core/src/app.rs"
-        ],
-        "implementation": [
-          "crates/core/src/orchestration.rs"
-        ],
-        "tests": [
-          "crates/core/tests/orchestration_core_contract.rs",
-          "crates/core/tests/chat_vertical_slice.rs"
-        ]
-      }
-    },
+    "CORE-GEN-002": {"baseline_context_bytes":410345,"commands":["cargo test -p lorepia-core --test chat_vertical_slice","python3 scripts/check_source_architecture.py"],"max_context_bytes":250000,"over_budget_reason":"GEN3 in app.rs","paths":{"documents":["crates/core/AGENTS.md"],"entrypoints":["crates/core/src/app.rs"],"implementation":["crates/core/src/app/generation/mod.rs","crates/core/src/app/generation/target_resolution.rs","crates/core/src/app/generation/capabilities.rs","crates/core/src/app/generation/preset.rs","crates/core/src/app/generation/protocol_request.rs","crates/core/src/app/generation/prompt_preparation.rs","crates/core/src/app/generation/actions.rs","crates/core/src/app/generation/target_send.rs"],"tests":["crates/core/tests/chat_vertical_slice.rs"]}},
     "CORE-GEN-003": {
       "baseline_context_bytes": 937579,
       "commands": [
