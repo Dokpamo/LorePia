@@ -1111,14 +1111,13 @@
           "crates/storage/src/interaction_repository.rs"
         ],
         "implementation": [
-          "crates/storage/src/database/action.rs",
-          "crates/storage/src/database/finalize.rs",
-          "crates/storage/src/interaction_repository/effects.rs",
           "crates/storage/src/interaction_repository/event_transactions.rs",
+          "crates/storage/src/interaction_repository/generation_proposal_persistence.rs",
+          "crates/storage/src/interaction_repository/generation_proposal_queries.rs",
+          "crates/storage/src/interaction_repository/generation_proposals.rs",
           "crates/storage/src/interaction_repository/generation_review.rs",
           "crates/storage/src/interaction_repository/generation_review_authority.rs",
-          "crates/storage/src/interaction_repository/proposal_records.rs",
-          "crates/storage/src/interaction_repository/proposals.rs"
+          "crates/storage/src/interaction_repository/proposal_records.rs"
         ],
         "tests": [
           "crates/storage/src/database/tests/conversation_and_import.rs",
