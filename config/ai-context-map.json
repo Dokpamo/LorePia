@@ -218,13 +218,11 @@
       }
     },
     "CORE-ORCH-003": {
-      "baseline_context_bytes": 469771,
       "commands": [
         "cargo test -p lorepia-core --test memory_auxiliary_fallback",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
       "max_context_bytes": 250000,
-      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
       "paths": {
         "documents": [
           "crates/core/AGENTS.md"
@@ -233,11 +231,19 @@
           "crates/core/src/orchestration_runtime.rs"
         ],
         "implementation": [
-          "crates/core/src/module_orchestration.rs"
+          "crates/core/src/orchestration_runtime/auxiliary_tasks.rs",
+          "crates/core/src/orchestration_runtime/auxiliary_tasks/summary.rs",
+          "crates/core/src/orchestration_runtime/embedding.rs",
+          "crates/core/src/orchestration_runtime/semantic.rs",
+          "crates/core/src/orchestration_runtime/recovery.rs",
+          "crates/core/src/orchestration_runtime/persistence.rs",
+          "crates/core/src/orchestration_runtime/persistence/events.rs",
+          "crates/core/src/orchestration_runtime/derived.rs",
+          "crates/core/src/orchestration_runtime/proposals.rs",
+          "crates/core/src/orchestration_runtime/generation_proposals.rs"
         ],
         "tests": [
-          "crates/core/tests/memory_auxiliary_fallback.rs",
-          "crates/core/tests/interaction_derived_supervisor.rs"
+          "crates/core/src/orchestration_runtime/tests/memory_cadence.rs"
         ]
       }
     },
