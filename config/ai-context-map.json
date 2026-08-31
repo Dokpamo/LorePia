@@ -408,9 +408,14 @@
           "apps/lorepia/src/app/app-controller.ts"
         ],
         "implementation": [
-          "apps/lorepia/src/app/app-state.ts"
+          "apps/lorepia/src/app/app-state.ts",
+          "apps/lorepia/src/app/controllers/controller-context.ts",
+          "apps/lorepia/src/app/controllers/conversation-controller.ts",
+          "apps/lorepia/src/app/controllers/import-controller.ts",
+          "apps/lorepia/src/app/controllers/library-controller.ts"
         ],
         "tests": [
+          "apps/lorepia/src/app/tests/app-controller.conversations.test.ts",
           "apps/lorepia/src/features/library/LibraryPane.test.ts",
           "apps/lorepia/src/features/import/ImportReviewDialog.test.ts"
         ]
