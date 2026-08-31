@@ -1,26 +1,7 @@
 <script lang="ts">
-    import {
-        ArrowLeft,
-        ArrowUp,
-        Check,
-        ChevronDown,
-        Copy,
-        GitBranch,
-        Maximize2,
-        MessagesSquare,
-        Minimize2,
-        Pencil,
-        Plus,
-        RefreshCw,
-        Share2,
-        Sparkles,
-        Trash2,
-        X,
-    } from '@lucide/svelte';
+    import { ArrowLeft, ChevronDown, MessagesSquare, Share2, Sparkles, X } from '@lucide/svelte';
     import PortableMessage from './PortableMessage.svelte';
     import { onMount, tick } from 'svelte';
-    import type { KeyboardEventHandler } from 'svelte/elements';
-    import { SvelteMap } from 'svelte/reactivity';
 
     import type { LorepiaAppController, LorepiaAppState } from '../../app/app-controller';
     import ChoicePopover from '../../components/ChoicePopover.svelte';
@@ -31,19 +12,22 @@
         MemoryRecordSourceNavigationDto,
         MessageDto,
     } from '../../lib/ipc/contracts';
-    import { t, tr } from '../../lib/i18n';
+    import { t } from '../../lib/i18n';
     import MemoryQueryRetryPanel from '../orchestration/MemoryQueryRetryPanel.svelte';
-    import OrchestrationQuickDrawer from '../orchestration/OrchestrationQuickDrawer.svelte';
     import type {
         OrchestrationController,
         OrchestrationState,
     } from '../orchestration/orchestration-controller';
-    import { shouldSubmitComposer } from './composer';
+    import ChatComposer from './ChatComposer.svelte';
+    import ChatFullscreenComposer from './ChatFullscreenComposer.svelte';
+    import ChatMessageActions from './ChatMessageActions.svelte';
+    import ChatUtilityDrawer from './ChatUtilityDrawer.svelte';
     import {
         ChatScrollLifecycle,
         type MessageCollectionSnapshot,
         type MessageMeasurementInput,
     } from './chat-scroll.svelte';
+    import { ChatComposerState } from './composer-state.svelte';
     import GenerationAttemptApprovals from './GenerationAttemptApprovals.svelte';
     import InteractionRoomSurface from './InteractionRoomSurface.svelte';
     import PortableRuntimeControls from './PortableRuntimeControls.svelte';
@@ -54,6 +38,8 @@
         type InteractionRoomCapableClient,
         type InteractionRoomState,
     } from './interaction-room-controller';
+    import { MessageActionsState } from './message-actions.svelte';
+    import { UtilitySwipeLifecycle } from './utility-swipe.svelte';
     import { VIRTUAL_MESSAGE_BLOCK_PADDING } from './virtual-window';
 
     interface Props {
@@ -81,13 +67,6 @@
         messageFocusRequest = null,
         onOpenHome = () => undefined,
     }: Props = $props();
-    let draft = $state('');
-    let compositionActive = $state(false);
-    let sending = $state(false);
-    let activeDraftKey = '';
-    let editingMessageId = $state<string | null>(null);
-    let editDraft = $state('');
-    let pendingRemoveId = $state<string | null>(null);
     let copyNotice = $state('');
     let handledMessageFocusRequestId = 0;
     let interactionController = $state<InteractionRoomController | null>(null);
@@ -112,7 +91,6 @@
     );
     let interactionRoomKey = '';
     let attemptApprovalRefreshEpoch = $state(0);
-    let composerTextarea = $state<HTMLTextAreaElement | null>(null);
     let cachedDisplayItemsSource: MessageDto[] | null = null;
     let cachedLiveAssistantMessageId: string | null = null;
     let cachedDisplayItems: MessageDto[] = [];
@@ -122,153 +100,51 @@
     let awaitingDurableAssistant = false;
     let observedGenerationId: string | null = null;
     let observedLiveAssistantMessageId: string | null = null;
-    const drafts = new SvelteMap<string, string>();
-    let activeMessageActionId = $state<string | null>(null);
-    let hoveredMessageActionId = $state<string | null>(null);
+    let utilityView = $state<'tools' | 'settings'>('tools');
     const chatScroll: ChatScrollLifecycle = new ChatScrollLifecycle({
         currentCollection: (): MessageCollectionSnapshot => messageCollection,
         messageDayKey,
         onMemorySourceMissing: notifyMissingMemorySource,
         onMemorySourceFocused: notifyFocusedMemorySource,
     });
-    let composerExpanded = $state(false);
-    let composerCanFullscreen = $state(false);
-    let composerOverflows = $state(false);
-    let composerFullscreen = $state(false);
-    let utilityView = $state<'tools' | 'settings'>('tools');
-    let composerField = $state<HTMLDivElement | null>(null);
-    let composerLeadingAction = $state<HTMLButtonElement | null>(null);
-    let composerSendButton = $state<HTMLButtonElement | null>(null);
-    let fullscreenComposerSurface = $state<HTMLFormElement | null>(null);
-    let fullscreenCloseButton = $state<HTMLButtonElement | null>(null);
-    let fullscreenSendButton = $state<HTMLButtonElement | null>(null);
-    let fullscreenTextRegion = $state<HTMLDivElement | null>(null);
-    let fullscreenComposerTextarea = $state<HTMLTextAreaElement | null>(null);
-    let utilityOpenPointer: {
-        pointerId: number;
-        startX: number;
-        startY: number;
-        lastX: number;
-        lastTime: number;
-        velocityX: number;
-        viewportWidth: number;
-    } | null = null;
-    let utilityOpenGesture = $state<'idle' | 'tracking' | 'dragging'>('idle');
-    let suppressUtilityOpenClickUntil = 0;
-
-    const UTILITY_SWIPE_AXIS_LOCK_PX = 8;
-    const UTILITY_SWIPE_COMMIT_MIN_PX = 64;
-    const UTILITY_SWIPE_COMMIT_MAX_PX = 120;
-    const UTILITY_SWIPE_COMMIT_RATIO = 0.22;
-    const UTILITY_SWIPE_FLING_MIN_PX = 32;
-    const UTILITY_SWIPE_FLING_VELOCITY = 0.55;
-
-    function resetUtilityOpenGesture(): void {
-        utilityOpenPointer = null;
-        utilityOpenGesture = 'idle';
-    }
-
-    function utilitySwipeCommitDistance(viewportWidth: number): number {
-        return Math.min(
-            UTILITY_SWIPE_COMMIT_MAX_PX,
-            Math.max(UTILITY_SWIPE_COMMIT_MIN_PX, viewportWidth * UTILITY_SWIPE_COMMIT_RATIO),
-        );
-    }
+    const messageActions = new MessageActionsState(chatScroll);
+    const composer = new ChatComposerState({
+        chatScroll,
+        currentActiveMessageActionId: () => messageActions.activeMessageActionId,
+        currentDesktop: () => desktop,
+        onBranchReset: () => {
+            utilityView = 'tools';
+        },
+        onSubmit: submit,
+    });
+    const utilitySwipe = new UtilitySwipeLifecycle({
+        composerFullscreen: () => composer.fullscreen,
+        desktop: () => desktop,
+        open: () => utilityOpen,
+        openTools: () => {
+            utilityView = 'tools';
+            utilityOpen = true;
+        },
+    });
 
     function handleUtilityOpenPointerDown(event: PointerEvent): void {
-        if (desktop || utilityOpen || composerFullscreen) return;
-        if (!event.isPrimary || event.button !== 0) return;
-        const target = event.currentTarget as HTMLElement;
-        const boundsWidth = target.getBoundingClientRect().width;
-        const viewportWidth = Math.max(1, boundsWidth || target.clientWidth || window.innerWidth);
-        utilityOpenPointer = {
-            pointerId: Number.isFinite(event.pointerId) ? event.pointerId : 1,
-            startX: event.clientX,
-            startY: event.clientY,
-            lastX: event.clientX,
-            lastTime: event.timeStamp,
-            velocityX: 0,
-            viewportWidth,
-        };
-        utilityOpenGesture = 'tracking';
+        utilitySwipe.pointerDown(event);
     }
 
     function handleUtilityOpenPointerMove(event: PointerEvent): void {
-        const pointer = utilityOpenPointer;
-        if (event.pointerId !== pointer?.pointerId) return;
-        const deltaX = event.clientX - pointer.startX;
-        const deltaY = event.clientY - pointer.startY;
-        const absoluteX = Math.abs(deltaX);
-        const absoluteY = Math.abs(deltaY);
-        if (utilityOpenGesture === 'tracking') {
-            if (absoluteX < UTILITY_SWIPE_AXIS_LOCK_PX && absoluteY < UTILITY_SWIPE_AXIS_LOCK_PX) {
-                return;
-            }
-            if (deltaX >= 0 || absoluteY >= absoluteX) {
-                resetUtilityOpenGesture();
-                return;
-            }
-            if (absoluteX < absoluteY * 1.2) return;
-            utilityOpenGesture = 'dragging';
-            const target = event.currentTarget as HTMLElement;
-            if (typeof target.setPointerCapture === 'function') {
-                target.setPointerCapture(pointer.pointerId);
-            }
-        }
-        if (utilityOpenGesture !== 'dragging') return;
-        event.preventDefault();
-        const elapsed = event.timeStamp - pointer.lastTime;
-        if (elapsed > 0) {
-            pointer.velocityX = Math.min(0, (event.clientX - pointer.lastX) / elapsed);
-        }
-        pointer.lastX = event.clientX;
-        pointer.lastTime = event.timeStamp;
-    }
-
-    function releaseUtilityOpenPointer(event: PointerEvent): void {
-        const target = event.currentTarget as HTMLElement;
-        if (
-            typeof target.hasPointerCapture === 'function' &&
-            typeof target.releasePointerCapture === 'function' &&
-            target.hasPointerCapture(event.pointerId)
-        ) {
-            target.releasePointerCapture(event.pointerId);
-        }
+        utilitySwipe.pointerMove(event);
     }
 
     function handleUtilityOpenPointerUp(event: PointerEvent): void {
-        const pointer = utilityOpenPointer;
-        if (event.pointerId !== pointer?.pointerId) return;
-        releaseUtilityOpenPointer(event);
-        if (utilityOpenGesture !== 'dragging') {
-            resetUtilityOpenGesture();
-            return;
-        }
-        event.preventDefault();
-        const distance = Math.max(0, pointer.startX - event.clientX);
-        const commits =
-            distance >= utilitySwipeCommitDistance(pointer.viewportWidth) ||
-            (distance >= UTILITY_SWIPE_FLING_MIN_PX &&
-                -pointer.velocityX >= UTILITY_SWIPE_FLING_VELOCITY);
-        if (commits) {
-            utilityView = 'tools';
-            utilityOpen = true;
-            suppressUtilityOpenClickUntil = Date.now() + 120;
-        }
-        resetUtilityOpenGesture();
+        utilitySwipe.pointerUp(event);
     }
 
     function handleUtilityOpenPointerCancel(event: PointerEvent): void {
-        if (event.pointerId !== utilityOpenPointer?.pointerId) return;
-        releaseUtilityOpenPointer(event);
-        resetUtilityOpenGesture();
+        utilitySwipe.pointerCancel(event);
     }
 
     function handleUtilityOpenClickCapture(event: MouseEvent): void {
-        if (Date.now() > suppressUtilityOpenClickUntil) return;
-        suppressUtilityOpenClickUntil = 0;
-        event.preventDefault();
-        event.stopPropagation();
+        utilitySwipe.clickCapture(event);
     }
 
     function syncMessageScrollbarInset(node: HTMLDivElement): { destroy: () => void } {
@@ -284,227 +160,6 @@
             destroy(): void {
                 window.removeEventListener('resize', update);
                 chatPane?.style.removeProperty('--message-scrollbar-width');
-            },
-        };
-    }
-
-    function measureComposer(node: HTMLTextAreaElement, draftValue: string) {
-        let observer: ResizeObserver | null = null;
-        let observedWidth: number | null = null;
-        let scrollAnchorFrame: number | null = null;
-        let overlayScrollFrame: number | null = null;
-        let updateQueued = false;
-        let pendingExpandedMeasurement: boolean | null = null;
-        const field = node.closest<HTMLElement>('.composer-field');
-        const composer = field?.closest<HTMLElement>('.composer');
-        const chatPane = field?.closest<HTMLElement>('.chat-pane');
-        const resizeTarget = composer ?? field ?? node;
-
-        if (draftValue.trim().length === 0) {
-            composerCanFullscreen = false;
-            composerOverflows = false;
-        }
-
-        const update = (measureExpanded = composerExpanded): void => {
-            const appliesMeasurementLayout =
-                measureExpanded && field !== null && !field.classList.contains('expanded');
-            if (appliesMeasurementLayout) field.classList.add('measuring');
-            const style = getComputedStyle(node);
-            const parsedFontSize = Number.parseFloat(style.fontSize);
-            const fontSize =
-                Number.isFinite(parsedFontSize) && parsedFontSize >= 8 ? parsedFontSize : 16;
-            const parsedLineHeight = Number.parseFloat(style.lineHeight);
-            const lineHeight =
-                Number.isFinite(parsedLineHeight) && parsedLineHeight > fontSize
-                    ? parsedLineHeight
-                    : fontSize *
-                      (Number.isFinite(parsedLineHeight) && parsedLineHeight > 0
-                          ? parsedLineHeight
-                          : 1.45);
-            const padding =
-                (Number.parseFloat(style.paddingTop) || 0) +
-                (Number.parseFloat(style.paddingBottom) || 0);
-            const previousInlineHeight = node.style.height;
-            node.style.height = '0px';
-            const scrollHeight = Math.max(lineHeight + padding, node.scrollHeight);
-            node.style.height = previousInlineHeight;
-            const contentHeight = Math.max(lineHeight, scrollHeight - padding);
-            const lineCount = Math.max(1, Math.ceil((contentHeight - 1) / lineHeight));
-            const textRegion = node.closest<HTMLElement>('.composer-text-region');
-            const parsedMaximumHeight = Number.parseFloat(
-                textRegion ? getComputedStyle(textRegion).maxHeight : '',
-            );
-            const maximumHeight =
-                Number.isFinite(parsedMaximumHeight) && parsedMaximumHeight >= lineHeight + padding
-                    ? parsedMaximumHeight
-                    : scrollHeight;
-            if (appliesMeasurementLayout) field.classList.remove('measuring');
-            const nextTextSize = Math.ceil(Math.min(scrollHeight, maximumHeight));
-            field?.style.setProperty('--composer-text-size', `${String(nextTextSize)}px`);
-            const overflows = scrollHeight > maximumHeight + 1;
-            composerOverflows = overflows;
-            if (!overflows) {
-                if (scrollAnchorFrame !== null) cancelAnimationFrame(scrollAnchorFrame);
-                let remainingFrames = 3;
-                const anchorVisibleLines = (): void => {
-                    node.scrollTop = 0;
-                    remainingFrames -= 1;
-                    if (remainingFrames > 0) {
-                        scrollAnchorFrame = requestAnimationFrame(anchorVisibleLines);
-                        return;
-                    }
-                    scrollAnchorFrame = null;
-                };
-                node.scrollTop = 0;
-                scrollAnchorFrame = requestAnimationFrame(anchorVisibleLines);
-            } else if (scrollAnchorFrame !== null) {
-                cancelAnimationFrame(scrollAnchorFrame);
-                scrollAnchorFrame = null;
-            }
-            if (node.value.trim().length === 0) {
-                composerCanFullscreen = false;
-                return;
-            }
-            composerCanFullscreen = lineCount >= 2 || overflows;
-        };
-        const scheduleUpdate = (measureExpanded?: boolean): void => {
-            if (measureExpanded !== undefined) {
-                pendingExpandedMeasurement = measureExpanded;
-            }
-            if (updateQueued) return;
-            updateQueued = true;
-            queueMicrotask(() => {
-                updateQueued = false;
-                const nextExpandedMeasurement = pendingExpandedMeasurement ?? composerExpanded;
-                pendingExpandedMeasurement = null;
-                update(nextExpandedMeasurement);
-            });
-        };
-        const handleInput = (): void => update(composerExpanded);
-        const handleFocusIn = (event: FocusEvent): void => {
-            if (event.relatedTarget instanceof Node && field?.contains(event.relatedTarget)) return;
-            if (composerExpanded) return;
-            // Resolve the final text height before the single expansion transition starts.
-            update(true);
-            composerExpanded = true;
-        };
-        const handleFocusOut = (event: FocusEvent): void => {
-            if (event.relatedTarget instanceof Node && field?.contains(event.relatedTarget)) return;
-            if (!composerExpanded) return;
-            if (desktop) return;
-            if (node.value.trim().length > 0) return;
-            composerExpanded = false;
-            scheduleUpdate(false);
-        };
-        const syncComposerOverlay = (fieldHeight: number): void => {
-            if (
-                composer === null ||
-                composer === undefined ||
-                chatPane === null ||
-                chatPane === undefined
-            ) {
-                return;
-            }
-            const composerStyle = getComputedStyle(composer);
-            const bottomInset = Number.parseFloat(composerStyle.paddingBottom) || 0;
-            const verticalPadding =
-                (Number.parseFloat(composerStyle.paddingTop) || 0) + bottomInset;
-            const overlayHeight = Math.ceil(fieldHeight + verticalPadding);
-            chatPane.style.setProperty(
-                '--composer-field-height',
-                `${String(Math.ceil(fieldHeight))}px`,
-            );
-            chatPane.style.setProperty(
-                '--composer-field-bottom-inset',
-                `${String(Math.ceil(bottomInset))}px`,
-            );
-            const previousOverlayHeight = Number.parseFloat(
-                chatPane.style.getPropertyValue('--composer-overlay-height'),
-            );
-            if (
-                Number.isFinite(previousOverlayHeight) &&
-                Math.abs(previousOverlayHeight - overlayHeight) < 0.5
-            ) {
-                return;
-            }
-            chatPane.style.setProperty('--composer-overlay-height', `${String(overlayHeight)}px`);
-            const scroller = chatScroll.scroller;
-            const composerOwnsFocus = field?.contains(document.activeElement) ?? false;
-            const overlayDelta = Number.isFinite(previousOverlayHeight)
-                ? overlayHeight - previousOverlayHeight
-                : 0;
-            if (
-                (!chatScroll.nearBottom && !(composerExpanded && composerOwnsFocus)) ||
-                scroller === null
-            ) {
-                return;
-            }
-            if (
-                activeMessageActionId !== null &&
-                composerExpanded &&
-                composerOwnsFocus &&
-                Number.isFinite(previousOverlayHeight)
-            ) {
-                const anchoredScrollTop = scroller.scrollTop + overlayDelta;
-                chatScroll.applyProgrammaticScrollPosition(scroller, anchoredScrollTop);
-                if (overlayScrollFrame !== null) cancelAnimationFrame(overlayScrollFrame);
-                overlayScrollFrame = requestAnimationFrame(() => {
-                    overlayScrollFrame = null;
-                    chatScroll.applyProgrammaticScrollPosition(scroller, anchoredScrollTop);
-                });
-                return;
-            }
-            chatScroll.applyProgrammaticScrollPosition(scroller, scroller.scrollHeight);
-            if (overlayScrollFrame !== null) cancelAnimationFrame(overlayScrollFrame);
-            overlayScrollFrame = requestAnimationFrame(() => {
-                overlayScrollFrame = null;
-                chatScroll.applyProgrammaticScrollPosition(scroller, scroller.scrollHeight);
-            });
-        };
-
-        node.addEventListener('input', handleInput);
-        node.addEventListener('focus', handleFocusIn);
-        node.addEventListener('blur', handleFocusOut);
-        field?.addEventListener('focusin', handleFocusIn);
-        field?.addEventListener('focusout', handleFocusOut);
-        if (typeof ResizeObserver !== 'undefined') {
-            observer = new ResizeObserver((entries) => {
-                for (const entry of entries) {
-                    if (entry.target === field) {
-                        const borderBoxHeight = entry.borderBoxSize[0]?.blockSize;
-                        syncComposerOverlay(borderBoxHeight ?? entry.contentRect.height);
-                        continue;
-                    }
-                    const nextWidth = entry.contentRect.width;
-                    if (observedWidth !== null && Math.abs(nextWidth - observedWidth) < 0.5)
-                        continue;
-                    observedWidth = nextWidth;
-                    scheduleUpdate();
-                }
-            });
-            observer.observe(resizeTarget);
-            if (field !== null && field !== resizeTarget) observer.observe(field);
-        }
-        scheduleUpdate();
-
-        return {
-            update(nextDraft: string): void {
-                if (nextDraft.trim().length === 0) {
-                    composerCanFullscreen = false;
-                    composerOverflows = false;
-                }
-                scheduleUpdate();
-            },
-            destroy(): void {
-                node.removeEventListener('input', handleInput);
-                node.removeEventListener('focus', handleFocusIn);
-                node.removeEventListener('blur', handleFocusOut);
-                field?.removeEventListener('focusin', handleFocusIn);
-                field?.removeEventListener('focusout', handleFocusOut);
-                observer?.disconnect();
-                if (scrollAnchorFrame !== null) cancelAnimationFrame(scrollAnchorFrame);
-                if (overlayScrollFrame !== null) cancelAnimationFrame(overlayScrollFrame);
-                chatPane?.style.removeProperty('--composer-overlay-height');
             },
         };
     }
@@ -686,14 +341,7 @@
     );
 
     $effect(() => {
-        const activeMessageId = activeMessageActionId;
-        if (
-            activeMessageId !== null &&
-            messageCollection.indexesById[activeMessageId] === undefined
-        ) {
-            activeMessageActionId = null;
-            chatScroll.clearStableMessageActionLayout();
-        }
+        messageActions.syncCollection(messageCollection);
     });
 
     const KOREAN_WEEKDAYS = ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일'];
@@ -746,27 +394,11 @@
     );
     $effect(() => {
         const nextKey = branchKey;
-        if (nextKey !== activeDraftKey) {
-            if (activeDraftKey !== '') drafts.set(activeDraftKey, draft);
-            draft = drafts.get(nextKey) ?? '';
-            activeDraftKey = nextKey;
-            composerExpanded = desktop;
-            utilityView = 'tools';
-            composerFullscreen = false;
-            composerCanFullscreen = false;
-            composerOverflows = false;
-        }
+        composer.syncBranch(nextKey);
     });
 
     $effect(() => {
-        if (desktop) {
-            composerExpanded = true;
-            return;
-        }
-        const composerOwnsFocus =
-            typeof document !== 'undefined' &&
-            composerField?.contains(document.activeElement) === true;
-        if (!composerOwnsFocus && draft.trim().length === 0) composerExpanded = false;
+        composer.syncDesktop(desktop);
     });
 
     $effect(() => {
@@ -829,10 +461,7 @@
 
     $effect(() => {
         const nextKey = branchKey;
-        chatScroll.syncBranch(nextKey, () => {
-            editingMessageId = null;
-            pendingRemoveId = null;
-        });
+        chatScroll.syncBranch(nextKey, () => messageActions.resetTransientActions());
     });
 
     $effect(() => {
@@ -931,23 +560,19 @@
     }
 
     function handleMessageScrollPointerDown(event: PointerEvent): void {
-        const target = event.target;
-        if (target instanceof Element && target.closest('[data-message-id]') !== null) return;
-        activeMessageActionId = null;
+        messageActions.handleMessageScrollPointerDown(event);
     }
 
     function activateMessageActions(messageId: string): void {
-        chatScroll.stabilizeMessageActionLayout(messageId);
-        activeMessageActionId = messageId;
+        messageActions.activate(messageId);
     }
 
     function hoverMessageActions(messageId: string): void {
-        if (!desktop) return;
-        hoveredMessageActionId = messageId;
+        messageActions.hover(messageId, desktop);
     }
 
     function unhoverMessageActions(messageId: string): void {
-        if (hoveredMessageActionId === messageId) hoveredMessageActionId = null;
+        messageActions.unhover(messageId);
     }
 
     function portableMessageText(message: MessageDto): string {
@@ -997,10 +622,10 @@
     }
 
     async function submit(): Promise<void> {
-        if (sending || draft.trim().length === 0) return;
-        sending = true;
+        const submittedDraft = composer.beginSubmission();
+        if (submittedDraft === null) return;
         try {
-            let content = draft;
+            let content = submittedDraft;
             let handledByRuntime = false;
             let runtime = portableRuntime;
             if (
@@ -1028,15 +653,13 @@
                           portableRuntimeLifecycle.generationVariableOverrides(runtime),
                       ));
             if (accepted) {
-                draft = '';
-                composerFullscreen = false;
-                if (activeDraftKey !== '') drafts.delete(activeDraftKey);
+                composer.acceptSubmission();
             }
             attemptApprovalRefreshEpoch += 1;
         } catch (error) {
             copyNotice = portableRuntimeLifecycle.fail(error, t('chat.runtime.execution_failed'));
         } finally {
-            sending = false;
+            composer.finishSubmission();
         }
     }
 
@@ -1049,147 +672,8 @@
             '승인된 생성 시도를 준비했습니다. 원래 전송·수정·재생성 작업을 직접 반복하세요.';
     }
 
-    const onComposerKeydown: KeyboardEventHandler<HTMLTextAreaElement> = (event) => {
-        if (
-            shouldSubmitComposer(
-                {
-                    key: event.key,
-                    shiftKey: event.shiftKey,
-                    isComposing: event.isComposing,
-                },
-                compositionActive,
-            )
-        ) {
-            event.preventDefault();
-            void submit();
-        }
-    };
-
-    const onFullscreenComposerKeydown: KeyboardEventHandler<HTMLTextAreaElement> = (event) => {
-        if (event.key === 'Escape') {
-            event.preventDefault();
-            void setComposerFullscreen(false);
-            return;
-        }
-        onComposerKeydown(event);
-    };
-
-    function setComposerControlOrigin(
-        source: HTMLButtonElement | null,
-        target: HTMLButtonElement | null,
-    ): void {
-        if (source === null || target === null) return;
-
-        const sourceRect = source.getBoundingClientRect();
-        const previousTransition = target.style.transition;
-        const previousTransform = target.style.transform;
-
-        // Measure the target at its layout position rather than at a previous
-        // morph offset, then install the new start point without painting it.
-        target.style.transition = 'none';
-        target.style.transform = 'none';
-        const targetRect = target.getBoundingClientRect();
-        const originX =
-            sourceRect.left + sourceRect.width / 2 - (targetRect.left + targetRect.width / 2);
-        const originY =
-            sourceRect.top + sourceRect.height / 2 - (targetRect.top + targetRect.height / 2);
-
-        target.style.setProperty('--composer-control-origin-x', `${String(originX)}px`);
-        target.style.setProperty('--composer-control-origin-y', `${String(originY)}px`);
-        if (previousTransform === '') target.style.removeProperty('transform');
-        else target.style.transform = previousTransform;
-        target.getBoundingClientRect();
-        if (previousTransition === '') target.style.removeProperty('transition');
-        else target.style.transition = previousTransition;
-    }
-
-    function syncFullscreenControlOrigins(): void {
-        setComposerControlOrigin(composerLeadingAction, fullscreenCloseButton);
-        setComposerControlOrigin(composerSendButton, fullscreenSendButton);
-    }
-
-    function syncFullscreenTextOrigin(): void {
-        const source = composerTextarea;
-        const target = fullscreenComposerTextarea;
-        const targetRegion = fullscreenTextRegion;
-        if (source === null || target === null || targetRegion === null) return;
-
-        const sourceRect = source.getBoundingClientRect();
-        const sourceStyle = getComputedStyle(source);
-        const previousTransition = targetRegion.style.transition;
-        const previousTransform = targetRegion.style.transform;
-
-        targetRegion.style.transition = 'none';
-        targetRegion.style.transform = 'none';
-        const targetRect = target.getBoundingClientRect();
-        const targetStyle = getComputedStyle(target);
-        const sourceTextLeft = sourceRect.left + (Number.parseFloat(sourceStyle.paddingLeft) || 0);
-        const sourceTextTop = sourceRect.top + (Number.parseFloat(sourceStyle.paddingTop) || 0);
-        const targetTextLeft = targetRect.left + (Number.parseFloat(targetStyle.paddingLeft) || 0);
-        const targetTextTop = targetRect.top + (Number.parseFloat(targetStyle.paddingTop) || 0);
-
-        targetRegion.style.setProperty(
-            '--composer-text-origin-x',
-            `${String(sourceTextLeft - targetTextLeft)}px`,
-        );
-        targetRegion.style.setProperty(
-            '--composer-text-origin-y',
-            `${String(sourceTextTop - targetTextTop)}px`,
-        );
-        targetRegion.style.setProperty('--composer-text-origin-font-size', sourceStyle.fontSize);
-        targetRegion.style.setProperty(
-            '--composer-text-origin-line-height',
-            sourceStyle.lineHeight,
-        );
-        if (previousTransform === '') targetRegion.style.removeProperty('transform');
-        else targetRegion.style.transform = previousTransform;
-        targetRegion.getBoundingClientRect();
-        if (previousTransition === '') targetRegion.style.removeProperty('transition');
-        else targetRegion.style.transition = previousTransition;
-    }
-
-    function syncFullscreenSurfaceOrigin(): void {
-        const source = composerField;
-        const target = fullscreenComposerSurface;
-        if (source === null || target === null) return;
-
-        const sourceRect = source.getBoundingClientRect();
-        const targetRect = target.getBoundingClientRect();
-        const originTop = Math.max(0, sourceRect.top - targetRect.top);
-        const originRight = Math.max(0, targetRect.right - sourceRect.right);
-        const originBottom = Math.max(0, targetRect.bottom - sourceRect.bottom);
-        const originLeft = Math.max(0, sourceRect.left - targetRect.left);
-        const originRadius = getComputedStyle(source).borderTopLeftRadius || '0px';
-
-        target.style.setProperty('--composer-origin-top', `${String(originTop)}px`);
-        target.style.setProperty('--composer-origin-right', `${String(originRight)}px`);
-        target.style.setProperty('--composer-origin-bottom', `${String(originBottom)}px`);
-        target.style.setProperty('--composer-origin-left', `${String(originLeft)}px`);
-        target.style.setProperty('--composer-origin-radius', originRadius);
-    }
-
-    async function setComposerFullscreen(nextOpen: boolean): Promise<void> {
-        if (nextOpen && !composerCanFullscreen) return;
-        if (composerFullscreen === nextOpen) return;
-        syncFullscreenSurfaceOrigin();
-        syncFullscreenControlOrigins();
-        syncFullscreenTextOrigin();
-        composerFullscreen = nextOpen;
-        await tick();
-        const target = nextOpen ? fullscreenComposerTextarea : composerTextarea;
-        target?.focus({ preventScroll: true });
-        const cursor = target?.value.length ?? 0;
-        target?.setSelectionRange(cursor, cursor);
-    }
-
     function setMode(mode: ConversationMode): void {
         void controller.setConversationMode(mode);
-    }
-
-    function beginEdit(message: MessageDto): void {
-        editingMessageId = message.id;
-        editDraft = message.content;
-        pendingRemoveId = null;
     }
 
     async function removeMessageAndResetRuntime(messageId: string): Promise<void> {
@@ -1200,11 +684,8 @@
     }
 
     async function commitEdit(messageId: string): Promise<void> {
-        const accepted = await controller.editUserMessage(messageId, editDraft);
-        if (accepted) {
-            editingMessageId = null;
-            editDraft = '';
-        }
+        const accepted = await controller.editUserMessage(messageId, messageActions.editDraft);
+        if (accepted) messageActions.finishEdit();
     }
 
     async function copyMessage(message: MessageDto): Promise<void> {
@@ -1312,7 +793,7 @@
             class="chat-room-new-operation"
             type="button"
             aria-label="새 생성 작업"
-            disabled={sending ||
+            disabled={composer.sending ||
                 appState.chat.phase === 'loading' ||
                 appState.chat.active_generation_id !== null}
             onclick={async () => {
@@ -1321,7 +802,7 @@
                     '새 생성 작업으로 전환했습니다. 같은 입력도 새로운 요청으로 처리됩니다.';
                 await closeSettings();
                 await tick();
-                composerTextarea?.focus();
+                composer.focusTextarea();
             }}
         >
             <Sparkles aria-hidden="true" />
@@ -1338,7 +819,7 @@
     class:desktop-composer={desktop}
     class:utility-open={utilityOpen}
     data-conversation-mode={appState.conversation_state?.selected_mode ?? 'chat'}
-    data-utility-open-gesture={utilityOpenGesture}
+    data-utility-open-gesture={utilitySwipe.gesture}
     aria-labelledby="chat-title"
     onpointerdown={handleUtilityOpenPointerDown}
     onpointermove={handleUtilityOpenPointerMove}
@@ -1426,10 +907,10 @@
                     </button>
                 {/if}
                 {#if orchestrationState && orchestrationController}
-                    <OrchestrationQuickDrawer
+                    <ChatUtilityDrawer
                         {appState}
                         {orchestrationState}
-                        controller={orchestrationController}
+                        {orchestrationController}
                         {desktop}
                         bind:open={utilityOpen}
                         bind:view={utilityView}
@@ -1575,8 +1056,9 @@
                         <li
                             class:from-user={message.role === 'user'}
                             class:has-date-divider={showsDay}
-                            class:actions-open={activeMessageActionId === message.id}
-                            class:actions-hovered={hoveredMessageActionId === message.id}
+                            class:actions-open={messageActions.activeMessageActionId === message.id}
+                            class:actions-hovered={messageActions.hoveredMessageActionId ===
+                                message.id}
                             class:memory-source-boundary={messageFocusRequest !== null &&
                                 (message.id === messageFocusRequest.start_message_id ||
                                     message.id === messageFocusRequest.end_message_id)}
@@ -1605,7 +1087,7 @@
                                       ? (appState.selected_character?.name ?? '캐릭터')
                                       : '시스템'}
                             </p>
-                            {#if editingMessageId === message.id}
+                            {#if messageActions.editingMessageId === message.id}
                                 <article class="message-body" aria-label={turnLabel}>
                                     <form
                                         class="inline-editor"
@@ -1620,14 +1102,13 @@
                                         >
                                         <textarea
                                             id={`edit-${message.id}`}
-                                            bind:value={editDraft}
+                                            bind:value={messageActions.editDraft}
                                             rows="3"></textarea>
                                         <div>
                                             <button
                                                 type="button"
                                                 onclick={() => {
-                                                    editingMessageId = null;
-                                                    editDraft = '';
+                                                    messageActions.cancelEdit();
                                                 }}
                                             >
                                                 취소
@@ -1635,7 +1116,8 @@
                                             <button
                                                 class="primary"
                                                 type="submit"
-                                                disabled={editDraft.trim().length === 0}
+                                                disabled={messageActions.editDraft.trim().length ===
+                                                    0}
                                             >
                                                 새 분기로 저장
                                             </button>
@@ -1681,81 +1163,17 @@
                                         </time>
                                     </footer>
                                 </article>
-                                <div class="message-actions" aria-label="메시지 작업">
-                                    <button
-                                        type="button"
-                                        aria-label="복사"
-                                        title="복사"
-                                        onclick={() => void copyMessage(message)}
-                                    >
-                                        <Copy aria-hidden="true" />
-                                    </button>
-                                    <button
-                                        type="button"
-                                        aria-label="여기서 분기"
-                                        title="여기서 분기"
-                                        disabled={appState.chat.active_generation_id !== null}
-                                        onclick={() => void controller.createBranch(message.id)}
-                                    >
-                                        <GitBranch aria-hidden="true" />
-                                    </button>
-                                    {#if message.role === 'user'}
-                                        <button
-                                            type="button"
-                                            aria-label="편집"
-                                            title="편집"
-                                            disabled={appState.chat.active_generation_id !== null}
-                                            onclick={() => beginEdit(message)}
-                                        >
-                                            <Pencil aria-hidden="true" />
-                                        </button>
-                                    {:else if message.role === 'assistant'}
-                                        <button
-                                            type="button"
-                                            aria-label="재생성"
-                                            title="재생성"
-                                            disabled={appState.chat.active_generation_id !== null}
-                                            onclick={() =>
-                                                void controller.regenerateAssistantMessage(
-                                                    message.id,
-                                                )}
-                                        >
-                                            <RefreshCw aria-hidden="true" />
-                                        </button>
-                                    {/if}
-                                    {#if pendingRemoveId === message.id}
-                                        <button
-                                            class="danger"
-                                            type="button"
-                                            aria-label={$tr('chat.message.remove_confirm')}
-                                            title={$tr('chat.message.remove_confirm')}
-                                            onclick={() => {
-                                                pendingRemoveId = null;
-                                                void removeMessageAndResetRuntime(message.id);
-                                            }}
-                                        >
-                                            <Check aria-hidden="true" />
-                                        </button>
-                                        <button
-                                            type="button"
-                                            aria-label="취소"
-                                            title="취소"
-                                            onclick={() => (pendingRemoveId = null)}
-                                        >
-                                            <X aria-hidden="true" />
-                                        </button>
-                                    {:else}
-                                        <button
-                                            type="button"
-                                            aria-label={$tr('chat.message.remove_from_here')}
-                                            title={$tr('chat.message.remove_from_here')}
-                                            disabled={appState.chat.active_generation_id !== null}
-                                            onclick={() => (pendingRemoveId = message.id)}
-                                        >
-                                            <Trash2 aria-hidden="true" />
-                                        </button>
-                                    {/if}
-                                </div>
+                                <ChatMessageActions
+                                    {message}
+                                    state={messageActions}
+                                    generationActive={appState.chat.active_generation_id !== null}
+                                    onCopy={copyMessage}
+                                    onCreateBranch={(messageId: string) =>
+                                        void controller.createBranch(messageId)}
+                                    onRegenerate={(messageId: string) =>
+                                        void controller.regenerateAssistantMessage(messageId)}
+                                    onRemove={removeMessageAndResetRuntime}
+                                />
                             {/if}
                         </li>
                     {/each}
@@ -1836,150 +1254,25 @@
             </div>
         {/if}
 
-        <form
-            class="composer"
-            aria-label="메시지 작성"
-            aria-hidden={composerFullscreen}
-            inert={composerFullscreen}
-            onsubmit={(event) => {
-                event.preventDefault();
-                void submit();
-            }}
-        >
-            <div
-                class="composer-field"
-                bind:this={composerField}
-                class:has-draft={draft.trim().length > 0}
-                class:expanded={composerExpanded}
-                class:can-fullscreen={composerCanFullscreen}
-                class:overflows={composerOverflows}
-            >
-                <div class="composer-text-region">
-                    <textarea
-                        id="chat-draft"
-                        aria-label="메시지"
-                        bind:this={composerTextarea}
-                        bind:value={draft}
-                        use:measureComposer={draft}
-                        rows="1"
-                        maxlength="131072"
-                        placeholder={desktop ? '무엇이든 요청하세요' : undefined}
-                        disabled={appState.chat.phase === 'loading' ||
-                            appState.chat.active_generation_id !== null ||
-                            appState.conversation_state === null}
-                        oncompositionstart={() => (compositionActive = true)}
-                        oncompositionend={() => (compositionActive = false)}
-                        onkeydown={onComposerKeydown}></textarea>
-                </div>
-                <div class="composer-action-row">
-                    <button
-                        class="composer-leading-action"
-                        bind:this={composerLeadingAction}
-                        type="button"
-                        aria-label="추가"
-                        onclick={() => composerTextarea?.focus()}
-                    >
-                        <Plus aria-hidden="true" />
-                    </button>
-                    <span class="composer-action-spacer" aria-hidden="true"></span>
-                    {#if desktop && composerConfigurationLabel !== ''}
-                        <button
-                            class="composer-desktop-model"
-                            type="button"
-                            title={composerConfigurationLabel}
-                            aria-label={`생성 설정: ${composerConfigurationLabel}`}
-                            onclick={openConversationSettings}
-                        >
-                            <span>{composerConfigurationLabel}</span>
-                            <ChevronDown aria-hidden="true" />
-                        </button>
-                    {/if}
-                    <button
-                        class="composer-expand-action"
-                        class:available={composerCanFullscreen}
-                        type="button"
-                        aria-label="전체화면으로 작성"
-                        aria-hidden={!composerCanFullscreen}
-                        tabindex={composerCanFullscreen ? 0 : -1}
-                        disabled={!composerCanFullscreen}
-                        onclick={() => void setComposerFullscreen(true)}
-                    >
-                        <Maximize2 aria-hidden="true" />
-                    </button>
-                    {#if appState.chat.active_generation_id !== null}
-                        <button
-                            class="danger compact composer-trailing-action"
-                            type="button"
-                            aria-label="응답 생성 취소"
-                            onclick={() => void controller.cancelGeneration()}
-                        >
-                            중지
-                        </button>
-                    {:else if draft.trim().length > 0 || desktop}
-                        <button
-                            class="primary send-button composer-trailing-action"
-                            bind:this={composerSendButton}
-                            type="submit"
-                            disabled={sending || draft.trim().length === 0}
-                            aria-label="메시지 보내기"
-                        >
-                            <ArrowUp class="chat-send-icon" aria-hidden="true" />
-                        </button>
-                    {/if}
-                </div>
-            </div>
-        </form>
-
-        <form
-            class="composer-fullscreen"
-            bind:this={fullscreenComposerSurface}
-            class:open={composerFullscreen}
-            aria-label="전체화면 메시지 작성"
-            aria-hidden={!composerFullscreen}
-            inert={!composerFullscreen}
-            onsubmit={(event) => {
-                event.preventDefault();
-                void submit();
-            }}
-        >
-            <header class="composer-fullscreen-header">
-                <button
-                    class="composer-fullscreen-close"
-                    bind:this={fullscreenCloseButton}
-                    type="button"
-                    aria-label="전체화면 입력 닫기"
-                    onclick={() => void setComposerFullscreen(false)}
-                >
-                    <Minimize2 aria-hidden="true" />
-                </button>
-                <span aria-hidden="true"></span>
-                {#if draft.trim().length > 0}
-                    <button
-                        class="primary send-button"
-                        bind:this={fullscreenSendButton}
-                        type="submit"
-                        disabled={sending}
-                        aria-label="메시지 보내기"
-                    >
-                        <ArrowUp class="chat-send-icon" aria-hidden="true" />
-                    </button>
-                {/if}
-            </header>
-            <div class="composer-fullscreen-text-region" bind:this={fullscreenTextRegion}>
-                <label class="sr-only" for="chat-draft-fullscreen">전체화면 메시지</label>
-                <textarea
-                    id="chat-draft-fullscreen"
-                    bind:this={fullscreenComposerTextarea}
-                    bind:value={draft}
-                    maxlength="131072"
-                    disabled={appState.chat.phase === 'loading' ||
-                        appState.chat.active_generation_id !== null ||
-                        appState.conversation_state === null}
-                    oncompositionstart={() => (compositionActive = true)}
-                    oncompositionend={() => (compositionActive = false)}
-                    onkeydown={onFullscreenComposerKeydown}></textarea>
-            </div>
-        </form>
+        <ChatComposer
+            state={composer}
+            {desktop}
+            {composerConfigurationLabel}
+            disabled={appState.chat.phase === 'loading' ||
+                appState.chat.active_generation_id !== null ||
+                appState.conversation_state === null}
+            generationActive={appState.chat.active_generation_id !== null}
+            onSubmit={submit}
+            onOpenSettings={openConversationSettings}
+            onCancelGeneration={() => controller.cancelGeneration()}
+        />
+        <ChatFullscreenComposer
+            state={composer}
+            disabled={appState.chat.phase === 'loading' ||
+                appState.chat.active_generation_id !== null ||
+                appState.conversation_state === null}
+            onSubmit={submit}
+        />
     {/if}
 </section>
 
