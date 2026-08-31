@@ -11,7 +11,7 @@
     "api_resolution": "STOR-API-001 alone may add compatible semantic views/methods; removals require proven compatibility; all other refactors preserve public contracts.",
     "test_resolution": "TEST tasks own named parents; else first owner moves/splits inline/source-sensitive tests in a separate test-only commit; keep module/test paths/names/assertions/fixtures/cfg/count within 61440B/1200 lines.",
     "status_resolution": "Manifest defines scope; ENF-004 records durable completion evidence.",
-    "validation_ledger_resolution": "During B-E tracked path moves, config/ai-context-map.json is implicitly allowed; frontend moves may likewise migrate only existing entries in config/i18n-literal-baseline.json."
+    "validation_ledger_resolution": "B-E path moves may update config/ai-context-map.json; frontend moves may migrate only existing config/i18n-literal-baseline.json entries. A commit that lowers a size, public-API, or context ratchet may regenerate both refactoring report snapshots."
   },
   "global_constraints": [
     "Use the Rust and Node versions pinned by rust-toolchain.toml and .node-version.",
@@ -106,7 +106,9 @@
         "config/refactoring/task-manifest.yaml",
         "AGENTS.md",
         "config/refactoring/baseline-report.json",
-        "scripts/check_source_architecture.py"
+        "scripts/check_source_architecture.py",
+        "scripts/check_i18n_literal_baseline.py",
+        "scripts/test_check_i18n_literal_baseline.py"
       ],
       "allowed_paths": [
         "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
@@ -114,6 +116,8 @@
         "config/ai-context-map.json",
         "scripts/check_ai_context_map.py",
         "scripts/test_check_ai_context_map.py",
+        "scripts/check_i18n_literal_baseline.py",
+        "scripts/test_check_i18n_literal_baseline.py",
         ".github/workflows/ci.yml"
       ],
       "forbidden_changes": [
@@ -124,7 +128,7 @@
       ],
       "validation": [
         "python3 -m json.tool config/refactoring/task-manifest.yaml",
-        "python3 -m unittest scripts/test_check_ai_context_map.py",
+        "python3 -m unittest scripts/test_check_ai_context_map.py scripts/test_check_i18n_literal_baseline.py",
         "python3 scripts/check_ai_context_map.py",
         "python3 scripts/check_github_workflow_security.py"
       ],
@@ -346,6 +350,7 @@
       ],
       "allowed_paths": [
         "crates/storage/src/orchestration.rs",
+        "crates/storage/src/orchestration/tests.rs",
         "crates/storage/src/orchestration/tests/**",
         "config/source-size-baseline.json",
         "config/test-source-size-baseline.json"

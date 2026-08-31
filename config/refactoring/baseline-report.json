@@ -7338,7 +7338,7 @@
     "config/ai-context-map.json": "75e96d928addcf32d74fbf036904f75f2a09dedf604c9f1690ae50ca3616f1f2",
     "config/core-storage-public-api-baseline.json": "c86c10d701180070ec6742d3424deb2784cb0c5e5628b6b809093befa5c3c46b",
     "config/refactoring/completion-status.json": "b90ab0f6b8434af59d77ec025fc542355c7670222d1101d1fcf3fd6ab3c611d5",
-    "config/refactoring/task-manifest.yaml": "82fc4032640615ae4d07fbbd1b9e5fc2473b07e49fd3933c40e58c4122328d0e",
+    "config/refactoring/task-manifest.yaml": "90a2365b949430d97d588d44818afe3d348329284c48631c900de5d1de47fd58",
     "config/source-size-baseline.json": "40e0f72954f09e4eca308fd1befd0a16fd3094dbd23114aeef603937aea029ec",
     "config/test-source-size-baseline.json": "7df20cb344d52000b8581a25ae04afd808b46bc32fe5cfd4c3e0d26ba5f8f861"
   },
