@@ -1,0 +1,223 @@
+/* --------------------------------------------------------------- modals */
+
+.modal-backdrop {
+    position: fixed;
+    border: 0;
+    background: var(--overlay-scrim);
+    inset: 0;
+}
+
+.modal-backdrop::backdrop {
+    background: var(--overlay-scrim);
+}
+
+.modal-card {
+    display: grid;
+    width: min(94vw, 32rem);
+    max-height: 86dvh;
+    padding: 0;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    margin: auto;
+    background: var(--surface-raised);
+    box-shadow: var(--shadow-3);
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    overflow-y: auto;
+}
+
+.modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--line);
+    gap: 10px;
+}
+
+.review-summary {
+    display: flex;
+    align-items: center;
+    padding: 16px;
+    gap: 14px;
+}
+
+.metadata-grid {
+    display: grid;
+    padding: 0 16px 16px;
+    margin: 0;
+    gap: 8px 16px;
+    grid-template-columns: auto 1fr;
+}
+
+.metadata-grid dt {
+    color: var(--ink-subtle);
+    font-size: 0.75rem;
+}
+
+.metadata-grid dd {
+    margin: 0;
+    font-size: 0.8125rem;
+}
+
+/* ---------------------------------------------------- home composition */
+
+/*
+ * The section toggle above already names the section, so a pane header inside
+ * the navigator carries nothing but its one action, shaped like a list row.
+ */
+.navigator .pane-header {
+    min-height: 0;
+    padding: 0 2px 8px;
+}
+
+.navigator .pane-header button {
+    width: 100%;
+    min-height: 38px;
+    border-color: transparent;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--ink-muted);
+    justify-content: flex-start;
+}
+
+.app-shell[data-layout='desktop'] .navigator .pane-header {
+    padding: 0 2px 4px;
+}
+
+.app-shell[data-layout='desktop'] .navigator .pane-header button {
+    min-height: 28px;
+    padding-inline: 8px;
+    border-radius: var(--radius-sm);
+    font-size: 11px;
+}
+
+.navigator .state-panel {
+    margin: 4px 2px 10px;
+    font-size: 0.75rem;
+}
+
+/*
+ * Hover is a pointer affordance, not a narrow-screen state. Keeping every
+ * hover rule behind this capability query prevents sticky or stray highlights
+ * on touch while preserving an immediate response for a mouse or trackpad.
+ */
+@media (hover: hover) and (pointer: fine) {
+    .app-shell[data-layout='desktop'] .chat-title-context:hover,
+    .app-shell[data-layout='desktop'] .chat-header-action:hover,
+    .app-shell[data-layout='desktop'][data-view='chat'] .composer-desktop-model:hover {
+        background: var(--desktop-hover-bg);
+        color: var(--desktop-ink);
+    }
+
+    .app-shell[data-layout='desktop'] .message-item:hover .message-actions {
+        pointer-events: auto;
+    }
+
+    .app-shell:not([data-layout='desktop'][data-view='settings']) button:hover:not(:disabled) {
+        background: var(--surface-hover);
+    }
+
+    .app-shell:not([data-layout='desktop'][data-view='settings']) .primary:hover:not(:disabled) {
+        border-color: transparent;
+        background: var(--primary-bg-hover);
+        color: var(--primary-ink);
+    }
+
+    .app-shell:not([data-layout='desktop'][data-view='settings']) .danger:hover:not(:disabled) {
+        border-color: var(--status-error-border);
+        background: var(--status-error-bg);
+    }
+
+    .app-shell:not([data-layout='desktop'][data-view='settings']) .ghost:hover:not(:disabled) {
+        background: var(--surface-hover);
+        color: var(--ink);
+    }
+
+    .app-shell:not([data-layout='desktop'][data-view='settings']) input:hover,
+    .app-shell:not([data-layout='desktop'][data-view='settings']) textarea:hover,
+    .app-shell:not([data-layout='desktop'][data-view='settings']) select:hover {
+        border-color: var(--ink-subtle);
+    }
+
+    .nav-row:hover:not(:disabled),
+    .navigator .pane-header button:hover:not(:disabled) {
+        background: var(--surface-hover);
+        color: var(--ink);
+    }
+
+    .sidebar-view-option:hover:not(:disabled) {
+        background: transparent;
+        color: var(--ink);
+    }
+
+    .nav-row[aria-current='page']:hover:not(:disabled),
+    .entity-row.active:hover {
+        background: var(--accent-soft);
+        color: var(--accent);
+    }
+
+    .sidebar-view-option[aria-pressed='true']:hover:not(:disabled) {
+        background: transparent;
+        color: var(--ink);
+    }
+
+    .tab:hover:not(:disabled) {
+        background: transparent;
+        color: var(--ink-muted);
+    }
+
+    .tab:hover:not(:disabled)::before {
+        background: var(--surface-hover);
+    }
+
+    .tab[aria-current='page']:hover:not(:disabled) {
+        background: transparent;
+        color: var(--accent);
+    }
+
+    .tab[aria-current='page']:hover:not(:disabled)::before {
+        background: var(--accent-soft);
+    }
+
+    .app-shell:not([data-layout='desktop'][data-view='settings']) .entity-row:hover {
+        background: var(--surface-hover);
+    }
+
+    .app-shell:not([data-layout='desktop'][data-view='settings'])
+        .setting-row:hover:not(:disabled) {
+        background: var(--bg);
+    }
+
+    .entity-row.active:hover {
+        color: var(--ink);
+    }
+
+    .app-shell[data-layout='desktop'] .sidebar .entity-row:hover,
+    .app-shell[data-layout='desktop'] .sidebar .nav-row:hover:not(:disabled),
+    .app-shell[data-layout='desktop'] .navigator .pane-header button:hover:not(:disabled) {
+        background: var(--desktop-hover-bg);
+    }
+
+    .app-shell[data-layout='desktop'] .sidebar .entity-row.active:hover,
+    .app-shell[data-layout='desktop'] .sidebar .nav-row[aria-current='page']:hover:not(:disabled) {
+        background: var(--desktop-selection-bg);
+    }
+
+    .message-item:hover .message-actions {
+        opacity: 1;
+    }
+
+    .message-actions button:hover:not(:disabled) {
+        background: var(--surface-hover);
+        color: var(--ink);
+    }
+
+    .app-shell[data-layout='desktop'] .message-actions button:hover:not(:disabled) {
+        background: transparent;
+        color: var(--desktop-chat-action-hover-ink);
+    }
+
+    .composer textarea:hover {
+        border-color: transparent;
+    }
+}

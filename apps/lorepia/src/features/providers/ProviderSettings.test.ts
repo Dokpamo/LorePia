@@ -15,7 +15,7 @@ import type {
 import { setThemePreference } from '../../lib/theme';
 import { INITIAL_PERSONA_STATE, PersonaController } from '../personas/persona-controller';
 import '../../styles/app.css';
-import appCss from '../../styles/app.css?raw';
+import appCss from '../../styles/app-css';
 import ProviderSettings from './ProviderSettings.svelte';
 
 afterEach(() => {

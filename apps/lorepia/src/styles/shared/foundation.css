@@ -1,0 +1,649 @@
+/*
+ * LorePia design system — one handheld column, everywhere.
+ *
+ * There is exactly one handheld layout: controls scale up to a 437px logical
+ * phone reference, then stop at a compact density so Fold and tablet windows
+ * widen without making the phone typography and controls feel enlarged.
+ *
+ * The colour source is the supplied desktop light/dark reference: warm paper
+ * whites by day and neutral charcoal at night. Each mode borrows the other's
+ * foreground instead of introducing a middle brand hue. The interface
+ * hierarchy comes from surface contrast, weight and inversion alone.
+ */
+
+:root {
+    color-scheme: light;
+
+    /* LorePia Paper & Ink. Legacy aliases remain for component compatibility. */
+    --brand-paper: #f2f0ea;
+    --brand-paper-bright: #fbfcfa;
+    --brand-ink: #2b2a28;
+    --brand-night-navy: #151515;
+    --brand-moon: #edede9;
+    --brand-link: var(--brand-ink);
+    --brand-link-dark: var(--brand-moon);
+    --brand-summer-aqua: var(--brand-ink);
+    --brand-summer-blue: var(--brand-ink);
+    --brand-primary-solid: var(--brand-ink);
+    --brand-seafoam: #4f8b6e;
+    --brand-sun: #aa7429;
+    --brand-coral: #c74343;
+    --brand-cloud: var(--brand-paper-bright);
+    --brand-night-indigo: #2c2c2c;
+    --brand-night-cyan: var(--brand-moon);
+    --brand-night-periwinkle: #bbbaaf;
+    --brand-night-coral: #ef6a65;
+    --brand-summer-gradient: var(--brand-ink);
+    --brand-summer-gradient-hover: var(--brand-night-navy);
+    --brand-night-action-gradient: var(--brand-moon);
+    --brand-night-action-gradient-hover: #ffffff;
+    --brand-logo-bg: var(--brand-paper);
+    --brand-logo-ink: var(--brand-ink);
+
+    /*
+     * Surfaces, from furthest back to closest to the reader. The page is
+     * tinted and the card is white — that difference is what makes a card read
+     * as a card, and without it a border has to do the whole job alone.
+     */
+    --bg: #fbfcfa;
+    --surface: #ffffff;
+    --surface-sunken: #fafaf8;
+    --surface-raised: #ffffff;
+    --surface-hover: #f4f3ef;
+    --surface-active: #eae9e5;
+
+    /* Codex-like desktop neutrals stay isolated from LorePia's handheld palette. */
+    --desktop-sidebar-bg: #f5f5f5;
+    --desktop-workspace-bg: #ffffff;
+    --desktop-panel-bg: #f3f3f3;
+    --desktop-selection-bg: #e8e8e8;
+    --desktop-hover-bg: #eeeeee;
+    --desktop-divider: #e3e3e3;
+    --desktop-user-bubble-bg: #f1f1f1;
+    --desktop-composer-bg: #f7f7f7;
+    --desktop-composer-line: #e3e3e3;
+    --desktop-ink: #242424;
+    --desktop-ink-muted: #666666;
+    --desktop-ink-subtle: #777777;
+
+    /* One warm-neutral palette for every surface in the desktop chat view. */
+    --desktop-chat-workspace-bg: #fdfcfb;
+    --desktop-chat-sidebar-bg: var(--desktop-chat-workspace-bg);
+    --desktop-chat-panel-bg: #f5f3ef;
+    --desktop-chat-selection-bg: #ebe9e5;
+    --desktop-chat-bubble-bg: #f2f1f0;
+    --desktop-chat-composer-bg: #ffffff;
+    --desktop-chat-composer-line: #d8d6d2;
+    --desktop-chat-composer-shadow: 0 5px 18px rgb(61 61 58 / 8%);
+    --desktop-chat-line: #e5e3df;
+    --desktop-chat-hover-bg: #f4f2ef;
+    --desktop-chat-ink: #3d3d3a;
+    --desktop-chat-muted-ink: #73726c;
+    --desktop-chat-subtle-ink: #77746e;
+    --desktop-chat-action-ink: #a7a6a2;
+    --desktop-chat-action-hover-ink: #73726c;
+
+    /* Settings shares the daylight paper, then becomes a raised charcoal workspace at night. */
+    --desktop-settings-sidebar-bg: var(--desktop-chat-sidebar-bg);
+    --desktop-settings-workspace-bg: var(--desktop-chat-workspace-bg);
+    --desktop-settings-panel-bg: var(--desktop-chat-composer-bg);
+    --desktop-settings-selection-bg: var(--desktop-chat-selection-bg);
+    --desktop-settings-hover-bg: var(--desktop-chat-hover-bg);
+    --desktop-settings-divider: var(--desktop-chat-line);
+    --desktop-settings-control-line: var(--desktop-chat-composer-line);
+    --desktop-settings-ink: var(--desktop-chat-ink);
+    --desktop-settings-muted-ink: var(--desktop-chat-muted-ink);
+    --desktop-settings-subtle-ink: var(--desktop-chat-subtle-ink);
+
+    /* Text, from primary to incidental. */
+    --ink: var(--brand-ink);
+    --ink-muted: #6f6d68;
+    --ink-subtle: #77746e;
+    --ink-inverse: var(--brand-moon);
+
+    --line: #e6e4df;
+    --line-strong: #d8d6d0;
+
+    /* The two voices of the transcript. */
+    --bubble-char-bg: var(--surface-raised);
+    --bubble-user-bg: var(--surface-active);
+    --bubble-user-ink: var(--brand-ink);
+
+    /* Solid semantic colors accompany the gradient identity where text or borders need one. */
+    --accent: var(--brand-ink);
+    --accent-hover: var(--brand-night-navy);
+    --accent-soft: var(--surface-active);
+    --accent-line: #bdbab2;
+    --utility-blue: var(--brand-primary-solid);
+
+    --primary-bg: var(--brand-summer-gradient);
+    --primary-bg-hover: var(--brand-summer-gradient-hover);
+    --primary-ink: var(--brand-paper);
+
+    /* Semantic feedback is shared by inline errors, notices, badges and dialogs. */
+    --status-error-fg: #b84242;
+    --status-error-bg: #f9ecea;
+    --status-error-border: #e5beb9;
+    --status-warning-fg: #85610f;
+    --status-warning-bg: #f8f1dd;
+    --status-warning-border: #ddcb93;
+    --status-success-fg: #3f765c;
+    --status-success-bg: #e8f1eb;
+    --status-success-border: #bad3c4;
+    --status-info-fg: var(--ink-muted);
+    --status-info-bg: var(--surface-sunken);
+    --status-info-border: var(--line);
+
+    /* Compatibility aliases keep older feature styles on the same palette. */
+    --danger: var(--status-error-fg);
+    --danger-soft: var(--status-error-bg);
+    --warning: var(--status-warning-fg);
+    --warning-soft: var(--status-warning-bg);
+    --success: var(--status-success-fg);
+    --success-soft: var(--status-success-bg);
+
+    --overlay-scrim: rgb(20 19 17 / 34%);
+    --disabled-opacity: 0.48;
+    --read-only-opacity: 0.72;
+    --control-inset-shadow: inset 0 1px 2px rgb(16 18 24 / 3%);
+    --popover-shadow: 0 12px 32px rgb(43 42 40 / 14%), 0 2px 8px rgb(43 42 40 / 8%);
+
+    --radius-xs: clamp(4px, 1.831vw, 8px);
+    --radius-sm: clamp(6px, 2.517vw, 11px);
+    --radius-md: clamp(8px, 3.432vw, 15px);
+    --radius-lg: clamp(11px, 4.577vw, 20px);
+    --radius-pill: 999px;
+
+    --shadow-1: 0 1px 2px rgb(43 42 40 / 5%);
+    --shadow-2: 0 8px 32px rgb(43 42 40 / 9%);
+    --shadow-3: 0 24px 64px rgb(43 42 40 / 18%);
+    --composer-morph-filter: drop-shadow(0 8px 16px rgb(43 42 40 / 9%));
+
+    /* Full-surface reveals share one rhythm, whether they grow or slide in. */
+    --panel-open-duration: 420ms;
+    --panel-close-duration: 360ms;
+    --panel-open-easing: cubic-bezier(0.22, 1, 0.36, 1);
+    --panel-close-easing: cubic-bezier(0.65, 0, 0.35, 1);
+
+    /* Controls scale through narrow phones, then stop at the 437px logical reference. */
+    --touch: clamp(25px, 10.069vw, 44px);
+    --mobile-toolbar: clamp(31px, 12.815vw, 56px);
+    --mobile-root-header: clamp(40px, 16.476vw, 72px);
+    --mobile-top-action: clamp(30px, 12.18vw, 53px);
+    --mobile-pill-control: clamp(26px, 10.526vw, 46px);
+    --mobile-top-inset: clamp(9px, 3.89vw, 17px);
+    --mobile-top-offset: clamp(10px, 4.06vw, 18px);
+    --mobile-top-fade: clamp(72px, 30.2vw, 132px);
+    --mobile-root-title-inset: clamp(14px, 6.095vw, 26px);
+    --mobile-row: clamp(40px, 16.476vw, 72px);
+    --mobile-search: clamp(27px, 10.984vw, 48px);
+    --mobile-search-inset: clamp(7px, 3vw, 13px);
+    --mobile-nav: clamp(37px, 15.103vw, 66px);
+    --detail-ui-type: clamp(10px, 4.119vw, 18px);
+    --detail-support-type: clamp(9px, 3.55vw, 16px);
+
+    /*
+     * Content measures. A full-bleed row spends its own padding to centre its
+     * content on one of these, so the row still reaches both window edges
+     * while the writing inside it stays the width of a phone-ish column.
+     * The percentage resolves against the row, so this collapses to the
+     * minimum on a phone with no media query.
+     */
+    --reading: 44rem;
+    --settings: 54rem;
+    --sidebar: 300px;
+    --gutter: clamp(9px, 3.89vw, 17px);
+    --settings-gutter: clamp(8px, 3.432vw, 15px);
+
+    font-family:
+        Pretendard,
+        Inter,
+        -apple-system,
+        BlinkMacSystemFont,
+        'Segoe UI',
+        sans-serif;
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    font-size: clamp(9px, 3.661vw, 16px);
+    color: var(--ink);
+    background: var(--bg);
+}
+
+/* Desktop keeps the handheld hierarchy, but uses a denser workspace scale. */
+@media (min-width: 900px) {
+    :root {
+        font-size: 13px;
+    }
+}
+
+/*
+ * Dark is reached two ways: the system asks for it and the reader has not
+ * overridden it in settings, or the reader picked it explicitly. Both doors
+ * carry the same tokens and must be edited together.
+ */
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme='light']) {
+        color-scheme: dark;
+
+        --bg: var(--brand-night-navy);
+        --surface: #1f1f1f;
+        --surface-sunken: #181818;
+        --surface-raised: #262626;
+        --surface-hover: #303030;
+        --surface-active: #3a3a3a;
+        --desktop-sidebar-bg: #1b1b1b;
+        --desktop-workspace-bg: #1f1f1f;
+        --desktop-panel-bg: #282828;
+        --desktop-selection-bg: #3a3a3a;
+        --desktop-hover-bg: #303030;
+        --desktop-divider: #333333;
+        --desktop-user-bubble-bg: #262626;
+        --desktop-composer-bg: #282828;
+        --desktop-composer-line: #414141;
+        --desktop-ink: #e4e4e4;
+        --desktop-ink-muted: #9c9c9c;
+        --desktop-ink-subtle: #858585;
+        --desktop-chat-workspace-bg: #151515;
+        --desktop-chat-sidebar-bg: #111111;
+        --desktop-chat-panel-bg: #202020;
+        --desktop-chat-selection-bg: #2c2c2c;
+        --desktop-chat-bubble-bg: #262626;
+        --desktop-chat-composer-bg: #202020;
+        --desktop-chat-composer-line: #353535;
+        --desktop-chat-composer-shadow: 0 5px 18px rgb(0 0 0 / 28%);
+        --desktop-chat-line: #2e2e2e;
+        --desktop-chat-hover-bg: #252525;
+        --desktop-chat-ink: #dedede;
+        --desktop-chat-muted-ink: #a7a7a7;
+        --desktop-chat-subtle-ink: #858585;
+        --desktop-chat-action-ink: #858585;
+        --desktop-chat-action-hover-ink: #a7a7a7;
+        --desktop-settings-sidebar-bg: #1b1b1b;
+        --desktop-settings-workspace-bg: #1f1f1f;
+        --desktop-settings-panel-bg: #282828;
+        --desktop-settings-selection-bg: #3a3a3a;
+        --desktop-settings-hover-bg: #303030;
+        --desktop-settings-divider: #333333;
+        --desktop-settings-control-line: #414141;
+        --desktop-settings-ink: #e4e4e4;
+        --desktop-settings-muted-ink: #9c9c9c;
+        --desktop-settings-subtle-ink: #858585;
+
+        --ink: #e4e4e4;
+        --ink-muted: #a3a3a3;
+        --ink-subtle: #858585;
+        --ink-inverse: var(--brand-night-navy);
+
+        --line: #333333;
+        --line-strong: #414141;
+
+        --bubble-char-bg: var(--surface-raised);
+        --bubble-user-bg: var(--brand-night-indigo);
+        --bubble-user-ink: var(--brand-moon);
+
+        --accent: var(--brand-moon);
+        --accent-hover: #ffffff;
+        --accent-soft: var(--surface-active);
+        --accent-line: #5a5955;
+        --utility-blue: var(--brand-link-dark);
+
+        --primary-bg: var(--brand-night-action-gradient);
+        --primary-bg-hover: var(--brand-night-action-gradient-hover);
+        --primary-ink: var(--brand-night-navy);
+
+        --status-error-fg: #f1847f;
+        --status-error-bg: #2c2020;
+        --status-error-border: #593231;
+        --status-warning-fg: #dec36c;
+        --status-warning-bg: #2a271e;
+        --status-warning-border: #51482b;
+        --status-success-fg: #86bd9e;
+        --status-success-bg: #202c25;
+        --status-success-border: #355241;
+        --status-info-fg: var(--ink-muted);
+        --status-info-bg: var(--surface-sunken);
+        --status-info-border: var(--line);
+
+        --danger: var(--status-error-fg);
+        --danger-soft: var(--status-error-bg);
+        --warning: var(--status-warning-fg);
+        --warning-soft: var(--status-warning-bg);
+        --success: var(--status-success-fg);
+        --success-soft: var(--status-success-bg);
+
+        --overlay-scrim: rgb(0 0 0 / 62%);
+        --disabled-opacity: 0.48;
+        --read-only-opacity: 0.72;
+        --control-inset-shadow: inset 0 1px 2px rgb(0 0 0 / 22%);
+        --popover-shadow: 0 12px 32px rgb(0 0 0 / 46%), 0 2px 8px rgb(0 0 0 / 34%);
+
+        --brand-logo-bg: var(--brand-night-navy);
+        --brand-logo-ink: var(--brand-moon);
+
+        --shadow-1: 0 1px 2px rgb(0 0 0 / 45%);
+        --shadow-2: 0 8px 32px rgb(0 0 0 / 55%);
+        --shadow-3: 0 24px 64px rgb(0 0 0 / 65%);
+        --composer-morph-filter: drop-shadow(0 8px 16px rgb(0 0 0 / 55%));
+    }
+}
+
+:root[data-theme='dark'] {
+    color-scheme: dark;
+
+    --bg: var(--brand-night-navy);
+    --surface: #1f1f1f;
+    --surface-sunken: #181818;
+    --surface-raised: #262626;
+    --surface-hover: #303030;
+    --surface-active: #3a3a3a;
+    --desktop-sidebar-bg: #1b1b1b;
+    --desktop-workspace-bg: #1f1f1f;
+    --desktop-panel-bg: #282828;
+    --desktop-selection-bg: #3a3a3a;
+    --desktop-hover-bg: #303030;
+    --desktop-divider: #333333;
+    --desktop-user-bubble-bg: #262626;
+    --desktop-composer-bg: #282828;
+    --desktop-composer-line: #414141;
+    --desktop-ink: #e4e4e4;
+    --desktop-ink-muted: #9c9c9c;
+    --desktop-ink-subtle: #858585;
+    --desktop-chat-workspace-bg: #151515;
+    --desktop-chat-sidebar-bg: #111111;
+    --desktop-chat-panel-bg: #202020;
+    --desktop-chat-selection-bg: #2c2c2c;
+    --desktop-chat-bubble-bg: #262626;
+    --desktop-chat-composer-bg: #202020;
+    --desktop-chat-composer-line: #353535;
+    --desktop-chat-composer-shadow: 0 5px 18px rgb(0 0 0 / 28%);
+    --desktop-chat-line: #2e2e2e;
+    --desktop-chat-hover-bg: #252525;
+    --desktop-chat-ink: #dedede;
+    --desktop-chat-muted-ink: #a7a7a7;
+    --desktop-chat-subtle-ink: #858585;
+    --desktop-chat-action-ink: #858585;
+    --desktop-chat-action-hover-ink: #a7a7a7;
+    --desktop-settings-sidebar-bg: #1b1b1b;
+    --desktop-settings-workspace-bg: #1f1f1f;
+    --desktop-settings-panel-bg: #282828;
+    --desktop-settings-selection-bg: #3a3a3a;
+    --desktop-settings-hover-bg: #303030;
+    --desktop-settings-divider: #333333;
+    --desktop-settings-control-line: #414141;
+    --desktop-settings-ink: #e4e4e4;
+    --desktop-settings-muted-ink: #9c9c9c;
+    --desktop-settings-subtle-ink: #858585;
+
+    --ink: #e4e4e4;
+    --ink-muted: #a3a3a3;
+    --ink-subtle: #858585;
+    --ink-inverse: var(--brand-night-navy);
+
+    --line: #333333;
+    --line-strong: #414141;
+
+    --bubble-char-bg: var(--surface-raised);
+    --bubble-user-bg: var(--brand-night-indigo);
+    --bubble-user-ink: var(--brand-moon);
+
+    --accent: var(--brand-moon);
+    --accent-hover: #ffffff;
+    --accent-soft: var(--surface-active);
+    --accent-line: #5a5955;
+    --utility-blue: var(--brand-link-dark);
+
+    --primary-bg: var(--brand-night-action-gradient);
+    --primary-bg-hover: var(--brand-night-action-gradient-hover);
+    --primary-ink: var(--brand-night-navy);
+
+    --status-error-fg: #f1847f;
+    --status-error-bg: #2c2020;
+    --status-error-border: #593231;
+    --status-warning-fg: #dec36c;
+    --status-warning-bg: #2a271e;
+    --status-warning-border: #51482b;
+    --status-success-fg: #86bd9e;
+    --status-success-bg: #202c25;
+    --status-success-border: #355241;
+    --status-info-fg: var(--ink-muted);
+    --status-info-bg: var(--surface-sunken);
+    --status-info-border: var(--line);
+
+    --danger: var(--status-error-fg);
+    --danger-soft: var(--status-error-bg);
+    --warning: var(--status-warning-fg);
+    --warning-soft: var(--status-warning-bg);
+    --success: var(--status-success-fg);
+    --success-soft: var(--status-success-bg);
+
+    --overlay-scrim: rgb(0 0 0 / 62%);
+    --disabled-opacity: 0.48;
+    --read-only-opacity: 0.72;
+    --control-inset-shadow: inset 0 1px 2px rgb(0 0 0 / 22%);
+    --popover-shadow: 0 12px 32px rgb(0 0 0 / 46%), 0 2px 8px rgb(0 0 0 / 34%);
+
+    --brand-logo-bg: var(--brand-night-navy);
+    --brand-logo-ink: var(--brand-moon);
+
+    --shadow-1: 0 1px 2px rgb(0 0 0 / 45%);
+    --shadow-2: 0 8px 32px rgb(0 0 0 / 55%);
+    --shadow-3: 0 24px 64px rgb(0 0 0 / 65%);
+    --composer-morph-filter: drop-shadow(0 8px 16px rgb(0 0 0 / 55%));
+}
+
+* {
+    box-sizing: border-box;
+}
+
+/*
+ * The floor is the one thing that can manufacture a horizontal scrollbar out
+ * of a layout that would otherwise still fit: below it the page stops
+ * shrinking and starts scrolling. Every screen here narrows to roughly 220px
+ * on its own, so the floor sits under that rather than at a phone's width —
+ * a zoomed webview or a very small window then keeps shrinking instead of
+ * sliding sideways.
+ */
+html,
+body,
+#app {
+    min-width: 240px;
+    min-height: 100%;
+    margin: 0;
+}
+
+body {
+    min-height: 100dvh;
+    overflow: hidden;
+    background: var(--bg);
+}
+
+/* ---------------------------------------------------------------- type */
+
+h1,
+h2,
+h3,
+h4,
+p,
+figure {
+    margin: 0;
+}
+
+h1 {
+    font-size: 1.0625rem;
+    font-weight: 700;
+    letter-spacing: -0.015em;
+}
+
+h2 {
+    font-size: 0.9375rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+}
+
+h3 {
+    font-size: 0.875rem;
+    font-weight: 600;
+}
+
+h4 {
+    font-size: 0.8125rem;
+    font-weight: 600;
+}
+
+/*
+ * Inline code carries hashes, origins and identifiers — strings with no space
+ * to break at. Left alone they set a floor the column cannot meet and the page
+ * slides sideways, so they are allowed to break mid-token. Code in a `pre`
+ * block is unaffected: `white-space: pre` there keeps lines intact and the
+ * block scrolls on its own.
+ */
+code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.9em;
+    overflow-wrap: anywhere;
+}
+
+a {
+    color: var(--accent);
+}
+
+.eyebrow {
+    color: var(--ink-subtle);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    border: 0;
+    margin: -1px;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
+/* ------------------------------------------------------------ controls */
+
+button,
+input,
+textarea,
+select {
+    font: inherit;
+    color: inherit;
+}
+
+button,
+select {
+    min-height: var(--touch);
+}
+
+button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    white-space: nowrap;
+    padding: 0 14px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    background: var(--surface-raised);
+    box-shadow: none;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition:
+        background-color 110ms ease,
+        border-color 110ms ease,
+        color 110ms ease;
+}
+
+button:active:not(:disabled) {
+    background: var(--surface-active);
+}
+
+button:disabled {
+    cursor: not-allowed;
+    opacity: var(--disabled-opacity);
+}
+
+.primary {
+    border-color: transparent;
+    background: var(--primary-bg);
+    color: var(--primary-ink);
+}
+
+.primary:active:not(:disabled) {
+    background: var(--primary-bg-hover);
+    border-color: transparent;
+    color: var(--primary-ink);
+}
+
+.danger {
+    border-color: transparent;
+    background: var(--danger-soft);
+    color: var(--danger);
+}
+
+/* A quiet button: reads as a label until it is pointed at. */
+.ghost {
+    border-color: transparent;
+    background: transparent;
+    color: var(--ink-muted);
+}
+
+/*
+ * A label that cannot wrap is a width the page must find somewhere. On a phone
+ * there is nowhere to find it, so long labels are allowed to take a second
+ * line — `normal` only wraps when the line does not fit, so short labels are
+ * untouched.
+ */
+@container view (max-width: 480px) {
+    button {
+        white-space: normal;
+    }
+}
+
+.compact {
+    min-height: 36px;
+    padding: 0 11px;
+    font-size: 0.75rem;
+}
+
+.icon-button {
+    width: var(--touch);
+    min-width: var(--touch);
+    padding: 0;
+}
+
+/*
+ * A form control's intrinsic width is its `size` default — around twenty
+ * characters — and it never shrinks below that on its own. Inside a flex or
+ * grid row that floor is what pushes a narrow window sideways, so controls are
+ * allowed to shrink and take their width from the row instead.
+ */
+input,
+textarea,
+select {
+    min-width: 0;
+    padding: 9px 12px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    font-size: 0.8125rem;
+}
+
+textarea {
+    resize: vertical;
+    line-height: 1.6;
+}
+
+:where(button, a, input, textarea, select, [tabindex]):focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}

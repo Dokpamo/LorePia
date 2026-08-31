@@ -12,7 +12,7 @@ import orchestrationStudioStylesA from '../features/orchestration/studio/styles/
 import orchestrationStudioStylesB from '../features/orchestration/studio/styles/studio-b.css?raw';
 import capabilityPanelSource from '../features/providers/CapabilityPanel.svelte?raw';
 import personaPanelSource from '../features/personas/PersonaPanel.svelte?raw';
-import appCss from './app.css?raw';
+import appCss from './app-css';
 
 const orchestrationStudioContractSource = [
     orchestrationStudioSource,

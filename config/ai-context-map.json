@@ -568,12 +568,10 @@
       }
     },
     "FE-CSS-001": {
-      "baseline_context_bytes": null,
       "commands": [
         "npm run test --prefix apps/lorepia -- src/{styles,app/titlebar-contract.test.ts,features/orchestration/studio-shell-contract.test.ts,features/providers/ProviderSettings.test.ts}"
       ],
       "max_context_bytes": 250000,
-      "over_budget_reason": null,
       "paths": {
         "documents": [
           "apps/lorepia/src/AGENTS.md"
@@ -582,11 +580,20 @@
           "apps/lorepia/src/styles/app.css"
         ],
         "implementation": [
-          "apps/lorepia/src/main.ts"
+          "apps/lorepia/src/styles/app-css.ts",
+          "apps/lorepia/src/styles/app/content.css",
+          "apps/lorepia/src/styles/app/shell-navigation.css",
+          "apps/lorepia/src/styles/chat/chat.css",
+          "apps/lorepia/src/styles/orchestration/detail-layout.css",
+          "apps/lorepia/src/styles/provider/settings.css",
+          "apps/lorepia/src/styles/shared/foundation.css",
+          "apps/lorepia/src/styles/shared/overlays-interactions.css",
+          "apps/lorepia/src/styles/shared/responsive.css"
         ],
         "tests": [
           "apps/lorepia/src/styles/hover-contract.test.ts",
-          "apps/lorepia/src/styles/semantic-state-contract.test.ts"
+          "apps/lorepia/src/styles/semantic-state-contract.test.ts",
+          "apps/lorepia/src/app/titlebar-contract.test.ts"
         ]
       }
     },

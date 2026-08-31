@@ -1,0 +1,1677 @@
+/* ----------------------------------------------------------------- chat */
+
+.chat-pane {
+    --chat-side-inset: var(--gutter);
+    --chat-utility-width: clamp(292px, 27vw, 320px);
+    --chat-utility-edge-inset: 12px;
+    --chat-utility-gap: 12px;
+    --chat-utility-reserved-width: calc(
+        var(--chat-utility-width) + var(--chat-utility-edge-inset) + var(--chat-utility-gap)
+    );
+    --chat-utility-side-inset: max(
+        14px,
+        calc((100% - var(--chat-utility-width) - var(--reading)) / 2)
+    );
+    --composer-overlay-height: 78px;
+    --composer-field-height: 54px;
+    --composer-field-bottom-inset: 8px;
+    --composer-fullscreen-open-duration: var(--panel-open-duration);
+    --composer-fullscreen-close-duration: var(--panel-close-duration);
+    --composer-fullscreen-open-easing: var(--panel-open-easing);
+    --composer-fullscreen-close-easing: var(--panel-close-easing);
+
+    display: flex;
+    height: 100%;
+    min-height: 0;
+    position: relative;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--bg);
+}
+
+.app-shell[data-layout='desktop'] .chat-pane {
+    padding-right: 0;
+    transition: padding-right var(--panel-close-duration) var(--panel-close-easing);
+}
+
+.app-shell[data-layout='desktop'] .chat-pane.utility-open {
+    padding-right: var(--chat-utility-reserved-width);
+    transition: padding-right var(--panel-open-duration) var(--panel-open-easing);
+}
+
+.app-shell[data-layout='desktop'] .chat-pane > .composer {
+    transition:
+        right var(--panel-close-duration) var(--panel-close-easing),
+        padding-left var(--panel-close-duration) var(--panel-close-easing),
+        padding-right var(--panel-close-duration) var(--panel-close-easing);
+}
+
+.app-shell[data-layout='desktop'] .chat-pane.utility-open > .composer {
+    right: var(--chat-utility-reserved-width);
+    transition:
+        right var(--panel-open-duration) var(--panel-open-easing),
+        padding-left var(--panel-open-duration) var(--panel-open-easing),
+        padding-right var(--panel-open-duration) var(--panel-open-easing);
+}
+
+.app-shell[data-layout='desktop'] .chat-pane.utility-open > .composer-fullscreen {
+    right: var(--chat-utility-reserved-width);
+}
+
+/* The mobile thread is a room layered over a quiet message canvas. */
+.app-shell[data-layout='mobile'][data-view='chat'] .chat-pane {
+    --chat-side-inset: max(clamp(8px, 3.4vw, 15px), calc((100% - var(--reading)) / 2));
+
+    position: relative;
+    background-color: color-mix(in srgb, var(--ink) 2%, var(--bg));
+    background-image:
+        radial-gradient(
+            circle at 18px 22px,
+            color-mix(in srgb, var(--ink) 4%, transparent) 0 2px,
+            transparent 2.5px
+        ),
+        radial-gradient(
+            circle at 64px 58px,
+            color-mix(in srgb, var(--ink) 3%, transparent) 0 3px,
+            transparent 3.5px
+        );
+    background-size: clamp(51px, 21.053vw, 92px) clamp(51px, 21.053vw, 92px);
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .chat-pane .message-scroll {
+    padding-top: calc(
+        env(safe-area-inset-top) + var(--mobile-top-offset) + var(--mobile-top-action) +
+            clamp(10px, 4.119vw, 18px)
+    );
+    background: transparent;
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .chat-pane::before {
+    position: absolute;
+    z-index: 10;
+    height: calc(
+        env(safe-area-inset-top) + var(--mobile-top-offset) + var(--mobile-top-action) +
+            clamp(13px, 5.492vw, 24px)
+    );
+    background: linear-gradient(
+        to bottom,
+        var(--bg) 0%,
+        color-mix(in srgb, var(--bg) 92%, transparent) 72%,
+        transparent 100%
+    );
+    content: '';
+    inset: 0 0 auto;
+    pointer-events: none;
+}
+
+/* Let the thread dissolve into the page behind the floating composer. */
+.app-shell[data-layout='mobile'][data-view='chat'] .chat-pane::after {
+    position: absolute;
+    z-index: 5;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    height: calc(var(--composer-overlay-height) + clamp(12px, 4.577vw, 20px));
+    background: linear-gradient(
+        to bottom,
+        transparent 0,
+        var(--bg) clamp(12px, 4.577vw, 20px),
+        var(--bg) 100%
+    );
+    content: '';
+    pointer-events: none;
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .chat-pane .chat-header {
+    position: absolute;
+    height: calc(var(--mobile-root-header) + env(safe-area-inset-top));
+    min-height: calc(var(--mobile-root-header) + env(safe-area-inset-top));
+    z-index: 12;
+    border: 0;
+    border-radius: 0;
+    margin: 0 auto;
+    background: transparent;
+    box-shadow: none;
+    column-gap: clamp(2px, 0.915vw, 4px);
+    inset: 0 0 auto;
+    pointer-events: none;
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .chat-pane .chat-header > * {
+    pointer-events: auto;
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .chat-pane .chat-identity {
+    height: var(--mobile-top-action);
+    align-self: center;
+    padding: clamp(2px, 0.686vw, 3px) clamp(5px, 2.288vw, 10px) clamp(2px, 0.686vw, 3px)
+        clamp(2px, 0.686vw, 3px);
+    border-radius: var(--radius-pill);
+    margin-top: 0;
+    background: color-mix(in srgb, var(--surface-raised) 94%, transparent);
+    box-shadow: var(--shadow-1);
+    gap: clamp(5px, 2.059vw, 9px);
+    backdrop-filter: blur(14px);
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .chat-pane .chat-identity .avatar {
+    width: calc(var(--mobile-top-action) - clamp(4px, 1.831vw, 8px));
+    height: calc(var(--mobile-top-action) - clamp(4px, 1.831vw, 8px));
+    background: var(--surface-active);
+    color: var(--ink);
+    font-size: clamp(9px, 3.661vw, 16px);
+    font-weight: 700;
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .chat-pane .chat-identity h2 {
+    font-size: clamp(10px, 3.89vw, 17px);
+    line-height: 1.15;
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .chat-pane .chat-subtitle {
+    font-size: clamp(7px, 2.746vw, 12px);
+    line-height: 1.15;
+}
+
+.chat-pane > .message-scroll {
+    flex: 1;
+    min-height: 0;
+}
+
+.chat-pane > .chat-header,
+.chat-pane > .composer,
+.chat-pane > .chat-live-status {
+    flex: none;
+}
+
+/*
+ * The advisory panels between header and composer must never grow tall
+ * enough to push the composer off screen, so they cap and scroll on their own.
+ */
+.chat-pane > .interaction-status,
+.chat-pane > .interaction-surface,
+.chat-pane > .attempt-approvals {
+    overflow-y: auto;
+    max-height: 34%;
+    flex: none;
+}
+
+.chat-pane > .attempt-approvals {
+    width: min(100% - 28px, var(--reading));
+    margin-inline: auto;
+}
+
+.chat-header {
+    border-bottom: 1px solid var(--line);
+    background: var(--bg);
+}
+
+.empty-chat-header {
+    border-bottom-color: transparent;
+}
+
+.chat-identity {
+    display: flex;
+    min-width: 0;
+    grid-column: 2;
+    align-items: center;
+    padding-inline: clamp(5px, 2.288vw, 10px);
+    gap: 10px;
+}
+
+.empty-chat-header .chat-identity {
+    grid-column: 1 / -1;
+    padding-left: clamp(6px, 2.517vw, 11px);
+}
+
+.chat-identity h2 {
+    overflow: hidden;
+    font-size: 1.0625rem;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.chat-identity .avatar {
+    width: 36px;
+    height: 36px;
+    font-size: 0.875rem;
+}
+
+.chat-subtitle {
+    overflow: hidden;
+    color: var(--ink-muted);
+    font-size: 0.8125rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.chat-controls {
+    display: flex;
+    width: var(--mobile-top-action);
+    flex: none;
+    grid-column: 3;
+    align-items: center;
+    justify-self: end;
+    gap: 6px;
+}
+
+.app-shell .chat-header:has(.quick-drawer) {
+    z-index: 30;
+}
+
+.app-shell[data-layout='mobile'] .chat-controls {
+    height: var(--mobile-top-action);
+    align-self: center;
+    margin-top: 0;
+}
+
+/* Desktop restores the compact transcript toolbar instead of stretching the phone grid. */
+.app-shell[data-layout='desktop'] .chat-header {
+    display: flex;
+    height: 46px;
+    min-height: 46px;
+    flex-wrap: nowrap;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 14px 6px 18px;
+    border-bottom: 1px solid var(--desktop-divider);
+    background: var(--desktop-workspace-bg);
+    gap: 8px;
+}
+
+.app-shell[data-layout='desktop'] .chat-identity h2 {
+    font-size: 13px;
+    font-weight: 550;
+}
+
+.app-shell[data-layout='desktop'] .chat-title-context {
+    display: flex;
+    min-width: 0;
+    height: 32px;
+    align-items: center;
+    justify-content: flex-start;
+    padding: 0 7px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--desktop-ink);
+    gap: 7px;
+    -webkit-app-region: no-drag;
+}
+
+.app-shell[data-layout='desktop'] .chat-title-context h2 {
+    min-width: 0;
+    margin: 0;
+}
+
+.app-shell[data-layout='desktop'] .chat-title-context > svg:first-child {
+    width: 17px;
+    height: 17px;
+    flex: none;
+    stroke-width: 1.8;
+}
+
+.app-shell[data-layout='desktop'] .chat-title-context > svg:last-child {
+    width: 13px;
+    height: 13px;
+    flex: none;
+    color: var(--desktop-ink-subtle);
+    stroke-width: 1.9;
+}
+
+.app-shell[data-layout='desktop'] .chat-identity .avatar {
+    display: none;
+}
+
+.app-shell[data-layout='desktop'] .chat-subtitle {
+    display: none;
+}
+
+.app-shell[data-layout='desktop'] .chat-pane .back-button {
+    display: none;
+}
+
+.app-shell[data-layout='desktop'] .chat-identity,
+.app-shell[data-layout='desktop'] .empty-chat-header .chat-identity {
+    padding: 0;
+    grid-column: auto;
+}
+
+.app-shell[data-layout='desktop'] .chat-controls {
+    width: auto;
+    grid-column: auto;
+    justify-self: auto;
+}
+
+.app-shell[data-layout='desktop'] .chat-header-action {
+    display: grid;
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    min-height: 32px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--desktop-ink-muted);
+    place-items: center;
+    -webkit-app-region: no-drag;
+}
+
+.app-shell[data-layout='desktop'] .chat-header-action svg {
+    width: 17px;
+    height: 17px;
+    stroke-width: 1.8;
+}
+
+.branch-picker {
+    display: flex;
+    align-items: center;
+    color: var(--ink-muted);
+    font-size: 0.75rem;
+    gap: 6px;
+}
+
+.branch-picker select {
+    min-height: 34px;
+    padding: 0 8px;
+    border-radius: var(--radius-pill);
+    font-size: 0.75rem;
+}
+
+/* A back chevron needs more optical weight than a text glyph gets by default. */
+.back-button {
+    font-size: 1.375rem;
+}
+
+/* ----------------------------------------------------------- transcript */
+
+.message-scroll {
+    overflow-y: auto;
+    overflow-anchor: none;
+    padding: 0 var(--chat-side-inset) calc(var(--composer-overlay-height) + var(--chat-side-inset));
+    background: var(--bg);
+    overscroll-behavior: contain;
+}
+
+.app-shell[data-layout='mobile'] .message-scroll {
+    padding-inline: max(var(--gutter), calc((100% - var(--reading)) / 2));
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .message-scroll {
+    padding-inline: var(--chat-side-inset);
+    background: transparent;
+}
+
+.message-list {
+    display: flex;
+    max-width: 100%;
+    flex-direction: column;
+    padding: 0;
+    margin: 0 auto;
+    gap: 0;
+    list-style: none;
+}
+
+/*
+ * A turn is a bubble. The character speaks on the left under their name and
+ * round avatar; the reader answers on the right in the accent. That
+ * alternation is the entire visual grammar of the transcript.
+ */
+.message-item {
+    --message-turn-spacing: 15px;
+
+    display: grid;
+    max-width: 100%;
+    padding: var(--message-turn-spacing) 0;
+    column-gap: 10px;
+    grid-template-columns: 32px minmax(0, 1fr);
+    scroll-margin-block: 24px;
+}
+
+.message-date-divider {
+    position: sticky;
+    z-index: 11;
+    top: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 0;
+    color: var(--ink-muted);
+}
+
+.message-date-chip {
+    padding: 5px 11px;
+    border: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
+    border-radius: var(--radius-pill);
+    background: color-mix(in srgb, var(--surface-raised) 90%, transparent);
+    box-shadow: var(--shadow-1);
+    font-size: 0.75rem;
+    font-weight: 650;
+    line-height: 1;
+    backdrop-filter: blur(10px);
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .message-date-divider {
+    top: calc(0px - clamp(10px, 4.119vw, 18px));
+    padding: 0 0 clamp(3px, 1.831vw, 8px);
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .message-date-chip {
+    padding: clamp(2px, 1.144vw, 5px) clamp(5px, 2.517vw, 11px);
+    font-size: clamp(10px, 3.204vw, 12px);
+}
+
+.message-avatar {
+    display: grid;
+    overflow: hidden;
+    width: 32px;
+    height: 32px;
+    align-self: start;
+    border-radius: 50%;
+    background: var(--surface-active);
+    color: var(--ink-muted);
+    font-size: 0.6875rem;
+    font-weight: 700;
+    grid-column: 1;
+    grid-row: 1 / span 3;
+    place-items: center;
+}
+
+.message-item.has-date-divider .message-avatar {
+    grid-row: 2 / span 3;
+}
+
+.message-role,
+.message-body,
+.message-time,
+.message-actions {
+    grid-column: 2;
+}
+
+.message-role {
+    padding: 0 0 4px 3px;
+    color: var(--ink-muted);
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.message-time {
+    display: block;
+    padding: 4px 0 0;
+    color: var(--ink-subtle);
+    font-size: 0.6875rem;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    text-align: right;
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .message-time {
+    font-size: clamp(9px, 2.975vw, 11px);
+}
+
+.message-body {
+    width: fit-content;
+    min-width: 0;
+    max-width: 100%;
+    padding: 10px 14px;
+    border: 0;
+    border-radius: var(--radius-lg);
+    border-top-left-radius: var(--radius-xs);
+    background: var(--bubble-char-bg);
+    color: var(--ink);
+    font-size: 0.9375rem;
+    line-height: 1.65;
+    overflow-wrap: anywhere;
+}
+
+/* The reader's own turn: no name, no avatar, accent bubble on the right. */
+.message-item.from-user {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.message-item.from-user .message-avatar,
+.message-item.from-user .message-role {
+    display: none;
+}
+
+.message-item.from-user .message-body {
+    max-width: 88%;
+    justify-self: end;
+    border-radius: var(--radius-lg);
+    border-top-right-radius: var(--radius-xs);
+    background: var(--bubble-user-bg);
+    color: var(--bubble-user-ink);
+    grid-column: 1;
+}
+
+.message-item.from-user .message-body a {
+    color: inherit;
+    text-decoration: underline;
+}
+
+.message-item.from-user .message-actions {
+    justify-content: flex-end;
+    grid-column: 1;
+}
+
+.message-item.from-user .message-time {
+    padding: 4px 0 0;
+    color: color-mix(in srgb, var(--bubble-user-ink) 58%, transparent);
+    grid-column: 1;
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .message-item {
+    --message-turn-spacing: clamp(5px, 2.86vw, 12.5px);
+
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.app-shell[data-layout='mobile'][data-view='chat']
+    .message-item
+    :is(.message-avatar, .message-role) {
+    display: none;
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .message-item .message-body {
+    max-width: 86%;
+    justify-self: start;
+    padding: clamp(5px, 2.059vw, 9px) clamp(7px, 2.746vw, 12px) clamp(4px, 1.602vw, 7px);
+    border-radius: var(--radius-lg);
+    border-bottom-left-radius: var(--radius-xs);
+    background: var(--bubble-char-bg);
+    box-shadow: var(--shadow-1);
+    font-size: clamp(9px, 3.89vw, 17px);
+    grid-column: 1;
+    line-height: 1.55;
+}
+
+.message-bubble-meta {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    margin-top: clamp(1px, 0.686vw, 3px);
+}
+
+.message-bubble-meta .message-time {
+    padding: 0;
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .message-item.from-user .message-body {
+    justify-self: end;
+    border-radius: var(--radius-lg);
+    border-bottom-right-radius: var(--radius-xs);
+    background: var(--bubble-user-bg);
+}
+
+/*
+ * Desktop chat mode keeps both speakers in bubbles. Story mode spends the
+ * wider canvas on continuous prose instead, while retaining the compact
+ * reader bubble and LorePia's date markers.
+ */
+.app-shell[data-layout='desktop'] .message-item {
+    --message-turn-spacing: 11px;
+
+    position: relative;
+    grid-template-columns: minmax(0, 1fr);
+    padding: var(--message-turn-spacing) 20px;
+    column-gap: 0;
+}
+
+.app-shell[data-layout='desktop'] .message-date-divider,
+.app-shell[data-layout='desktop'] .message-time {
+    display: none;
+}
+
+.app-shell[data-layout='desktop'] .message-item :is(.message-avatar, .message-role) {
+    display: none;
+}
+
+.app-shell[data-layout='desktop']
+    .message-item
+    :is(.message-body, .message-time, .message-actions) {
+    grid-column: 1;
+}
+
+.app-shell[data-layout='desktop']
+    .chat-pane[data-conversation-mode='chat']
+    .message-item:not(.from-user)
+    .message-body {
+    width: fit-content;
+    max-width: 76%;
+    padding: 9px 13px;
+    border-radius: 14px;
+    background: var(--desktop-user-bubble-bg);
+    color: var(--desktop-ink);
+    font-size: 13px;
+    line-height: 1.62;
+}
+
+.app-shell[data-layout='desktop']
+    .chat-pane[data-conversation-mode='story']
+    .message-item:not(.from-user)
+    .message-body {
+    width: 100%;
+    padding: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--desktop-ink);
+    font-size: 13px;
+    line-height: 1.62;
+}
+
+.app-shell[data-layout='desktop'] .message-item.from-user .message-body {
+    max-width: 76%;
+    padding: 9px 13px;
+    border-radius: 14px;
+    background: var(--desktop-user-bubble-bg);
+    color: var(--desktop-ink);
+    font-size: 12px;
+    line-height: 1.55;
+}
+
+.app-shell[data-layout='desktop'] .message-actions {
+    position: static;
+    z-index: 2;
+    width: max-content;
+    min-height: 30px;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    margin-top: 2px;
+    background: transparent;
+    box-shadow: none;
+    justify-self: start;
+    pointer-events: none;
+}
+
+.app-shell[data-layout='desktop'] .message-actions button {
+    color: var(--desktop-chat-action-ink);
+}
+
+.app-shell[data-layout='desktop'] .message-item.from-user .message-actions {
+    justify-self: end;
+}
+
+.app-shell[data-layout='desktop'] .message-item.actions-hovered .message-actions {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.app-shell[data-layout='desktop']
+    .message-item:has(.message-body:focus-visible, .message-actions :focus-visible)
+    .message-actions {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.app-shell[data-layout='desktop'] .message-date-chip {
+    border-color: var(--desktop-divider);
+    background: color-mix(in srgb, var(--surface-raised) 96%, transparent);
+    box-shadow: var(--shadow-1);
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .message-item .message-actions {
+    --message-action-size: clamp(26px, 8.696vw, 32px);
+    --message-actions-duration: 360ms;
+    --message-actions-easing: cubic-bezier(0.16, 1, 0.3, 1);
+
+    max-height: 0;
+    padding-top: 0;
+    overflow: hidden;
+    overflow-anchor: none;
+    grid-column: 1;
+    opacity: 0;
+    pointer-events: none;
+    visibility: hidden;
+    transition:
+        max-height var(--message-actions-duration) var(--message-actions-easing),
+        padding-top var(--message-actions-duration) var(--message-actions-easing),
+        opacity var(--message-actions-duration) var(--message-actions-easing),
+        visibility 0s linear var(--message-actions-duration);
+}
+
+.app-shell[data-layout='mobile'][data-view='chat']
+    .message-item:is(.actions-open, :focus-within)
+    .message-actions {
+    max-height: var(--message-action-size);
+    padding-top: 4px;
+    opacity: 1;
+    pointer-events: auto;
+    transition:
+        max-height var(--message-actions-duration) var(--message-actions-easing),
+        padding-top var(--message-actions-duration) var(--message-actions-easing),
+        opacity var(--message-actions-duration) var(--message-actions-easing),
+        visibility 0s;
+    visibility: visible;
+}
+
+/* Editing swaps the bubble for a working surface, whoever is speaking. */
+.message-body:has(> .inline-editor) {
+    width: 100%;
+    background: var(--surface-sunken);
+    color: var(--ink);
+}
+
+.message-body.streaming {
+    box-shadow: none;
+}
+
+.message-item.memory-source-boundary .message-body {
+    box-shadow: inset 0 0 0 1.5px var(--accent-line);
+}
+
+.stream-caret {
+    display: inline-block;
+    width: 2px;
+    height: 1em;
+    margin-left: 2px;
+    background: var(--primary-bg);
+    vertical-align: text-bottom;
+    animation: caret 1s steps(2) infinite;
+}
+
+@keyframes caret {
+    50% {
+        opacity: 0;
+    }
+}
+
+.message-status {
+    display: block;
+    padding-top: 4px;
+    color: var(--ink-subtle);
+    font-size: 0.6875rem;
+}
+
+.message-item.from-user .message-status {
+    color: color-mix(in srgb, var(--bubble-user-ink) 72%, transparent);
+}
+
+/* Turn actions surface on hover where hover exists, and always on touch. */
+.message-actions {
+    display: flex;
+    flex-wrap: wrap;
+    padding-top: 4px;
+    gap: 4px;
+    opacity: 0;
+    transition: opacity 110ms ease;
+}
+
+.message-actions button {
+    display: grid;
+    width: 30px;
+    min-width: 30px;
+    height: 30px;
+    min-height: 30px;
+    padding: 0;
+    border-color: transparent;
+    border-radius: var(--radius-pill);
+    background: transparent;
+    color: var(--ink-muted);
+    place-items: center;
+}
+
+.message-actions button svg {
+    width: 15px;
+    height: 15px;
+    flex: none;
+    fill: none;
+    stroke: currentcolor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.8;
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .message-actions button {
+    width: var(--message-action-size);
+    min-width: var(--message-action-size);
+    height: var(--message-action-size);
+    min-height: var(--message-action-size);
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .message-actions button svg {
+    width: clamp(13px, 4.119vw, 16px);
+    height: clamp(13px, 4.119vw, 16px);
+}
+
+.inline-editor {
+    display: grid;
+    gap: 8px;
+}
+
+.inline-editor textarea {
+    width: 100%;
+}
+
+.chat-live-status {
+    min-height: 0;
+    padding: 0 var(--gutter) 6px;
+    color: var(--ink-muted);
+    font-size: 0.6875rem;
+    text-align: center;
+}
+
+.chat-live-status:empty {
+    display: none;
+}
+
+.app-shell[data-layout='desktop'][data-view='chat'] .chat-live-status {
+    position: absolute;
+    z-index: 7;
+    right: var(--chat-side-inset);
+    bottom: calc(18px + var(--composer-field-height) + 8px);
+    left: var(--chat-side-inset);
+    display: flex;
+    min-height: 14px;
+    align-items: center;
+    justify-content: center;
+    padding: 0 16px;
+    color: var(--desktop-ink-subtle);
+    font-size: 10px;
+    line-height: 14px;
+    text-align: left;
+    pointer-events: none;
+}
+
+.app-shell[data-layout='desktop'][data-view='chat'] .chat-pane.utility-open > .chat-live-status {
+    right: calc(var(--chat-utility-reserved-width) + var(--chat-utility-side-inset));
+    left: var(--chat-utility-side-inset);
+}
+
+/*
+ * The empty transcript borrows the empty-state panel for its copy, but it
+ * fills the whole region — at that size the dashed frame stops reading as a
+ * placeholder and becomes a box drawn around the window.
+ */
+.chat-placeholder {
+    display: grid;
+    min-height: 0;
+    flex: 1;
+    align-content: center;
+    justify-items: center;
+    padding: 24px;
+    border: 0;
+    margin: 0;
+    background: transparent;
+    gap: 8px;
+    text-align: center;
+}
+
+/* The call to action gets a beat of air after the empty-state title. */
+.chat-placeholder .primary {
+    margin-top: 8px;
+}
+
+.large-mark {
+    display: grid;
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: 1.375rem;
+    place-items: center;
+}
+
+.large-mark > svg {
+    width: 26px;
+    height: 26px;
+    stroke-width: 2;
+}
+
+/* ------------------------------------------------------------ composer */
+
+/* The field is the only visible composer surface; its surrounding dock is clear. */
+.composer {
+    --composer-dock-top-inset: 8px;
+
+    display: block;
+    position: absolute;
+    z-index: 6;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    padding: var(--composer-dock-top-inset) var(--chat-side-inset);
+    border: 0;
+    background: none;
+    box-shadow: none;
+    pointer-events: none;
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .composer {
+    --composer-dock-top-inset: clamp(3px, 1.373vw, 6px);
+
+    padding: var(--composer-dock-top-inset) var(--chat-side-inset)
+        calc(clamp(7px, 3.2vw, 14px) + env(safe-area-inset-bottom));
+    border: 0;
+    margin: 0;
+    background: none;
+    box-shadow: none;
+}
+
+.app-shell[data-layout='desktop'][data-view='chat'] .composer {
+    padding-right: var(--chat-side-inset);
+    padding-bottom: 18px;
+}
+
+.app-shell[data-layout='desktop'][data-view='chat'] .chat-pane.utility-open > .composer {
+    padding-left: var(--chat-utility-side-inset);
+    padding-right: var(--chat-utility-side-inset);
+}
+
+.composer-field {
+    --composer-control-size: 44px;
+    --composer-button-size: var(--composer-control-size);
+    --composer-corner: calc(var(--composer-control-size) / 2 + 5px);
+    --composer-collapsed-size: 54px;
+    --composer-field-inset: 4px;
+    --composer-inline-action-gap: var(--composer-text-action-gap);
+    --composer-text-action-gap: 6px;
+    --composer-action-gap: 4px;
+    --composer-action-bottom: calc(
+        (var(--composer-collapsed-size) - var(--composer-control-size)) / 2
+    );
+    --composer-text-size: calc(1.45em + 13px);
+    --composer-expanded-min: clamp(82px, 11dvh, 96px);
+    --composer-expanded-corner: var(--radius-lg);
+    --composer-max-size: clamp(142px, 22dvh, 190px);
+    --composer-motion-duration: 360ms;
+    --composer-motion-easing: cubic-bezier(0.22, 1, 0.36, 1);
+
+    display: block;
+    height: var(--composer-collapsed-size);
+    min-height: var(--composer-collapsed-size);
+    max-height: var(--composer-max-size);
+    position: relative;
+    z-index: 1;
+    overflow: hidden;
+    padding: 0;
+    border: 0;
+    border-radius: var(--composer-corner);
+    background: var(--surface-raised);
+    box-shadow: var(--shadow-2);
+    pointer-events: auto;
+    transition:
+        height var(--composer-motion-duration) var(--composer-motion-easing),
+        border-radius var(--composer-motion-duration) var(--composer-motion-easing);
+    will-change: height, border-radius;
+}
+
+.composer-leading-action {
+    display: grid;
+    width: var(--composer-button-size);
+    height: var(--composer-button-size);
+    min-width: var(--composer-button-size);
+    min-height: var(--composer-button-size);
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--ink-muted);
+    place-items: center;
+}
+
+.composer-leading-action svg {
+    width: 24px;
+    height: 24px;
+    fill: none;
+    stroke: currentcolor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.8;
+}
+
+.composer-field.expanded {
+    height: clamp(
+        var(--composer-expanded-min),
+        calc(
+            var(--composer-text-size) + var(--composer-control-size) +
+                var(--composer-text-action-gap) + var(--composer-field-inset) +
+                var(--composer-action-bottom)
+        ),
+        var(--composer-max-size)
+    );
+    border-radius: var(--composer-expanded-corner);
+}
+
+.composer-text-region {
+    position: absolute;
+    z-index: 1;
+    top: var(--composer-field-inset);
+    right: var(--composer-field-inset);
+    bottom: var(--composer-field-inset);
+    left: calc(
+        var(--composer-field-inset) + var(--composer-button-size) +
+            var(--composer-inline-action-gap)
+    );
+    height: auto;
+    max-height: calc(
+        var(--composer-max-size) - var(--composer-control-size) - var(--composer-text-action-gap) -
+            var(--composer-field-inset) - var(--composer-field-inset)
+    );
+    overflow: hidden;
+    transition:
+        right var(--composer-motion-duration) var(--composer-motion-easing),
+        left var(--composer-motion-duration) var(--composer-motion-easing);
+}
+
+.composer-field:is(.expanded, .measuring) .composer-text-region {
+    right: var(--composer-field-inset);
+    bottom: calc(
+        var(--composer-action-bottom) + var(--composer-control-size) +
+            var(--composer-text-action-gap)
+    );
+    left: var(--composer-field-inset);
+}
+
+.composer-field.measuring .composer-text-region {
+    transition: none;
+}
+
+.composer-text-region textarea {
+    width: 100%;
+    height: 100%;
+    max-height: 100%;
+    min-height: 0;
+    padding: calc((var(--composer-control-size) - 1.45em) / 2) 12px;
+    border: 0;
+    border-radius: calc(var(--composer-control-size) / 2);
+    outline: 0;
+    background: transparent;
+    font-size: 0.9375rem;
+    line-height: 1.45;
+    overflow: hidden;
+    resize: none;
+    white-space: nowrap;
+    transition: none;
+}
+
+.composer-field:is(.expanded, .measuring) .composer-text-region textarea {
+    padding: 9px 14px 0;
+    border-radius: calc(var(--radius-lg) - 5px);
+    overflow-y: hidden;
+    white-space: pre-wrap;
+}
+
+.composer-field.overflows .composer-text-region textarea {
+    overflow-y: auto;
+}
+
+.composer-text-region textarea:focus-visible {
+    outline: 0;
+}
+
+.composer-action-row {
+    display: flex;
+    position: absolute;
+    z-index: 2;
+    right: var(--composer-field-inset);
+    bottom: var(--composer-action-bottom);
+    left: var(--composer-field-inset);
+    height: var(--composer-control-size);
+    min-height: var(--composer-control-size);
+    align-items: center;
+    padding: 0;
+    gap: var(--composer-action-gap);
+    pointer-events: none;
+    transition: none;
+}
+
+/*
+ * A draft keeps its actions after focus leaves, but the field itself returns
+ * to the compact rail. Reserve the trailing controls so the first visible
+ * line never slides underneath send or fullscreen while the rail closes.
+ */
+.composer-field.has-draft:not(.expanded) .composer-text-region {
+    right: calc(
+        var(--composer-field-inset) + var(--composer-button-size) +
+            var(--composer-inline-action-gap)
+    );
+}
+
+.composer-field.has-draft.can-fullscreen:not(.expanded) .composer-text-region {
+    right: calc(
+        var(--composer-field-inset) + var(--composer-button-size) + var(--composer-button-size) +
+            var(--composer-action-gap) + var(--composer-inline-action-gap)
+    );
+}
+
+.composer-action-row > button:not(.composer-expand-action) {
+    flex: none;
+    pointer-events: auto;
+}
+
+.composer-action-spacer {
+    display: block;
+    flex: 1;
+}
+
+.composer-expand-action {
+    display: grid;
+    width: 0;
+    height: var(--composer-button-size);
+    min-width: 0;
+    min-height: var(--composer-button-size);
+    flex: none;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--ink-subtle);
+    opacity: 0;
+    place-items: center;
+    pointer-events: none;
+    transform: scale(0.82);
+    transform-origin: 100% 50%;
+    transition:
+        width var(--composer-motion-duration) var(--composer-motion-easing),
+        min-width var(--composer-motion-duration) var(--composer-motion-easing),
+        opacity calc(var(--composer-motion-duration) * 0.72) ease,
+        transform var(--composer-motion-duration) var(--composer-motion-easing);
+}
+
+.composer-expand-action.available {
+    width: var(--composer-button-size);
+    min-width: var(--composer-button-size);
+    opacity: 1;
+    pointer-events: auto;
+    transform: scale(1);
+}
+
+.composer-expand-action:not(.available) {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.composer-expand-action svg {
+    width: 24px;
+    height: 24px;
+    fill: none;
+    stroke: currentcolor;
+    stroke-width: 1.8;
+}
+
+.send-button {
+    width: var(--composer-button-size, var(--composer-control-size, 44px));
+    height: var(--composer-button-size, var(--composer-control-size, 44px));
+    min-width: var(--composer-button-size, var(--composer-control-size, 44px));
+    min-height: var(--composer-button-size, var(--composer-control-size, 44px));
+    padding: 0;
+    border-radius: 50%;
+}
+
+.send-button svg {
+    width: 21px;
+    height: 21px;
+    fill: none;
+    stroke: currentcolor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.8;
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .composer-field {
+    --composer-control-size: clamp(28px, 11.35vw, 42px);
+    --composer-button-size: var(--composer-control-size);
+    --composer-collapsed-size: clamp(44px, 17.98vw, 66px);
+    --composer-corner: calc(var(--composer-collapsed-size) / 2);
+    --composer-field-inset: clamp(5px, 2.18vw, 8px);
+    --composer-inline-action-gap: clamp(10px, 4.36vw, 16px);
+    --composer-text-action-gap: clamp(7px, 2.99vw, 11px);
+    --composer-action-gap: clamp(4px, 1.63vw, 6px);
+    --composer-expanded-min: clamp(68px, 27.7vw, 102px);
+    --composer-expanded-corner: clamp(14px, 5.72vw, 22px);
+    --composer-max-size: clamp(112px, 22dvh, 182px);
+
+    min-height: var(--composer-collapsed-size);
+    background: var(--surface-raised);
+    box-shadow: var(--shadow-2);
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .composer-text-region textarea {
+    padding: calc((var(--composer-control-size) - 1.45em) / 2) clamp(4px, 1.831vw, 8px);
+    font-size: clamp(10px, 4.36vw, 16px);
+}
+
+.app-shell[data-layout='mobile'][data-view='chat']
+    .composer-field:is(.expanded, .measuring)
+    .composer-text-region
+    textarea {
+    padding: clamp(5px, 2.288vw, 10px) clamp(5px, 2.18vw, 10px) 0;
+}
+
+.app-shell[data-layout='mobile'][data-view='chat']
+    :is(.composer-leading-action, .composer-expand-action.available, .send-button) {
+    width: var(--composer-button-size);
+    height: var(--composer-button-size);
+    min-width: var(--composer-button-size);
+    min-height: var(--composer-button-size);
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .composer-action-row {
+    gap: var(--composer-action-gap);
+}
+
+.app-shell[data-layout='mobile'][data-view='chat']
+    :is(.composer-leading-action, .composer-expand-action)
+    svg {
+    width: clamp(16px, 6.865vw, 24px);
+    height: clamp(16px, 6.865vw, 24px);
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .send-button svg {
+    width: clamp(14px, 5.95vw, 21px);
+    height: clamp(14px, 5.95vw, 21px);
+}
+
+/* The Codex task composer is always a two-row card: writing above, tools below. */
+.app-shell[data-layout='desktop'][data-view='chat'] .composer-field {
+    --composer-control-size: 28px;
+    --composer-button-size: var(--composer-control-size);
+    --composer-collapsed-size: 96px;
+    --composer-corner: 16px;
+    --composer-field-inset: 8px;
+    --composer-inline-action-gap: 0px;
+    --composer-text-action-gap: 8px;
+    --composer-action-gap: 6px;
+    --composer-action-bottom: 8px;
+    --composer-expanded-min: 96px;
+    --composer-expanded-corner: 16px;
+    --composer-max-size: min(224px, 34dvh);
+
+    border: 0;
+    border-radius: var(--composer-corner);
+    background: var(--desktop-composer-bg);
+    box-shadow:
+        0 0 0 0.5px var(--desktop-composer-line),
+        var(--desktop-composer-shadow);
+    backdrop-filter: blur(12px);
+}
+
+.app-shell[data-layout='desktop'][data-view='chat'] .composer-field.expanded:not(.can-fullscreen) {
+    height: var(--composer-collapsed-size);
+}
+
+.app-shell[data-layout='desktop'][data-view='chat'] .composer-field.expanded.can-fullscreen {
+    height: clamp(
+        var(--composer-expanded-min),
+        calc(var(--composer-text-size) + var(--composer-control-size) + 32px),
+        var(--composer-max-size)
+    );
+}
+
+.app-shell[data-layout='desktop'][data-view='chat']
+    .composer-field:is(.expanded, .measuring)
+    .composer-text-region {
+    top: 8px;
+    right: 14px;
+    bottom: 44px;
+    left: 14px;
+    max-height: calc(var(--composer-max-size) - 52px);
+}
+
+.app-shell[data-layout='desktop'][data-view='chat']
+    .composer-field:is(.expanded, .measuring)
+    .composer-text-region
+    textarea {
+    padding: 8px 0 0;
+    border-radius: 0;
+}
+
+.app-shell[data-layout='desktop'][data-view='chat'] .composer-text-region textarea {
+    color: var(--desktop-ink);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 14px;
+}
+
+.app-shell[data-layout='desktop'][data-view='chat'] .composer-desktop-model {
+    display: flex;
+    overflow: hidden;
+    max-width: min(210px, 34vw);
+    height: 28px;
+    min-height: 28px;
+    align-items: center;
+    padding: 0 7px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--desktop-ink-muted);
+    font-size: 12px;
+    font-weight: 550;
+    line-height: 28px;
+    gap: 4px;
+    pointer-events: auto;
+}
+
+.app-shell[data-layout='desktop'][data-view='chat'] .composer-desktop-model > span {
+    overflow: hidden;
+    min-width: 0;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.app-shell[data-layout='desktop'][data-view='chat'] .composer-desktop-model svg {
+    width: 12px;
+    height: 12px;
+    flex: none;
+    stroke-width: 2;
+}
+
+.app-shell[data-layout='desktop'][data-view='chat'] .composer-leading-action svg {
+    transform: none;
+}
+
+.app-shell[data-layout='desktop'][data-view='chat']
+    :is(.composer-leading-action, .composer-expand-action)
+    svg {
+    width: 16px;
+    height: 16px;
+}
+
+.app-shell[data-layout='desktop'][data-view='chat'] .send-button svg {
+    width: 16px;
+    height: 16px;
+}
+
+.app-shell[data-layout='desktop'][data-view='chat'] .send-button {
+    width: var(--composer-button-size);
+    height: var(--composer-button-size);
+    min-width: var(--composer-button-size);
+    min-height: var(--composer-button-size);
+    border-radius: 50%;
+    margin-right: 0;
+    transform: none;
+}
+
+.composer .danger.compact {
+    min-height: 44px;
+    border-radius: var(--radius-pill);
+}
+
+.composer-fullscreen {
+    --composer-fullscreen-top: 64px;
+    --composer-origin-top: calc(
+        100% - var(--composer-field-height) - var(--composer-field-bottom-inset)
+    );
+    --composer-origin-right: var(--chat-side-inset);
+    --composer-origin-bottom: var(--composer-field-bottom-inset);
+    --composer-origin-left: var(--chat-side-inset);
+    --composer-origin-radius: calc(var(--composer-field-height) / 2);
+
+    display: grid;
+    position: absolute;
+    z-index: 32;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    height: calc(100% - var(--composer-fullscreen-top));
+    border: 0;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    background: var(--surface-raised);
+    filter: var(--composer-morph-filter);
+    grid-template-rows: auto minmax(0, 1fr);
+    overflow: hidden;
+    pointer-events: auto;
+    clip-path: inset(
+        var(--composer-origin-top) var(--composer-origin-right) var(--composer-origin-bottom)
+            var(--composer-origin-left) round var(--composer-origin-radius)
+    );
+    visibility: hidden;
+    transition:
+        clip-path var(--composer-fullscreen-close-duration) var(--composer-fullscreen-close-easing),
+        visibility 0s linear var(--composer-fullscreen-close-duration);
+}
+
+.composer-fullscreen.open {
+    clip-path: inset(0 round var(--radius-lg) var(--radius-lg) 0 0);
+    pointer-events: auto;
+    visibility: visible;
+    transition:
+        clip-path var(--composer-fullscreen-open-duration) var(--composer-fullscreen-open-easing),
+        visibility 0s;
+}
+
+.composer-fullscreen-header {
+    --composer-control-size: 44px;
+    --composer-button-size: var(--composer-control-size);
+
+    display: grid;
+    align-items: center;
+    padding: 16px var(--gutter) 8px;
+    grid-template-columns:
+        var(--composer-control-size, 44px) minmax(0, 1fr)
+        var(--composer-control-size, 44px);
+}
+
+.composer-fullscreen-close {
+    display: grid;
+    width: var(--composer-control-size, 44px);
+    height: var(--composer-control-size, 44px);
+    min-width: var(--composer-control-size, 44px);
+    min-height: var(--composer-control-size, 44px);
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--ink);
+    place-items: center;
+}
+
+.composer-fullscreen-close svg {
+    width: 24px;
+    height: 24px;
+    fill: none;
+    stroke: currentcolor;
+    stroke-width: 1.8;
+}
+
+.composer-fullscreen-header .send-button {
+    justify-self: end;
+}
+
+.composer-fullscreen-header :is(.composer-fullscreen-close, .send-button) {
+    transform: translate3d(
+        var(--composer-control-origin-x, 0px),
+        var(--composer-control-origin-y, 0px),
+        0
+    );
+    transition: transform var(--composer-fullscreen-close-duration)
+        var(--composer-fullscreen-close-easing);
+    will-change: transform;
+}
+
+.composer-fullscreen.open
+    .composer-fullscreen-header
+    :is(.composer-fullscreen-close, .send-button) {
+    transform: translate3d(0, 0, 0);
+    transition: transform var(--composer-fullscreen-open-duration)
+        var(--composer-fullscreen-open-easing);
+}
+
+.composer-fullscreen-text-region {
+    --composer-fullscreen-text-size: 1rem;
+    --composer-fullscreen-text-line-height: 1.6;
+
+    min-height: 0;
+    position: relative;
+    transform: translate3d(
+        var(--composer-text-origin-x, 0px),
+        var(--composer-text-origin-y, 0px),
+        0
+    );
+    transform-origin: 0 0;
+    transition: transform var(--composer-fullscreen-close-duration)
+        var(--composer-fullscreen-close-easing);
+    will-change: transform;
+}
+
+.composer-fullscreen.open .composer-fullscreen-text-region {
+    transform: translate3d(0, 0, 0);
+    transition: transform var(--composer-fullscreen-open-duration)
+        var(--composer-fullscreen-open-easing);
+}
+
+.composer-fullscreen textarea {
+    display: block;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    padding: 12px max(24px, var(--gutter)) 24px;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: var(--ink);
+    font: inherit;
+    font-size: var(--composer-text-origin-font-size, var(--composer-fullscreen-text-size));
+    line-height: var(
+        --composer-text-origin-line-height,
+        var(--composer-fullscreen-text-line-height)
+    );
+    resize: none;
+    transition:
+        font-size var(--composer-fullscreen-close-duration) var(--composer-fullscreen-close-easing),
+        line-height var(--composer-fullscreen-close-duration)
+            var(--composer-fullscreen-close-easing);
+}
+
+.composer-fullscreen.open textarea {
+    font-size: var(--composer-fullscreen-text-size);
+    line-height: var(--composer-fullscreen-text-line-height);
+    transition:
+        font-size var(--composer-fullscreen-open-duration) var(--composer-fullscreen-open-easing),
+        line-height var(--composer-fullscreen-open-duration) var(--composer-fullscreen-open-easing);
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .composer-fullscreen {
+    --composer-fullscreen-top: calc(
+        var(--mobile-root-header) + env(safe-area-inset-top) + clamp(3px, 1.373vw, 6px)
+    );
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .composer-fullscreen-header {
+    --composer-control-size: clamp(28px, 11.35vw, 42px);
+    --composer-button-size: var(--composer-control-size);
+
+    padding: clamp(12px, 4.119vw, 18px) var(--gutter) clamp(5px, 1.831vw, 8px);
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .composer-fullscreen-close svg {
+    width: clamp(10px, 4.577vw, 18px);
+    height: clamp(10px, 4.577vw, 18px);
+}
+
+.app-shell[data-layout='mobile'][data-view='chat'] .composer-fullscreen textarea {
+    --composer-fullscreen-text-size: var(--detail-ui-type);
+
+    padding: clamp(7px, 2.746vw, 12px) clamp(16px, 5.492vw, 24px)
+        calc(clamp(16px, 5.492vw, 24px) + env(safe-area-inset-bottom));
+}
+
+/* ------------------------------------------------------- status boxes */
+
+.state-panel {
+    padding: 12px 14px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    margin: 8px 12px;
+    background: var(--surface);
+    color: var(--ink-muted);
+    font-size: 0.8125rem;
+}
+
+.state-panel.empty {
+    border-style: dashed;
+    background: transparent;
+    text-align: center;
+}
+
+/* The full chat placeholder is a canvas, not a dashed card stretched to the window. */
+.chat-placeholder.state-panel.empty {
+    border: 0;
+}
+
+.state-panel.error,
+.issue-box.blocked,
+.inline-diagnostic {
+    border-color: var(--status-error-border);
+    background: var(--status-error-bg);
+    color: var(--status-error-fg);
+}
+
+.inline-diagnostic {
+    padding: 8px 10px;
+    border: 1px solid var(--status-error-border);
+    border-radius: var(--radius-sm);
+    margin: 0;
+    font-size: 0.75rem;
+}
+
+.issue-box {
+    padding: 10px 12px;
+    border: 1px solid var(--status-info-border);
+    border-radius: var(--radius-sm);
+    background: var(--status-info-bg);
+    color: var(--status-info-fg);
+    font-size: 0.8125rem;
+}
+
+.issue-box.warning {
+    border-color: var(--status-warning-border);
+    background: var(--status-warning-bg);
+    color: var(--status-warning-fg);
+}
+
+.blocked {
+    color: var(--status-error-fg);
+}
+
+.legacy {
+    color: var(--status-warning-fg);
+}
+
+.fatal-screen {
+    display: grid;
+    height: 100%;
+    align-content: center;
+    justify-items: center;
+    padding: 32px;
+    gap: 10px;
+    text-align: center;
+}
+
+.fatal-screen .large-mark {
+    color: var(--status-error-fg);
+}
+
+.fatal-screen p {
+    max-width: 44rem;
+    color: var(--ink-muted);
+    overflow-wrap: anywhere;
+}
+
+/*
+ * An index screen names itself once and then gets out of the way: the tab bar
+ * below already says where the reader is, so a second eyebrow and a paragraph
+ * of explanation would spend the top of the screen restating it. What each
+ * destination covers is the job of its row.
+ */
+.index-header {
+    display: flex;
+    min-height: var(--mobile-toolbar);
+    flex: none;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px var(--settings-gutter) 6px;
+    gap: 12px;
+}
+
+.index-header h1,
+.index-header h2,
+.index-title {
+    font-size: 1.375rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+}

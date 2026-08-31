@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import appSource from '../../app/App.svelte?raw';
 import detailActionBarSource from '../../components/detail/DetailActionBar.svelte?raw';
 import { ko } from '../../lib/i18n/ko';
-import appCss from '../../styles/app.css?raw';
+import appCss from '../../styles/app-css';
 import contentModuleSource from './ContentModuleLifecyclePanel.svelte?raw';
 import creatorDocumentsSource from './CreatorDocumentEditors.svelte?raw';
 import orchestrationStudioSource from './OrchestrationStudio.svelte?raw';

@@ -9,7 +9,7 @@ import releaseConfig from '../../src-tauri/tauri.release.conf.json';
 import chatPaneSource from '../features/chat/ChatPane.svelte?raw';
 import orchestrationStudioSource from '../features/orchestration/OrchestrationStudio.svelte?raw';
 import providerSettingsSource from '../features/providers/ProviderSettings.svelte?raw';
-import appCss from '../styles/app.css?raw';
+import appCss from '../styles/app-css';
 import appSource from './App.svelte?raw';
 
 const windowConfigs = [baseConfig, devConfig, demoConfig, releaseConfig].map(

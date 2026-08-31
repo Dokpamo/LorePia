@@ -1,0 +1,107 @@
+/*
+ * Create and settings are long scrolling forms rather than reading columns,
+ * so they centre on the wider measure.
+ */
+.view-scroll {
+    min-height: 0;
+    flex: 1;
+    padding: 16px var(--settings-gutter) 24px;
+    overscroll-behavior: contain;
+    overflow-x: hidden;
+    overflow-y: auto;
+}
+
+.app-shell[data-layout='mobile'] .view-scroll {
+    padding-bottom: calc(var(--mobile-nav) + 28px + env(safe-area-inset-bottom));
+}
+
+.view-scroll.studio-detail-scroll {
+    padding-bottom: 24px;
+}
+
+.app-shell[data-layout='desktop'][data-view='create'] .view-scroll:not(.studio-detail-scroll) {
+    padding-top: clamp(52px, 7.4vh, 68px);
+}
+
+.app-shell[data-layout='mobile'] .view-scroll.studio-detail-scroll {
+    padding-bottom: calc(24px + env(safe-area-inset-bottom));
+}
+
+.view-scroll.studio-detail-scroll.studio-detail-has-actions,
+.app-shell[data-layout='mobile'] .view-scroll.studio-detail-scroll.studio-detail-has-actions {
+    padding-bottom: calc(var(--mobile-nav) + 28px + env(safe-area-inset-bottom));
+}
+
+/*
+ * Studio owns the vertical gesture, while its wide tables, diffs, and
+ * minimaps may still consume a horizontal pan. This avoids a pan-x-only child
+ * intersecting with the shell's default pan-y contract and cancelling both.
+ */
+.app-shell[data-layout='mobile'] .view-scroll.studio-detail-scroll,
+.app-shell[data-layout='mobile']
+    .view-scroll.studio-detail-scroll
+    :is(.data-table-wrap, .block-minimap ol, .safe-text-preview pre, .diff-preview pre) {
+    touch-action: pan-x pan-y;
+}
+
+.view-scroll.studio-detail-scroll
+    :is(.data-table-wrap, .block-minimap ol, .safe-text-preview pre, .diff-preview pre) {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-inline: contain;
+}
+
+/*
+ * Pushed mobile screens have no header ledge. Their action and title remain
+ * fixed in a transparent overlay while a separate background gradient lets
+ * scrolled content dissolve beneath them. Keeping the gradient off the
+ * scroller avoids WebKit mask compositing hiding the fixed header.
+ */
+.app-shell[data-layout='mobile'] .sub-header {
+    position: absolute;
+    z-index: 10;
+    grid-template-columns: var(--mobile-top-action) minmax(0, 1fr) var(--mobile-top-action);
+    border: 0;
+    background: transparent;
+    inset: 0 0 auto;
+    pointer-events: none;
+}
+
+.app-shell[data-layout='mobile'] .sub-header > .mobile-top-action {
+    pointer-events: auto;
+}
+
+.app-shell[data-layout='mobile'] .sub-header::after {
+    position: absolute;
+    z-index: -1;
+    height: var(--mobile-top-fade);
+    background: linear-gradient(to bottom, var(--bg) 0, transparent 100%);
+    content: '';
+    inset: 0 0 auto;
+    opacity: var(--mobile-top-fade-progress, 0);
+    pointer-events: none;
+}
+
+.app-shell[data-layout='mobile'] :is(.studio-detail-scroll, .settings-detail-scroll) {
+    padding-top: calc(
+        env(safe-area-inset-top) + var(--mobile-top-offset) + var(--mobile-top-action) +
+            clamp(7px, 3.661vw, 16px)
+    );
+    scroll-padding-top: calc(
+        env(safe-area-inset-top) + var(--mobile-top-action) + var(--mobile-top-offset) +
+            clamp(4px, 1.831vw, 8px)
+    );
+}
+
+.sub-header h1:focus {
+    outline: none;
+}
+
+.app-shell[data-layout='mobile'] .mobile-root .entity-list {
+    width: min(100%, var(--reading));
+    margin-inline: auto;
+}
+
+.app-shell[data-layout='mobile'] :is(.settings-home-scroll, .studio-home) > .setting-list {
+    width: min(calc(100% - clamp(3px, 1.373vw, 6px)), var(--reading));
+    margin-inline: auto;
+}

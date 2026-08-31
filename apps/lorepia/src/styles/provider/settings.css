@@ -1,0 +1,349 @@
+/* ------------------------------------------------------ settings list */
+
+/*
+ * Two list patterns, and they are not interchangeable.
+ *
+ * An index groups its destinations into one raised panel, with a quiet outline
+ * icon, each destination name, and the value it currently holds. The rows stay
+ * separate buttons, but the shared outer curve and narrow surface seams make
+ * the index read as one settings list.
+ *
+ * A detail list inside a destination lists settings: a quiet outline mark, the
+ * name, and the value it currently holds. Those rows look alike, so a rule
+ * separates them — inset to the text column, so the marks stay a clean edge.
+ */
+.setting-list {
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    border: 0;
+    border-radius: clamp(20px, 6.59vw, 24px);
+    margin: 0 clamp(3px, 0.686vw, 3px);
+    background: var(--bg);
+    box-shadow: var(--shadow-1);
+    list-style: none;
+    gap: clamp(2px, 0.686vw, 3px);
+    overflow: hidden;
+}
+
+.setting-row {
+    display: flex;
+    width: 100%;
+    min-height: clamp(54px, 15.561vw, 68px);
+    align-items: center;
+    padding: clamp(8px, 2.288vw, 10px) clamp(16px, 4.577vw, 20px);
+    border: 0;
+    border-radius: clamp(3px, 0.915vw, 4px);
+    background: var(--surface-raised);
+    box-shadow: none;
+    gap: clamp(19px, 5.492vw, 24px);
+    text-align: left;
+}
+
+.setting-row:focus-visible {
+    outline-offset: -3px;
+}
+
+.setting-icon {
+    display: grid;
+    width: clamp(28px, 7.78vw, 34px);
+    height: clamp(28px, 7.78vw, 34px);
+    flex: none;
+    color: var(--ink);
+    place-items: center;
+}
+
+.setting-icon svg {
+    width: clamp(20px, 5.492vw, 24px);
+    height: clamp(20px, 5.492vw, 24px);
+    fill: none;
+    stroke: currentcolor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 2;
+}
+
+.app-shell[data-layout='mobile'] .setting-list {
+    border-radius: clamp(16px, 6.59vw, 24px);
+    margin-inline: clamp(2px, 0.686vw, 3px);
+    gap: clamp(2px, 0.686vw, 3px);
+}
+
+.app-shell[data-layout='mobile'] .setting-row {
+    min-height: clamp(37px, 15.561vw, 68px);
+    padding: clamp(5px, 2.288vw, 10px) clamp(11px, 4.577vw, 20px);
+    border-radius: clamp(2px, 0.915vw, 4px);
+    gap: clamp(13px, 5.492vw, 24px);
+}
+
+.app-shell[data-layout='mobile'] .setting-icon {
+    width: clamp(19px, 7.78vw, 34px);
+    height: clamp(19px, 7.78vw, 34px);
+}
+
+.app-shell[data-layout='mobile'] .setting-icon svg {
+    width: clamp(13px, 5.492vw, 24px);
+    height: clamp(13px, 5.492vw, 24px);
+}
+
+.setting-copy {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+}
+
+.setting-copy > strong {
+    font-size: 1.0625rem;
+    font-weight: 550;
+    line-height: 1.15;
+    letter-spacing: -0.01em;
+}
+
+.setting-content {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    align-items: center;
+    gap: 8px;
+}
+
+.setting-trailing {
+    display: flex;
+    min-width: 0;
+    max-width: 48%;
+    flex: none;
+    align-items: center;
+    color: var(--ink-muted);
+    gap: 4px;
+}
+
+.setting-value {
+    overflow: hidden;
+    font-size: 0.875rem;
+    font-weight: 500;
+    line-height: 1.25;
+    text-align: right;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.app-shell[data-layout='desktop'][data-view='settings'] .setting-list {
+    border: 1px solid var(--desktop-divider);
+    border-radius: 14px;
+    margin-inline: 0;
+    background: var(--desktop-workspace-bg);
+    box-shadow: none;
+    gap: 0;
+}
+
+.app-shell[data-layout='desktop'] .setting-row {
+    position: relative;
+    min-height: 52px;
+    padding: 9px 16px;
+    border-bottom: 0;
+    border-radius: 0;
+    background: transparent;
+    gap: 14px;
+}
+
+.app-shell[data-layout='desktop'] .setting-list > li + li > .setting-row::before,
+.app-shell[data-layout='desktop'] .setting-list > .setting-row + .setting-row::before,
+.app-shell[data-layout='desktop'] .setting-list > li + .setting-row::before,
+.app-shell[data-layout='desktop'] .setting-list > .setting-row + li > .setting-row::before {
+    position: absolute;
+    top: 0;
+    right: 16px;
+    left: 16px;
+    height: 1px;
+    background: var(--desktop-divider);
+    content: '';
+    pointer-events: none;
+}
+
+.app-shell[data-layout='desktop'] .setting-icon {
+    width: 26px;
+    height: 26px;
+}
+
+.app-shell[data-layout='desktop'] .setting-icon svg {
+    width: 19px;
+    height: 19px;
+    stroke-width: 1.8;
+}
+
+.app-shell[data-layout='desktop'] .setting-copy > strong {
+    font-size: 14px;
+}
+
+.app-shell[data-layout='desktop'] .setting-value,
+.app-shell[data-layout='desktop'] .group-label {
+    font-size: 12px;
+}
+
+/* A label belongs to the card it heads, so it sits inside its top edge. */
+.group-label {
+    padding: 8px 16px 6px;
+    color: var(--accent);
+    font-size: 0.875rem;
+    font-weight: 600;
+}
+
+/*
+ * A pushed screen carries its own way back and drops the tab bar, so the row
+ * of destinations never competes with the one screen the reader chose.
+ */
+.sub-header {
+    border: 0;
+}
+
+.sub-header h1 {
+    overflow: hidden;
+    min-width: 0;
+    grid-column: 2;
+    padding-inline: 8px;
+    font-size: var(--detail-ui-type);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.app-shell[data-layout='mobile'] .sub-header h1 {
+    height: var(--mobile-top-action);
+    display: flex;
+    align-self: center;
+    align-items: center;
+    justify-content: center;
+    padding-inline: 0;
+    margin: 0;
+    background: transparent;
+    box-shadow: none;
+    line-height: 1.2;
+}
+
+.app-shell[data-layout='desktop'] .sub-header {
+    position: relative;
+    display: flex;
+    height: 112px;
+    min-height: 112px;
+    align-items: flex-end;
+    padding: 0 var(--settings-gutter) 24px;
+    border-bottom: 0;
+    background: var(--desktop-workspace-bg);
+    gap: 8px;
+    pointer-events: auto;
+}
+
+.app-shell[data-layout='desktop'] .sub-header > .mobile-top-action {
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    min-height: 32px;
+    align-self: center;
+    margin-top: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+.app-shell[data-layout='desktop'] .sub-header > .mobile-top-action svg {
+    width: 18px;
+    height: 18px;
+    stroke-width: 1.8;
+}
+
+.app-shell[data-layout='desktop'] .sub-header h1 {
+    flex: 1;
+    padding-inline: 0;
+    font-size: 24px;
+    font-weight: 600;
+    grid-column: auto;
+    text-align: left;
+}
+
+.app-shell[data-layout='desktop'] :is(.view-scroll, .provider-scroll) {
+    scrollbar-gutter: auto;
+}
+
+.app-shell[data-layout='desktop'] .message-scroll {
+    padding-bottom: calc(var(--composer-overlay-height) + 16px);
+    padding-right: max(0px, calc(var(--chat-side-inset) - var(--message-scrollbar-width, 0px)));
+    scrollbar-gutter: auto;
+}
+
+.app-shell[data-layout='desktop'] .chat-pane.utility-open > .message-scroll {
+    padding-left: var(--chat-utility-side-inset);
+    padding-right: max(
+        0px,
+        calc(var(--chat-utility-side-inset) - var(--message-scrollbar-width, 0px))
+    );
+}
+
+.app-shell[data-layout='desktop'] :is(.message-scroll, .quick-drawer.desktop .drawer-body) {
+    scrollbar-color: color-mix(in srgb, var(--desktop-ink-subtle) 48%, transparent) transparent;
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+}
+
+.app-shell[data-layout='desktop']
+    :is(.message-scroll, .quick-drawer.desktop .drawer-body)::-webkit-scrollbar {
+    width: 8px;
+}
+
+.app-shell[data-layout='desktop']
+    :is(.message-scroll, .quick-drawer.desktop .drawer-body)::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.app-shell[data-layout='desktop']
+    :is(.message-scroll, .quick-drawer.desktop .drawer-body)::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: var(--radius-pill);
+    background: color-mix(in srgb, var(--desktop-ink-subtle) 48%, transparent);
+    background-clip: padding-box;
+}
+
+/*
+ * A settings card. Panels across the app reach for this class, so it lives
+ * here rather than scoped inside one of them — a scoped copy silently does
+ * nothing for every other panel that asks for it.
+ */
+.settings-section {
+    padding: 20px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: var(--surface-raised);
+}
+
+@container view (max-width: 640px) {
+    .settings-section {
+        padding: 15px;
+    }
+}
+
+.assistant-block,
+.review-block,
+.block-editor {
+    display: grid;
+    padding: 12px 14px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: var(--surface);
+    gap: 10px;
+}
+
+.button-row,
+.modal-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.modal-actions {
+    justify-content: flex-end;
+}
+
+.discovery-start {
+    display: grid;
+    gap: 10px;
+}

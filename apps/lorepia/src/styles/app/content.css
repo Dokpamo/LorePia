@@ -1,0 +1,172 @@
+/* ---------------------------------------------------------- home panes */
+
+.pane {
+    display: flex;
+    height: 100%;
+    min-height: 0;
+    flex-direction: column;
+}
+
+.pane > .entity-list {
+    flex: 1;
+    min-height: 0;
+}
+
+.library-pane,
+.conversation-pane {
+    background: transparent;
+}
+
+.pane-header {
+    display: flex;
+    min-height: 40px;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 10px 8px 16px;
+    gap: 8px;
+}
+
+.pane-header h1,
+.pane-header h2 {
+    font-size: 0.8125rem;
+    font-weight: 600;
+}
+
+.pane-header .eyebrow {
+    display: none;
+}
+
+/* ---------------------------------------------------------------- lists */
+
+.entity-list {
+    display: flex;
+    overflow-y: auto;
+    flex-direction: column;
+    padding: 0 10px 10px;
+    margin: 0;
+    gap: 2px;
+    list-style: none;
+}
+
+.entity-row {
+    display: flex;
+    width: 100%;
+    min-height: 72px;
+    align-items: center;
+    padding: 8px 14px;
+    border: 0;
+    border-radius: var(--radius-md);
+    background: transparent;
+    gap: 12px;
+    text-align: left;
+}
+
+.entity-row:focus-visible {
+    background: var(--surface-hover);
+}
+
+/* Selection speaks with the accent, softly. */
+.entity-row.active {
+    background: var(--accent-soft);
+    color: var(--ink);
+    font-weight: 500;
+}
+
+.entity-copy {
+    display: grid;
+    min-width: 0;
+    flex: 1;
+    gap: 1px;
+}
+
+.entity-copy > span,
+.entity-copy > small {
+    overflow: hidden;
+    color: var(--ink-muted);
+    font-size: 0.875rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.entity-copy > strong {
+    overflow: hidden;
+    font-size: 1.0625rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Conversation rows are text only: a title and a date, like a chat list. */
+.conversation-row .entity-copy {
+    grid-auto-flow: column;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    grid-template-columns: minmax(0, 1fr) auto;
+}
+
+/* People are circles here; a messenger's oldest convention. */
+.avatar,
+.review-avatar {
+    display: grid;
+    overflow: hidden;
+    width: 54px;
+    height: 54px;
+    flex: none;
+    border-radius: 50%;
+    background: var(--surface-active);
+    color: var(--ink-muted);
+    font-size: 1.125rem;
+    font-weight: 600;
+    object-fit: cover;
+    place-items: center;
+}
+
+.review-avatar {
+    width: 52px;
+    height: 52px;
+    font-size: 1.0625rem;
+}
+
+.avatar .asset-status,
+.avatar .asset-error,
+.avatar .asset-metadata {
+    display: none;
+}
+
+/* Desktop lists follow Codex's compact 14/12/11 type ladder and tighter rows. */
+.app-shell[data-layout='desktop'] .sidebar .entity-row {
+    min-height: 42px;
+    padding: 5px 7px;
+    gap: 8px;
+}
+
+.app-shell[data-layout='desktop'] .sidebar .entity-row.active {
+    background: var(--desktop-selection-bg);
+}
+
+.app-shell[data-layout='desktop'] .sidebar .conversation-row {
+    min-height: 28px;
+    padding-block: 3px;
+    border-radius: 6px;
+}
+
+.app-shell[data-layout='desktop'] .sidebar .avatar {
+    width: 30px;
+    height: 30px;
+    font-size: 11px;
+}
+
+.app-shell[data-layout='desktop'] .sidebar .entity-copy > strong {
+    font-size: 12px;
+}
+
+.app-shell[data-layout='desktop'] .sidebar .entity-copy > :is(span, small) {
+    font-size: 10px;
+}
+
+.app-shell[data-layout='desktop'] .sidebar .entity-list {
+    padding: 0 2px 6px;
+    gap: 1px;
+}

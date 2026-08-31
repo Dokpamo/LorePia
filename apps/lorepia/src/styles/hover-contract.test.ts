@@ -35,7 +35,7 @@ import templateRaw from '../features/providers/settings/TemplateSection.svelte?r
 import settingsCssA from '../features/providers/settings/styles/provider-settings-a.css?raw';
 import settingsCssB from '../features/providers/settings/styles/provider-settings-b.css?raw';
 import themeSource from '../lib/theme.ts?raw';
-import css from './app.css?raw';
+import css from './app-css';
 
 const FINE_POINTER_MEDIA = '@media (hover: hover) and (pointer: fine)';
 const settingsSource = [
