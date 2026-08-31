@@ -105,27 +105,33 @@
       }
     },
     "CORE-DISC-003": {
-      "baseline_context_bytes": 695107,
       "commands": [
         "cargo test -p lorepia-core --test provider_discovery_integration",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
       "max_context_bytes": 250000,
-      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
       "paths": {
         "documents": [
           "crates/core/AGENTS.md",
+          "docs/adr/0001-layer-boundaries.md",
+          "docs/adr/0002-storage-transaction-boundaries.md",
           "docs/adr/0003-credential-and-secret-boundary.md"
         ],
         "entrypoints": [
+          "crates/core/src/lib.rs",
           "crates/core/src/provider_discovery.rs"
         ],
         "implementation": [
-          "crates/core/src/provider_discovery_view.rs"
+          "crates/core/src/provider_discovery/approval.rs",
+          "crates/core/src/provider_discovery/credential.rs",
+          "crates/core/src/provider_discovery/credential_install.rs",
+          "crates/core/src/provider_discovery/commit.rs",
+          "crates/core/src/provider_discovery/recovery.rs"
         ],
         "tests": [
-          "crates/core/tests/provider_discovery_integration.rs",
-          "crates/storage/tests/provider_credential_operations.rs"
+          "crates/core/src/provider_discovery/tests/credential_commit.rs",
+          "crates/core/src/provider_discovery/tests/credential_recovery.rs",
+          "crates/core/src/provider_discovery/tests/integration/credential_recovery.rs"
         ]
       }
     },
