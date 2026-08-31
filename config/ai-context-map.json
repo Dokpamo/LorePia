@@ -383,7 +383,10 @@
           "apps/lorepia/src/app/app-controller.ts"
         ],
         "implementation": [
-          "apps/lorepia/src/app/app-state.ts"
+          "apps/lorepia/src/app/app-state.ts",
+          "apps/lorepia/src/app/operations/epoch-guard.ts",
+          "apps/lorepia/src/app/operations/operation-identity.ts",
+          "apps/lorepia/src/app/operations/serialized-mutation.ts"
         ],
         "tests": [
           "apps/lorepia/src/app/tests/app-controller.generation-identity.test.ts"
