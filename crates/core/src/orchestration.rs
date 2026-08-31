@@ -4,6 +4,26 @@
 //! concurrency. Prompt rendering stays in `lorepia-orchestration`; this module
 //! coordinates that pure engine with conversation, branch, and provider state.
 
+mod targets;
+mod transforms;
+mod variables;
+
+pub use targets::{
+    PromptAppliedParameterPreview, PromptEffectiveMessageContentPreview,
+    PromptProviderMessagePreview, TaskGenerationTargetPlan,
+};
+pub use transforms::TransformPreviewRequest;
+pub(crate) use transforms::apply_transform_sets_with_import_approvals;
+pub use variables::{CreatorControlValue, RoomOrchestrationConfig, RoomOrchestrationConfigPatch};
+
+use targets::{
+    PromptProviderResolution, cacheable_prefix_has_volatile_before_fixed_after,
+    canonical_prompt_capabilities, prompt_execution_hash, provider_cacheable_prefix_tokens,
+    redacted_prompt_preview,
+};
+use transforms::{PromptTransformPreparation, apply_resolved_prompt_transforms};
+use variables::{PromptQuickSettings, PromptVariableState, prompt_creativity_temperature};
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{DateTime, Utc};
@@ -12,39 +32,30 @@ use lorepia_chat::{
     MaterializedPromptPlan, PromptPlanner,
 };
 use lorepia_domain::{
-    ActivationRule, ApiFamily, BlockResolutionTrace, CapabilityKey, CapabilityValue, Character,
-    CharacterContentV1, CharacterPromptContent, ContentCapability, ContentModule, ContentModuleId,
-    ControlKind, ControlSpec, ConversationMode, GenerationPresetId, GenerationReasoningEffort,
-    InteractionRuleSet, InteractionRuleSetId, KnowledgeBook, KnowledgeBookId, KnowledgeEntryId,
-    MemoryJob, MemoryJobId, MemoryKind, MemoryProfile, MemoryProfileId, MemoryRecord,
-    MemoryRecordId, Message, MessageId, MessageRole, ModuleBinding, ModuleBindingId,
-    ModuleComponentRef, ModuleScope, OverflowTrace, PersonaId, PersonaPromptContent,
-    PromptContextBindingEvidence, PromptContextPersonaEvidence, PromptContextSnapshotV1,
-    PromptConversationMessage, PromptMemorySelectionEvidence, PromptMemorySelectionLane,
-    PromptMemorySelectionReason, PromptMessageRole, PromptPreset, PromptPresetId,
-    PromptResolutionContext, PromptResolutionTrace, PromptResolveRequest,
+    ActivationRule, ApiFamily, BlockResolutionTrace, CapabilityKey, Character, CharacterContentV1,
+    CharacterPromptContent, ContentCapability, ContentModule, ContentModuleId, ControlSpec,
+    ConversationMode, GenerationReasoningEffort, InteractionRuleSet, InteractionRuleSetId,
+    KnowledgeBook, KnowledgeBookId, KnowledgeEntryId, MemoryJob, MemoryJobId, MemoryKind,
+    MemoryProfile, MemoryProfileId, MemoryRecord, MemoryRecordId, Message, MessageId, MessageRole,
+    ModuleBinding, ModuleBindingId, ModuleComponentRef, ModuleScope, OverflowTrace, PersonaId,
+    PersonaPromptContent, PromptContextBindingEvidence, PromptContextPersonaEvidence,
+    PromptContextSnapshotV1, PromptConversationMessage, PromptMemorySelectionEvidence,
+    PromptMemorySelectionLane, PromptMemorySelectionReason, PromptMessageRole, PromptPreset,
+    PromptPresetId, PromptResolutionContext, PromptResolutionTrace, PromptResolveRequest,
     PromptSummarySourceEvidence, ProviderMessageRole, ResolvedCacheDirective, ResolvedPromptPlan,
     RoleHint, RoleMappingTrace, SelectedKnowledge, SelectedMemory, SemanticKnowledgeScore,
-    SourceKind, SummaryBoundary, TaskProfile, TaskProfileId, TemplateSlot, TransformRuleId,
-    TransformSet, TransformSetId, ValidateOrchestration, VariableId, VariableMap, VariableRef,
-    VariableScope, VariableType, VariableValue, VersionedJson, prompt_context_snapshot_sha256,
-    prompt_local_user_id_sha256,
+    SourceKind, SummaryBoundary, TemplateSlot, TransformSet, TransformSetId, ValidateOrchestration,
+    VariableMap, VersionedJson, prompt_context_snapshot_sha256, prompt_local_user_id_sha256,
 };
 use lorepia_orchestration::{
     AppliedModuleRuntimePlan, KnowledgeEngine, KnowledgeSelection, KnowledgeSelectionContext,
     KnowledgeWorkBudget, MemoryEngine, MemorySelection, MemorySelectionContext,
     MemorySelectionLane, MemorySelectionReason, MemorySemanticScore, ModuleResolutionContext,
-    TransformApplyOptions, TransformCompileOptions, TransformContext, TransformLimits,
-    TransformPipeline, TransformResult, preview_transform_rule, reseal_prompt_resolution_evidence,
-    reseal_resolved_prompt_plan, resolve_prompt_plan as resolve_prompt_plan_engine,
+    TransformResult, reseal_prompt_resolution_evidence,
+    resolve_prompt_plan as resolve_prompt_plan_engine,
     validate_prompt_preset as validate_prompt_preset_document, verify_resolved_prompt_plan,
 };
-use lorepia_providers::parameter_mapping::PromptCacheWireDialect;
-use lorepia_providers::{
-    DeveloperRoleCapability, ProviderCacheBoundaryCompilation, ProviderCacheBoundaryDisposition,
-    ProviderCompiledPromptPreview, ProviderPromptAdapterContract, ProviderPromptPlacement,
-    ProviderWireRole,
-};
+use lorepia_providers::{ProviderCacheBoundaryCompilation, ProviderCompiledPromptPreview};
 use lorepia_storage::{
     ContentModuleRevisionDiff, GenerationPromptPlanRecord, GenerationPromptQuickSettingsAuthority,
     GenerationPromptSelectionAuthority, GenerationProviderTargetAuthority,
@@ -69,13 +80,6 @@ use lorepia_domain::{
     ConversationBranchId, ConversationId, CoreError, CoreResult, GenerationId, GenerationTarget,
 };
 use uuid::Uuid;
-
-/// Deterministic primary and fallback targets for one auxiliary task.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct TaskGenerationTargetPlan {
-    pub task_profile_id: TaskProfileId,
-    pub targets: Vec<GenerationTarget>,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct KnowledgeTokenEstimate {
@@ -117,17 +121,6 @@ pub struct MemoryRetrievalRequest {
     pub query_texts: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct TransformPreviewRequest {
-    pub transform_set_id: TransformSetId,
-    pub rule_id: TransformRuleId,
-    pub input: String,
-    pub variables: VariableMap,
-    pub supported_capabilities: Vec<CapabilityKey>,
-    pub approved_import_source_ids: Vec<String>,
-    pub allow_resolved_prompt: bool,
-}
-
 /// Safe, owned input used by both preview and generation preparation.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PromptPlanRequest {
@@ -141,75 +134,6 @@ pub struct PromptPlanRequest {
     pub expected_plan_hash: Option<String>,
 }
 
-/// JSON-safe creator-control value. Core converts this high-level value only
-/// through the selected preset's declared `ControlSpec -> VariableRef` binding;
-/// callers never submit arbitrary variable references for room settings.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(untagged)]
-pub enum CreatorControlValue {
-    Bool(bool),
-    Integer(i64),
-    Decimal(f64),
-    Text(String),
-    StringList(Vec<String>),
-}
-
-/// Full desired room-scoped orchestration settings used by the CAS save.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RoomOrchestrationConfigPatch {
-    pub prompt_preset_id: Option<PromptPresetId>,
-    pub generation_preset_id: Option<GenerationPresetId>,
-    #[serde(default)]
-    pub creator_values: BTreeMap<String, CreatorControlValue>,
-    pub response_length: PromptResponseLength,
-    pub creativity: u8,
-    pub reasoning_effort: Option<GenerationReasoningEffort>,
-    pub memory_enabled: bool,
-    pub knowledge_enabled: bool,
-    #[serde(default)]
-    pub user_name_override: Option<String>,
-    #[serde(default)]
-    pub author_note: Option<String>,
-    #[serde(default)]
-    pub group_context: Option<String>,
-    #[serde(default)]
-    pub template_slots: Vec<TemplateSlot>,
-}
-
-/// Effective room settings. `binding_revision` is present only when this exact
-/// branch owns a binding; inherited conversation/character/user/app settings
-/// remain visible but save as a new branch binding with expected `None`.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RoomOrchestrationConfig {
-    pub conversation_id: ConversationId,
-    pub branch_id: ConversationBranchId,
-    pub prompt_preset_id: PromptPresetId,
-    pub generation_preset_id: Option<GenerationPresetId>,
-    /// Credential-free target that generation must use for this exact room.
-    ///
-    /// A prompt binding/default generation preset wins over the installation
-    /// default. The route is read from the stored preset in Core so renderers
-    /// never reproduce route/preset resolution rules.
-    pub generation_target: Option<GenerationTarget>,
-    pub creator_values: BTreeMap<String, CreatorControlValue>,
-    /// Exact non-sensitive variable overrides represented by the effective
-    /// binding. The renderer may review this value but cannot author arbitrary
-    /// variable references through the room quick-settings API.
-    pub variable_overrides: VariableMap,
-    pub response_length: PromptResponseLength,
-    pub creativity: u8,
-    pub reasoning_effort: Option<GenerationReasoningEffort>,
-    pub memory_enabled: bool,
-    pub knowledge_enabled: bool,
-    pub user_name_override: Option<String>,
-    pub author_note: Option<String>,
-    pub group_context: Option<String>,
-    pub template_slots: Vec<TemplateSlot>,
-    pub binding_revision: Option<u64>,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PromptPlanMessagePreview {
     pub sequence: u32,
@@ -219,36 +143,6 @@ pub struct PromptPlanMessagePreview {
     pub effective_role: ProviderMessageRole,
     pub estimated_tokens: u32,
     pub source_message_ids: Vec<MessageId>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct PromptProviderMessagePreview {
-    pub sequence: u32,
-    pub block_id: lorepia_domain::PromptBlockId,
-    pub effective_role: ProviderMessageRole,
-    pub wire_role: ProviderWireRole,
-    pub placement: ProviderPromptPlacement,
-    pub estimated_tokens: u32,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PromptEffectiveMessageContentPreview {
-    pub sequence: u32,
-    pub block_id: lorepia_domain::PromptBlockId,
-    pub block_kind: lorepia_domain::PromptBlockKind,
-    pub requested_role: RoleHint,
-    pub effective_role: ProviderMessageRole,
-    pub estimated_tokens: u32,
-    pub source_message_ids: Vec<MessageId>,
-    pub content: String,
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PromptAppliedParameterPreview {
-    pub field: String,
-    pub value: serde_json::Value,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -528,25 +422,6 @@ pub(crate) enum KnowledgeSemanticScoreSourceEvidence {
     },
 }
 
-struct PromptProviderResolution {
-    contract: lorepia_domain::ProviderPromptContract,
-    adapter: ProviderPromptAdapterContract,
-    developer_capability: DeveloperRoleCapability,
-    cache_dialect: PromptCacheWireDialect,
-    max_context_tokens: u32,
-    reserved_output_tokens: u32,
-    reasoning_effort_applied: Option<GenerationReasoningEffort>,
-    request_plan_sha256: String,
-    generation_preset_sha256: String,
-}
-
-struct PromptProviderWireMetadata {
-    developer_capability: DeveloperRoleCapability,
-    cache_dialect: PromptCacheWireDialect,
-    request_plan_sha256: String,
-    generation_preset_sha256: String,
-}
-
 struct PromptPersonaMaterialization {
     content: PersonaPromptContent,
     evidence: PromptContextPersonaEvidence,
@@ -583,17 +458,6 @@ struct PromptContextMaterialization {
     snapshot: PromptContextSnapshotV1,
 }
 
-struct PromptQuickSettings {
-    temperature: Option<f64>,
-    max_output_tokens: Option<u32>,
-    response_length: PromptResponseLength,
-    creativity: u8,
-    reasoning_effort: Option<GenerationReasoningEffort>,
-    memory_enabled: bool,
-    knowledge_enabled: bool,
-    warnings: Vec<String>,
-}
-
 struct PromptPresetPreparation {
     preset: PromptPreset,
     revision: u64,
@@ -606,19 +470,6 @@ struct PromptPresetPreparation {
     block_source_revisions: BTreeMap<lorepia_domain::PromptBlockId, String>,
     module_overlay: PromptModuleOverlay,
     warnings: Vec<String>,
-}
-
-struct PromptVariableState {
-    variables: VariableMap,
-    manually_active_knowledge: BTreeSet<KnowledgeEntryId>,
-}
-
-struct PromptTransformPreparation {
-    transform_sets: Vec<TransformSet>,
-    transform_set_revisions: BTreeMap<TransformSetId, String>,
-    approved_import_source_ids: BTreeSet<String>,
-    supported_capabilities: Vec<CapabilityKey>,
-    transformed_latest: TransformResult,
 }
 
 struct PromptConversationPreparation {
@@ -1522,30 +1373,6 @@ impl Core {
         })
     }
 
-    fn resolve_prompt_provider_and_warnings(
-        &self,
-        input: &GenerationPlanInput<'_>,
-        quick_settings: &PromptQuickSettings,
-        mut warnings: Vec<String>,
-    ) -> CoreResult<(PromptProviderResolution, Vec<String>)> {
-        let provider = self.prompt_provider_contract(
-            input.generation_target,
-            input.provider_family,
-            quick_settings.max_output_tokens,
-            quick_settings.reasoning_effort,
-            input.prompt_wire_contract,
-        )?;
-        if quick_settings.reasoning_effort.is_some()
-            && provider.reasoning_effort_applied != quick_settings.reasoning_effort
-        {
-            warnings.push(
-                "reasoning effort quick setting was omitted because the selected route does not expose that exact effort"
-                    .to_owned(),
-            );
-        }
-        Ok((provider, warnings))
-    }
-
     fn resolve_prompt_plan_assembly(
         input: &GenerationPlanInput<'_>,
         resolved_memory_semantics: Option<&ResolvedMemorySemanticQuery>,
@@ -1674,90 +1501,6 @@ impl Core {
                 .map(|resolved| resolved.evidence.clone()),
             knowledge_semantic_evidence: assembly.knowledge_semantic_evidence,
         })
-    }
-
-    fn resolve_prompt_quick_settings(
-        &self,
-        binding: Option<&PromptPresetBinding>,
-        input: &GenerationPlanInput<'_>,
-    ) -> CoreResult<PromptQuickSettings> {
-        if let (Some(binding), Some(target)) = (binding, input.generation_target)
-            && binding
-                .generation_preset_override_id
-                .as_ref()
-                .is_some_and(|id| id != &target.generation_preset_id)
-        {
-            return Err(CoreError::invalid(
-                "prompt binding generation override does not match the selected target",
-            ));
-        }
-        if let Some(authority) = input.prompt_selection_authority {
-            let quick = &authority.quick_settings;
-            let mut warnings = Vec::new();
-            if binding.is_some()
-                && input.temperature.is_none()
-                && quick.resolved_temperature.is_none()
-                && !quick.supports_temperature
-            {
-                warnings.push(
-                    "creativity quick setting was ignored because the selected route does not expose temperature"
-                        .to_owned(),
-                );
-            }
-            return Ok(PromptQuickSettings {
-                temperature: quick.resolved_temperature,
-                max_output_tokens: quick.resolved_max_output_tokens,
-                response_length: quick.response_length,
-                creativity: quick.creativity,
-                reasoning_effort: quick.reasoning_effort,
-                memory_enabled: quick.memory_enabled,
-                knowledge_enabled: quick.knowledge_enabled,
-                warnings,
-            });
-        }
-        let mut settings = PromptQuickSettings {
-            temperature: input.temperature,
-            max_output_tokens: input.max_output_tokens,
-            response_length: PromptResponseLength::Balanced,
-            creativity: 50,
-            reasoning_effort: None,
-            memory_enabled: true,
-            knowledge_enabled: true,
-            warnings: Vec::new(),
-        };
-        let Some(binding) = binding else {
-            return Ok(settings);
-        };
-        settings.response_length = binding.response_length;
-        settings.creativity = binding.creativity;
-        settings.reasoning_effort = binding.reasoning_effort;
-        settings.memory_enabled = binding.memory_enabled;
-        settings.knowledge_enabled = binding.knowledge_enabled;
-        if settings.temperature.is_none() {
-            let supports_temperature = if let Some(contract) = input.prompt_wire_contract {
-                contract.supports_temperature
-            } else {
-                input.generation_target.map_or(Ok(false), |target| {
-                    crate::app::prompt_route_supports_temperature(self, target)
-                })?
-            };
-            if supports_temperature {
-                settings.temperature = Some(prompt_creativity_temperature(binding.creativity));
-            } else {
-                settings.warnings.push(
-                    "creativity quick setting was ignored because the selected route does not expose temperature"
-                        .to_owned(),
-                );
-            }
-        }
-        if settings.max_output_tokens.is_none() {
-            settings.max_output_tokens = Some(match binding.response_length {
-                PromptResponseLength::Short => 512,
-                PromptResponseLength::Balanced => 2_048,
-                PromptResponseLength::Long => 4_096,
-            });
-        }
-        Ok(settings)
     }
 
     fn prepare_prompt_preset_sources(
@@ -1899,158 +1642,6 @@ impl Core {
             selected_memory,
             memory_evidence,
             warnings,
-        })
-    }
-
-    fn resolve_prompt_variable_state(
-        &self,
-        preset: &PromptPreset,
-        binding: Option<&PromptPresetBinding>,
-        module_overlay: &PromptModuleOverlay,
-        input: &GenerationPlanInput<'_>,
-    ) -> CoreResult<PromptVariableState> {
-        let mut variables = self.character_runtime_initial_variables(input)?;
-        merge_variable_map(&mut variables, &preset.default_values);
-        if let Some(binding) = binding {
-            merge_variable_map(&mut variables, &binding.variable_overrides);
-        }
-        merge_variable_map(&mut variables, &module_overlay.variables);
-        let state_branch = input.interaction_state_branch_id.unwrap_or(input.branch_id);
-        let current_module_knowledge =
-            prompt_module_knowledge_revisions(&module_overlay.knowledge_books)?;
-        let manually_active_knowledge = if let Some(snapshot) = input.interaction_state_override {
-            if snapshot.key.conversation_id != *input.conversation_id
-                || snapshot.key.branch_id != *state_branch
-            {
-                return Err(CoreError::invalid(
-                    "historical interaction state does not match the prompt lineage",
-                ));
-            }
-            merge_variable_map(&mut variables, &snapshot.state.variables);
-            exact_prompt_manual_knowledge(
-                &snapshot.state.manually_active_knowledge,
-                &snapshot.knowledge,
-                &current_module_knowledge,
-            )?
-        } else {
-            match self
-                .storage()
-                .get_interaction_state_snapshot(input.conversation_id, state_branch)
-            {
-                Ok(snapshot) => {
-                    merge_variable_map(&mut variables, &snapshot.state.variables);
-                    exact_prompt_manual_knowledge(
-                        &snapshot.state.manually_active_knowledge,
-                        &snapshot.knowledge,
-                        &current_module_knowledge,
-                    )?
-                }
-                Err(error) if error.code == lorepia_domain::CoreErrorCode::NotFound => {
-                    BTreeSet::new()
-                }
-                Err(error) => return Err(error),
-            }
-        };
-        merge_variable_map(&mut variables, input.variable_overrides);
-        Ok(PromptVariableState {
-            variables,
-            manually_active_knowledge,
-        })
-    }
-
-    fn character_runtime_initial_variables(
-        &self,
-        input: &GenerationPlanInput<'_>,
-    ) -> CoreResult<VariableMap> {
-        let values = if let Some(authority) = input.prompt_selection_authority {
-            authority
-                .character_content
-                .as_ref()
-                .map(|content| content.value.runtime.initial_variables.clone())
-                .unwrap_or_default()
-        } else {
-            match self.storage().get_character_content(&input.character.id) {
-                Ok(content) => content.value.runtime.initial_variables,
-                Err(error) if error.code == lorepia_domain::CoreErrorCode::NotFound => {
-                    BTreeMap::new()
-                }
-                Err(error) => return Err(error),
-            }
-        };
-        let mut variables = VariableMap::default();
-        for (name, value) in values {
-            let value = match value.trim().to_ascii_lowercase().as_str() {
-                "true" => VariableValue::Bool(true),
-                "false" => VariableValue::Bool(false),
-                _ => value
-                    .parse::<i64>()
-                    .map_or_else(|_| VariableValue::Text(value), VariableValue::Integer),
-            };
-            variables.insert(
-                VariableRef {
-                    scope: VariableScope::Character,
-                    namespace: None,
-                    id: VariableId::from(name),
-                },
-                value,
-            );
-        }
-        Ok(variables)
-    }
-
-    fn prepare_prompt_transforms(
-        &self,
-        prompt_transform_sets: &[ObjectRevision<TransformSet>],
-        module_overlay: &PromptModuleOverlay,
-        input: &GenerationPlanInput<'_>,
-        latest: &Message,
-        variables: &VariableMap,
-    ) -> CoreResult<PromptTransformPreparation> {
-        let mut transform_set_revisions = BTreeMap::new();
-        for revision in prompt_transform_sets
-            .iter()
-            .chain(&module_overlay.transform_sets)
-        {
-            if transform_set_revisions
-                .insert(revision.value.id.clone(), revision.revision_id.clone())
-                .is_some()
-            {
-                return Err(CoreError::invalid(
-                    "prompt preset and approved module select the same transform set ambiguously",
-                ));
-            }
-        }
-        let mut transform_sets = prompt_transform_sets
-            .iter()
-            .map(|revision| revision.value.clone())
-            .collect::<Vec<_>>();
-        append_exact_module_transform_sets(&mut transform_sets, &module_overlay.transform_sets)?;
-        // Imported character-card transforms are session-granted display behavior.
-        // Core has no revision-bound portable-runtime grant, so it must not add the
-        // stored native projection to canonical generation transforms implicitly.
-        let approved_import_source_ids = module_overlay.approved_import_source_ids.clone();
-        let supported_capabilities = if let Some(authority) = input.prompt_selection_authority {
-            authority.supported_capabilities.clone()
-        } else {
-            input.generation_target.map_or_else(
-                || Ok(Vec::new()),
-                |target| self.prompt_supported_capabilities(&target.model_route_id),
-            )?
-        };
-        let transformed_latest = apply_transform_sets_with_import_approvals(
-            &transform_sets,
-            lorepia_domain::TransformPhase::UserInputForRequest,
-            &latest.content,
-            variables,
-            &supported_capabilities,
-            &approved_import_source_ids,
-        )?;
-        Ok(PromptTransformPreparation {
-            transform_sets,
-            transform_set_revisions,
-            approved_import_source_ids,
-            supported_capabilities,
-            transformed_latest,
         })
     }
 
@@ -2747,295 +2338,6 @@ impl Core {
             .map(project_revision)
     }
 
-    pub fn get_room_orchestration_config(
-        &self,
-        conversation_id: &ConversationId,
-        branch_id: &ConversationBranchId,
-    ) -> CoreResult<RoomOrchestrationConfig> {
-        let conversation = self.storage().get_conversation(conversation_id)?;
-        let branch = self.storage().get_conversation_branch(branch_id)?;
-        if branch.conversation_id != *conversation_id {
-            return Err(CoreError::new(
-                lorepia_domain::CoreErrorCode::NotFound,
-                "conversation branch was not found in the conversation",
-                false,
-            ));
-        }
-        let character = self.storage().get_character(&conversation.character_id)?;
-        let state = self.storage().get_conversation_state(conversation_id)?;
-        let (preset, _, _, effective_binding, _) = self.resolve_prompt_preset_selection(
-            &character,
-            conversation_id,
-            branch_id,
-            state.selected_mode,
-            None,
-        )?;
-        let branch_bindings = self
-            .list_prompt_preset_bindings(ModuleScope::Branch, Some(branch_id.0.as_str()))?
-            .into_iter()
-            .filter(|stored| stored.deleted_at.is_none() && stored.value.enabled)
-            .collect::<Vec<_>>();
-        if branch_bindings.len() > 1 {
-            return Err(CoreError::invalid(
-                "multiple enabled prompt bindings apply to this room",
-            ));
-        }
-        let binding_revision = branch_bindings.first().map(|stored| stored.revision);
-        let binding = effective_binding.as_ref().map(|stored| &stored.value);
-        let creator_values = creator_values_from_binding(&preset, binding)?;
-        let generation_preset_id = binding
-            .and_then(|binding| binding.generation_preset_override_id.clone())
-            .or_else(|| preset.default_generation_preset_id.clone());
-        let generation_target = if let Some(generation_preset_id) = &generation_preset_id {
-            let generation_preset = self.storage().get_generation_preset(generation_preset_id)?;
-            Some(GenerationTarget {
-                model_route_id: generation_preset.model_route_id,
-                generation_preset_id: generation_preset.id,
-            })
-        } else {
-            let settings = self.get_settings()?;
-            match (
-                settings.selected_model_route_id,
-                settings.selected_generation_preset_id,
-            ) {
-                (Some(model_route_id), Some(generation_preset_id)) => Some(GenerationTarget {
-                    model_route_id,
-                    generation_preset_id,
-                }),
-                (None, None) => None,
-                _ => {
-                    return Err(CoreError::new(
-                        lorepia_domain::CoreErrorCode::StorageCorrupted,
-                        "stored generation target is incomplete",
-                        false,
-                    ));
-                }
-            }
-        };
-        if let Some(target) = &generation_target {
-            self.validate_generation_preset(&target.model_route_id, &target.generation_preset_id)?;
-        }
-        Ok(RoomOrchestrationConfig {
-            conversation_id: conversation_id.clone(),
-            branch_id: branch_id.clone(),
-            prompt_preset_id: preset.id.clone(),
-            generation_preset_id,
-            generation_target,
-            creator_values,
-            variable_overrides: binding
-                .map(|binding| binding.variable_overrides.clone())
-                .unwrap_or_default(),
-            response_length: binding.map_or(PromptResponseLength::Balanced, |binding| {
-                binding.response_length
-            }),
-            creativity: binding.map_or(50, |binding| binding.creativity),
-            reasoning_effort: binding.and_then(|binding| binding.reasoning_effort),
-            memory_enabled: binding.is_none_or(|binding| binding.memory_enabled),
-            knowledge_enabled: binding.is_none_or(|binding| binding.knowledge_enabled),
-            user_name_override: binding.and_then(|binding| binding.user_name_override.clone()),
-            author_note: binding.and_then(|binding| binding.author_note.clone()),
-            group_context: binding.and_then(|binding| binding.group_context.clone()),
-            template_slots: binding
-                .map(|binding| binding.template_slots.clone())
-                .unwrap_or_default(),
-            binding_revision,
-        })
-    }
-
-    pub fn save_room_orchestration_config(
-        &self,
-        conversation_id: &ConversationId,
-        branch_id: &ConversationBranchId,
-        expected_revision: Option<u64>,
-        patch: &RoomOrchestrationConfigPatch,
-    ) -> CoreResult<RoomOrchestrationConfig> {
-        if patch.creativity > 100 {
-            return Err(CoreError::invalid(
-                "room creativity must be between 0 and 100",
-            ));
-        }
-        let current = self.get_room_orchestration_config(conversation_id, branch_id)?;
-        if current.binding_revision != expected_revision {
-            return Err(CoreError::invalid(
-                "room orchestration settings changed before save",
-            ));
-        }
-        let preset_id = patch
-            .prompt_preset_id
-            .clone()
-            .unwrap_or(current.prompt_preset_id);
-        let stored_preset = self.get_prompt_preset(&preset_id)?;
-        let preset = stored_preset.value;
-        let variable_overrides =
-            canonical_creator_variable_overrides(&preset, &patch.creator_values)?;
-        if let Some(generation_preset_id) = &patch.generation_preset_id {
-            let generation_preset = self.storage().get_generation_preset(generation_preset_id)?;
-            if generation_preset.id != *generation_preset_id {
-                return Err(CoreError::internal(
-                    "generation preset identity changed during room save",
-                ));
-            }
-        }
-        let now = Utc::now();
-        let binding = PromptPresetBinding {
-            id: deterministic_room_prompt_binding_id(conversation_id, branch_id),
-            prompt_preset_id: preset_id,
-            scope: ModuleScope::Branch,
-            target_id: Some(branch_id.0.clone()),
-            conversation_id: Some(conversation_id.clone()),
-            pinned_revision_id: None,
-            priority: 0,
-            enabled: true,
-            response_length: patch.response_length,
-            creativity: patch.creativity,
-            reasoning_effort: patch.reasoning_effort,
-            memory_enabled: patch.memory_enabled,
-            knowledge_enabled: patch.knowledge_enabled,
-            variable_overrides,
-            generation_preset_override_id: patch.generation_preset_id.clone(),
-            user_name_override: patch.user_name_override.clone(),
-            author_note: patch.author_note.clone(),
-            group_context: patch.group_context.clone(),
-            template_slots: patch.template_slots.clone(),
-            created_at: now,
-            updated_at: now,
-        };
-        self.bind_prompt_preset(&binding, expected_revision)?;
-        self.get_room_orchestration_config(conversation_id, branch_id)
-    }
-
-    pub fn list_prompt_preset_bindings(
-        &self,
-        scope: ModuleScope,
-        target_id: Option<&str>,
-    ) -> CoreResult<Vec<Revisioned<PromptPresetBinding>>> {
-        self.storage()
-            .list_prompt_preset_bindings(scope, target_id)
-            .map(project_revisions)
-    }
-
-    pub fn unbind_prompt_preset(
-        &self,
-        binding_id: &str,
-        expected_revision: u64,
-    ) -> CoreResult<Revisioned<PromptPresetBinding>> {
-        self.storage()
-            .soft_delete_prompt_preset_binding(binding_id, expected_revision)
-            .map(project_revision)
-    }
-
-    pub fn upsert_task_profile(
-        &self,
-        profile: &TaskProfile,
-        expected_revision: Option<u64>,
-    ) -> CoreResult<Revisioned<TaskProfile>> {
-        self.validate_task_profile(profile)?;
-        self.storage()
-            .save_task_profile(profile, expected_revision)
-            .map(project_revision)
-    }
-
-    pub fn get_task_profile(&self, id: &TaskProfileId) -> CoreResult<Revisioned<TaskProfile>> {
-        self.storage().get_task_profile(id).map(project_revision)
-    }
-
-    pub fn list_task_profiles(&self) -> CoreResult<Vec<Revisioned<TaskProfile>>> {
-        self.storage().list_task_profiles().map(project_revisions)
-    }
-
-    pub fn delete_task_profile(
-        &self,
-        id: &TaskProfileId,
-        expected_revision: u64,
-    ) -> CoreResult<Revisioned<TaskProfile>> {
-        self.storage()
-            .soft_delete_task_profile(id, expected_revision)
-            .map(project_revision)
-    }
-
-    /// Resolves a task profile to an ordered, provider-valid target list.
-    ///
-    /// The explicitly configured route/preset is always first. Each fallback
-    /// route contributes its first stored preset in the storage-defined stable
-    /// ordering. Missing fallback configuration is rejected before a job is
-    /// launched, so background work never silently switches parameters.
-    pub fn resolve_task_generation_targets(
-        &self,
-        id: &TaskProfileId,
-    ) -> CoreResult<TaskGenerationTargetPlan> {
-        let profile = self.get_task_profile(id)?.value;
-        self.validate_task_profile(&profile)?;
-        let mut targets = vec![GenerationTarget {
-            model_route_id: profile.route_id.clone(),
-            generation_preset_id: profile.generation_preset_id,
-        }];
-        for route_id in profile.fallback_route_ids {
-            if targets
-                .iter()
-                .any(|target| target.model_route_id == route_id)
-            {
-                continue;
-            }
-            let preset = self
-                .storage()
-                .list_generation_presets(&route_id)?
-                .into_iter()
-                .next()
-                .ok_or_else(|| {
-                    CoreError::invalid(format!(
-                        "task fallback route {} has no generation preset",
-                        route_id.as_str()
-                    ))
-                })?;
-            targets.push(GenerationTarget {
-                model_route_id: route_id,
-                generation_preset_id: preset.id,
-            });
-        }
-        Ok(TaskGenerationTargetPlan {
-            task_profile_id: id.clone(),
-            targets,
-        })
-    }
-
-    fn validate_task_profile(&self, profile: &TaskProfile) -> CoreResult<()> {
-        if profile.timeout_ms == 0
-            || profile.concurrency_limit == 0
-            || profile.rate_limit.requests == 0
-            || profile.rate_limit.per_seconds == 0
-        {
-            return Err(CoreError::invalid(
-                "task profile timeout, concurrency, and rate limits must be greater than zero",
-            ));
-        }
-        self.storage().get_model_route(&profile.route_id)?;
-        let primary_preset = self
-            .storage()
-            .get_generation_preset(&profile.generation_preset_id)?;
-        if primary_preset.model_route_id != profile.route_id {
-            return Err(CoreError::invalid(
-                "task profile generation preset does not belong to its primary route",
-            ));
-        }
-        let mut seen = std::collections::HashSet::new();
-        seen.insert(profile.route_id.clone());
-        for route_id in &profile.fallback_route_ids {
-            if !seen.insert(route_id.clone()) {
-                return Err(CoreError::invalid(
-                    "task profile fallback routes must be unique",
-                ));
-            }
-            self.storage().get_model_route(route_id)?;
-            if self.storage().list_generation_presets(route_id)?.is_empty() {
-                return Err(CoreError::invalid(format!(
-                    "task fallback route {} has no generation preset",
-                    route_id.as_str()
-                )));
-            }
-        }
-        Ok(())
-    }
-
     pub fn upsert_memory_profile(
         &self,
         profile: &MemoryProfile,
@@ -3242,42 +2544,6 @@ impl Core {
                 supported_capabilities: &request.supported_capabilities,
                 token_estimates: &token_estimates,
                 activation_seed: request.activation_seed,
-            },
-        )
-        .map_err(orchestration_validation_error)
-    }
-
-    pub fn preview_transform(
-        &self,
-        request: &TransformPreviewRequest,
-    ) -> CoreResult<TransformResult> {
-        let transform_set = self.get_transform_set(&request.transform_set_id)?.value;
-        let rule = transform_set
-            .rules
-            .iter()
-            .find(|rule| rule.id == request.rule_id)
-            .ok_or_else(|| {
-                CoreError::new(
-                    lorepia_domain::CoreErrorCode::NotFound,
-                    "transform rule was not found in the selected set",
-                    false,
-                )
-            })?;
-        let approved_import_source_ids =
-            request.approved_import_source_ids.iter().cloned().collect();
-        preview_transform_rule(
-            rule,
-            &request.input,
-            TransformContext {
-                variables: &request.variables,
-                model_capabilities: &request.supported_capabilities,
-            },
-            TransformLimits::default(),
-            &TransformCompileOptions {
-                approved_import_source_ids,
-            },
-            TransformApplyOptions {
-                allow_resolved_prompt: request.allow_resolved_prompt,
             },
         )
         .map_err(orchestration_validation_error)
@@ -3824,48 +3090,6 @@ impl Core {
         Ok(overlay)
     }
 
-    fn prompt_supported_capabilities(
-        &self,
-        model_route_id: &lorepia_domain::ModelRouteId,
-    ) -> CoreResult<Vec<CapabilityKey>> {
-        const KEYS: [CapabilityKey; 16] = [
-            CapabilityKey::Streaming,
-            CapabilityKey::Reasoning,
-            CapabilityKey::PromptCaching,
-            CapabilityKey::ToolCalling,
-            CapabilityKey::ParallelToolCalling,
-            CapabilityKey::StructuredOutput,
-            CapabilityKey::JsonMode,
-            CapabilityKey::ImageInput,
-            CapabilityKey::AudioInput,
-            CapabilityKey::AudioOutput,
-            CapabilityKey::Logprobs,
-            CapabilityKey::Seed,
-            CapabilityKey::Batch,
-            CapabilityKey::Background,
-            CapabilityKey::ContextWindow,
-            CapabilityKey::MaxOutputTokens,
-        ];
-        let mut supported = Vec::new();
-        for key in KEYS {
-            let Some(capability) = self.effective_capability(model_route_id, key)? else {
-                continue;
-            };
-            if capability.has_conflict || capability.selected_is_stale {
-                continue;
-            }
-            if matches!(
-                capability.selected.status,
-                lorepia_domain::SupportStatus::Unsupported | lorepia_domain::SupportStatus::Unknown
-            ) || matches!(capability.selected.value, CapabilityValue::Boolean(false))
-            {
-                continue;
-            }
-            supported.push(key);
-        }
-        Ok(supported)
-    }
-
     #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
     fn select_prompt_knowledge(
         &self,
@@ -4267,145 +3491,6 @@ impl Core {
             .collect();
         Ok(Some(PromptMemorySource { profile, records }))
     }
-
-    fn prompt_provider_contract(
-        &self,
-        target: Option<&GenerationTarget>,
-        family: Option<ApiFamily>,
-        max_output_tokens: Option<u32>,
-        requested_reasoning_effort: Option<GenerationReasoningEffort>,
-        supplied_wire_contract: Option<&crate::app::PromptRouteWireContract>,
-    ) -> CoreResult<PromptProviderResolution> {
-        let owned_wire_contract = self.resolve_owned_prompt_wire_contract(
-            target,
-            supplied_wire_contract,
-            requested_reasoning_effort,
-        )?;
-        let wire_contract = supplied_wire_contract.or(owned_wire_contract.as_ref());
-        if wire_contract.is_some_and(|contract| {
-            contract.reasoning_effort_applied != requested_reasoning_effort
-                && contract.reasoning_effort_applied.is_some()
-        }) {
-            return Err(CoreError::internal(
-                "provider snapshot reasoning overlay does not match prompt quick settings",
-            ));
-        }
-        let family = resolve_prompt_provider_family(family, wire_contract)?;
-        let (max_context_tokens, reserved_output_tokens) =
-            prompt_provider_token_limits(wire_contract, max_output_tokens)?;
-        let metadata = prompt_provider_wire_metadata(family, wire_contract);
-        let adapter = ProviderPromptAdapterContract::for_family(family)
-            .with_context_limit_tokens(Some(max_context_tokens))
-            .map_err(orchestration_validation_error)?;
-        let mut contract = adapter.resolution_contract(metadata.developer_capability);
-        contract.supports_explicit_cache = matches!(
-            metadata.cache_dialect,
-            PromptCacheWireDialect::Anthropic {
-                supports_explicit_breakpoints: true,
-                ..
-            }
-        );
-        contract.max_cache_boundaries = if contract.supports_explicit_cache {
-            4
-        } else {
-            0
-        };
-        Ok(PromptProviderResolution {
-            contract,
-            adapter,
-            developer_capability: metadata.developer_capability,
-            cache_dialect: metadata.cache_dialect,
-            max_context_tokens,
-            reserved_output_tokens,
-            reasoning_effort_applied: wire_contract
-                .and_then(|contract| contract.reasoning_effort_applied),
-            request_plan_sha256: metadata.request_plan_sha256,
-            generation_preset_sha256: metadata.generation_preset_sha256,
-        })
-    }
-
-    fn resolve_owned_prompt_wire_contract(
-        &self,
-        target: Option<&GenerationTarget>,
-        supplied: Option<&crate::app::PromptRouteWireContract>,
-        reasoning_effort: Option<GenerationReasoningEffort>,
-    ) -> CoreResult<Option<crate::app::PromptRouteWireContract>> {
-        match (target, supplied) {
-            (Some(_), Some(_)) | (None, None) => Ok(None),
-            (Some(target), None) => crate::app::prompt_route_wire_contract_with_reasoning_effort(
-                self,
-                target,
-                reasoning_effort,
-            )
-            .map(Some),
-            (None, Some(_)) => Err(CoreError::internal(
-                "legacy provider cannot carry a catalog route contract",
-            )),
-        }
-    }
-}
-
-fn resolve_prompt_provider_family(
-    family: Option<ApiFamily>,
-    wire_contract: Option<&crate::app::PromptRouteWireContract>,
-) -> CoreResult<ApiFamily> {
-    match (family, wire_contract) {
-        (Some(family), Some(contract)) if family != contract.api_family => Err(
-            CoreError::internal("provider snapshot API family does not match prompt preparation"),
-        ),
-        (Some(family), _) => Ok(family),
-        (None, Some(contract)) => Ok(contract.api_family),
-        (None, None) => Ok(ApiFamily::OpenAiChatCompletions),
-    }
-}
-
-fn prompt_provider_token_limits(
-    wire_contract: Option<&crate::app::PromptRouteWireContract>,
-    max_output_tokens: Option<u32>,
-) -> CoreResult<(u32, u32)> {
-    let max_context_tokens = wire_contract
-        .and_then(|contract| contract.context_limit_tokens)
-        .unwrap_or(8_192);
-    let requested_output_tokens = max_output_tokens
-        .or_else(|| wire_contract.and_then(|contract| contract.configured_max_output_tokens))
-        .unwrap_or(4_096);
-    let reserved_output_tokens = wire_contract
-        .and_then(|contract| contract.observed_max_output_tokens)
-        .map_or(requested_output_tokens, |limit| {
-            requested_output_tokens.min(limit)
-        });
-    if reserved_output_tokens >= max_context_tokens {
-        return Err(CoreError::invalid(
-            "reserved output tokens must be smaller than the model context limit",
-        ));
-    }
-    Ok((max_context_tokens, reserved_output_tokens))
-}
-
-fn prompt_provider_wire_metadata(
-    family: ApiFamily,
-    wire_contract: Option<&crate::app::PromptRouteWireContract>,
-) -> PromptProviderWireMetadata {
-    wire_contract.map_or_else(
-        || PromptProviderWireMetadata {
-            developer_capability: match family {
-                ApiFamily::OpenAiResponses => DeveloperRoleCapability::Supported,
-                ApiFamily::OpenAiChatCompletions => DeveloperRoleCapability::Unknown,
-                ApiFamily::AnthropicMessages
-                | ApiFamily::GeminiGenerateContent
-                | ApiFamily::OllamaNative => DeveloperRoleCapability::Unsupported,
-            },
-            cache_dialect: PromptCacheWireDialect::Unsupported,
-            request_plan_sha256: "legacy-provider-request-plan".to_owned(),
-            generation_preset_sha256: "legacy-generation-preset".to_owned(),
-        },
-        |contract| PromptProviderWireMetadata {
-            developer_capability: contract.developer_capability,
-            cache_dialect: contract.cache_dialect,
-            request_plan_sha256: contract.request_plan_sha256.clone(),
-            generation_preset_sha256: contract.generation_preset_sha256.clone(),
-        },
-    )
 }
 
 fn prompt_memory_selection_semantic_scores(
@@ -4716,238 +3801,6 @@ pub(crate) fn deterministic_prompt_user_message_id(
     MessageId(Uuid::new_v5(&Uuid::NAMESPACE_URL, identity.as_bytes()).to_string())
 }
 
-fn deterministic_room_prompt_binding_id(
-    conversation_id: &ConversationId,
-    branch_id: &ConversationBranchId,
-) -> String {
-    let identity = format!(
-        "lorepia:room-prompt-binding:v1\u{0}{}\u{0}{}",
-        conversation_id.0, branch_id.0
-    );
-    Uuid::new_v5(&Uuid::NAMESPACE_URL, identity.as_bytes()).to_string()
-}
-
-fn canonical_creator_variable_overrides(
-    preset: &PromptPreset,
-    creator_values: &BTreeMap<String, CreatorControlValue>,
-) -> CoreResult<VariableMap> {
-    if creator_values.len() > preset.controls.len() {
-        return Err(CoreError::invalid(
-            "creator values contain more controls than the selected preset",
-        ));
-    }
-    let mut variables = VariableMap::default();
-    for (control_id, supplied) in creator_values {
-        let control = preset
-            .controls
-            .iter()
-            .find(|control| control.id.as_str() == control_id)
-            .ok_or_else(|| {
-                CoreError::invalid(format!(
-                    "creator value references unknown control `{control_id}`"
-                ))
-            })?;
-        if control.sensitive {
-            return Err(CoreError::invalid(
-                "sensitive creator controls cannot cross the frontend boundary",
-            ));
-        }
-        let variable = control.variable.as_ref().ok_or_else(|| {
-            CoreError::invalid("presentation-only controls cannot receive creator values")
-        })?;
-        if variables.get(variable).is_some() {
-            return Err(CoreError::invalid(
-                "multiple creator controls cannot override the same variable",
-            ));
-        }
-        let value = canonical_creator_control_value(control, supplied)?;
-        variables.insert(variable.clone(), value);
-    }
-    Ok(variables)
-}
-
-fn canonical_creator_control_value(
-    control: &ControlSpec,
-    supplied: &CreatorControlValue,
-) -> CoreResult<VariableValue> {
-    let value_type = control
-        .value_type
-        .ok_or_else(|| CoreError::invalid("creator control has no declared value type"))?;
-    let value = match (value_type, supplied) {
-        (VariableType::Bool, CreatorControlValue::Bool(value)) => VariableValue::Bool(*value),
-        (VariableType::Integer, CreatorControlValue::Integer(value)) => {
-            VariableValue::Integer(*value)
-        }
-        (VariableType::Integer, CreatorControlValue::Decimal(value)) => {
-            VariableValue::Integer(exact_i64_from_f64(*value).ok_or_else(|| {
-                CoreError::invalid("creator value type does not match the selected preset control")
-            })?)
-        }
-        (VariableType::Decimal, CreatorControlValue::Integer(value)) => {
-            VariableValue::Decimal(i64_as_f64(*value)?)
-        }
-        (VariableType::Decimal, CreatorControlValue::Decimal(value)) if value.is_finite() => {
-            VariableValue::Decimal(*value)
-        }
-        (VariableType::Text, CreatorControlValue::Text(value)) => {
-            validate_creator_text(value)?;
-            VariableValue::Text(value.clone())
-        }
-        (VariableType::Enum, CreatorControlValue::Text(value)) => {
-            validate_creator_text(value)?;
-            VariableValue::Enum(value.clone())
-        }
-        (VariableType::StringList, CreatorControlValue::StringList(values)) => {
-            if values.len() > 1_024 {
-                return Err(CoreError::invalid(
-                    "creator multi-select contains too many values",
-                ));
-            }
-            let mut unique = std::collections::BTreeSet::new();
-            for value in values {
-                validate_creator_text(value)?;
-                if !unique.insert(value.as_str()) {
-                    return Err(CoreError::invalid(
-                        "creator multi-select contains duplicate values",
-                    ));
-                }
-            }
-            let allowed = control
-                .options
-                .iter()
-                .filter_map(|option| match &option.value {
-                    VariableValue::Text(value) | VariableValue::Enum(value) => Some(value),
-                    _ => None,
-                })
-                .collect::<Vec<_>>();
-            if values.iter().any(|value| !allowed.contains(&value)) {
-                return Err(CoreError::invalid(
-                    "creator multi-select value is not a declared option",
-                ));
-            }
-            let canonical = allowed
-                .into_iter()
-                .filter(|value| unique.contains(value.as_str()))
-                .cloned()
-                .collect();
-            VariableValue::StringList(canonical)
-        }
-        _ => {
-            return Err(CoreError::invalid(
-                "creator value type does not match the selected preset control",
-            ));
-        }
-    };
-    if control.kind == ControlKind::Select
-        && !control.options.iter().any(|option| option.value == value)
-    {
-        return Err(CoreError::invalid(
-            "creator select value is not a declared option",
-        ));
-    }
-    validate_creator_numeric_control(control, &value)?;
-    Ok(value)
-}
-
-fn validate_creator_text(value: &str) -> CoreResult<()> {
-    if value.len() > 262_144 || value.chars().count() > 65_536 || value.contains('\0') {
-        return Err(CoreError::invalid(
-            "creator text exceeds its safe size or contains a null character",
-        ));
-    }
-    Ok(())
-}
-
-fn validate_creator_numeric_control(
-    control: &ControlSpec,
-    value: &VariableValue,
-) -> CoreResult<()> {
-    let numeric = match value {
-        VariableValue::Integer(value) => i64_as_f64(*value)?,
-        VariableValue::Decimal(value) => *value,
-        _ => return Ok(()),
-    };
-    if !numeric.is_finite()
-        || control.minimum.is_some_and(|minimum| numeric < minimum)
-        || control.maximum.is_some_and(|maximum| numeric > maximum)
-    {
-        return Err(CoreError::invalid(
-            "creator numeric value is outside the declared bounds",
-        ));
-    }
-    if let Some(step) = control.step {
-        let origin = control.minimum.unwrap_or(0.0);
-        let steps = (numeric - origin) / step;
-        let tolerance = f64::EPSILON * steps.abs().max(1.0) * 16.0;
-        if (steps - steps.round()).abs() > tolerance {
-            return Err(CoreError::invalid(
-                "creator numeric value does not match the declared step",
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn exact_i64_from_f64(value: f64) -> Option<i64> {
-    (value.is_finite() && value.fract() == 0.0)
-        .then(|| value.to_string().parse::<i64>().ok())
-        .flatten()
-}
-
-fn i64_as_f64(value: i64) -> CoreResult<f64> {
-    value
-        .to_string()
-        .parse::<f64>()
-        .map_err(|_| CoreError::internal("integer creator value could not be converted"))
-}
-
-fn creator_values_from_binding(
-    preset: &PromptPreset,
-    binding: Option<&PromptPresetBinding>,
-) -> CoreResult<BTreeMap<String, CreatorControlValue>> {
-    let Some(binding) = binding else {
-        return Ok(BTreeMap::new());
-    };
-    let mut values = BTreeMap::new();
-    for control in &preset.controls {
-        if control.sensitive {
-            continue;
-        }
-        let Some(variable) = &control.variable else {
-            continue;
-        };
-        let Some(value) = binding.variable_overrides.get(variable) else {
-            continue;
-        };
-        let value = match value {
-            VariableValue::Bool(value) => CreatorControlValue::Bool(*value),
-            VariableValue::Integer(value) => CreatorControlValue::Integer(*value),
-            VariableValue::Decimal(value) if value.is_finite() => {
-                CreatorControlValue::Decimal(*value)
-            }
-            VariableValue::Text(value) | VariableValue::Enum(value) => {
-                CreatorControlValue::Text(value.clone())
-            }
-            VariableValue::StringList(values) => CreatorControlValue::StringList(values.clone()),
-            VariableValue::Decimal(_) => {
-                return Err(CoreError::new(
-                    lorepia_domain::CoreErrorCode::StorageCorrupted,
-                    "stored creator value is not finite",
-                    false,
-                ));
-            }
-        };
-        values.insert(control.id.as_str().to_owned(), value);
-    }
-    Ok(values)
-}
-
-fn merge_variable_map(target: &mut VariableMap, source: &VariableMap) {
-    for binding in &source.values {
-        target.insert(binding.variable.clone(), binding.value.clone());
-    }
-}
-
 fn prompt_module_knowledge_revisions(
     books: &[ObjectRevision<KnowledgeBook>],
 ) -> CoreResult<BTreeMap<KnowledgeEntryId, String>> {
@@ -5095,21 +3948,6 @@ fn module_binding_applies_to_prompt(
     }
 }
 
-fn append_exact_module_transform_sets(
-    target: &mut Vec<TransformSet>,
-    module_sets: &[ObjectRevision<TransformSet>],
-) -> CoreResult<()> {
-    for revision in module_sets {
-        if target.iter().any(|set| set.id == revision.value.id) {
-            return Err(CoreError::invalid(
-                "prompt preset and approved module select the same transform set ambiguously",
-            ));
-        }
-        target.push(revision.value.clone());
-    }
-    Ok(())
-}
-
 fn module_plan_error(error: impl std::fmt::Display) -> CoreError {
     CoreError::invalid(format!("approved module plan is invalid: {error}"))
 }
@@ -5134,98 +3972,6 @@ fn is_builtin_prompt_preset_id(id: &PromptPresetId) -> bool {
     built_in_prompt_presets()
         .iter()
         .any(|preset| preset.id == *id)
-}
-
-pub(crate) fn apply_transform_sets_with_import_approvals(
-    sets: &[TransformSet],
-    phase: lorepia_domain::TransformPhase,
-    input: &str,
-    variables: &VariableMap,
-    supported_capabilities: &[CapabilityKey],
-    approved_import_source_ids: &BTreeSet<String>,
-) -> CoreResult<TransformResult> {
-    let pipeline = TransformPipeline::compile_with_options(
-        sets,
-        TransformLimits::default(),
-        &TransformCompileOptions {
-            approved_import_source_ids: approved_import_source_ids.clone(),
-        },
-    )
-    .map_err(|error| CoreError::invalid(format!("transform pipeline is invalid: {error}")))?;
-    // Runtime transform failures deliberately return the original input. The
-    // structured report stays available for diagnostics while generation never
-    // consumes a partial or ambiguous transform output.
-    Ok(pipeline.apply(
-        phase,
-        input,
-        TransformContext {
-            variables,
-            model_capabilities: supported_capabilities,
-        },
-        TransformApplyOptions::default(),
-    ))
-}
-
-fn apply_resolved_prompt_transforms(
-    plan: &ResolvedPromptPlan,
-    sets: &[TransformSet],
-    variables: &VariableMap,
-    supported_capabilities: &[CapabilityKey],
-    approved_import_source_ids: &BTreeSet<String>,
-) -> CoreResult<(ResolvedPromptPlan, Vec<String>)> {
-    if !sets.iter().any(|set| {
-        set.enabled
-            && set.rules.iter().any(|rule| {
-                rule.enabled && rule.phase == lorepia_domain::TransformPhase::ResolvedPrompt
-            })
-    }) {
-        return Ok((plan.clone(), Vec::new()));
-    }
-    let pipeline = TransformPipeline::compile_with_options(
-        sets,
-        TransformLimits::default(),
-        &TransformCompileOptions {
-            approved_import_source_ids: approved_import_source_ids.clone(),
-        },
-    )
-    .map_err(|error| CoreError::invalid(format!("transform pipeline is invalid: {error}")))?;
-    let mut transformed_contents = Vec::with_capacity(plan.effective_messages.len());
-    let mut warnings = Vec::new();
-    let mut changed = false;
-    for message in &plan.effective_messages {
-        let result = pipeline.apply(
-            lorepia_domain::TransformPhase::ResolvedPrompt,
-            &message.content,
-            TransformContext {
-                variables,
-                model_capabilities: supported_capabilities,
-            },
-            TransformApplyOptions {
-                allow_resolved_prompt: true,
-            },
-        );
-        if let Some(error) = &result.error {
-            warnings.push(format!(
-                "resolved-prompt transform failed for block {} and preserved the original text: {:?}",
-                message.block_id.as_str(),
-                error.code
-            ));
-        }
-        changed |= result.changed;
-        transformed_contents.push(result.output);
-    }
-    if !changed {
-        return Ok((plan.clone(), warnings));
-    }
-    match reseal_resolved_prompt_plan(plan, &transformed_contents) {
-        Ok(plan) => Ok((plan, warnings)),
-        Err(error) => {
-            warnings.push(format!(
-                "resolved-prompt transform exceeded the reviewed plan boundary and was ignored: {error}"
-            ));
-            Ok((plan.clone(), warnings))
-        }
-    }
 }
 
 fn character_prompt_content(
@@ -5256,136 +4002,6 @@ fn character_prompt_content(
             .map(|asset| asset.id.clone())
             .collect(),
     }
-}
-
-fn redacted_prompt_preview(
-    plan: &ResolvedPromptPlan,
-    execution_hash: &str,
-    prompt_preset_revision: u64,
-    prompt_preset_revision_id: &str,
-    generation_target: Option<GenerationTarget>,
-    provider: &ProviderCompiledPromptPreview,
-    preparation_warnings: &[String],
-) -> CoreResult<PromptPlanPreview> {
-    verify_resolved_prompt_plan(plan).map_err(orchestration_validation_error)?;
-    let mut warnings = plan.trace.warnings.clone();
-    warnings.extend_from_slice(preparation_warnings);
-    for boundary in &provider.cache_boundaries {
-        if let ProviderCacheBoundaryDisposition::Ignored { warning } = boundary.disposition {
-            warnings.push(format!(
-                "provider ignored cache boundary {}: {warning:?}",
-                boundary.boundary_id.as_str()
-            ));
-        }
-    }
-    Ok(PromptPlanPreview {
-        plan_id: execution_hash.to_owned(),
-        plan_hash: execution_hash.to_owned(),
-        neutral_plan_hash: plan.plan_hash.clone(),
-        prompt_preset_id: plan.preset_id.clone(),
-        prompt_preset_revision,
-        prompt_preset_revision_id: prompt_preset_revision_id.to_owned(),
-        generation_target,
-        estimated_input_tokens: plan.trace.estimated_input_tokens,
-        available_input_tokens: plan.trace.available_input_tokens,
-        token_estimator_id: plan.trace.estimator_id.clone(),
-        token_estimate_exact: false,
-        messages: plan
-            .effective_messages
-            .iter()
-            .map(|message| PromptPlanMessagePreview {
-                sequence: message.sequence,
-                block_id: message.block_id.clone(),
-                block_kind: message.block_kind,
-                requested_role: message.requested_role,
-                effective_role: message.effective_role,
-                estimated_tokens: message.estimated_tokens,
-                source_message_ids: message.source_message_ids.clone(),
-            })
-            .collect(),
-        provider_family: provider.family,
-        provider_messages: provider
-            .messages
-            .iter()
-            .map(|message| PromptProviderMessagePreview {
-                sequence: message.sequence,
-                block_id: message.block_id.clone(),
-                effective_role: message.effective_role,
-                wire_role: message.wire_role,
-                placement: message.placement,
-                estimated_tokens: message.estimated_tokens,
-            })
-            .collect(),
-        provider_cache_boundaries: provider.cache_boundaries.clone(),
-        cache_directives: plan.cache_directives.clone(),
-        blocks: plan.trace.blocks.clone(),
-        role_mappings: plan.trace.role_mappings.clone(),
-        overflow: plan.trace.overflow.clone(),
-        warnings,
-    })
-}
-
-fn provider_cacheable_prefix_tokens(provider: &ProviderCompiledPromptPreview) -> u32 {
-    let last_applied_sequence = provider
-        .cache_boundaries
-        .iter()
-        .filter(|boundary| {
-            matches!(
-                boundary.disposition,
-                ProviderCacheBoundaryDisposition::Mapped { .. }
-            )
-        })
-        .filter_map(|boundary| boundary.after_message_sequence)
-        .max();
-    last_applied_sequence.map_or(0, |last| {
-        provider
-            .messages
-            .iter()
-            .filter(|message| message.sequence <= last)
-            .map(|message| message.estimated_tokens)
-            .fold(0_u32, u32::saturating_add)
-    })
-}
-
-fn cacheable_prefix_has_volatile_before_fixed_after(
-    plan: &ResolvedPromptPlan,
-    provider: &ProviderCompiledPromptPreview,
-) -> bool {
-    let Some(last_applied_sequence) = provider
-        .cache_boundaries
-        .iter()
-        .filter(|boundary| {
-            matches!(
-                boundary.disposition,
-                ProviderCacheBoundaryDisposition::Mapped { .. }
-            )
-        })
-        .filter_map(|boundary| boundary.after_message_sequence)
-        .max()
-    else {
-        return false;
-    };
-    let volatile_before = plan.effective_messages.iter().any(|message| {
-        message.sequence <= last_applied_sequence && prompt_block_is_volatile(message.block_kind)
-    });
-    let fixed_after = plan.effective_messages.iter().any(|message| {
-        message.sequence > last_applied_sequence && !prompt_block_is_volatile(message.block_kind)
-    });
-    volatile_before && fixed_after
-}
-
-const fn prompt_block_is_volatile(kind: lorepia_domain::PromptBlockKind) -> bool {
-    matches!(
-        kind,
-        lorepia_domain::PromptBlockKind::WorldKnowledge
-            | lorepia_domain::PromptBlockKind::RetrievedMemory
-            | lorepia_domain::PromptBlockKind::ConversationSummary
-            | lorepia_domain::PromptBlockKind::HistorySlice
-            | lorepia_domain::PromptBlockKind::LatestUserTurn
-            | lorepia_domain::PromptBlockKind::AuthorNote
-            | lorepia_domain::PromptBlockKind::AssistantPrefill
-            | lorepia_domain::PromptBlockKind::GroupContext
-    )
 }
 
 fn estimate_prompt_memory_tokens(_title: &str, summary: &str) -> u32 {
@@ -5740,34 +4356,6 @@ fn usize_as_f32(mut value: usize) -> f32 {
     result
 }
 
-fn prompt_creativity_temperature(creativity: u8) -> f64 {
-    // Preserve the product's 0.015 step through a JSON round trip. Multiplying
-    // directly by a binary floating-point literal can serialize values such as
-    // 90 as 1.3499999999999999 and then normalize to 1.35 when decoded.
-    f64::from(u16::from(creativity) * 15) / 1_000.0
-}
-
-fn canonical_prompt_capabilities(
-    capabilities: Vec<CapabilityKey>,
-) -> CoreResult<Vec<CapabilityKey>> {
-    let mut keyed = capabilities
-        .into_iter()
-        .map(|capability| {
-            serde_json::to_string(&capability)
-                .map(|key| (key, capability))
-                .map_err(|error| {
-                    CoreError::internal(format!("prompt capability cannot be encoded: {error}"))
-                })
-        })
-        .collect::<CoreResult<Vec<_>>>()?;
-    keyed.sort_by(|left, right| left.0.cmp(&right.0));
-    keyed.dedup_by(|left, right| left.0 == right.0);
-    Ok(keyed
-        .into_iter()
-        .map(|(_, capability)| capability)
-        .collect())
-}
-
 const fn prompt_memory_lane(lane: MemorySelectionLane) -> PromptMemorySelectionLane {
     match lane {
         MemorySelectionLane::Pinned => PromptMemorySelectionLane::Pinned,
@@ -5793,88 +4381,6 @@ fn prompt_memory_reason(reason: MemorySelectionReason) -> PromptMemorySelectionR
             PromptMemorySelectionReason::Importance { score_millionths }
         }
     }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn prompt_execution_hash(
-    plan: &ResolvedPromptPlan,
-    prompt_preset_revision_id: &str,
-    generation_target: Option<&GenerationTarget>,
-    provider: &PromptProviderResolution,
-    provider_preview: &ProviderCompiledPromptPreview,
-    temperature: Option<f64>,
-    response_length: PromptResponseLength,
-    creativity: u8,
-    requested_reasoning_effort: Option<GenerationReasoningEffort>,
-    memory_enabled: bool,
-    knowledge_enabled: bool,
-    variables: &VariableMap,
-    transform_sets: &[TransformSet],
-    module_plan_sha256: Option<&str>,
-    approved_import_source_ids: &BTreeSet<String>,
-    memory_semantic_evidence: Option<&MemorySemanticQueryEvidence>,
-    knowledge_semantic_evidence: &[KnowledgeSemanticBookEvidence],
-) -> CoreResult<String> {
-    #[derive(serde::Serialize)]
-    struct ExecutionIdentity<'a> {
-        schema_version: u32,
-        neutral_plan_hash: &'a str,
-        prompt_preset_revision_id: &'a str,
-        generation_target: Option<&'a GenerationTarget>,
-        provider_family: ApiFamily,
-        developer_capability: DeveloperRoleCapability,
-        cache_dialect: PromptCacheWireDialect,
-        request_plan_sha256: &'a str,
-        generation_preset_sha256: &'a str,
-        context_limit_tokens: u32,
-        reserved_output_tokens: u32,
-        temperature: Option<f64>,
-        response_length: PromptResponseLength,
-        creativity: u8,
-        requested_reasoning_effort: Option<GenerationReasoningEffort>,
-        reasoning_effort_applied: Option<GenerationReasoningEffort>,
-        memory_enabled: bool,
-        knowledge_enabled: bool,
-        variables: &'a VariableMap,
-        transform_sets: &'a [TransformSet],
-        module_plan_sha256: Option<&'a str>,
-        approved_import_source_ids: &'a BTreeSet<String>,
-        provider_preview: &'a ProviderCompiledPromptPreview,
-        memory_semantic_evidence: Option<&'a MemorySemanticQueryEvidence>,
-        knowledge_semantic_evidence: &'a [KnowledgeSemanticBookEvidence],
-    }
-
-    let encoded = serde_json::to_vec(&ExecutionIdentity {
-        schema_version: 1,
-        neutral_plan_hash: &plan.plan_hash,
-        prompt_preset_revision_id,
-        generation_target,
-        provider_family: provider.adapter.family(),
-        developer_capability: provider.developer_capability,
-        cache_dialect: provider.cache_dialect,
-        request_plan_sha256: &provider.request_plan_sha256,
-        generation_preset_sha256: &provider.generation_preset_sha256,
-        context_limit_tokens: provider.max_context_tokens,
-        reserved_output_tokens: provider.reserved_output_tokens,
-        temperature,
-        response_length,
-        creativity,
-        requested_reasoning_effort,
-        reasoning_effort_applied: provider.reasoning_effort_applied,
-        memory_enabled,
-        knowledge_enabled,
-        variables,
-        transform_sets,
-        module_plan_sha256,
-        approved_import_source_ids,
-        provider_preview,
-        memory_semantic_evidence,
-        knowledge_semantic_evidence,
-    })
-    .map_err(|error| {
-        CoreError::internal(format!("cannot encode prompt execution identity: {error}"))
-    })?;
-    Ok(format!("{:x}", Sha256::digest(encoded)))
 }
 
 #[cfg(test)]
