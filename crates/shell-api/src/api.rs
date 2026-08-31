@@ -3,22 +3,30 @@ use std::{fmt, path::Path};
 use lorepia_core::{
     CORE_API_VERSION, ConnectionBoundCredential, ConversationBranchId, ConversationId,
     ConversationMode, Core, CoreConfig, CoreError, DiscoveryRecoveryOwner, GenerationId,
-    GenerationOperationContext, GenerationTarget, InspectionId, MessageId, MessageRole,
-    ProviderConnectionId, ProviderCredentialAccessAuthority, RuntimeGenerationAuditContext,
-    RuntimeGenerationCapability, RuntimePromptMessage, VariableMap,
+    GenerationOperationContext, GenerationTarget, InspectionId, MessageId, ProviderConnectionId,
+    ProviderCredentialAccessAuthority, RuntimeGenerationAuditContext, RuntimePromptMessage,
 };
-use serde::{Deserialize, Serialize};
 
 use crate::{
     BootstrapDto, CharacterDto, CharacterGreetingCatalogDto, CharacterRenderProfileDto,
-    ChatEventStream, ConversationBranchDto, ConversationDto, ConversationModeDto,
-    ConversationStateDto, GenerationCredential, GenerationStartedDto, GenerationTargetDto,
-    GenerationUsageDto, HealthDto, ImportInspectionDto, MessageActionGenerationDto, MessageDto,
-    ProviderCredentialAccessAuthorityContext, SecretCredential, ShellError, ShellResult,
-    StagedImportFile, TaskCredentialLease, TaskCredentialReader,
-    orchestration::ShellTaskCredentialBroker, sensitive::GenerationCredentialKind,
-    stream::GenerationReattachment,
+    ChatEventStream, ConversationBranchDto, ConversationDto, ConversationStateDto,
+    GenerationCredential, GenerationStartedDto, HealthDto, ImportInspectionDto,
+    MessageActionGenerationDto, MessageDto, ProviderCredentialAccessAuthorityContext,
+    SecretCredential, ShellError, ShellResult, StagedImportFile, TaskCredentialLease,
+    TaskCredentialReader, orchestration::ShellTaskCredentialBroker,
+    sensitive::GenerationCredentialKind, stream::GenerationReattachment,
 };
+
+pub use crate::dto::{
+    ConversationGreetingSelectionInput, CreateConversationBranchInput, CreateConversationInput,
+    EditUserMessageInput, GenerateRuntimeTextInput, GenerationSelectionInput,
+    RegenerateAssistantMessageInput, RemoveMessageInput, RuntimePromptMessageInput,
+    RuntimePromptRoleInput, RuntimeTextGenerationDto, SelectConversationBranchInput,
+    SendMessageInput, SetConversationModeInput,
+};
+
+#[allow(unused_imports)]
+pub use crate::dto::{RuntimeGenerationAuditInput, RuntimeGenerationCapabilityInput};
 
 const MAX_IPC_IDENTIFIER_BYTES: usize = 512;
 const MAX_IPC_IDENTIFIER_CHARS: usize = 256;
@@ -50,136 +58,6 @@ fn connection_bound_credential(
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum GenerationSelectionInput {
-    LegacyProfile { provider_profile_id: String },
-    Target { target: GenerationTargetDto },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RuntimePromptRoleInput {
-    System,
-    User,
-    Assistant,
-}
-
-impl From<RuntimePromptRoleInput> for MessageRole {
-    fn from(value: RuntimePromptRoleInput) -> Self {
-        match value {
-            RuntimePromptRoleInput::System => Self::System,
-            RuntimePromptRoleInput::User => Self::User,
-            RuntimePromptRoleInput::Assistant => Self::Assistant,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RuntimePromptMessageInput {
-    pub role: RuntimePromptRoleInput,
-    pub content: String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum RuntimeGenerationCapabilityInput {
-    #[serde(rename = "model:primary")]
-    Primary,
-    #[serde(rename = "model:auxiliary")]
-    Auxiliary,
-}
-
-impl From<RuntimeGenerationCapabilityInput> for RuntimeGenerationCapability {
-    fn from(value: RuntimeGenerationCapabilityInput) -> Self {
-        match value {
-            RuntimeGenerationCapabilityInput::Primary => Self::Primary,
-            RuntimeGenerationCapabilityInput::Auxiliary => Self::Auxiliary,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RuntimeGenerationAuditInput {
-    pub character_id: String,
-    pub character_content_revision_id: Option<String>,
-    pub capability: RuntimeGenerationCapabilityInput,
-    pub grant_sha256: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct GenerateRuntimeTextInput {
-    pub request_id: String,
-    pub audit: RuntimeGenerationAuditInput,
-    pub selection: GenerationSelectionInput,
-    pub messages: Vec<RuntimePromptMessageInput>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RuntimeTextGenerationDto {
-    pub request_id: String,
-    pub result: String,
-    pub usage: GenerationUsageDto,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SendMessageInput {
-    pub conversation_id: String,
-    pub branch_id: String,
-    pub expected_head: Option<String>,
-    pub mode: ConversationModeDto,
-    pub text: String,
-    pub selection: GenerationSelectionInput,
-    /// Per-generation character/runtime values merged after stored prompt state.
-    #[serde(default)]
-    pub variable_overrides: VariableMap,
-    /// Caller-owned idempotency identity. Missing fields still deserialize so
-    /// older clients receive a bounded validation error instead of a schema
-    /// decoding failure.
-    #[serde(default)]
-    pub operation_nonce: Option<String>,
-    /// Exact durable attempt to resume. This and `operation_nonce` are XOR.
-    #[serde(default)]
-    pub generation_attempt_id: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct EditUserMessageInput {
-    pub conversation_id: String,
-    pub branch_id: String,
-    pub expected_head: Option<String>,
-    pub message_id: String,
-    pub replacement_text: String,
-    pub selection: GenerationSelectionInput,
-    /// Caller-owned identity for a new edit operation.
-    #[serde(default)]
-    pub operation_nonce: Option<String>,
-    /// Exact durable edit attempt to resume; mutually exclusive with nonce.
-    #[serde(default)]
-    pub generation_attempt_id: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RegenerateAssistantMessageInput {
-    pub conversation_id: String,
-    pub branch_id: String,
-    pub expected_head: Option<String>,
-    pub message_id: String,
-    pub selection: GenerationSelectionInput,
-    /// Caller-owned identity for a new regenerate operation.
-    #[serde(default)]
-    pub operation_nonce: Option<String>,
-    /// Exact durable regenerate attempt to resume; mutually exclusive with nonce.
-    #[serde(default)]
-    pub generation_attempt_id: Option<String>,
-}
-
 pub(crate) enum ValidatedGenerationOperationContext {
     New(String),
     Resume(GenerationId),
@@ -194,57 +72,6 @@ impl ValidatedGenerationOperationContext {
             },
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RemoveMessageInput {
-    pub conversation_id: String,
-    pub branch_id: String,
-    pub expected_head: Option<String>,
-    pub message_id: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CreateConversationInput {
-    pub character_id: String,
-    pub title: String,
-    pub mode: ConversationModeDto,
-    /// Present only when the caller is bound to a greeting catalog snapshot.
-    /// A nested object distinguishes an exact legacy `null` revision from an
-    /// older caller that did not participate in greeting selection.
-    #[serde(default)]
-    pub greeting: Option<ConversationGreetingSelectionInput>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ConversationGreetingSelectionInput {
-    pub character_content_revision_id: Option<String>,
-    pub greeting_id: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CreateConversationBranchInput {
-    pub conversation_id: String,
-    pub from_message_id: Option<String>,
-    pub title: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SelectConversationBranchInput {
-    pub conversation_id: String,
-    pub branch_id: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SetConversationModeInput {
-    pub conversation_id: String,
-    pub mode: ConversationModeDto,
 }
 
 #[derive(Clone)]
