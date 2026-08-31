@@ -20,10 +20,6 @@
       "bytes": 180370,
       "lines": 4773
     },
-    "crates/core/tests/orchestration_core_contract.rs": {
-      "bytes": 130794,
-      "lines": 3293
-    },
     "crates/core/tests/ordinary_same_branch_sealed_retry.rs": {
       "bytes": 79628,
       "lines": 2162
