@@ -190,25 +190,30 @@
       }
     },
     "CORE-ORCH-002": {
-      "baseline_context_bytes": 447423,
       "commands": [
         "cargo test -p lorepia-core --test ordinary_interaction_sealed_replay",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
       "max_context_bytes": 250000,
-      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
       "paths": {
         "documents": [
           "crates/core/AGENTS.md"
         ],
         "entrypoints": [
-          "crates/core/src/orchestration_runtime.rs"
+          "crates/core/src/lib.rs"
         ],
         "implementation": [
-          "crates/core/src/module_orchestration.rs"
+          "crates/core/src/module_orchestration/runtime_plan.rs",
+          "crates/core/src/orchestration_runtime/plan.rs",
+          "crates/core/src/orchestration_runtime/module_runtime.rs",
+          "crates/core/src/orchestration_runtime/interaction.rs",
+          "crates/core/src/orchestration_runtime/interaction/review.rs",
+          "crates/core/src/orchestration_runtime/interaction/policy.rs",
+          "crates/core/src/orchestration_runtime/interaction/state.rs"
         ],
         "tests": [
-          "crates/core/tests/ordinary_interaction_sealed_replay.rs"
+          "crates/core/tests/ordinary_interaction_sealed_replay.rs",
+          "crates/core/src/orchestration_runtime/interaction/tests/knowledge_binding_revision.rs"
         ]
       }
     },
