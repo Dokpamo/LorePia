@@ -26,13 +26,11 @@
       }
     },
     "CORE-CONTENT-001": {
-      "baseline_context_bytes": 397600,
       "commands": [
         "cargo test -p lorepia-core --test orchestration_content_import",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
       "max_context_bytes": 250000,
-      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
       "paths": {
         "documents": [
           "crates/core/AGENTS.md",
@@ -42,7 +40,10 @@
           "crates/core/src/content_package.rs"
         ],
         "implementation": [
-          "crates/content/src/package.rs"
+          "crates/core/src/content_package/inspect.rs",
+          "crates/core/src/content_package/review.rs",
+          "crates/core/src/content_package/commit.rs",
+          "crates/core/src/content_package/lifecycle.rs"
         ],
         "tests": [
           "crates/core/tests/orchestration_content_import.rs",
