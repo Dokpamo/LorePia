@@ -7339,14 +7339,14 @@
     "config/core-storage-public-api-baseline.json": "c86c10d701180070ec6742d3424deb2784cb0c5e5628b6b809093befa5c3c46b",
     "config/refactoring/completion-status.json": "b90ab0f6b8434af59d77ec025fc542355c7670222d1101d1fcf3fd6ab3c611d5",
     "config/refactoring/task-manifest.yaml": "90a2365b949430d97d588d44818afe3d348329284c48631c900de5d1de47fd58",
-    "config/source-size-baseline.json": "40e0f72954f09e4eca308fd1befd0a16fd3094dbd23114aeef603937aea029ec",
+    "config/source-size-baseline.json": "ae256c2584456303ac0e0e270b14082eee4b7fc3eb187f4986d450aae79f68c5",
     "config/test-source-size-baseline.json": "7df20cb344d52000b8581a25ae04afd808b46bc32fe5cfd4c3e0d26ba5f8f861"
   },
   "remaining_hotspots": {
     "configured_ratchets": {
       "active_over_hard_target_count": 55,
-      "count": 57,
-      "eligible_for_removal_count": 2,
+      "count": 55,
+      "eligible_for_removal_count": 0,
       "entries": [
         {
           "authority": "config/source-size-baseline.json#baselines/apps/lorepia/src-tauri/src/contract.rs",
@@ -7811,17 +7811,6 @@
           "status": "active-over-hard-target"
         },
         {
-          "authority": "config/source-size-baseline.json#baselines/crates/storage/src/discovery_repository.rs",
-          "current_bytes": 8217,
-          "current_lines": 161,
-          "hard_target_bytes": 40960,
-          "hard_target_lines": 500,
-          "path": "crates/storage/src/discovery_repository.rs",
-          "ratchet_bytes": 8217,
-          "ratchet_lines": 161,
-          "status": "eligible-for-removal"
-        },
-        {
           "authority": "config/source-size-baseline.json#baselines/crates/storage/src/generation_attempt.rs",
           "current_bytes": 163943,
           "current_lines": 4150,
@@ -7875,17 +7864,6 @@
           "ratchet_bytes": 29269,
           "ratchet_lines": 777,
           "status": "active-over-hard-target"
-        },
-        {
-          "authority": "config/source-size-baseline.json#baselines/crates/storage/src/package_repository.rs",
-          "current_bytes": 5490,
-          "current_lines": 126,
-          "hard_target_bytes": 40960,
-          "hard_target_lines": 500,
-          "path": "crates/storage/src/package_repository.rs",
-          "ratchet_bytes": 5490,
-          "ratchet_lines": 126,
-          "status": "eligible-for-removal"
         },
         {
           "authority": "config/source-size-baseline.json#baselines/crates/storage/src/provider_credential_repository.rs",
