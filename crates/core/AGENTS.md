@@ -72,8 +72,8 @@
 
 - `lib.rs`: public facade, compatibility re-exports, and version constants.
 - `config.rs`: data-root configuration and discovery recovery ownership.
-- `app.rs`: `Core`/`CoreInner`, lifecycle, and broad chat/import/provider/
-  generation facade; it still contains a large inline test module.
+- `app.rs`: `Core`/`CoreInner` lifecycle and the remaining compatibility/
+  delegation facade; feature-grouped unit tests live under `app/tests/`.
 - `app/generation_events.rs`, `generation_workflow.rs`: admission, ordered
   subscriptions, provider execution, checkpointing, persistence, and events.
 - `app/model_sync.rs`, `runtime_control.rs`, `runtime_generation.rs`,
@@ -123,7 +123,7 @@ python3 scripts/check_source_architecture.py --base-ref "$(git merge-base HEAD m
 ```
 
 - Lifecycle/open: `cargo test -p lorepia-core --test core_smoke`
-- Inline app tests: `cargo test -p lorepia-core --lib app::tests`
+- App child tests: `cargo test -p lorepia-core --lib app::tests`
 - Chat/generation: `chat_vertical_slice`,
   `ordinary_same_branch_sealed_retry`, `generation_attempt_derived_closure`
 - Import/export: `import_vertical_slice`, `orchestration_content_import`,
