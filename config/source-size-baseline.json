@@ -22,7 +22,6 @@
     "crates/core/src/catalog.rs": {"bytes": 83792, "lines": 2120},
     "crates/core/src/content_package.rs": {"bytes": 230230, "lines": 5599},
     "crates/core/src/module_orchestration.rs": {"bytes": 88197, "lines": 2104},
-    "crates/core/src/orchestration.rs": {"bytes": 241875, "lines": 6043},
     "crates/core/src/orchestration_runtime.rs": {"bytes": 302113, "lines": 7484},
     "crates/domain/src/discovery.rs": {"bytes": 175109, "lines": 4422},
     "crates/domain/src/orchestration.rs": {"bytes": 167139, "lines": 4840},

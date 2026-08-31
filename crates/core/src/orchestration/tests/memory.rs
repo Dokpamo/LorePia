@@ -433,4 +433,3 @@ fn historical_edit_fork_includes_only_memory_whose_complete_range_precedes_the_f
     );
     provider.join().expect("join synthetic provider");
 }
-

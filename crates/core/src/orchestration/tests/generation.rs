@@ -789,4 +789,3 @@ fn stale_knowledge_revision_rejects_the_atomic_generation_append() {
     assert_eq!(stats.generation_prompt_plans, 0);
     assert_eq!(stats.knowledge_activation_logs, 0);
 }
-

@@ -162,25 +162,29 @@
       }
     },
     "CORE-ORCH-001": {
-      "baseline_context_bytes": 415575,
       "commands": [
         "cargo test -p lorepia-core --test orchestration_core_contract",
+        "cargo test -p lorepia-orchestration --test cross_platform_golden",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
       "max_context_bytes": 250000,
-      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
       "paths": {
         "documents": [
           "crates/core/AGENTS.md"
         ],
         "entrypoints": [
+          "crates/core/src/lib.rs",
           "crates/core/src/orchestration.rs"
         ],
         "implementation": [
-          "crates/orchestration/src/lib.rs"
+          "crates/orchestration/src/lib.rs",
+          "crates/core/src/orchestration/prompt_plan.rs",
+          "crates/core/src/orchestration/prompt_assembly.rs",
+          "crates/core/src/orchestration/presets.rs"
         ],
         "tests": [
           "crates/core/tests/orchestration_core_contract.rs",
+          "crates/core/src/orchestration/tests/generation.rs",
           "crates/orchestration/tests/cross_platform_golden.rs"
         ]
       }

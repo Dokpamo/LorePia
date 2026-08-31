@@ -203,4 +203,3 @@ fn room_generation_preset_resolves_its_own_route_over_the_global_target() {
     );
     provider.join().expect("join idle synthetic provider");
 }
-
