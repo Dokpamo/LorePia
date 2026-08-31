@@ -5,44 +5,44 @@
     "phase_gates": {
       "A": {
         "github_checks": "not_run",
-        "local_validation": "pending",
+        "local_validation": "pass",
         "status": "incomplete"
       },
       "B": {
         "github_checks": "not_run",
-        "local_validation": "pending",
+        "local_validation": "pass",
         "status": "incomplete"
       },
       "C": {
         "github_checks": "not_run",
-        "local_validation": "pending",
+        "local_validation": "pass",
         "status": "incomplete"
       },
       "D": {
         "github_checks": "not_run",
-        "local_validation": "pending",
+        "local_validation": "pass",
         "status": "incomplete"
       },
       "E": {
         "github_checks": "not_run",
-        "local_validation": "pending",
+        "local_validation": "pass",
         "status": "incomplete"
       },
       "F": {
         "github_checks": "not_run",
-        "local_validation": "pending",
+        "local_validation": "pass",
         "status": "incomplete"
       }
     },
     "task_status_counts": {
       "blocked": 0,
-      "complete": 58,
-      "in_progress": 1
+      "complete": 59,
+      "in_progress": 0
     },
     "unresolved_plan_target_count": 1
   },
   "format_version": 1,
-  "full_report_sha256": "8bf15914c38812afd9626e5e844dda0e971cb124839303925196d83956f90fbf",
+  "full_report_sha256": "fb7e0986479f030ebaf3326a5cc82cb219906c0d1effdc3638a910fdbc2419f3",
   "remaining_hotspots": {
     "approved_exception_count": 0,
     "configured_ratchet_count": 57,
