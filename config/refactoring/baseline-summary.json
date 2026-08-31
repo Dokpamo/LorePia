@@ -39,23 +39,23 @@
       "complete": 59,
       "in_progress": 0
     },
-    "unresolved_plan_target_count": 1
+    "unresolved_plan_target_count": 0
   },
   "format_version": 1,
-  "full_report_sha256": "b6fe5bf81a22d7538776e542995a8ffc975353157b23267776821382cbe944c6",
+  "full_report_sha256": "af69f38fec46f5565a978a7d39a2a68744fe725fe057c3c4e4b5c3f92a81bcef",
   "remaining_hotspots": {
     "approved_exception_count": 0,
     "configured_ratchet_count": 57,
     "hard_target_overage_count": 95,
-    "plan_target_met_count": 9,
-    "plan_target_unresolved_count": 1,
+    "plan_target_met_count": 10,
+    "plan_target_unresolved_count": 0,
     "unresolved_hard_target_count": 95
   },
   "summary": {
-    "production_bytes": 15340927,
+    "production_bytes": 15340988,
     "production_declarations": 14156,
     "production_files": 664,
-    "production_lines": 404853,
-    "public_symbols": 6797
+    "production_lines": 404855,
+    "public_symbols": 6798
   }
 }

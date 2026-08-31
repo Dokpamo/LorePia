@@ -2,7 +2,7 @@
   "baseline_commit": "01af428da8ea64f6028d7fef276b10bfa6fd9f79",
   "completion": {
     "approved_hotspot_exception_count": 0,
-    "ledger_sha256": "f5128297b707ca094f6e29a7fc928dc0d6e1088ac0a59293a7aee51c7f8c328e",
+    "ledger_sha256": "b90ab0f6b8434af59d77ec025fc542355c7670222d1101d1fcf3fd6ab3c611d5",
     "overall_status": "incomplete",
     "phase_gates": {
       "A": {
@@ -12,7 +12,7 @@
           "status": "not_run"
         },
         "local_validation": {
-          "commit": "bbe313f611aef2304f3ecf0ad29fbcc86c2054b8",
+          "commit": "c24a99d784ff3bf278c3a0363b69f0e67cb98a5e",
           "status": "pass"
         },
         "status": "incomplete",
@@ -30,7 +30,7 @@
           "status": "not_run"
         },
         "local_validation": {
-          "commit": "bbe313f611aef2304f3ecf0ad29fbcc86c2054b8",
+          "commit": "c24a99d784ff3bf278c3a0363b69f0e67cb98a5e",
           "status": "pass"
         },
         "status": "incomplete",
@@ -48,7 +48,7 @@
           "status": "not_run"
         },
         "local_validation": {
-          "commit": "bbe313f611aef2304f3ecf0ad29fbcc86c2054b8",
+          "commit": "c24a99d784ff3bf278c3a0363b69f0e67cb98a5e",
           "status": "pass"
         },
         "status": "incomplete",
@@ -66,7 +66,7 @@
           "status": "not_run"
         },
         "local_validation": {
-          "commit": "bbe313f611aef2304f3ecf0ad29fbcc86c2054b8",
+          "commit": "c24a99d784ff3bf278c3a0363b69f0e67cb98a5e",
           "status": "pass"
         },
         "status": "incomplete",
@@ -84,7 +84,7 @@
           "status": "not_run"
         },
         "local_validation": {
-          "commit": "bbe313f611aef2304f3ecf0ad29fbcc86c2054b8",
+          "commit": "c24a99d784ff3bf278c3a0363b69f0e67cb98a5e",
           "status": "pass"
         },
         "status": "incomplete",
@@ -102,7 +102,7 @@
           "status": "not_run"
         },
         "local_validation": {
-          "commit": "bbe313f611aef2304f3ecf0ad29fbcc86c2054b8",
+          "commit": "c24a99d784ff3bf278c3a0363b69f0e67cb98a5e",
           "status": "pass"
         },
         "status": "incomplete",
@@ -477,7 +477,7 @@
         "status": "complete"
       }
     },
-    "unresolved_plan_target_count": 1
+    "unresolved_plan_target_count": 0
   },
   "files": {
     "apps/lorepia/src-tauri/build.rs": {
@@ -3205,10 +3205,10 @@
       "public_symbols": 2
     },
     "crates/storage/src/database.rs": {
-      "bytes": 43274,
-      "declarations": 38,
-      "lines": 1123,
-      "public_symbols": 32
+      "bytes": 33656,
+      "declarations": 33,
+      "lines": 890,
+      "public_symbols": 29
     },
     "crates/storage/src/database/action.rs": {
       "bytes": 14092,
@@ -3415,10 +3415,10 @@
       "public_symbols": 3
     },
     "crates/storage/src/database/settings.rs": {
-      "bytes": 18112,
-      "declarations": 18,
-      "lines": 461,
-      "public_symbols": 13
+      "bytes": 27791,
+      "declarations": 23,
+      "lines": 696,
+      "public_symbols": 17
     },
     "crates/storage/src/database/stats.rs": {
       "bytes": 628,
@@ -4951,13 +4951,6 @@
       "public_symbols": 0
     },
     {
-      "bytes": 43274,
-      "declarations": 38,
-      "lines": 1123,
-      "path": "crates/storage/src/database.rs",
-      "public_symbols": 32
-    },
-    {
       "bytes": 42542,
       "declarations": 12,
       "lines": 1128,
@@ -5166,6 +5159,13 @@
       "lines": 1029,
       "path": "apps/lorepia/src/features/library/LibraryPane.svelte",
       "public_symbols": 0
+    },
+    {
+      "bytes": 34637,
+      "declarations": 15,
+      "lines": 877,
+      "path": "crates/storage/src/discovery_repository/transition_store.rs",
+      "public_symbols": 10
     }
   ],
   "ipc_commands": {
@@ -6693,8 +6693,8 @@
         "sha256": "05f0a422bbe0a2275110480815b1b0c3bf21d27f9a0ae19cffb5e74462c2b9bf"
       },
       "crates/storage/src/database.rs": {
-        "count": 32,
-        "sha256": "e1077c71443b60439491468564494a063ca7b021ba666b6e3d30a904ba392cb8"
+        "count": 29,
+        "sha256": "a8315dbc55dc6f07f8bedcdc6b81015f48dbcca87d0d2c1ce447c0825cefbd12"
       },
       "crates/storage/src/database/action.rs": {
         "count": 3,
@@ -6833,8 +6833,8 @@
         "sha256": "660d85dc51957dcfa8c54dd7a2f8ebd177f5843d84a21fe64785711c2b1590ac"
       },
       "crates/storage/src/database/settings.rs": {
-        "count": 13,
-        "sha256": "3e025b0ba7caaee593c63ec58ba2aa3fa5e00832d4a1aa11a8fd43cd7a981f65"
+        "count": 17,
+        "sha256": "ca1af84436916b3f11cfd7fe65389f87bad0ca4899d2c34ccf989974de00f3db"
       },
       "crates/storage/src/database/stats.rs": {
         "count": 2,
@@ -7331,15 +7331,15 @@
     },
     "core_api_version": 10,
     "policy": "conservative source-level declaration fingerprint, not semantic rustdoc API",
-    "sha256": "f9bd318f68fb011063e9859aba23b8244bb8a4ae882e9c78c9ce071e4271afb6",
+    "sha256": "cb79cb814c62a57a0b5b79b9e01685249f071b595cbcc4f061a57db4a373eaf5",
     "shell_api_version": 3
   },
   "ratchets": {
     "config/ai-context-map.json": "75e96d928addcf32d74fbf036904f75f2a09dedf604c9f1690ae50ca3616f1f2",
     "config/core-storage-public-api-baseline.json": "c86c10d701180070ec6742d3424deb2784cb0c5e5628b6b809093befa5c3c46b",
-    "config/refactoring/completion-status.json": "f5128297b707ca094f6e29a7fc928dc0d6e1088ac0a59293a7aee51c7f8c328e",
+    "config/refactoring/completion-status.json": "b90ab0f6b8434af59d77ec025fc542355c7670222d1101d1fcf3fd6ab3c611d5",
     "config/refactoring/task-manifest.yaml": "82fc4032640615ae4d07fbbd1b9e5fc2473b07e49fd3933c40e58c4122328d0e",
-    "config/source-size-baseline.json": "c60120e09e2666cb60a48f674dd6e658688cb366bc5c443998e4b26ffdf20be2",
+    "config/source-size-baseline.json": "40e0f72954f09e4eca308fd1befd0a16fd3094dbd23114aeef603937aea029ec",
     "config/test-source-size-baseline.json": "df6f4c17681bdf50baa6ee3959c3e6e696222bb32cedf6f267ed8d94f92824ae"
   },
   "remaining_hotspots": {
@@ -7801,13 +7801,13 @@
         },
         {
           "authority": "config/source-size-baseline.json#baselines/crates/storage/src/database.rs",
-          "current_bytes": 43274,
-          "current_lines": 1123,
+          "current_bytes": 33656,
+          "current_lines": 890,
           "hard_target_bytes": 40960,
           "hard_target_lines": 500,
           "path": "crates/storage/src/database.rs",
-          "ratchet_bytes": 43274,
-          "ratchet_lines": 1123,
+          "ratchet_bytes": 33656,
+          "ratchet_lines": 890,
           "status": "active-over-hard-target"
         },
         {
@@ -9265,23 +9265,6 @@
         },
         {
           "approved_exception": null,
-          "bytes": 43274,
-          "disposition": "unresolved",
-          "hard_target_bytes": 40960,
-          "hard_target_lines": 500,
-          "kind": "facade",
-          "language": "rust",
-          "lines": 1123,
-          "path": "crates/storage/src/database.rs",
-          "ratchet": {
-            "authority": "config/source-size-baseline.json#baselines/crates/storage/src/database.rs",
-            "bytes": 43274,
-            "kind": "configured-baseline",
-            "lines": 1123
-          }
-        },
-        {
-          "approved_exception": null,
           "bytes": 40577,
           "disposition": "unresolved",
           "hard_target_bytes": 40960,
@@ -9422,6 +9405,23 @@
             "bootstrap_lines": 949,
             "kind": "bootstrap-legacy",
             "ref": "ace8105c7bcad425a751490b77c136fa1800df67"
+          }
+        },
+        {
+          "approved_exception": null,
+          "bytes": 33656,
+          "disposition": "unresolved",
+          "hard_target_bytes": 40960,
+          "hard_target_lines": 500,
+          "kind": "facade",
+          "language": "rust",
+          "lines": 890,
+          "path": "crates/storage/src/database.rs",
+          "ratchet": {
+            "authority": "config/source-size-baseline.json#baselines/crates/storage/src/database.rs",
+            "bytes": 33656,
+            "kind": "configured-baseline",
+            "lines": 890
           }
         },
         {
@@ -9699,9 +9699,9 @@
         },
         {
           "approved_exception": null,
-          "bytes": 43274,
-          "disposition": "unresolved",
-          "lines": 1123,
+          "bytes": 33656,
+          "disposition": "target-met",
+          "lines": 890,
           "path": "crates/storage/src/database.rs",
           "target_bytes": 40960,
           "target_lines": 900
@@ -9734,16 +9734,16 @@
           "target_lines": 800
         }
       ],
-      "met_count": 9,
-      "unresolved_count": 1
+      "met_count": 10,
+      "unresolved_count": 0
     },
     "policy": "Size baselines and bootstrap history are non-growth ratchets, not design approvals. Schema v2 records zero approved exceptions and rejects non-empty entries until a structured ADR binding is implemented."
   },
   "summary": {
-    "production_bytes": 15340927,
+    "production_bytes": 15340988,
     "production_declarations": 14156,
     "production_files": 664,
-    "production_lines": 404853,
-    "public_symbols": 6797
+    "production_lines": 404855,
+    "public_symbols": 6798
   }
 }
