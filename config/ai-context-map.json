@@ -1,4 +1,5 @@
 {
+  "bootstrap_ref": "98e854effb89617147ee51f99dbebb5a5fcd1ccd",
   "contexts": {
     "CORE-APP-001": {
       "commands": [
@@ -287,11 +288,10 @@
           "scripts/check_source_architecture.py"
         ],
         "implementation": [
-          "config/source-size-baseline.json"
+          "config/source-size-baseline.json",
+          "config/test-source-size-baseline.json"
         ],
-        "tests": [
-          "scripts/test_check_source_architecture.py"
-        ]
+        "tests": []
       }
     },
     "ENF-002": {
@@ -311,12 +311,12 @@
           "scripts/check_source_architecture.py"
         ],
         "implementation": [
-          "config/core-storage-public-api-baseline.json",
+          "crates/core/Cargo.toml",
           "config/ipc-commands.json",
           "Cargo.toml"
         ],
         "tests": [
-          "scripts/test_check_source_architecture.py",
+          "crates/core/tests/core_smoke.rs",
           "scripts/test_generate_ipc_commands.py"
         ]
       }
@@ -324,8 +324,10 @@
     "ENF-003": {
       "baseline_context_bytes": null,
       "commands": [
-        "python3 -m unittest scripts/test_check_ai_context_map.py",
-        "python3 scripts/check_ai_context_map.py --strict-budget"
+        "python3 -m unittest scripts/test_check_ai_context_map.py scripts/test_check_github_workflow_security.py",
+        "python3 scripts/check_ai_context_map.py --base-ref \"$(git merge-base HEAD main)\"",
+        "python3 scripts/check_ai_context_map.py --print-commands ENF-003",
+        "python3 scripts/check_github_workflow_security.py"
       ],
       "max_context_bytes": 250000,
       "over_budget_reason": null,
@@ -334,13 +336,15 @@
           "config/refactoring/task-manifest.yaml"
         ],
         "entrypoints": [
-          "scripts/check_ai_context_map.py"
+          "scripts/check_ai_context_map.py",
+          "scripts/check_github_workflow_security.py"
         ],
         "implementation": [
           "config/ai-context-map.json"
         ],
         "tests": [
-          "scripts/test_check_ai_context_map.py"
+          "scripts/test_check_ai_context_map.py",
+          "scripts/test_check_github_workflow_security.py"
         ]
       }
     },
@@ -722,25 +726,26 @@
     "GOV-003": {
       "baseline_context_bytes": null,
       "commands": [
-        "python3 -m unittest scripts/test_check_ai_context_map.py",
-        "python3 scripts/check_ai_context_map.py"
+        "python3 -m unittest scripts/test_check_ai_context_map.py scripts/test_check_github_workflow_security.py",
+        "python3 scripts/check_ai_context_map.py --base-ref \"$(git merge-base HEAD main)\"",
+        "python3 scripts/check_github_workflow_security.py"
       ],
       "max_context_bytes": 250000,
       "over_budget_reason": null,
       "paths": {
         "documents": [
-          "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
           "config/refactoring/task-manifest.yaml"
         ],
         "entrypoints": [
-          "scripts/check_ai_context_map.py"
+          "scripts/check_ai_context_map.py",
+          "scripts/check_github_workflow_security.py"
         ],
         "implementation": [
-          "config/ai-context-map.json",
-          ".github/workflows/ci.yml"
+          "config/ai-context-map.json"
         ],
         "tests": [
-          "scripts/test_check_ai_context_map.py"
+          "scripts/test_check_ai_context_map.py",
+          "scripts/test_check_github_workflow_security.py"
         ]
       }
     },
@@ -758,11 +763,10 @@
           "scripts/check_source_architecture.py"
         ],
         "implementation": [
-          "config/source-size-baseline.json"
+          "config/source-size-baseline.json",
+          "config/test-source-size-baseline.json"
         ],
-        "tests": [
-          "scripts/test_check_source_architecture.py"
-        ]
+        "tests": []
       }
     },
     "IPC-001": {
@@ -875,7 +879,7 @@
           "crates/storage/src/lib.rs"
         ],
         "implementation": [
-          "config/core-storage-public-api-baseline.json",
+          "crates/storage/Cargo.toml",
           "crates/storage/src/discovery_repository/semantic_view.rs"
         ],
         "tests": [
@@ -1554,7 +1558,8 @@
     }
   },
   "default_max_context_bytes": 250000,
-  "policy": "Repository-local read starting points, not a security allowlist",
+  "policy": "Repository-local read starting points, not a security allowlist; reviewed pre-enforcement path migrations preserve entry counts, then base-ref path removals require explicit reviewed replacements",
+  "reviewed_path_migrations": [],
   "shared_paths": [
     "AGENTS.md"
   ],

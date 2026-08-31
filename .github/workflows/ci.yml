@@ -36,6 +36,7 @@ jobs:
         run: |
           python3 scripts/check_github_workflow_security.py
           python3 -m unittest \
+            scripts/test_check_github_workflow_security.py \
             scripts/test_stage_release_candidate.py \
             scripts/test_package_linux_release_candidate.py \
             scripts/test_write_release_checksums.py
@@ -243,7 +244,7 @@ jobs:
             scripts/test_check_ai_context_map.py \
             scripts/test_check_source_architecture.py \
             scripts/test_report_refactoring_baseline.py
-          python3 scripts/check_ai_context_map.py
+          python3 scripts/check_ai_context_map.py --base-ref "$SOURCE_RATCHET_BASE"
           python3 scripts/check_source_architecture.py --base-ref "$SOURCE_RATCHET_BASE"
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
