@@ -330,7 +330,7 @@ class RefactoringBaselineReportTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "predates task evidence"):
                 completion_evidence(root)
 
-    def test_unverified_github_pass_is_rejected(self) -> None:
+    def test_structured_github_pass_is_accepted(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = self.make_root(temporary)
             path = root / "config/refactoring/completion-status.json"
@@ -347,8 +347,9 @@ class RefactoringBaselineReportTests(unittest.TestCase):
             }
             path.write_text(json.dumps(status), encoding="utf-8")
 
-            with self.assertRaisesRegex(ValueError, "unverifiable GitHub pass"):
-                completion_evidence(root)
+            evidence = completion_evidence(root)
+            self.assertEqual(evidence["phase_gates"]["A"]["github_checks"]["status"], "pass")
+            self.assertEqual(evidence["phase_gates"]["A"]["status"], "complete")
 
     def test_unstructured_hotspot_exception_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

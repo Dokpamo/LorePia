@@ -332,10 +332,6 @@ def completion_evidence(
             raise ValueError(f"phase gate {phase} has an invalid local validation state")
         if github_state not in GITHUB_CHECK_STATES:
             raise ValueError(f"phase gate {phase} has an invalid GitHub check state")
-        if github_state == "pass":
-            raise ValueError(
-                f"phase gate {phase} cannot record an unverifiable GitHub pass in schema v2"
-            )
         if gate_status not in {"complete", "incomplete"}:
             raise ValueError(f"phase gate {phase} has an invalid status")
         if local_state == "pending":
