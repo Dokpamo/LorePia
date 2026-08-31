@@ -763,23 +763,31 @@
       }
     },
     "SHELL-001": {
-      "baseline_context_bytes": null,
       "commands": [
         "cargo test -p lorepia-shell-api",
         "python3 scripts/generate_ipc_commands.py --check"
       ],
       "max_context_bytes": 250000,
-      "over_budget_reason": null,
       "paths": {
         "documents": [],
         "entrypoints": [
           "crates/shell-api/src/lib.rs",
-          "crates/shell-api/src/api.rs"
-        ],
-        "implementation": [
+          "crates/shell-api/src/api.rs",
           "crates/shell-api/src/dto.rs"
         ],
+        "implementation": [
+          "crates/shell-api/src/api/conversation.rs",
+          "crates/shell-api/src/api/generation.rs",
+          "crates/shell-api/src/api/generation_async.rs",
+          "crates/shell-api/src/api/library.rs",
+          "crates/shell-api/src/dto/bootstrap.rs",
+          "crates/shell-api/src/dto/conversation.rs",
+          "crates/shell-api/src/dto/generation.rs",
+          "crates/shell-api/src/dto/library.rs"
+        ],
         "tests": [
+          "crates/shell-api/src/api/tests.rs",
+          "crates/shell-api/src/dto/tests.rs",
           "apps/lorepia/src-tauri/src/contract.rs"
         ]
       }
