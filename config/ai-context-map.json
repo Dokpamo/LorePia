@@ -1,13 +1,11 @@
 {
   "contexts": {
     "CORE-APP-001": {
-      "baseline_context_bytes": 844540,
       "commands": [
         "cargo test -p lorepia-core",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
       "max_context_bytes": 250000,
-      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
       "paths": {
         "documents": [
           "crates/core/AGENTS.md"
