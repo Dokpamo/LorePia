@@ -52,9 +52,21 @@
       "hangul_lines": 14,
       "sha256": "cebefc1cbfdcd76e251e5b54bd7a562bc71c6d9a45fde3f790ba1314edc3c60b"
     },
+    "src/features/chat/ChatComposer.svelte": {
+      "hangul_lines": 9,
+      "sha256": "dfb896444a7f7f6c06dad1fa93314bada48c1310a534cebad946b55d54abc5e1"
+    },
+    "src/features/chat/ChatFullscreenComposer.svelte": {
+      "hangul_lines": 4,
+      "sha256": "ca328acf1ecca4eeb344bf77edbe2323651b1e7f8f08aa5af3f5a0273329093f"
+    },
+    "src/features/chat/ChatMessageActions.svelte": {
+      "hangul_lines": 11,
+      "sha256": "ad3aec1f6d57f8b37a48dec74e086549c88535a47e5a257deadba09b38aa95fb"
+    },
     "src/features/chat/ChatPane.svelte": {
-      "hangul_lines": 100,
-      "sha256": "d3062c626fb78223c595cca3a9b15493096a55870b39ca2183f9d307a2b92f62"
+      "hangul_lines": 76,
+      "sha256": "464b880b971a8a7ccd62dbe1a60943a21a6d495b0099f6ba720b3e3854cd4edc"
     },
     "src/features/chat/ChatPane.test.ts": {
       "hangul_lines": 70,

@@ -8,7 +8,7 @@
     "apps/lorepia/src-tauri/src/contract.rs": {"bytes": 84557, "lines": 2174},
     "apps/lorepia/src-tauri/src/state.rs": {"bytes": 78974, "lines": 2112},
     "apps/lorepia/src/app/app-controller.ts": {"bytes": 21693, "lines": 566},
-    "apps/lorepia/src/features/chat/ChatPane.svelte": {"bytes": 94517, "lines": 2176},
+    "apps/lorepia/src/features/chat/ChatPane.svelte": {"bytes": 61490, "lines": 1469},
     "apps/lorepia/src/features/orchestration/OrchestrationStudio.svelte": {"bytes": 263299, "lines": 4839},
     "apps/lorepia/src/features/orchestration/orchestration-controller.ts": {"bytes": 111702, "lines": 2818},
     "apps/lorepia/src/features/providers/ProviderSettings.svelte": {"bytes": 84143, "lines": 2073},

@@ -507,12 +507,12 @@
       }
     },
     "FE-CHAT-002": {
-      "baseline_context_bytes": 277508,
+      "baseline_context_bytes": null,
       "commands": [
-        "npm run test --prefix apps/lorepia -- src/features/chat/ChatPane.test.ts"
+        "npm run test --prefix apps/lorepia -- src/features/chat/composer.test.ts src/features/chat/tests/ChatPane.composer.test.ts src/features/chat/tests/ChatPane.actions.test.ts"
       ],
       "max_context_bytes": 250000,
-      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
+      "over_budget_reason": null,
       "paths": {
         "documents": [
           "apps/lorepia/src/AGENTS.md"
@@ -521,11 +521,19 @@
           "apps/lorepia/src/features/chat/ChatPane.svelte"
         ],
         "implementation": [
-          "apps/lorepia/src/features/chat/composer.ts"
+          "apps/lorepia/src/features/chat/ChatComposer.svelte",
+          "apps/lorepia/src/features/chat/ChatFullscreenComposer.svelte",
+          "apps/lorepia/src/features/chat/ChatMessageActions.svelte",
+          "apps/lorepia/src/features/chat/ChatUtilityDrawer.svelte",
+          "apps/lorepia/src/features/chat/composer-state.svelte.ts",
+          "apps/lorepia/src/features/chat/composer.ts",
+          "apps/lorepia/src/features/chat/message-actions.svelte.ts",
+          "apps/lorepia/src/features/chat/utility-swipe.svelte.ts"
         ],
         "tests": [
-          "apps/lorepia/src/features/chat/ChatPane.test.ts",
-          "apps/lorepia/src/features/chat/composer.test.ts"
+          "apps/lorepia/src/features/chat/composer.test.ts",
+          "apps/lorepia/src/features/chat/tests/ChatPane.actions.test.ts",
+          "apps/lorepia/src/features/chat/tests/ChatPane.composer.test.ts"
         ]
       }
     },
