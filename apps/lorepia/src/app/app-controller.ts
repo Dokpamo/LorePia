@@ -10,8 +10,6 @@ import {
     type BootstrapDto,
     type CapabilityKeyInput,
     type CharacterDto,
-    type ChatEventDto,
-    type ChatStreamItemDto,
     type ContinueProviderDiscoveryActionInput,
     type ConversationDto,
     type ConversationMode,
@@ -24,8 +22,6 @@ import {
     type GenerationSelectionInput,
     type GenerationTargetDto,
     type LorepiaClient,
-    type MessageActionGenerationDto,
-    type MessageDto,
     type InterruptedMemoryJobDto,
     type MemoryJobRetryReceiptDto,
     type MemoryQueryEmbeddingRetryCandidateDto,
@@ -47,19 +43,14 @@ import {
 } from '../lib/ipc/contracts';
 import { t } from '../lib/i18n';
 import { LorepiaClientError, normalizeClientError } from '../lib/ipc/errors';
-import { ChatStreamVerifier } from '../features/chat/chat-stream';
+import { ChatStreamController } from './controllers/chat-stream-controller';
 import { ConversationController } from './controllers/conversation-controller';
 import type { AppControllerContext } from './controllers/controller-context';
+import { GenerationController } from './controllers/generation-controller';
 import { ImportController } from './controllers/import-controller';
 import { LibraryController } from './controllers/library-controller';
-import { INITIAL_APP_STATE, type ChatState, type LorepiaAppState } from './app-state';
+import { INITIAL_APP_STATE, type LorepiaAppState } from './app-state';
 import { EpochGuard } from './operations/epoch-guard';
-import {
-    GenerationOperationIdentityAuthority,
-    generationOperationIdentity,
-    generationSelectionOperationIdentity,
-    type GenerationOperationInputAuthority,
-} from './operations/operation-identity';
 import { SerializedMutation } from './operations/serialized-mutation';
 import { credentialKey, discoveryCredentialTarget } from './provider-credential';
 import {
@@ -187,19 +178,6 @@ function isQueuedMemoryQueryRetryReceipt(
     );
 }
 
-function reattachmentUnavailableChatState(generationId: string): ChatState {
-    return {
-        phase: 'error',
-        error: GENERATION_REATTACHMENT_UNAVAILABLE_MESSAGE,
-        active_generation_id: generationId,
-        live_assistant_message_id: null,
-        streaming_text: '',
-        reasoning_text: '',
-        reconcile_notice: null,
-        usage_label: null,
-    };
-}
-
 function ensureCompatible(snapshot: BootstrapDto): void {
     if (
         snapshot.shell_api_version !== SUPPORTED_SHELL_API_VERSION ||
@@ -253,32 +231,19 @@ export class LorepiaAppController {
     private readonly mutable = writable<LorepiaAppState>(structuredClone(INITIAL_APP_STATE));
     readonly state: Readable<LorepiaAppState> = this.mutable;
 
+    private readonly streamController: ChatStreamController;
+    private readonly generationController: GenerationController;
     private readonly libraryController: LibraryController;
     private readonly importController: ImportController;
     private readonly conversationController: ConversationController;
 
     private readonly appEpoch = new EpochGuard();
     private readonly memoryQueryRetryEpoch = new EpochGuard();
-    private readonly streamEpoch = new EpochGuard();
     private readonly providerEpoch = new EpochGuard();
     private readonly providerSettingsEpoch = new EpochGuard();
     private readonly discoveryRequestEpoch = new EpochGuard();
     private readonly providerSettingsMutations = new SerializedMutation();
-    private reconcileInFlight: symbol | null = null;
-    private reconcileBufferedItems: ChatStreamItemDto[] = [];
-    private streamVerifier: ChatStreamVerifier | null = null;
-    private activeStreamId: string | null = null;
-    private deltaFlushTimer: ReturnType<typeof setTimeout> | null = null;
-    private pendingTextDelta = '';
-    private pendingReasoningDelta = '';
     private memorySupervisorUnlisten: (() => void) | null = null;
-    private readonly generationOperations = new GenerationOperationIdentityAuthority();
-    private roomGenerationTarget: {
-        conversation_id: string;
-        branch_id: string;
-        /** undefined means the exact room target is still loading. */
-        target: GenerationTargetDto | null | undefined;
-    } | null = null;
 
     constructor(private readonly client: LorepiaClient) {
         const context: AppControllerContext = {
@@ -288,28 +253,40 @@ export class LorepiaAppController {
             announce: (message) => this.announce(message),
             errorLabel,
         };
+        this.streamController = new ChatStreamController(context, {
+            refreshMemoryQueryRetries: () => this.refreshMemoryQueryRetries(),
+        });
+        this.generationController = new GenerationController(context, this.streamController, {
+            clearMemoryQueryRetryNotice: () => this.clearMemoryQueryRetryNotice(),
+            invalidateMemoryQueryRetries: () => {
+                this.memoryQueryRetryEpoch.advance();
+            },
+            refreshMemoryQueryRetries: () => this.refreshMemoryQueryRetries(),
+            activeBranchHead: (state) => this.activeBranchHead(state),
+        });
         this.libraryController = new LibraryController(context, (epoch) =>
             this.appEpoch.isCurrent(epoch),
         );
         this.importController = new ImportController(context);
         this.conversationController = new ConversationController(context, {
-            detachStream: () => this.detachStream(),
+            detachStream: () => this.streamController.detachStream(),
             invalidateMemoryQueryRetries: () => {
                 this.memoryQueryRetryEpoch.advance();
             },
             refreshMemoryQueryRetries: () => this.refreshMemoryQueryRetries(),
-            resumePendingGeneration: (messages) => this.resumePendingGeneration(messages),
+            resumePendingGeneration: (messages) =>
+                this.streamController.resumePendingGeneration(messages),
             selectBranch: (branchId) => this.selectBranch(branchId),
             activeBranchHead: (state) => this.activeBranchHead(state),
         });
     }
 
     beginNewGenerationOperation(): void {
-        this.generationOperations.beginNewOperation();
+        this.generationController.beginNewGenerationOperation();
     }
 
     stageGenerationAttemptRetry(generationAttemptId: string): boolean {
-        return this.generationOperations.stageAttemptRetry(generationAttemptId);
+        return this.generationController.stageGenerationAttemptRetry(generationAttemptId);
     }
 
     private update(updater: (state: LorepiaAppState) => LorepiaAppState): void {
@@ -474,389 +451,30 @@ export class LorepiaAppController {
         branchId: string | null,
         target: GenerationTargetDto | null | undefined,
     ): void {
-        this.roomGenerationTarget =
-            conversationId === null || branchId === null
-                ? null
-                : {
-                      conversation_id: conversationId,
-                      branch_id: branchId,
-                      target: target === undefined ? undefined : structuredClone(target),
-                  };
-    }
-
-    private generationSelection(state: LorepiaAppState): GenerationSelectionInput | null {
-        const roomTarget = this.roomGenerationTarget;
-        if (
-            roomTarget !== null &&
-            roomTarget.conversation_id === state.selected_conversation?.id &&
-            roomTarget.branch_id === state.conversation_state?.active_branch_id
-        ) {
-            if (roomTarget.target === undefined) return null;
-            if (roomTarget.target !== null) {
-                return { kind: 'target', target: structuredClone(roomTarget.target) };
-            }
-        }
-        const settings = state.providers.workspace.settings;
-        const profileId = settings.selected_provider_profile_id;
-        if (profileId !== null) {
-            return { kind: 'legacy_profile', provider_profile_id: profileId };
-        }
-        const routeId = settings.selected_model_route_id;
-        const presetId = settings.selected_generation_preset_id;
-        if (routeId !== null && presetId !== null) {
-            return {
-                kind: 'target',
-                target: {
-                    model_route_id: routeId,
-                    generation_preset_id: presetId,
-                },
-            };
-        }
-        return null;
+        this.generationController.setRoomGenerationTarget(conversationId, branchId, target);
     }
 
     runtimeGenerationSelection(): GenerationSelectionInput | null {
-        const selection = this.generationSelection(get(this.mutable));
-        return selection === null ? null : structuredClone(selection);
+        return this.generationController.runtimeGenerationSelection();
     }
 
-    async sendMessage(
+    sendMessage(
         content: string,
         variableOverrides: OrchestrationVariableMapDto = { values: [] },
     ): Promise<boolean> {
-        const state = get(this.mutable);
-        if (state.chat.active_generation_id !== null) {
-            this.announce(t('chat.notice.cancel_before_send'));
-            return false;
-        }
-        const conversation = state.selected_conversation;
-        const conversationState = state.conversation_state;
-        const selection = this.generationSelection(state);
-        if (
-            conversation === null ||
-            conversationState === null ||
-            selection === null ||
-            content.trim().length === 0
-        ) {
-            this.announce(t('chat.notice.check_model'));
-            return false;
-        }
-
-        const branch = state.branches.find(
-            (item) => item.id === conversationState.active_branch_id,
-        );
-        const expectedHead = branch?.head_message_id ?? null;
-        const text = content.trim();
-        const operationIdentity = generationOperationIdentity([
-            'send',
-            conversation.id,
-            conversationState.active_branch_id,
-            expectedHead,
-            text,
-            ...generationSelectionOperationIdentity(selection),
-            JSON.stringify(variableOverrides),
-        ]);
-        const operationContext = this.generationOperations.context(operationIdentity);
-        this.clearMemoryQueryRetryNotice();
-        const { epoch, streamId } = this.prepareStream(
-            conversation.id,
-            conversationState.active_branch_id,
-        );
-        const buffered: ChatStreamItemDto[] = [];
-        let ready = false;
-        try {
-            const started = await this.client.sendMessage(
-                {
-                    conversation_id: conversation.id,
-                    branch_id: conversationState.active_branch_id,
-                    expected_head: expectedHead,
-                    mode: conversationState.selected_mode,
-                    text,
-                    selection,
-                    ...(variableOverrides.values.length === 0
-                        ? {}
-                        : { variable_overrides: structuredClone(variableOverrides) }),
-                    ...this.generationOperations.input(operationContext),
-                },
-                streamId,
-                (item) => {
-                    if (!this.streamEpoch.isCurrent(epoch) || this.activeStreamId !== streamId) {
-                        void this.disposeStream(streamId);
-                        return;
-                    }
-                    if (ready) this.acceptStreamItem(item, epoch, streamId);
-                    else buffered.push(item);
-                },
-            );
-            if (!this.streamEpoch.isCurrent(epoch) || this.activeStreamId !== streamId) {
-                void this.disposeStream(streamId);
-                return false;
-            }
-            if (!this.streamVerifier?.bindGeneration(started.generation_id)) {
-                await this.reconcile(
-                    started.generation_id,
-                    epoch,
-                    streamId,
-                    'generation mismatch',
-                    this.streamVerifier?.getLastSequence() ?? 0,
-                );
-                return false;
-            }
-            this.update((current) => ({
-                ...current,
-                chat: {
-                    ...current.chat,
-                    phase: 'ready',
-                    active_generation_id: started.generation_id,
-                },
-            }));
-            ready = true;
-            for (const item of buffered) {
-                if (!this.streamEpoch.isCurrent(epoch) || this.activeStreamId !== streamId) break;
-                this.acceptStreamItem(item, epoch, streamId);
-            }
-            this.generationOperations.complete(operationContext);
-            return true;
-        } catch (error: unknown) {
-            this.failStream(epoch, streamId, error);
-            return false;
-        }
+        return this.generationController.sendMessage(content, variableOverrides);
     }
 
-    async sendReviewedPrompt(input: ReviewedPromptSendInput): Promise<boolean> {
-        const state = get(this.mutable);
-        if (state.chat.active_generation_id !== null) {
-            this.announce(t('chat.notice.cancel_before_plan'));
-            return false;
-        }
-        const conversation = state.selected_conversation;
-        const conversationState = state.conversation_state;
-        const branch = state.branches.find(
-            (item) => item.id === conversationState?.active_branch_id,
-        );
-        if (
-            conversation === null ||
-            conversationState === null ||
-            input.conversation_id !== conversation.id ||
-            input.branch_id !== conversationState.active_branch_id ||
-            input.expected_head !== (branch?.head_message_id ?? null)
-        ) {
-            this.announce(t('chat.notice.plan_stale'));
-            return false;
-        }
-
-        this.clearMemoryQueryRetryNotice();
-        const { epoch, streamId } = this.prepareStream(input.conversation_id, input.branch_id);
-        const buffered: ChatStreamItemDto[] = [];
-        let ready = false;
-        try {
-            const started = await this.client.sendReviewedPrompt(input, streamId, (item) => {
-                if (!this.streamEpoch.isCurrent(epoch) || this.activeStreamId !== streamId) {
-                    void this.disposeStream(streamId);
-                    return;
-                }
-                if (ready) this.acceptStreamItem(item, epoch, streamId);
-                else buffered.push(item);
-            });
-            if (!this.streamEpoch.isCurrent(epoch) || this.activeStreamId !== streamId) {
-                void this.disposeStream(streamId);
-                return false;
-            }
-            if (!this.streamVerifier?.bindGeneration(started.generation_id)) {
-                await this.reconcile(
-                    started.generation_id,
-                    epoch,
-                    streamId,
-                    'generation mismatch',
-                    this.streamVerifier?.getLastSequence() ?? 0,
-                );
-                return false;
-            }
-            this.update((current) => ({
-                ...current,
-                chat: {
-                    ...current.chat,
-                    phase: 'ready',
-                    active_generation_id: started.generation_id,
-                },
-            }));
-            ready = true;
-            for (const item of buffered) {
-                if (!this.streamEpoch.isCurrent(epoch) || this.activeStreamId !== streamId) break;
-                this.acceptStreamItem(item, epoch, streamId);
-            }
-            return true;
-        } catch (error: unknown) {
-            this.failStream(epoch, streamId, error);
-            return false;
-        }
+    sendReviewedPrompt(input: ReviewedPromptSendInput): Promise<boolean> {
+        return this.generationController.sendReviewedPrompt(input);
     }
 
-    async editUserMessage(messageId: string, replacementText: string): Promise<boolean> {
-        const trimmed = replacementText.trim();
-        if (trimmed.length === 0) return false;
-        return this.startBranchGeneration(
-            'edit',
-            messageId,
-            trimmed,
-            (state, selection, operationAuthority, streamId, onItem) => {
-                const branchId = state.conversation_state?.active_branch_id;
-                const conversationId = state.selected_conversation?.id;
-                if (branchId === undefined || conversationId === undefined) return null;
-                return this.client.editUserMessage(
-                    {
-                        conversation_id: conversationId,
-                        branch_id: branchId,
-                        expected_head: this.activeBranchHead(state),
-                        message_id: messageId,
-                        replacement_text: trimmed,
-                        selection,
-                        ...operationAuthority,
-                    },
-                    streamId,
-                    onItem,
-                );
-            },
-        );
+    editUserMessage(messageId: string, replacementText: string): Promise<boolean> {
+        return this.generationController.editUserMessage(messageId, replacementText);
     }
 
-    async regenerateAssistantMessage(messageId: string): Promise<boolean> {
-        return this.startBranchGeneration(
-            'regenerate',
-            messageId,
-            null,
-            (state, selection, operationAuthority, streamId, onItem) => {
-                const branchId = state.conversation_state?.active_branch_id;
-                const conversationId = state.selected_conversation?.id;
-                if (branchId === undefined || conversationId === undefined) return null;
-                return this.client.regenerateAssistantMessage(
-                    {
-                        conversation_id: conversationId,
-                        branch_id: branchId,
-                        expected_head: this.activeBranchHead(state),
-                        message_id: messageId,
-                        selection,
-                        ...operationAuthority,
-                    },
-                    streamId,
-                    onItem,
-                );
-            },
-        );
-    }
-
-    private async startBranchGeneration(
-        action: 'edit' | 'regenerate',
-        messageId: string,
-        replacementText: string | null,
-        start: (
-            state: LorepiaAppState,
-            selection: GenerationSelectionInput,
-            operationAuthority: GenerationOperationInputAuthority,
-            streamId: string,
-            onItem: (item: ChatStreamItemDto) => void,
-        ) => Promise<MessageActionGenerationDto> | null,
-    ): Promise<boolean> {
-        const state = get(this.mutable);
-        if (state.chat.active_generation_id !== null) {
-            this.announce(t('chat.notice.cancel_before_edit'));
-            return false;
-        }
-        const conversation = state.selected_conversation;
-        const selection = this.generationSelection(state);
-        if (conversation === null || state.conversation_state === null || selection === null) {
-            this.announce(t('chat.notice.check_model_first'));
-            return false;
-        }
-
-        const operationIdentity = generationOperationIdentity([
-            action,
-            conversation.id,
-            state.conversation_state.active_branch_id,
-            this.activeBranchHead(state),
-            messageId,
-            replacementText,
-            ...generationSelectionOperationIdentity(selection),
-        ]);
-        const operationContext = this.generationOperations.context(operationIdentity);
-
-        this.clearMemoryQueryRetryNotice();
-        const { epoch, streamId } = this.beginStreamReceiver();
-        const buffered: ChatStreamItemDto[] = [];
-        let ready = false;
-        this.setChatLoading();
-        try {
-            const started = await start(
-                state,
-                selection,
-                this.generationOperations.input(operationContext),
-                streamId,
-                (item) => {
-                    if (!this.streamEpoch.isCurrent(epoch) || this.activeStreamId !== streamId) {
-                        void this.disposeStream(streamId);
-                        return;
-                    }
-                    if (ready) this.acceptStreamItem(item, epoch, streamId);
-                    else buffered.push(item);
-                },
-            );
-            if (
-                started === null ||
-                !this.streamEpoch.isCurrent(epoch) ||
-                this.activeStreamId !== streamId
-            ) {
-                void this.disposeStream(streamId);
-                return false;
-            }
-
-            const conversationState = await this.client.selectBranch(
-                conversation.id,
-                started.branch.id,
-            );
-            const messages = await this.client.listBranchMessages(started.branch.id);
-            if (!this.streamEpoch.isCurrent(epoch) || this.activeStreamId !== streamId) {
-                void this.disposeStream(streamId);
-                return false;
-            }
-            const pendingAssistant = this.pendingAssistantMessage(messages, started.generation_id);
-            this.memoryQueryRetryEpoch.advance();
-            this.streamVerifier = new ChatStreamVerifier({
-                conversationId: conversation.id,
-                branchId: started.branch.id,
-                generationId: started.generation_id,
-                assistantMessageId: pendingAssistant?.id,
-            });
-            this.update((current) => ({
-                ...current,
-                conversation_state: conversationState,
-                branches: [
-                    started.branch,
-                    ...current.branches.filter((item) => item.id !== started.branch.id),
-                ],
-                messages: { phase: 'ready', error: null, items: messages },
-                memory_query_retries: {
-                    phase: 'idle',
-                    error: null,
-                    candidates: [],
-                    interrupted_jobs: [],
-                    busy_id: null,
-                    notice: null,
-                },
-                chat: {
-                    ...current.chat,
-                    phase: 'ready',
-                    active_generation_id: started.generation_id,
-                },
-            }));
-            void this.refreshMemoryQueryRetries();
-            ready = true;
-            for (const item of buffered) this.acceptStreamItem(item, epoch, streamId);
-            this.generationOperations.complete(operationContext);
-            return true;
-        } catch (error: unknown) {
-            this.failStream(epoch, streamId, error);
-            return false;
-        }
+    regenerateAssistantMessage(messageId: string): Promise<boolean> {
+        return this.generationController.regenerateAssistantMessage(messageId);
     }
 
     removeMessage(messageId: string): Promise<RemoveMessageResult> {
@@ -1220,497 +838,8 @@ export class LorepiaAppController {
         return state.branches.find((item) => item.id === activeBranchId)?.head_message_id ?? null;
     }
 
-    private beginStreamReceiver(): { epoch: number; streamId: string } {
-        this.detachStream();
-        const streamId = this.activateStreamReceiver();
-        return { epoch: this.streamEpoch.current(), streamId };
-    }
-
-    private activateStreamReceiver(): string {
-        const streamId = globalThis.crypto.randomUUID();
-        this.activeStreamId = streamId;
-        return streamId;
-    }
-
-    private prepareStream(
-        conversationId: string,
-        branchId: string,
-        generationId?: string,
-        assistantMessageId?: string,
-        sequenceBaseline = 0,
-    ): { epoch: number; streamId: string } {
-        const active = this.beginStreamReceiver();
-        this.streamVerifier = new ChatStreamVerifier({
-            conversationId,
-            branchId,
-            generationId,
-            assistantMessageId,
-            sequenceBaseline,
-        });
-        this.setChatLoading(generationId ?? null);
-        return active;
-    }
-
-    private setChatLoading(generationId: string | null = null): void {
-        this.update((state) => ({
-            ...state,
-            chat: {
-                phase: 'loading',
-                error: null,
-                active_generation_id: generationId,
-                live_assistant_message_id: null,
-                streaming_text: '',
-                reasoning_text: '',
-                reconcile_notice: null,
-                usage_label: null,
-            },
-        }));
-    }
-
-    private failStream(epoch: number, streamId: string, error: unknown): void {
-        void this.disposeStream(streamId);
-        if (!this.streamEpoch.isCurrent(epoch)) return;
-        this.cancelPendingDeltas();
-        this.update((state) => ({
-            ...state,
-            chat: {
-                ...state.chat,
-                phase: 'error',
-                error: errorLabel(error),
-                active_generation_id: null,
-                live_assistant_message_id: null,
-            },
-        }));
-        void this.refreshMemoryQueryRetries();
-    }
-
-    private resumePendingGeneration(messages: MessageDto[]): void {
-        const pending = this.pendingAssistantMessage(messages);
-        if (pending?.generation_id === null || pending?.generation_id === undefined) return;
-        const state = get(this.mutable);
-        const conversationId = state.selected_conversation?.id;
-        const branchId = state.conversation_state?.active_branch_id;
-        if (conversationId === undefined || branchId === undefined) return;
-        const generationId = pending.generation_id;
-        const { epoch, streamId } = this.prepareStream(
-            conversationId,
-            branchId,
-            generationId,
-            pending.id,
-        );
-        void this.subscribePendingGeneration(
-            generationId,
-            conversationId,
-            branchId,
-            pending.id,
-            0,
-            epoch,
-            streamId,
-        );
-    }
-
-    private async subscribePendingGeneration(
-        generationId: string,
-        conversationId: string,
-        branchId: string,
-        assistantMessageId: string,
-        sequenceBaseline: number,
-        epoch: number,
-        streamId: string,
-    ): Promise<boolean> {
-        const buffered: ChatStreamItemDto[] = [];
-        let ready = false;
-        try {
-            await this.client.subscribeGeneration(
-                generationId,
-                conversationId,
-                branchId,
-                sequenceBaseline,
-                streamId,
-                (item) => {
-                    if (!this.streamEpoch.isCurrent(epoch) || this.activeStreamId !== streamId) {
-                        void this.disposeStream(streamId);
-                        return;
-                    }
-                    if (ready) this.acceptStreamItem(item, epoch, streamId);
-                    else buffered.push(item);
-                },
-            );
-            if (!this.streamEpoch.isCurrent(epoch) || this.activeStreamId !== streamId) {
-                void this.disposeStream(streamId);
-                return false;
-            }
-            this.streamVerifier = new ChatStreamVerifier({
-                conversationId,
-                branchId,
-                generationId,
-                assistantMessageId,
-                sequenceBaseline,
-                requireLiveSnapshot: true,
-            });
-            this.update((state) => ({
-                ...state,
-                chat: {
-                    ...state.chat,
-                    phase: 'ready',
-                    error: null,
-                    active_generation_id: generationId,
-                    reconcile_notice: null,
-                },
-            }));
-            ready = true;
-            for (const item of buffered) {
-                if (!this.streamEpoch.isCurrent(epoch) || this.activeStreamId !== streamId) break;
-                this.acceptStreamItem(item, epoch, streamId);
-            }
-            return true;
-        } catch (error: unknown) {
-            void this.disposeStream(streamId);
-            if (!this.streamEpoch.isCurrent(epoch)) return false;
-            const normalized = normalizeClientError(error);
-            if (
-                normalized.code === 'generation_reattachment_unavailable' &&
-                (await this.settleGenerationAfterUnavailableSubscription(
-                    generationId,
-                    conversationId,
-                    epoch,
-                ))
-            ) {
-                return false;
-            }
-            if (!this.streamEpoch.isCurrent(epoch)) return false;
-            this.streamVerifier = null;
-            this.cancelPendingDeltas();
-            this.update((state) => ({
-                ...state,
-                chat: {
-                    ...reattachmentUnavailableChatState(generationId),
-                    error: errorLabel(normalized),
-                },
-            }));
-            return false;
-        }
-    }
-
-    private async settleGenerationAfterUnavailableSubscription(
-        generationId: string,
-        conversationId: string,
-        epoch: number,
-    ): Promise<boolean> {
-        if (get(this.mutable).selected_conversation?.id !== conversationId) return false;
-        try {
-            const conversationState = await this.client.getConversationState(conversationId);
-            const [branches, messages] = await Promise.all([
-                this.client.listBranches(conversationId),
-                this.client.listBranchMessages(conversationState.active_branch_id),
-            ]);
-            if (
-                !this.streamEpoch.isCurrent(epoch) ||
-                get(this.mutable).selected_conversation?.id !== conversationId
-            ) {
-                return false;
-            }
-            if (this.pendingAssistantMessage(messages, generationId) !== null) return false;
-            this.streamVerifier = null;
-            this.reconcileBufferedItems = [];
-            this.cancelPendingDeltas();
-            this.update((state) => ({
-                ...state,
-                conversation_state: conversationState,
-                branches,
-                messages: { phase: 'ready', error: null, items: messages },
-                chat: {
-                    ...state.chat,
-                    phase: 'idle',
-                    error: null,
-                    active_generation_id: null,
-                    live_assistant_message_id: null,
-                    streaming_text: '',
-                    reasoning_text: '',
-                    reconcile_notice: null,
-                },
-            }));
-            this.announce(t('chat.notice.synced'));
-            return true;
-        } catch {
-            return false;
-        }
-    }
-
-    private pendingAssistantMessage(
-        messages: MessageDto[],
-        generationId?: string,
-    ): MessageDto | null {
-        return (
-            [...messages]
-                .reverse()
-                .find(
-                    (message) =>
-                        message.role === 'assistant' &&
-                        message.status === 'pending' &&
-                        message.generation_id !== null &&
-                        (generationId === undefined || message.generation_id === generationId),
-                ) ?? null
-        );
-    }
-
-    private acceptStreamItem(item: ChatStreamItemDto, epoch: number, streamId: string): void {
-        if (this.reconcileInFlight !== null) {
-            if (this.streamEpoch.isCurrent(epoch) && this.activeStreamId === streamId) {
-                this.reconcileBufferedItems.push(item);
-            }
-            return;
-        }
-        if (this.streamVerifier === null) return;
-        const decision = this.streamVerifier.accept(item);
-        if (decision.type === 'ignore') return;
-        if (decision.type === 'live_snapshot') {
-            this.cancelPendingDeltas();
-            const liveAssistant = this.pendingAssistantMessage(
-                get(this.mutable).messages.items,
-                decision.generationId,
-            );
-            if (liveAssistant === null) {
-                void this.reconcile(
-                    decision.generationId,
-                    epoch,
-                    streamId,
-                    'live snapshot route mismatch',
-                    decision.sequenceBaseline,
-                );
-                return;
-            }
-            this.update((state) => ({
-                ...state,
-                chat: {
-                    ...state.chat,
-                    phase: 'ready',
-                    error: null,
-                    active_generation_id: decision.generationId,
-                    live_assistant_message_id: liveAssistant.id,
-                    streaming_text: decision.displayPrefix,
-                    reasoning_text: decision.reasoningPrefix,
-                    reconcile_notice: null,
-                },
-            }));
-            return;
-        }
-        if (decision.type === 'reconcile') {
-            if (decision.reason === 'terminal') {
-                this.flushPendingDeltas(epoch);
-            } else {
-                this.cancelPendingDeltas();
-            }
-            const generationId =
-                decision.event?.generation_id ?? this.streamVerifier.getGenerationId();
-            if (generationId !== null) {
-                void this.reconcile(
-                    generationId,
-                    epoch,
-                    streamId,
-                    decision.reason,
-                    decision.sequenceBaseline,
-                );
-            }
-            return;
-        }
-        this.applyChatEvent(decision.event, epoch);
-    }
-
-    private applyChatEvent(event: ChatEventDto, epoch: number): void {
-        if (event.kind.type === 'text_delta') {
-            this.pendingTextDelta += event.kind.payload;
-            this.scheduleDeltaFlush(epoch);
-            return;
-        }
-        if (event.kind.type === 'reasoning_delta') {
-            this.pendingReasoningDelta += event.kind.payload;
-            this.scheduleDeltaFlush(epoch);
-            return;
-        }
-        this.update((state) => {
-            const chat = { ...state.chat, active_generation_id: event.generation_id };
-            switch (event.kind.type) {
-                case 'generation_started':
-                    chat.phase = 'ready';
-                    break;
-                case 'usage_updated': {
-                    const output = event.kind.payload.output_tokens;
-                    chat.usage_label =
-                        output === null
-                            ? null
-                            : t('chat.usage.output_tokens', { count: output.toLocaleString() });
-                    break;
-                }
-                case 'message_committed':
-                    chat.reconcile_notice = t('chat.notice.reconciling');
-                    break;
-                case 'tool_call_started':
-                    chat.reconcile_notice = t('chat.notice.tool_suggested');
-                    break;
-                case 'tool_call_arguments_delta':
-                case 'tool_call_completed':
-                case 'generation_cancelled':
-                case 'generation_failed':
-                case 'generation_finished':
-                    break;
-                case 'text_delta':
-                case 'reasoning_delta':
-                    break;
-            }
-            return { ...state, chat };
-        });
-    }
-
-    private scheduleDeltaFlush(epoch: number): void {
-        if (this.deltaFlushTimer !== null) return;
-        this.deltaFlushTimer = setTimeout(() => this.flushPendingDeltas(epoch), 16);
-    }
-
-    private flushPendingDeltas(epoch: number): void {
-        if (this.deltaFlushTimer !== null) {
-            clearTimeout(this.deltaFlushTimer);
-            this.deltaFlushTimer = null;
-        }
-        if (!this.streamEpoch.isCurrent(epoch)) {
-            this.pendingTextDelta = '';
-            this.pendingReasoningDelta = '';
-            return;
-        }
-        const text = this.pendingTextDelta;
-        const reasoning = this.pendingReasoningDelta;
-        this.pendingTextDelta = '';
-        this.pendingReasoningDelta = '';
-        if (text === '' && reasoning === '') return;
-        this.update((state) => ({
-            ...state,
-            chat: {
-                ...state.chat,
-                streaming_text: state.chat.streaming_text + text,
-                reasoning_text: state.chat.reasoning_text + reasoning,
-            },
-        }));
-    }
-
-    private cancelPendingDeltas(): void {
-        if (this.deltaFlushTimer !== null) {
-            clearTimeout(this.deltaFlushTimer);
-            this.deltaFlushTimer = null;
-        }
-        this.pendingTextDelta = '';
-        this.pendingReasoningDelta = '';
-    }
-
-    private async reconcile(
-        generationId: string,
-        epoch: number,
-        streamId: string,
-        reason: string,
-        sequenceBaseline: number,
-    ): Promise<void> {
-        if (this.reconcileInFlight !== null) return;
-        const conversation = get(this.mutable).selected_conversation;
-        if (conversation === null) {
-            void this.disposeStream(streamId);
-            return;
-        }
-        const reconciliation = Symbol('generation-reconciliation');
-        this.reconcileInFlight = reconciliation;
-        this.reconcileBufferedItems = [];
-        this.update((state) => ({
-            ...state,
-            chat: {
-                ...state.chat,
-                reconcile_notice: t('chat.notice.stream_recovering', { reason }),
-            },
-        }));
-        try {
-            await this.disposeStream(streamId);
-            if (!this.streamEpoch.isCurrent(epoch)) return;
-            const conversationState = await this.client.getConversationState(conversation.id);
-            const [branches, messages] = await Promise.all([
-                this.client.listBranches(conversation.id),
-                this.client.listBranchMessages(conversationState.active_branch_id),
-            ]);
-            if (!this.streamEpoch.isCurrent(epoch)) return;
-            const pendingAssistant = this.pendingAssistantMessage(messages, generationId);
-            this.streamVerifier = null;
-            this.update((state) => ({
-                ...state,
-                conversation_state: conversationState,
-                branches,
-                messages: { phase: 'ready', error: null, items: messages },
-                chat:
-                    pendingAssistant === null
-                        ? {
-                              ...state.chat,
-                              phase: 'idle',
-                              error: null,
-                              active_generation_id: null,
-                              live_assistant_message_id: null,
-                              streaming_text: '',
-                              reasoning_text: '',
-                              reconcile_notice: null,
-                          }
-                        : {
-                              ...state.chat,
-                              phase: 'loading',
-                              error: null,
-                              active_generation_id: generationId,
-                              live_assistant_message_id: null,
-                              streaming_text: '',
-                              reasoning_text: '',
-                              reconcile_notice: t('chat.notice.stream_reconnecting'),
-                          },
-            }));
-            if (pendingAssistant === null) {
-                this.reconcileBufferedItems = [];
-                this.announce(t('chat.notice.synced'));
-                return;
-            }
-            this.reconcileBufferedItems = [];
-            const nextStreamId = this.activateStreamReceiver();
-            void this.subscribePendingGeneration(
-                generationId,
-                conversation.id,
-                conversationState.active_branch_id,
-                pendingAssistant.id,
-                sequenceBaseline,
-                epoch,
-                nextStreamId,
-            );
-        } catch (error: unknown) {
-            void this.disposeStream(streamId);
-            if (!this.streamEpoch.isCurrent(epoch)) return;
-            this.update((state) => ({
-                ...state,
-                chat: {
-                    ...state.chat,
-                    phase: 'error',
-                    error: errorLabel(error),
-                    live_assistant_message_id: null,
-                    streaming_text: '',
-                    reasoning_text: '',
-                    reconcile_notice: t('chat.notice.refresh_needed'),
-                },
-            }));
-        } finally {
-            if (this.reconcileInFlight === reconciliation) this.reconcileInFlight = null;
-        }
-    }
-
-    async cancelGeneration(): Promise<void> {
-        const generationId = get(this.mutable).chat.active_generation_id;
-        if (generationId === null) return;
-        try {
-            await this.client.cancelGeneration(generationId);
-            this.announce(t('chat.notice.cancel_requested'));
-        } catch (error: unknown) {
-            const normalized = normalizeClientError(error);
-            if (normalized.code !== 'not_found' && normalized.code !== 'cancelled') {
-                this.announce(errorLabel(normalized));
-            }
-        }
+    cancelGeneration(): Promise<void> {
+        return this.generationController.cancelGeneration();
     }
 
     async loadProviders(): Promise<void> {
@@ -2662,26 +1791,6 @@ export class LorepiaAppController {
         }
     }
 
-    private async disposeStream(streamId: string): Promise<void> {
-        if (this.activeStreamId === streamId) this.activeStreamId = null;
-        try {
-            await this.client.disposeChatStream(streamId);
-        } catch {
-            // Receiver disposal is idempotent and must not mask the product action.
-        }
-    }
-
-    private detachStream(): void {
-        const streamId = this.activeStreamId;
-        this.activeStreamId = null;
-        this.streamEpoch.advance();
-        this.streamVerifier = null;
-        this.reconcileInFlight = null;
-        this.reconcileBufferedItems = [];
-        this.cancelPendingDeltas();
-        if (streamId !== null) void this.disposeStream(streamId);
-    }
-
     destroy(): void {
         this.appEpoch.advance();
         this.conversationController.destroy();
@@ -2690,7 +1799,7 @@ export class LorepiaAppController {
         this.discoveryRequestEpoch.advance();
         this.memorySupervisorUnlisten?.();
         this.memorySupervisorUnlisten = null;
-        this.detachStream();
+        this.streamController.detachStream();
     }
 }
 
