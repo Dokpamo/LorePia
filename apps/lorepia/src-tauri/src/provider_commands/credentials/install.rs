@@ -1,4 +1,18 @@
-use super::*;
+use lorepia_shell_api as shell;
+use tauri::AppHandle;
+use tauri_plugin_lorepia_platform::{
+    BoundCredentialObservation, CredentialAuthority, CredentialStatus, NativeCaptureStatus,
+    NativeCredential, PlatformResult,
+};
+
+use super::{
+    CapturedDiscoveryCredential, DiscoveryCredentialVault, PlatformDiscoveryCredentialVault,
+    platform_result_requires_credential_recovery, status_only_bound_observation,
+};
+use crate::{
+    error::{CommandError, CommandResult},
+    state::{AppState, DiscoveryCredentialLeaseBinding},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg(test)]

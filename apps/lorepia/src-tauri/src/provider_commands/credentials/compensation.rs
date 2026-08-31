@@ -1,4 +1,18 @@
-use super::*;
+use lorepia_shell_api as shell;
+use sha2::{Digest, Sha256};
+use tauri::AppHandle;
+use tauri_plugin_lorepia_platform::{
+    BoundCredentialObservation, CredentialAuthority, NativeCredentialEffect,
+    NativeCredentialEffectContext, PlatformErrorCode, PlatformResult,
+};
+
+use super::{
+    DiscoveryCompensationConfirmation, DiscoveryCredentialVault, PlatformDiscoveryCredentialVault,
+};
+use crate::{
+    error::{CommandError, CommandResult},
+    state::AppState,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::provider_commands) enum CredentialCompensationDeleteOutcome {

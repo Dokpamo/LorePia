@@ -1,5 +1,22 @@
-use super::credentials::*;
-use super::*;
+use lorepia_shell_api as shell;
+use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, State};
+use tauri_plugin_lorepia_platform::{
+    BoundCredentialObservation, LorepiaPlatformExt, NativeCaptureStatus,
+};
+
+use super::credentials::{
+    CompensationObserveErrorPolicy, ExistingConnectionCredentialReader,
+    PlatformExistingConnectionCredentialReader,
+    credential_authority_for_existing_connection_with_reader, credential_for_discovery_action,
+    discovery_credential_authority, drive_provider_discovery_compensation_explicit,
+    drive_provider_discovery_compensation_observe_only, promote_discovery_credential_lease,
+    recover_provider_discovery_credential_installs, require_started_discovery_credential_install,
+};
+use crate::{
+    error::{CommandError, CommandResult},
+    state::AppState,
+};
 
 mod runtime;
 

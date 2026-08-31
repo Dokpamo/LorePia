@@ -1,5 +1,12 @@
-use super::credentials::*;
-use super::*;
+use lorepia_shell_api as shell;
+use serde::Deserialize;
+use tauri::{AppHandle, State};
+
+use super::credentials::{
+    ExistingConnectionCredentialReader, PlatformExistingConnectionCredentialReader,
+    credential_for_connection_with_reader,
+};
+use crate::{error::CommandResult, state::AppState};
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]

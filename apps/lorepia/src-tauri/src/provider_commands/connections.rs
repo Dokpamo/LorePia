@@ -1,5 +1,13 @@
-use super::credentials::*;
-use super::*;
+use lorepia_shell_api as shell;
+use serde::Deserialize;
+use tauri::{AppHandle, State};
+use tauri_plugin_lorepia_platform::{LorepiaPlatformExt, NativeCredentialEffect};
+
+use super::credentials::{NewConnectionSlotGuard, PlatformNewConnectionSlotGuard, find_connection};
+use crate::{
+    error::{CommandError, CommandResult},
+    state::AppState,
+};
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]

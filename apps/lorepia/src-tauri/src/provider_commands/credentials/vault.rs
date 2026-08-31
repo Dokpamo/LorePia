@@ -1,4 +1,16 @@
-use super::*;
+use std::{future::Future, pin::Pin};
+
+use lorepia_shell_api as shell;
+use tauri::AppHandle;
+use tauri_plugin_lorepia_platform::{
+    BoundCredentialObservation, CredentialAuthority, CredentialStatus, LorepiaPlatformExt,
+    NativeCaptureStatus, NativeCredential, NativeCredentialEffectConfirmation,
+    NativeCredentialEffectContext, PlatformResult, PreparedBoundCredentialStore,
+};
+#[cfg(test)]
+use tauri_plugin_lorepia_platform::{NativeCredentialEffect, PlatformErrorCode};
+
+use crate::error::{CommandError, CommandResult};
 
 pub(in crate::provider_commands) type DiscoveryVaultFuture<'a, T> =
     Pin<Box<dyn Future<Output = PlatformResult<T>> + Send + 'a>>;

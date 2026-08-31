@@ -1,27 +1,3 @@
-use std::{
-    collections::HashMap,
-    future::Future,
-    pin::Pin,
-    sync::{Mutex, OnceLock},
-};
-
-use lorepia_shell_api as shell;
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-use tauri::{AppHandle, State};
-use tauri_plugin_lorepia_platform::{
-    BoundCredentialObservation, CredentialAuthority, CredentialStatus, LorepiaPlatformExt,
-    NativeCaptureStatus, NativeCredential, NativeCredentialEffect,
-    NativeCredentialEffectConfirmation, NativeCredentialEffectContext, PlatformErrorCode,
-    PlatformResult, PreparedBoundCredentialStore,
-};
-use uuid::Uuid;
-
-use crate::{
-    error::{CommandError, CommandResult},
-    state::{AppState, CatalogImportTicket, DiscoveryCredentialLeaseBinding},
-};
-
 mod capabilities;
 mod catalog;
 mod connections;

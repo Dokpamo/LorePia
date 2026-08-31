@@ -1,4 +1,11 @@
-use super::*;
+use std::{
+    collections::HashMap,
+    sync::{Mutex, OnceLock},
+};
+
+use uuid::Uuid;
+
+use crate::error::{CommandError, CommandResult};
 
 struct ActiveDiscoveryRequest {
     request_id: Uuid,
