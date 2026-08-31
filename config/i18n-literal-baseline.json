@@ -233,8 +233,8 @@
       "sha256": "bf5ab4d1ab042672651b839e04c917d56d1bbcfb4bad62fa63bd925d54fdbc09"
     },
     "src/features/orchestration/OrchestrationStudio.svelte": {
-      "hangul_lines": 455,
-      "sha256": "b0f76c045be97284b3577f0cc738baf6a6a779b914a9a2214b51ce2fd4e97542"
+      "hangul_lines": 32,
+      "sha256": "785dc8f4a94ff22f755345b11ba05bf6c7a3ac8a6607e023e459fa13a321e420"
     },
     "src/features/orchestration/PromptPresetHistory.svelte": {
       "hangul_lines": 39,
@@ -267,6 +267,42 @@
     "src/features/orchestration/prompt-preset-history-controller.test.ts": {
       "hangul_lines": 1,
       "sha256": "8cb2a3368c353afd806e0ce1d044232ed081f932ebc49a40c55d3007bb62e07f"
+    },
+    "src/features/orchestration/studio/ContentPackageReview.svelte": {
+      "hangul_lines": 74,
+      "sha256": "0f95818c1805e1d78fca8fe9c123da7a9197ce26c0fc1f9ac7bb3e6564db79f4"
+    },
+    "src/features/orchestration/studio/ContentSection.svelte": {
+      "hangul_lines": 43,
+      "sha256": "789ed696967886891d5f151fe7c7f265eaf4639e742849c42c43d84be05140eb"
+    },
+    "src/features/orchestration/studio/DiagnosticsSection.svelte": {
+      "hangul_lines": 24,
+      "sha256": "73a63939154e1d252d0624f42c2c6b7ebfa581e29e9d86028615ae775ba2269d"
+    },
+    "src/features/orchestration/studio/MemorySection.svelte": {
+      "hangul_lines": 101,
+      "sha256": "be4160137163dc68c58a0ca3b7f0e8be05b7780ca52ca3a048eed9c228574fbb"
+    },
+    "src/features/orchestration/studio/PlanDetails.svelte": {
+      "hangul_lines": 64,
+      "sha256": "3bbfd25c7960e97d2b7c4305a28368c4c457e508af0cce60102bd2d3c9ed1262"
+    },
+    "src/features/orchestration/studio/PromptBlockItem.svelte": {
+      "hangul_lines": 41,
+      "sha256": "0de35388efc087a2b0fdb41b7a1a5d782452e5306962304bfa8706de4c279db0"
+    },
+    "src/features/orchestration/studio/PromptBlocksSection.svelte": {
+      "hangul_lines": 23,
+      "sha256": "a1e9cc25a6009febeb044c4f05dc5de897bed1978c00c2e0dc552fbacc6e066f"
+    },
+    "src/features/orchestration/studio/PromptSection.svelte": {
+      "hangul_lines": 20,
+      "sha256": "577d3e66a7cbec4e661faaedb4c53b30d5b42b43993d309560db44666822c4b7"
+    },
+    "src/features/orchestration/studio/RuntimePlanSection.svelte": {
+      "hangul_lines": 33,
+      "sha256": "59783c20041100acaf5163444e30b4b89ea112868801a1d8d61ad9ab08ec2182"
     },
     "src/features/orchestration/tests/content-package-fixtures.ts": {
       "hangul_lines": 2,

@@ -4,11 +4,22 @@ import choicePopoverSource from '../components/ChoicePopover.svelte?raw';
 import segmentedControlSource from '../components/SegmentedControl.svelte?raw';
 import toggleSwitchSource from '../components/ToggleSwitch.svelte?raw';
 import trustedAssetSource from '../features/assets/TrustedAsset.svelte?raw';
+import chatErrorSource from '../features/chat/ChatErrorRegion.svelte?raw';
 import chatPaneSource from '../features/chat/ChatPane.svelte?raw';
 import orchestrationStudioSource from '../features/orchestration/OrchestrationStudio.svelte?raw';
+import orchestrationMemorySource from '../features/orchestration/studio/MemorySection.svelte?raw';
+import orchestrationStudioStylesA from '../features/orchestration/studio/styles/studio-a.css?raw';
+import orchestrationStudioStylesB from '../features/orchestration/studio/styles/studio-b.css?raw';
 import capabilityPanelSource from '../features/providers/CapabilityPanel.svelte?raw';
 import personaPanelSource from '../features/personas/PersonaPanel.svelte?raw';
 import appCss from './app.css?raw';
+
+const orchestrationStudioContractSource = [
+    orchestrationStudioSource,
+    orchestrationMemorySource,
+    orchestrationStudioStylesA,
+    orchestrationStudioStylesB,
+].join('\n');
 
 const svelteSources = import.meta.glob<string>('../**/*.svelte', {
     eager: true,
@@ -94,28 +105,28 @@ describe('semantic state styling', () => {
     });
 
     it('renders delayed memory failures as errors instead of neutral notices', () => {
-        expect(orchestrationStudioSource).toContain(
+        expect(orchestrationStudioContractSource).toContain(
             "class:error={appState.memory_supervisor.status.phase === 'failed'}",
         );
-        expect(orchestrationStudioSource).toMatch(
+        expect(orchestrationStudioContractSource).toMatch(
             /memory_supervisor\.error[^]*class="bounded-note error" role="alert"/u,
         );
-        expect(orchestrationStudioSource).toMatch(/\.bounded-note\.error,/u);
+        expect(orchestrationStudioContractSource).toMatch(/\.bounded-note\.error,/u);
     });
 
     it('keeps chat errors above the transcript instead of stretching them along the bottom edge', () => {
-        expect(chatPaneSource).toMatch(
+        expect(chatErrorSource).toMatch(
             /\.chat-error-region\s*\{[^}]*position:\s*absolute;[^}]*z-index:\s*24;/s,
         );
-        expect(chatPaneSource).toMatch(
+        expect(chatErrorSource).toMatch(
             /app-shell\[data-layout='desktop'\][^{}]*\.chat-error-region\s*\{[^}]*top:\s*72px;/s,
         );
-        expect(chatPaneSource).toMatch(
+        expect(chatErrorSource).toMatch(
             /\.chat-error-notice\s*\{[^}]*width:\s*min\(100%, 680px\);[^}]*var\(--status-error-bg\);[^}]*var\(--popover-shadow\);/s,
         );
-        expect(chatPaneSource.match(/class="chat-error-dismiss"/g)).toHaveLength(3);
+        expect(chatErrorSource.match(/class="chat-error-dismiss"/g)).toHaveLength(3);
         expect(chatPaneSource).not.toContain('class="state-panel error portable-runtime-status"');
-        expect(chatPaneSource).toContain('copyNotice !== portableRuntimeError');
+        expect(chatPaneSource).toContain('copyNotice !== portableRuntimeLifecycle.error');
     });
 
     it('uses the same disabled contract and moving control thumbs', () => {

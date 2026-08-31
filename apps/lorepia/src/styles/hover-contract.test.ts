@@ -5,20 +5,26 @@ import choiceFieldSource from '../components/ChoiceField.svelte?raw';
 import choicePopoverSource from '../components/ChoicePopover.svelte?raw';
 import segmentedControlSource from '../components/SegmentedControl.svelte?raw';
 import toggleSwitchSource from '../components/ToggleSwitch.svelte?raw';
-import detailActionBarSource from '../components/detail/DetailActionBar.svelte?raw';
+import actionBarSource from '../components/detail/DetailActionBar.svelte?raw';
 import detailPageSource from '../components/detail/DetailPage.svelte?raw';
+import composerSource from '../features/chat/ChatComposer.svelte?raw';
+import fullscreenSource from '../features/chat/ChatFullscreenComposer.svelte?raw';
+import chatMessageActionsSource from '../features/chat/ChatMessageActions.svelte?raw';
+import chatMessageListSource from '../features/chat/ChatMessageList.svelte?raw';
 import chatPaneSource from '../features/chat/ChatPane.svelte?raw';
-import conversationPaneSource from '../features/conversations/ConversationPane.svelte?raw';
+import chatViewportSource from '../features/chat/ChatViewport.svelte?raw';
+import composerLogic from '../features/chat/composer-state.svelte.ts?raw';
+import conversationSource from '../features/conversations/ConversationPane.svelte?raw';
 import libraryPaneSource from '../features/library/LibraryPane.svelte?raw';
-import orchestrationQuickDrawerSource from '../features/orchestration/OrchestrationQuickDrawer.svelte?raw';
-import orchestrationStudioSource from '../features/orchestration/OrchestrationStudio.svelte?raw';
+import quickDrawerSource from '../features/orchestration/OrchestrationQuickDrawer.svelte?raw';
+import studioSource from '../features/orchestration/OrchestrationStudio.svelte?raw';
 import personaPanelSource from '../features/personas/PersonaPanel.svelte?raw';
 import capabilityPanelSource from '../features/providers/CapabilityPanel.svelte?raw';
 import discoveryPanelSource from '../features/providers/DiscoveryPanel.svelte?raw';
 import modelSyncPanelSource from '../features/providers/ModelSyncPanel.svelte?raw';
 import providerCrudPanelSource from '../features/providers/ProviderCrudPanel.svelte?raw';
 import desktopSettingsSidebarSource from '../features/providers/DesktopSettingsSidebar.svelte?raw';
-import providerSettingsSource from '../features/providers/ProviderSettings.svelte?raw';
+import settingsSource from '../features/providers/ProviderSettings.svelte?raw';
 import themeSource from '../lib/theme.ts?raw';
 import appCss from './app.css?raw';
 
@@ -60,7 +66,7 @@ function hoverIndexes(source: string): number[] {
 describe('pointer interaction styling', () => {
     it('keeps settings choices inside the LorePia popover layer', () => {
         const settingsSurfaces = [
-            providerSettingsSource,
+            settingsSource,
             providerCrudPanelSource,
             capabilityPanelSource,
             discoveryPanelSource,
@@ -154,8 +160,8 @@ describe('pointer interaction styling', () => {
         expect(appCss).not.toContain('--brand-yellow');
         expect(appCss).not.toContain('--brand-tangerine-orange');
         expect(appCss).not.toContain('#0e9384');
-        expect(providerSettingsSource).toContain('lorepia-logo-mark.png');
-        expect(providerSettingsSource).toContain('class="settings-avatar brand-logo-mark"');
+        expect(settingsSource).toContain('lorepia-logo-mark.png');
+        expect(settingsSource).toContain('class="settings-avatar brand-logo-mark"');
         expect(appSource).not.toContain('lorepia-logo-mark.png');
         expect(appSource).not.toContain('class="sidebar-logo"');
         expect(appSource).not.toContain('lorepia-logo-light.png');
@@ -163,16 +169,16 @@ describe('pointer interaction styling', () => {
         expect(appCss).toContain('-webkit-mask-image: var(--logo-mask);');
         expect(appCss).toContain('mask-image: var(--logo-mask);');
         expect(themeSource).toContain("const DEFAULT_THEME_PREFERENCE: ThemePreference = 'light';");
-        expect(providerSettingsSource).toMatch(
+        expect(settingsSource).toMatch(
             /\.settings-avatar-wrap\s*\{[^}]*overflow:\s*visible;[^}]*background:\s*var\(--brand-logo-bg\);[^}]*box-shadow:\s*var\(--shadow-2\);/s,
         );
-        expect(providerSettingsSource).toMatch(
+        expect(settingsSource).toMatch(
             /\.settings-avatar-badge\s*\{[^}]*z-index:\s*1;[^}]*background:\s*var\(--surface-active\);[^}]*box-shadow:\s*var\(--shadow-1\);/s,
         );
-        expect(providerSettingsSource).toMatch(
+        expect(settingsSource).toMatch(
             /\.settings-avatar\s*\{[^}]*position:\s*absolute;[^}]*border-radius:\s*50%;/s,
         );
-        expect(providerSettingsSource).not.toContain('data-tone=');
+        expect(settingsSource).not.toContain('data-tone=');
         expect(appCss).not.toContain('.setting-tile[data-tone=');
         expect(appCss).toMatch(
             /\.setting-icon\s*\{[^}]*color:\s*var\(--ink\);[^}]*place-items:\s*center;/s,
@@ -236,19 +242,19 @@ describe('pointer interaction styling', () => {
         expect(appCss).toMatch(
             /\.app-shell\[data-layout='desktop'\] \.message-actions button:hover:not\(:disabled\)\s*\{[^}]*background:\s*transparent;[^}]*color:\s*var\(--desktop-chat-action-hover-ink\);/s,
         );
-        expect(providerSettingsSource).toMatch(
+        expect(settingsSource).toMatch(
             /\.desktop-settings-card\s*\{[^}]*background:\s*var\(--desktop-workspace-bg\);/s,
         );
         expect(appCss).toMatch(
             /\.app-shell\[data-layout='desktop'\]\[data-view='settings'\] \.setting-list\s*\{[^}]*background:\s*var\(--desktop-workspace-bg\);/s,
         );
-        expect(providerSettingsSource).toMatch(
+        expect(settingsSource).toMatch(
             /\.theme-preview-dark \.theme-preview-canvas\s*\{[^}]*border-color:\s*#464646;[^}]*background:\s*#1f1f1f;/s,
         );
-        expect(providerSettingsSource).toMatch(
+        expect(settingsSource).toMatch(
             /\.theme-preview-dark \.theme-preview-sidebar\s*\{[^}]*background:\s*#1b1b1b;/s,
         );
-        expect(providerSettingsSource).toMatch(
+        expect(settingsSource).toMatch(
             /\.theme-preview-dark \.theme-preview-composer\s*\{[^}]*border-color:\s*#414141;[^}]*background:\s*#282828;/s,
         );
     });
@@ -264,25 +270,23 @@ describe('pointer interaction styling', () => {
         expect(
             appSource.match(/mobile-top-action mobile-top-action-left back-button/g),
         ).toHaveLength(2);
-        expect(conversationPaneSource).toMatch(
+        expect(conversationSource).toMatch(
             /class="mobile-top-frame mobile-root-header conversation-root-header"/,
         );
-        expect(providerSettingsSource).toMatch(/class="mobile-top-frame settings-toolbar"/);
-        expect(providerSettingsSource).toMatch(/mobile-top-action settings-tool-button/);
-        expect(providerSettingsSource).toMatch(
+        expect(settingsSource).toMatch(/class="mobile-top-frame settings-toolbar"/);
+        expect(settingsSource).toMatch(/mobile-top-action settings-tool-button/);
+        expect(settingsSource).toMatch(
             /\.settings-toolbar\s*\{[^}]*position:\s*absolute;[^}]*inset:\s*0 0 auto;[^}]*background:\s*transparent;[^}]*pointer-events:\s*none;/s,
         );
-        expect(providerSettingsSource).toMatch(
-            /\.settings-tool-button\s*\{[^}]*pointer-events:\s*auto;/s,
-        );
-        expect(providerSettingsSource).toMatch(
+        expect(settingsSource).toMatch(/\.settings-tool-button\s*\{[^}]*pointer-events:\s*auto;/s);
+        expect(settingsSource).toMatch(
             /\.provider-scroll\.settings-home-scroll\s*\{[^}]*padding-top:\s*clamp\(36px,\s*10\.297vw,\s*45px\);[^}]*padding-inline:\s*var\(--settings-gutter\);/s,
         );
         expect(appSource).not.toContain('mobile-detail-title');
-        expect(providerSettingsSource).not.toContain('mobile-detail-title');
-        expect(providerSettingsSource).not.toContain('showDetailTitle');
-        expect(providerSettingsSource).toContain('onscroll={handleSettingsDetailScroll}');
-        expect(providerSettingsSource).not.toMatch(/class="settings-dialog"/);
+        expect(settingsSource).not.toContain('mobile-detail-title');
+        expect(settingsSource).not.toContain('showDetailTitle');
+        expect(settingsSource).toContain('onscroll={handleSettingsDetailScroll}');
+        expect(settingsSource).not.toMatch(/class="settings-dialog"/);
         expect(chatPaneSource).toMatch(
             /class="mobile-top-frame mobile-top-frame-leading chat-header"/,
         );
@@ -342,8 +346,8 @@ describe('pointer interaction styling', () => {
         expect(appSource).toContain('use:syncDetailActionViewport');
         expect(appSource).toContain("'--detail-action-center'");
         expect(appSource).toContain("'--detail-action-workspace-width'");
-        expect(chatPaneSource).toContain('use:syncMessageScrollbarInset');
-        expect(chatPaneSource).toContain("'--message-scrollbar-width'");
+        expect(chatViewportSource).toContain('use:syncMessageScrollbarInset');
+        expect(chatViewportSource).toContain("'--message-scrollbar-width'");
         expect(appCss).toMatch(
             /\.app-shell\[data-layout='desktop'\]\[data-view='chat'\] \.composer\s*\{[^}]*padding-right:\s*var\(--chat-side-inset\);/s,
         );
@@ -351,7 +355,7 @@ describe('pointer interaction styling', () => {
 
     it.each([
         ['global app styles', appCss],
-        ['conversation pane styles', conversationPaneSource],
+        ['conversation pane styles', conversationSource],
     ])('keeps every %s hover rule on devices with a fine pointer', (_, source) => {
         const ranges = blockRanges(source, FINE_POINTER_MEDIA);
         const indexes = hoverIndexes(source);
@@ -363,18 +367,18 @@ describe('pointer interaction styling', () => {
     });
 
     it('routes create destinations through the shared settings-row hover treatment', () => {
-        expect(orchestrationStudioSource).toContain('class="setting-row studio-destination-row"');
+        expect(studioSource).toContain('class="setting-row studio-destination-row"');
         expect(appCss).toMatch(
             /\.setting-row:hover:not\(:disabled\)\s*\{[^}]*background:\s*var\(--bg\);/s,
         );
     });
 
     it('keeps message actions icon-only and gives timestamps a legible hierarchy', () => {
-        expect(chatPaneSource).toContain('<Copy aria-hidden="true" />');
-        expect(chatPaneSource).toContain('<GitBranch aria-hidden="true" />');
-        expect(chatPaneSource).toContain('<Pencil aria-hidden="true" />');
-        expect(chatPaneSource).toContain('<RefreshCw aria-hidden="true" />');
-        expect(chatPaneSource).toContain('<Trash2 aria-hidden="true" />');
+        expect(chatMessageActionsSource).toContain('<Copy aria-hidden="true" />');
+        expect(chatMessageActionsSource).toContain('<GitBranch aria-hidden="true" />');
+        expect(chatMessageActionsSource).toContain('<Pencil aria-hidden="true" />');
+        expect(chatMessageActionsSource).toContain('<RefreshCw aria-hidden="true" />');
+        expect(chatMessageActionsSource).toContain('<Trash2 aria-hidden="true" />');
         expect(appCss).toMatch(
             /\.message-actions button\s*\{[^}]*width:\s*30px;[^}]*height:\s*30px;[^}]*place-items:\s*center;/s,
         );
@@ -384,11 +388,15 @@ describe('pointer interaction styling', () => {
         expect(appCss).toMatch(
             /\.app-shell\[data-layout='desktop'\] \.message-actions\s*\{[^}]*position:\s*static;[^}]*min-height:\s*30px;[^}]*padding:\s*0;[^}]*border:\s*0;[^}]*border-radius:\s*0;[^}]*background:\s*transparent;[^}]*box-shadow:\s*none;/s,
         );
-        expect(chatPaneSource).toContain(
-            'class:actions-hovered={hoveredMessageActionId === message.id}',
+        expect(chatMessageListSource).toContain(
+            'class:actions-hovered={messageActions.hoveredMessageActionId === message.id}',
         );
-        expect(chatPaneSource).toContain('onmouseenter={() => hoverMessageActions(message.id)}');
-        expect(chatPaneSource).toContain('onmouseleave={() => unhoverMessageActions(message.id)}');
+        expect(chatMessageListSource).toContain(
+            'onmouseenter={() => messageActions.hover(message.id, desktop)}',
+        );
+        expect(chatMessageListSource).toContain(
+            'onmouseleave={() => messageActions.unhover(message.id)}',
+        );
         expect(appCss).toMatch(
             /\.app-shell\[data-layout='desktop'\] \.message-item\.actions-hovered \.message-actions\s*\{[^}]*opacity:\s*1;[^}]*pointer-events:\s*auto;/s,
         );
@@ -402,7 +410,7 @@ describe('pointer interaction styling', () => {
         expect(appCss).toMatch(
             /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.message-date-chip\s*\{[^}]*font-size:\s*clamp\(10px,\s*3\.204vw,\s*12px\);/s,
         );
-        expect(chatPaneSource).not.toContain('message-date-follower');
+        expect(chatMessageListSource).not.toContain('message-date-follower');
         expect(appCss).toMatch(
             /\.message-date-divider\s*\{[^}]*position:\s*sticky;[^}]*z-index:\s*11;[^}]*top:\s*0;[^}]*display:\s*flex;/s,
         );
@@ -462,14 +470,10 @@ describe('pointer interaction styling', () => {
     });
 
     it('omits decorative right arrows from every destination row', () => {
-        for (const source of [
-            providerSettingsSource,
-            personaPanelSource,
-            orchestrationStudioSource,
-        ]) {
+        for (const source of [settingsSource, personaPanelSource, studioSource]) {
             expect(source).not.toContain('setting-chevron');
         }
-        expect(conversationPaneSource).not.toContain('<span aria-hidden="true">›</span>');
+        expect(conversationSource).not.toContain('<span aria-hidden="true">›</span>');
         expect(appCss).not.toContain('.setting-chevron');
     });
 
@@ -493,7 +497,7 @@ describe('pointer interaction styling', () => {
         expect(detailPageSource).toContain('getContext<DetailScrollListener | undefined>');
         expect(detailPageSource).toContain('inheritedOnScroll?.(scrollTop)');
         expect(detailPageSource).not.toContain('mask');
-        expect(providerSettingsSource).toContain('onDetailScroll(scroller.scrollTop)');
+        expect(settingsSource).toContain('onDetailScroll(scroller.scrollTop)');
         expect(detailPageSource).toMatch(
             /<section class=\{`detail-page \$\{className\}`\.trim\(\)\} aria-label=\{ariaLabel\}>[\s\S]*?<div[\s\S]*?class=\{`detail-page-scroll \$\{scrollClassName\}`\.trim\(\)\}[\s\S]*?onscroll=\{handleScroll\}[\s\S]*?>/s,
         );
@@ -506,16 +510,16 @@ describe('pointer interaction styling', () => {
         expect(detailPageSource).toMatch(
             /\.detail-page-scroll\.detail-page-has-actions\s*\{[^}]*padding-bottom:\s*calc\(var\(--mobile-nav\) \+ 36px \+ env\(safe-area-inset-bottom\)\);/s,
         );
-        expect(providerSettingsSource).toMatch(
+        expect(settingsSource).toMatch(
             /:global\(\.app-shell\[data-layout='mobile'\]\)\s*\.settings-detail-scroll\.detail-scroll-has-actions\s*\{[^}]*padding-bottom:\s*calc\(\s*var\(--mobile-nav\) \+ clamp\(15px,\s*8\.238vw,\s*36px\) \+ env\(safe-area-inset-bottom\)\s*\);/s,
         );
         expect(
-            providerSettingsSource.indexOf(
+            settingsSource.indexOf(
                 '.settings-detail-scroll.detail-scroll-has-actions {',
-                providerSettingsSource.indexOf(":global(.app-shell[data-layout='mobile'])"),
+                settingsSource.indexOf(":global(.app-shell[data-layout='mobile'])"),
             ),
         ).toBeGreaterThan(
-            providerSettingsSource.indexOf(
+            settingsSource.indexOf(
                 ":global(.app-shell[data-layout='mobile']) .settings-detail-scroll {",
             ),
         );
@@ -529,26 +533,26 @@ describe('pointer interaction styling', () => {
     });
 
     it('keeps detail actions in the floating Persona proportions and source order', () => {
-        expect(detailActionBarSource).toMatch(
+        expect(actionBarSource).toMatch(
             /\.detail-action-bar\s*\{[^}]*position:\s*absolute;[^}]*bottom:\s*calc\(8px \+ env\(safe-area-inset-bottom\)\);[^}]*left:\s*50%;[^}]*width:\s*min\(calc\(100% - var\(--gutter\) - var\(--gutter\)\),\s*560px\);[^}]*height:\s*var\(--mobile-nav\);[^}]*min-height:\s*var\(--mobile-nav\);[^}]*background:\s*transparent;[^}]*gap:\s*clamp\(4px,\s*1\.144vw,\s*6px\);[^}]*transform:\s*translateX\(-50%\);/s,
         );
-        expect(detailActionBarSource).toMatch(
+        expect(actionBarSource).toMatch(
             /\.detail-action-bar :global\(\.detail-action\)\s*\{[^}]*height:\s*100%;[^}]*min-height:\s*0;[^}]*flex:\s*1;[^}]*padding:\s*0 clamp\(12px,\s*3\.661vw,\s*16px\);[^}]*border-radius:\s*var\(--radius-pill\);[^}]*font-size:\s*var\(--detail-support-type\);[^}]*font-weight:\s*700;/s,
         );
-        expect(detailActionBarSource).toMatch(
+        expect(actionBarSource).toMatch(
             /\.detail-action-bar :global\(\.detail-action--grow\)\s*\{[^}]*flex:\s*2;/s,
         );
-        expect(detailActionBarSource).toMatch(
+        expect(actionBarSource).toMatch(
             /\.detail-action-bar :global\(\.detail-action--wide\)\s*\{[^}]*flex:\s*1;/s,
         );
-        expect(detailActionBarSource).toMatch(
+        expect(actionBarSource).toMatch(
             /\.detail-action-bar :global\(\.detail-action--destructive\)\s*\{[^}]*color:\s*var\(--status-error-fg\);/s,
         );
-        expect(detailActionBarSource).toMatch(
+        expect(actionBarSource).toMatch(
             /\.detail-action-bar :global\(\.detail-action--borderless\)\s*\{[^}]*border:\s*0;/s,
         );
-        expect(detailActionBarSource).toContain('{@render children()}');
-        expect(detailActionBarSource).not.toMatch(/flex-direction:\s*row-reverse/);
+        expect(actionBarSource).toContain('{@render children()}');
+        expect(actionBarSource).not.toMatch(/flex-direction:\s*row-reverse/);
         expect(personaPanelSource.indexOf('persona-delete-button')).toBeLessThan(
             personaPanelSource.indexOf('persona-save-action'),
         );
@@ -644,7 +648,7 @@ describe('pointer interaction styling', () => {
         expect(appCss).toMatch(
             /@media \(max-width:\s*899px\)[\s\S]*?\.mobile-root-header h1\s*\{[^}]*font-size:\s*clamp\(14px,\s*5\.72vw,\s*22px\);/s,
         );
-        for (const source of [libraryPaneSource, conversationPaneSource]) {
+        for (const source of [libraryPaneSource, conversationSource]) {
             expect(source).toMatch(
                 /@media \(max-width:\s*899px\)[\s\S]*?\.mobile-root-row\s*\{[^}]*min-height:\s*clamp\(46px,\s*19\.222vw,\s*68px\);[^}]*padding:\s*clamp\(4px,\s*1\.831vw,\s*6px\) clamp\(10px,\s*4\.119vw,\s*16px\);/s,
             );
@@ -652,17 +656,17 @@ describe('pointer interaction styling', () => {
                 /@media \(max-width:\s*899px\)[\s\S]*?\.mobile-root-row[\s\S]*?\.avatar\s*\{[^}]*width:\s*clamp\(35px,\s*14\.645vw,\s*52px\);[^}]*height:\s*clamp\(35px,\s*14\.645vw,\s*52px\);/s,
             );
         }
-        expect(conversationPaneSource).toMatch(
+        expect(conversationSource).toMatch(
             /@media \(max-width:\s*899px\)[\s\S]*?\.conversation-filter-strip\s*\{[^}]*min-height:\s*clamp\(37px,\s*15\.561vw,\s*52px\);/s,
         );
-        expect(providerSettingsSource).toMatch(
+        expect(settingsSource).toMatch(
             /@media \(max-width:\s*899px\)[\s\S]*?\.settings-avatar-wrap\s*\{[^}]*width:\s*clamp\(59px,\s*24\.714vw,\s*88px\);[^}]*height:\s*clamp\(59px,\s*24\.714vw,\s*88px\);/s,
         );
         expect(appCss).not.toContain('@media (min-width: 600px) and (max-width: 899px)');
     });
 
     it('hides mobile scrollbars without disabling native wheel or touch scrolling', () => {
-        expect(providerSettingsSource).toMatch(
+        expect(settingsSource).toMatch(
             /\.provider-scroll\s*\{[^}]*height:\s*0;[^}]*min-height:\s*0;[^}]*flex:\s*1 1 0;[^}]*overflow-y:\s*auto;/s,
         );
         expect(detailPageSource).toMatch(
@@ -686,10 +690,10 @@ describe('pointer interaction styling', () => {
     });
 
     it('keeps symmetric page gutters after scrollbar chrome is hidden', () => {
-        expect(providerSettingsSource).toMatch(
+        expect(settingsSource).toMatch(
             /\.provider-scroll\.settings-home-scroll\s*\{[^}]*padding-inline:\s*var\(--settings-gutter\);/s,
         );
-        expect(providerSettingsSource).not.toMatch(
+        expect(settingsSource).not.toMatch(
             /\.provider-scroll\.settings-home-scroll\s*\{[^}]*padding-inline:\s*var\(--settings-gutter\)\s+0;/s,
         );
         expect(appCss).toMatch(
@@ -701,40 +705,40 @@ describe('pointer interaction styling', () => {
         expect(libraryPaneSource).toMatch(
             /\.library-pane\.root-view \.entity-list\s*\{[^}]*padding:\s*0 8px calc\(/s,
         );
-        expect(conversationPaneSource).toMatch(
+        expect(conversationSource).toMatch(
             /\.conversation-pane\.root-view \.entity-list\s*\{[^}]*padding:\s*8px 8px calc\(/s,
         );
         expect(appCss).toMatch(
             /\.message-scroll\s*\{[^}]*padding:\s*0 var\(--chat-side-inset\)\s*calc\(var\(--composer-overlay-height\) \+ var\(--chat-side-inset\)\);/s,
         );
-        expect(providerSettingsSource).toMatch(
+        expect(settingsSource).toMatch(
             /\.provider-scroll\.settings-home-scroll\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;[^}]*padding-inline:\s*var\(--settings-gutter\);/s,
         );
-        expect(providerSettingsSource).toMatch(
+        expect(settingsSource).toMatch(
             /\.settings-home-scroll \.setting-list\s*\{[^}]*flex:\s*none;[^}]*justify-content:\s*flex-start;/s,
         );
-        expect(providerSettingsSource).toMatch(
+        expect(settingsSource).toMatch(
             /:global\(\.app-shell\[data-layout='mobile'\]\) \.provider-scroll\.settings-home-scroll\s*\{[^}]*padding-bottom:/s,
         );
-        expect(providerSettingsSource).toMatch(
+        expect(settingsSource).toMatch(
             /:global\(\.app-shell\[data-layout='mobile'\]\) \.settings-home-scroll \.setting-list\s*\{[^}]*margin-bottom:/s,
         );
     });
 
     it('keeps the desktop settings title at the top-left without the profile mark', () => {
-        expect(providerSettingsSource).toMatch(
+        expect(settingsSource).toMatch(
             /:global\(\.app-shell\[data-layout='desktop'\]\) \.provider-scroll\.settings-home-scroll\s*\{[^}]*padding-top:\s*clamp\(52px,\s*7\.4vh,\s*68px\);/s,
         );
-        expect(providerSettingsSource).toMatch(
+        expect(settingsSource).toMatch(
             /:global\(\.app-shell\[data-layout='desktop'\]\) \.settings-identity\s*\{[^}]*min-height:\s*0;[^}]*justify-items:\s*start;[^}]*text-align:\s*left;/s,
         );
-        expect(providerSettingsSource).toMatch(
+        expect(settingsSource).toMatch(
             /:global\(\.app-shell\[data-layout='desktop'\]\) \.settings-avatar-wrap\s*\{[^}]*display:\s*none;/s,
         );
-        expect(providerSettingsSource).toMatch(
+        expect(settingsSource).toMatch(
             /:global\(\.app-shell\[data-layout='desktop'\]\) \.settings-identity-copy\s*\{[^}]*justify-items:\s*start;/s,
         );
-        expect(providerSettingsSource).toMatch(
+        expect(settingsSource).toMatch(
             /:global\(\.app-shell\[data-layout='desktop'\]\) \.settings-identity-copy h2\s*\{[^}]*font-size:\s*28px;[^}]*font-weight:\s*600;/s,
         );
     });
@@ -753,17 +757,17 @@ describe('pointer interaction styling', () => {
             /\.settings-destination-row:focus-visible\s*\{[^}]*outline:\s*none;/s,
         );
         expect(desktopSettingsSidebarSource).not.toContain('.settings-destination-row:hover');
-        expect(providerSettingsSource).not.toContain('.desktop-settings-summary-row:hover');
+        expect(settingsSource).not.toContain('.desktop-settings-summary-row:hover');
         expect(appCss).toContain(
             ".app-shell:not([data-layout='desktop'][data-view='settings']) button:hover:not(:disabled)",
         );
         expect(choicePopoverSource).toContain(
             ":global(.app-shell:not([data-layout='desktop'][data-view='settings']))",
         );
-        expect(providerSettingsSource).toMatch(
+        expect(settingsSource).toMatch(
             /\.desktop-settings-summary-row \+ \.desktop-settings-summary-row,[\s\S]*?\.desktop-settings-static-row \+ \.desktop-settings-summary-row\s*\{[^}]*border-top:\s*0;/s,
         );
-        expect(providerSettingsSource).toMatch(
+        expect(settingsSource).toMatch(
             /\.desktop-settings-summary-row \+ \.desktop-settings-summary-row::before,[\s\S]*?\.desktop-settings-static-row \+ \.desktop-settings-summary-row::before\s*\{[^}]*right:\s*14px;[^}]*left:\s*14px;[^}]*height:\s*1px;[^}]*background:\s*var\(--line\);/s,
         );
     });
@@ -774,33 +778,31 @@ describe('pointer interaction styling', () => {
         expect(libraryPaneSource).toMatch(
             /class="mobile-top-frame mobile-root-header library-root-header"/,
         );
-        expect(conversationPaneSource).toMatch(
+        expect(conversationSource).toMatch(
             /class="mobile-top-frame mobile-root-header conversation-root-header"/,
         );
-        expect(conversationPaneSource).toMatch(
+        expect(conversationSource).toMatch(
             /class="conversation-search conversation-top-search"[\s\S]*?role="search"/,
         );
-        expect(conversationPaneSource).not.toMatch(
-            /class="conversation-search mobile-root-search"/,
-        );
-        expect(conversationPaneSource).toMatch(/@keyframes conversation-search-expand/);
-        expect(conversationPaneSource).toMatch(/@keyframes conversation-search-collapse/);
+        expect(conversationSource).not.toMatch(/class="conversation-search mobile-root-search"/);
+        expect(conversationSource).toMatch(/@keyframes conversation-search-expand/);
+        expect(conversationSource).toMatch(/@keyframes conversation-search-collapse/);
         expect(libraryPaneSource).toMatch(/class="library-top-search"[\s\S]*?role="search"/);
         expect(libraryPaneSource).toMatch(/@keyframes library-search-expand/);
         expect(libraryPaneSource).toMatch(/@keyframes library-search-collapse/);
-        expect(conversationPaneSource).toMatch(
+        expect(conversationSource).toMatch(
             /\.conversation-filter-pill\s*\{[^}]*height:\s*var\(--mobile-pill-control\);[^}]*min-height:\s*var\(--mobile-pill-control\);/s,
         );
         expect(libraryPaneSource).toMatch(
             /\.library-filter-pill\s*\{[^}]*height:\s*var\(--mobile-pill-control\);[^}]*min-height:\s*var\(--mobile-pill-control\);/s,
         );
-        expect(conversationPaneSource).toContain(
+        expect(conversationSource).toContain(
             '.conversation-filter-pill:hover:not(:disabled):not(.active)',
         );
         expect(libraryPaneSource).toContain(
             '.library-filter-pill:hover:not(:disabled):not(.active)',
         );
-        expect(conversationPaneSource).not.toMatch(
+        expect(conversationSource).not.toMatch(
             /\.conversation-filter-pill(?:\.active)?:hover[^{}]*\{[^}]*translateY/s,
         );
         expect(libraryPaneSource).not.toMatch(
@@ -809,24 +811,24 @@ describe('pointer interaction styling', () => {
         expect(libraryPaneSource).toMatch(
             /\.library-pane\.root-view\s*\.mobile-root-row\.active:hover\s*\{[^}]*background:\s*var\(--surface-hover\);/s,
         );
-        expect(conversationPaneSource).toMatch(
+        expect(conversationSource).toMatch(
             /\.conversation-pane\.root-view\s*\.mobile-root-row\.active:hover\s*\{[^}]*background:\s*var\(--surface-hover\);/s,
         );
-        expect(conversationPaneSource).toMatch(
+        expect(conversationSource).toMatch(
             /\.conversation-preview\s*\{[^}]*padding-right:\s*clamp\(14px,\s*5\.492vw,\s*24px\);/s,
         );
         expect(libraryPaneSource).toMatch(/class="mobile-root-actions"/);
-        expect(conversationPaneSource).toMatch(/class="mobile-root-actions"/);
+        expect(conversationSource).toMatch(/class="mobile-root-actions"/);
         expect(libraryPaneSource).not.toContain('mobile-root-fab');
-        expect(conversationPaneSource).not.toContain('mobile-root-fab');
+        expect(conversationSource).not.toContain('mobile-root-fab');
         expect(libraryPaneSource).toMatch(/class:mobile-root-row=\{rootView\}/);
-        expect(conversationPaneSource).toMatch(/class:mobile-root-row=\{rootView\}/);
+        expect(conversationSource).toMatch(/class:mobile-root-row=\{rootView\}/);
         expect(appCss).toMatch(/\.chat-list-view\s*\{[^}]*background:\s*var\(--bg\);/s);
         expect(appCss).toMatch(
             /\.app-shell\[data-layout='mobile'\] \.mobile-root-search\s*\{[^}]*min-height:\s*var\(--mobile-search\);[^}]*border:\s*1px solid var\(--line\);[^}]*width:\s*min\([\s\S]*?var\(--reading\)[\s\S]*?\);[^}]*margin:\s*0 auto clamp\(4px,\s*1\.831vw,\s*8px\);[^}]*background:\s*var\(--surface-raised\);[^}]*box-shadow:\s*var\(--shadow-1\);/s,
         );
         expect(libraryPaneSource).not.toContain('mobile-root-empty');
-        expect(conversationPaneSource).not.toContain('mobile-root-empty');
+        expect(conversationSource).not.toContain('mobile-root-empty');
         expect(appCss).not.toContain('.mobile-root-empty');
         expect(appCss).not.toContain('.mobile-root-contact-action');
         expect(appCss).not.toContain('.mobile-root-contact-button');
@@ -859,7 +861,7 @@ describe('pointer interaction styling', () => {
         expect(appCss).toMatch(
             /\.app-shell\[data-layout='mobile'\]\s*\{[^}]*--reading:\s*591px;[^}]*--settings:\s*591px;/s,
         );
-        for (const source of [libraryPaneSource, conversationPaneSource]) {
+        for (const source of [libraryPaneSource, conversationSource]) {
             expect(source).toMatch(
                 /\.mobile-root-row\s*\{[^}]*min-height:\s*clamp\(46px,\s*19\.222vw,\s*84px\);[^}]*padding:\s*clamp\(4px,\s*1\.831vw,\s*8px\) clamp\(10px,\s*4\.119vw,\s*18px\);/s,
             );
@@ -976,7 +978,7 @@ describe('pointer interaction styling', () => {
         expect(appCss).toMatch(
             /\.composer-fullscreen\.open\s*\{[^}]*clip-path:\s*inset\(0 round var\(--radius-lg\) var\(--radius-lg\) 0 0\);[^}]*pointer-events:\s*auto;[^}]*visibility:\s*visible;[^}]*transition:[^}]*clip-path var\(--composer-fullscreen-open-duration\)[^}]*var\(--composer-fullscreen-open-easing\),[^}]*visibility 0s;/s,
         );
-        expect(chatPaneSource).toContain('target?.focus({ preventScroll: true });');
+        expect(composerLogic).toContain('target?.focus({ preventScroll: true });');
         expect(appCss.match(/--composer-morph-filter:/g)).toHaveLength(3);
         expect(appCss).not.toContain(".composer[aria-hidden='true'] .composer-field");
         expect(appCss).not.toMatch(/\.composer-fullscreen\s*\{[^}]*will-change:/s);
@@ -1023,41 +1025,41 @@ describe('pointer interaction styling', () => {
         expect(appCss).not.toContain('opacity 220ms ease 110ms');
         expect(appCss).not.toContain('transform 360ms cubic-bezier(0.22, 1, 0.36, 1) 80ms');
         expect(appCss).not.toContain('opacity 120ms ease 240ms');
-        expect(chatPaneSource).toContain('<Plus aria-hidden="true" />');
-        expect(chatPaneSource).toContain('<Maximize2 aria-hidden="true" />');
-        expect(chatPaneSource).toContain('<Minimize2 aria-hidden="true" />');
-        expect(chatPaneSource).toContain('<ArrowUp class="chat-send-icon" aria-hidden="true" />');
-        expect(chatPaneSource).toContain('class="composer-text-region"');
-        expect(chatPaneSource).toContain('class="composer-action-row"');
-        expect(chatPaneSource).toContain('class:can-fullscreen={composerCanFullscreen}');
-        expect(chatPaneSource).toContain('class:expanded={composerExpanded}');
-        expect(chatPaneSource).toContain('class:available={composerCanFullscreen}');
-        expect(chatPaneSource).toContain('aria-hidden={!composerCanFullscreen}');
-        expect(chatPaneSource).toContain('class:overflows={composerOverflows}');
-        expect(chatPaneSource).toContain('class="composer-fullscreen"');
-        expect(chatPaneSource).toContain('syncFullscreenControlOrigins();');
-        expect(chatPaneSource).toContain('syncFullscreenTextOrigin();');
-        expect(chatPaneSource).toContain("'--composer-control-origin-x'");
-        expect(chatPaneSource).toContain("'--composer-control-origin-y'");
-        expect(chatPaneSource).toContain("'--composer-text-origin-x'");
-        expect(chatPaneSource).toContain("'--composer-text-origin-y'");
-        expect(chatPaneSource).toContain('bind:this={composerLeadingAction}');
-        expect(chatPaneSource).toContain('bind:this={composerSendButton}');
-        expect(chatPaneSource).toContain('bind:this={composerField}');
-        expect(chatPaneSource).toContain('bind:this={fullscreenComposerSurface}');
-        expect(chatPaneSource).toContain('bind:this={fullscreenCloseButton}');
-        expect(chatPaneSource).toContain('bind:this={fullscreenSendButton}');
-        expect(chatPaneSource).toContain('bind:this={fullscreenTextRegion}');
+        expect(composerSource).toContain('<Plus aria-hidden="true" />');
+        expect(composerSource).toContain('<Maximize2 aria-hidden="true" />');
+        expect(fullscreenSource).toContain('<Minimize2 aria-hidden="true" />');
+        expect(composerSource).toContain('<ArrowUp class="chat-send-icon" aria-hidden="true" />');
+        expect(composerSource).toContain('class="composer-text-region"');
+        expect(composerSource).toContain('class="composer-action-row"');
+        expect(composerSource).toContain('class:can-fullscreen={state.canFullscreen}');
+        expect(composerSource).toContain('class:expanded={state.expanded}');
+        expect(composerSource).toContain('class:available={state.canFullscreen}');
+        expect(composerSource).toContain('aria-hidden={!state.canFullscreen}');
+        expect(composerSource).toContain('class:overflows={state.overflows}');
+        expect(fullscreenSource).toContain('class="composer-fullscreen"');
+        expect(composerLogic).toContain('this.#syncFullscreenControlOrigins();');
+        expect(composerLogic).toContain('this.#syncFullscreenTextOrigin();');
+        expect(composerLogic).toContain("'--composer-control-origin-x'");
+        expect(composerLogic).toContain("'--composer-control-origin-y'");
+        expect(composerLogic).toContain("'--composer-text-origin-x'");
+        expect(composerLogic).toContain("'--composer-text-origin-y'");
+        expect(composerSource).toContain('bind:this={state.leadingAction}');
+        expect(composerSource).toContain('bind:this={state.sendButton}');
+        expect(composerSource).toContain('bind:this={state.field}');
+        expect(fullscreenSource).toContain('bind:this={state.fullscreenSurface}');
+        expect(fullscreenSource).toContain('bind:this={state.fullscreenCloseButton}');
+        expect(fullscreenSource).toContain('bind:this={state.fullscreenSendButton}');
+        expect(fullscreenSource).toContain('bind:this={state.fullscreenTextRegion}');
         expect(appCss).toMatch(
             /:root\s*\{[^}]*--panel-open-duration:\s*420ms;[^}]*--panel-close-duration:\s*360ms;[^}]*--panel-open-easing:\s*cubic-bezier\(0\.22,\s*1,\s*0\.36,\s*1\);[^}]*--panel-close-easing:\s*cubic-bezier\(0\.65,\s*0,\s*0\.35,\s*1\);/s,
         );
         expect(appCss).toMatch(
             /\.chat-pane\s*\{[^}]*--chat-side-inset:\s*var\(--gutter\);[^}]*--composer-overlay-height:\s*78px;[^}]*--composer-field-height:\s*54px;[^}]*--composer-field-bottom-inset:\s*8px;[^}]*--composer-fullscreen-open-duration:\s*var\(--panel-open-duration\);[^}]*--composer-fullscreen-close-duration:\s*var\(--panel-close-duration\);[^}]*--composer-fullscreen-open-easing:\s*var\(--panel-open-easing\);[^}]*--composer-fullscreen-close-easing:\s*var\(--panel-close-easing\);/s,
         );
-        expect(orchestrationQuickDrawerSource).toMatch(
+        expect(quickDrawerSource).toMatch(
             /\.quick-drawer\s*\{[^}]*transition:[^}]*transform var\(--panel-close-duration\) var\(--panel-close-easing\),[^}]*visibility 0s linear var\(--panel-close-duration\);/s,
         );
-        expect(orchestrationQuickDrawerSource).toMatch(
+        expect(quickDrawerSource).toMatch(
             /\.quick-drawer\.open\s*\{[^}]*transition:[^}]*transform var\(--panel-open-duration\) var\(--panel-open-easing\),[^}]*visibility 0s;/s,
         );
         expect(appCss).toMatch(
@@ -1072,40 +1074,40 @@ describe('pointer interaction styling', () => {
         expect(appCss).not.toMatch(
             /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.message-scroll\s*\{[^}]*(?:-webkit-)?mask-image:/s,
         );
-        expect(chatPaneSource).toContain("chatPane.style.setProperty('--composer-overlay-height'");
-        expect(chatPaneSource).toContain("'--composer-field-height'");
-        expect(chatPaneSource).toContain("'--composer-field-bottom-inset'");
-        expect(chatPaneSource).toContain('observer.observe(field)');
-        const composerMaximumRead = chatPaneSource.indexOf(
+        expect(composerLogic).toContain("chatPane.style.setProperty('--composer-overlay-height'");
+        expect(composerLogic).toContain("'--composer-field-height'");
+        expect(composerLogic).toContain("'--composer-field-bottom-inset'");
+        expect(composerLogic).toContain('observer.observe(field)');
+        const composerMaximumRead = composerLogic.indexOf(
             'textRegion ? getComputedStyle(textRegion).maxHeight',
         );
-        const composerHeightWrite = chatPaneSource.indexOf(
+        const composerHeightWrite = composerLogic.indexOf(
             "field?.style.setProperty('--composer-text-size'",
         );
         expect(composerMaximumRead).toBeGreaterThan(-1);
         expect(composerMaximumRead).toBeLessThan(composerHeightWrite);
-        const composerFinalMeasurement = chatPaneSource.indexOf('update(true);');
-        const composerExpansionStart = chatPaneSource.indexOf(
-            'composerExpanded = true;',
+        const composerFinalMeasurement = composerLogic.indexOf('update(true);');
+        const composerExpansionStart = composerLogic.indexOf(
+            'this.expanded = true;',
             composerFinalMeasurement,
         );
         expect(composerFinalMeasurement).toBeGreaterThan(-1);
         expect(composerExpansionStart).toBeGreaterThan(composerFinalMeasurement);
-        expect(chatPaneSource).toMatch(
-            /const handleFocusOut[\s\S]*?node\.value\.trim\(\)\.length > 0[\s\S]*?composerExpanded = false;/,
+        expect(composerLogic).toMatch(
+            /const handleFocusOut[\s\S]*?node\.value\.trim\(\)\.length > 0[\s\S]*?this\.expanded = false;/,
         );
-        expect(chatPaneSource).not.toContain('--composer-line-offset');
-        expect(chatPaneSource).toContain('aria-hidden={!composerFullscreen}');
-        expect(chatPaneSource).toContain('inert={!composerFullscreen}');
+        expect(composerLogic).not.toContain('--composer-line-offset');
+        expect(fullscreenSource).toContain('aria-hidden={!state.fullscreen}');
+        expect(fullscreenSource).toContain('inert={!state.fullscreen}');
         const removedPlaceholder = `placeholder="${String.fromCodePoint(47700, 49884, 51648)}"`;
-        expect(chatPaneSource).not.toContain(removedPlaceholder);
-        expect(chatPaneSource).not.toContain('message-action-reveal');
+        expect(composerSource).not.toContain(removedPlaceholder);
+        expect(chatMessageActionsSource).not.toContain('message-action-reveal');
         expect(appCss).toMatch(/\.sub-header h1\s*\{[^}]*font-size:\s*var\(--detail-ui-type\);/s);
         expect(appCss).toMatch(
             /\.app-shell\[data-layout='mobile'\] \.sub-header h1\s*\{[^}]*height:\s*var\(--mobile-top-action\);[^}]*display:\s*flex;[^}]*align-self:\s*center;[^}]*align-items:\s*center;[^}]*justify-content:\s*center;[^}]*padding-inline:\s*0;[^}]*margin:\s*0;/s,
         );
         expect(chatPaneSource).toContain('{#snippet roomControls(');
-        expect(chatPaneSource).toMatch(/<OrchestrationQuickDrawer[\s\S]*\{roomControls\}/);
+        expect(chatPaneSource).toMatch(/<ChatUtilityDrawer[\s\S]*\{roomControls\}/);
         expect(appSource.match(/<ArrowLeft aria-hidden="true" \/>/g)).toHaveLength(2);
         expect(chatPaneSource).toContain('<ArrowLeft class="chat-back-icon" aria-hidden="true" />');
         for (const icon of [
@@ -1116,31 +1118,31 @@ describe('pointer interaction styling', () => {
             'PanelRightOpen',
             'X',
         ]) {
-            expect(orchestrationQuickDrawerSource).toContain(`${icon},`);
+            expect(quickDrawerSource).toContain(`${icon},`);
         }
-        expect(orchestrationQuickDrawerSource).toContain(
+        expect(quickDrawerSource).toContain(
             '<Menu class="orchestration-toggle-icon" aria-hidden="true" />',
         );
-        expect(orchestrationQuickDrawerSource).toContain('SlidersHorizontal,');
-        expect(orchestrationQuickDrawerSource).not.toContain('EllipsisVertical');
+        expect(quickDrawerSource).toContain('SlidersHorizontal,');
+        expect(quickDrawerSource).not.toContain('EllipsisVertical');
         expect(chatPaneSource).not.toContain('class="chat-toolbar"');
         expect(appCss).not.toContain('.chat-toolbar-new-operation');
         expect(appCss).not.toContain('.chat-pane .chat-toolbar');
         expect(appCss).toMatch(
             /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.chat-pane \.chat-header\s*\{[^}]*margin:\s*0 auto;[^}]*inset:\s*0 0 auto;/s,
         );
-        expect(orchestrationQuickDrawerSource).not.toContain('quick-drawer-backdrop');
-        expect(orchestrationQuickDrawerSource).toContain('aria-hidden={!open}');
-        expect(orchestrationQuickDrawerSource).toContain('inert={!open}');
-        expect(orchestrationQuickDrawerSource).toContain('data-view={view}');
+        expect(quickDrawerSource).not.toContain('quick-drawer-backdrop');
+        expect(quickDrawerSource).toContain('aria-hidden={!open}');
+        expect(quickDrawerSource).toContain('inert={!open}');
+        expect(quickDrawerSource).toContain('data-view={view}');
         expect(chatPaneSource).toContain('bind:view={utilityView}');
         expect(chatPaneSource).toContain("utilityView = 'tools';");
-        expect(orchestrationQuickDrawerSource).not.toContain('in:fly');
-        expect(orchestrationQuickDrawerSource).not.toContain('out:fly');
-        expect(orchestrationQuickDrawerSource).toContain(
+        expect(quickDrawerSource).not.toContain('in:fly');
+        expect(quickDrawerSource).not.toContain('out:fly');
+        expect(quickDrawerSource).toContain(
             '<PanelRightOpen class="orchestration-toggle-icon" aria-hidden="true" />',
         );
-        expect(orchestrationQuickDrawerSource).toContain(
+        expect(quickDrawerSource).toContain(
             '<PanelRightClose class="orchestration-toggle-icon" aria-hidden="true" />',
         );
         expect(choicePopoverSource).toContain('role="combobox"');
@@ -1154,34 +1156,32 @@ describe('pointer interaction styling', () => {
         expect(choicePopoverSource).toMatch(
             /\.choice-menu::backdrop\s*\{[^}]*background:\s*transparent;/s,
         );
-        expect(orchestrationQuickDrawerSource).not.toContain('<footer>');
-        expect(orchestrationQuickDrawerSource).not.toContain('type="checkbox"');
-        expect(orchestrationQuickDrawerSource).toContain('<ToggleSwitch');
-        expect(orchestrationQuickDrawerSource).toContain('checked={roomConfig.memory_enabled}');
+        expect(quickDrawerSource).not.toContain('<footer>');
+        expect(quickDrawerSource).not.toContain('type="checkbox"');
+        expect(quickDrawerSource).toContain('<ToggleSwitch');
+        expect(quickDrawerSource).toContain('checked={roomConfig.memory_enabled}');
         expect(toggleSwitchSource).toContain('role="switch"');
         expect(toggleSwitchSource).toMatch(
             /\.toggle-switch\[aria-checked='true'\] \.toggle-switch-thumb\s*\{[^}]*transform:\s*translate3d\(16px, 0, 0\);/s,
         );
-        expect(orchestrationQuickDrawerSource).toContain('onpointerdown={handlePanelPointerDown}');
-        expect(orchestrationQuickDrawerSource).toMatch(
+        expect(quickDrawerSource).toContain('onpointerdown={handlePanelPointerDown}');
+        expect(quickDrawerSource).toMatch(
             /\.quick-drawer\s*\{[^}]*position:\s*fixed;[^}]*top:\s*0;[^}]*right:\s*0;[^}]*bottom:\s*0;[^}]*grid-template-rows:\s*auto minmax\(0, 1fr\);[^}]*width:\s*min\(100%, 390px\);[^}]*height:\s*100dvh;/s,
         );
-        expect(orchestrationQuickDrawerSource).toMatch(
+        expect(quickDrawerSource).toMatch(
             /\.quick-drawer\.open\s*\{[^}]*transform:\s*translate3d\(0, 0, 0\);[^}]*visibility:\s*visible;/s,
         );
-        expect(orchestrationQuickDrawerSource).toContain(
+        expect(quickDrawerSource).toContain(
             'transform: translate3d(var(--utility-drag-x, 0px), 0, 0);',
         );
-        expect(orchestrationQuickDrawerSource).toContain('will-change: transform;');
-        expect(orchestrationQuickDrawerSource).toMatch(
+        expect(quickDrawerSource).toContain('will-change: transform;');
+        expect(quickDrawerSource).toMatch(
             /\.quick-drawer\.desktop\s*\{[^}]*top:\s*58px;[^}]*right:\s*var\(--chat-utility-edge-inset,\s*12px\);[^}]*width:\s*var\(--chat-utility-width,[^}]*border-radius:\s*18px;[^}]*background:\s*var\(--desktop-panel-bg,\s*var\(--desktop-sidebar-bg\)\);/s,
         );
-        expect(orchestrationQuickDrawerSource).toMatch(
+        expect(quickDrawerSource).toMatch(
             /@container view \(max-width:\s*640px\)[\s\S]*?\.quick-drawer\s*\{[^}]*width:\s*100%;[^}]*height:\s*100dvh;[^}]*max-height:\s*100dvh;/s,
         );
-        expect(orchestrationQuickDrawerSource).toMatch(
-            /\.drawer-body\s*\{[^}]*overflow-y:\s*auto;/s,
-        );
+        expect(quickDrawerSource).toMatch(/\.drawer-body\s*\{[^}]*overflow-y:\s*auto;/s);
         expect(appCss).toMatch(
             /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.chat-pane::before\s*\{[^}]*position:\s*absolute;[^}]*z-index:\s*10;[^}]*background:\s*linear-gradient\(/s,
         );
@@ -1229,9 +1229,9 @@ describe('pointer interaction styling', () => {
         );
         expect(appCss).toContain('--chat-utility-edge-inset: 12px;');
         expect(appCss).toContain('--chat-utility-gap: 12px;');
-        expect(chatPaneSource).not.toContain('chat-disclaimer');
-        expect(chatPaneSource).not.toMatch(/<label[^>]*for="chat-draft"/);
-        expect(chatPaneSource).toMatch(/id="chat-draft"\s+aria-label=/);
+        expect(composerSource).not.toContain('chat-disclaimer');
+        expect(composerSource).not.toMatch(/<label[^>]*for="chat-draft"/);
+        expect(composerSource).toMatch(/id="chat-draft"\s+aria-label=/);
         expect(appCss).toMatch(
             /\.app-shell\[data-layout='desktop'\]\[data-view='chat'\] \.chat-pane\.utility-open > \.composer\s*\{[^}]*padding-left:\s*var\(--chat-utility-side-inset\);[^}]*padding-right:\s*var\(--chat-utility-side-inset\);/s,
         );
@@ -1247,13 +1247,13 @@ describe('pointer interaction styling', () => {
         expect(personaPanelSource).toMatch(
             /\.persona-form label\s*\{[^}]*font-size:\s*var\(--detail-support-type\);/s,
         );
-        expect(detailActionBarSource).toMatch(
+        expect(actionBarSource).toMatch(
             /\.detail-action-bar :global\(\.detail-action\)\s*\{[^}]*font-size:\s*var\(--detail-support-type\);/s,
         );
-        expect(detailActionBarSource).toMatch(
+        expect(actionBarSource).toMatch(
             /\.detail-action-bar :global\(\.detail-action--destructive\)\s*\{[^}]*color:\s*var\(--status-error-fg\);/s,
         );
-        expect(detailActionBarSource).toMatch(
+        expect(actionBarSource).toMatch(
             /\.detail-action-bar :global\(\.detail-action--borderless\)\s*\{[^}]*border:\s*0;/s,
         );
         expect(personaPanelSource).toMatch(

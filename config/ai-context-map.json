@@ -620,12 +620,10 @@
       }
     },
     "FE-ORCH-002": {
-      "baseline_context_bytes": 499487,
       "commands": [
         "npm run test --prefix apps/lorepia -- src/features/orchestration/OrchestrationStudio.content-packages.test.ts src/features/orchestration/OrchestrationStudio.interactions.test.ts src/features/orchestration/OrchestrationStudio.memory-knowledge-transforms.test.ts src/features/orchestration/OrchestrationStudio.modules-diagnostics.test.ts src/features/orchestration/OrchestrationStudio.navigation.test.ts src/features/orchestration/OrchestrationStudio.preview-generation.test.ts src/features/orchestration/OrchestrationStudio.prompt.test.ts"
       ],
       "max_context_bytes": 250000,
-      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
       "paths": {
         "documents": [
           "apps/lorepia/src/AGENTS.md"
@@ -634,20 +632,14 @@
           "apps/lorepia/src/features/orchestration/OrchestrationStudio.svelte"
         ],
         "implementation": [
-          "apps/lorepia/src/features/orchestration/CreatorDocumentEditors.svelte",
-          "apps/lorepia/src/features/orchestration/ContentModuleLifecyclePanel.svelte",
-          "apps/lorepia/src/features/orchestration/tests/content-package-fixtures.ts",
-          "apps/lorepia/src/features/orchestration/tests/fixtures.ts",
-          "apps/lorepia/src/features/orchestration/tests/live-studio-fixtures.ts"
+          "apps/lorepia/src/features/orchestration/studio/ContentSection.svelte",
+          "apps/lorepia/src/features/orchestration/studio/MemorySection.svelte",
+          "apps/lorepia/src/features/orchestration/studio/PromptBlocksSection.svelte",
+          "apps/lorepia/src/features/orchestration/studio/PromptSection.svelte",
+          "apps/lorepia/src/features/orchestration/studio/RuntimePlanSection.svelte"
         ],
         "tests": [
-          "apps/lorepia/src/features/orchestration/OrchestrationStudio.content-packages.test.ts",
-          "apps/lorepia/src/features/orchestration/OrchestrationStudio.interactions.test.ts",
-          "apps/lorepia/src/features/orchestration/OrchestrationStudio.memory-knowledge-transforms.test.ts",
-          "apps/lorepia/src/features/orchestration/OrchestrationStudio.modules-diagnostics.test.ts",
-          "apps/lorepia/src/features/orchestration/OrchestrationStudio.navigation.test.ts",
-          "apps/lorepia/src/features/orchestration/OrchestrationStudio.preview-generation.test.ts",
-          "apps/lorepia/src/features/orchestration/OrchestrationStudio.prompt.test.ts"
+          "apps/lorepia/src/features/orchestration/OrchestrationStudio.navigation.test.ts"
         ]
       }
     },

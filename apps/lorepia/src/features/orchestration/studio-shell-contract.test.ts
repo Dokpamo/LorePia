@@ -8,6 +8,16 @@ import contentModuleSource from './ContentModuleLifecyclePanel.svelte?raw';
 import creatorDocumentsSource from './CreatorDocumentEditors.svelte?raw';
 import orchestrationStudioSource from './OrchestrationStudio.svelte?raw';
 import promptHistorySource from './PromptPresetHistory.svelte?raw';
+import contentPackageReviewSource from './studio/ContentPackageReview.svelte?raw';
+import contentSource from './studio/ContentSection.svelte?raw';
+import memorySource from './studio/MemorySection.svelte?raw';
+import planDetailsSource from './studio/PlanDetails.svelte?raw';
+import promptBlockItemSource from './studio/PromptBlockItem.svelte?raw';
+import promptBlocksSource from './studio/PromptBlocksSection.svelte?raw';
+import promptSource from './studio/PromptSection.svelte?raw';
+import runtimePlanSource from './studio/RuntimePlanSection.svelte?raw';
+import studioStylesA from './studio/styles/studio-a.css?raw';
+import studioStylesB from './studio/styles/studio-b.css?raw';
 import taskProfilesSource from './TaskProfilesPanel.svelte?raw';
 import {
     STUDIO_DETAIL_TITLE_KEYS,
@@ -15,6 +25,20 @@ import {
     studioDetailParent,
     studioNestedDetailTitleKey,
 } from './studio-contracts';
+
+const orchestrationStudioContractSource = [
+    orchestrationStudioSource,
+    contentPackageReviewSource,
+    contentSource,
+    memorySource,
+    planDetailsSource,
+    promptBlockItemSource,
+    promptBlocksSource,
+    promptSource,
+    runtimePlanSource,
+    studioStylesA,
+    studioStylesB,
+].join('\n');
 
 describe('Studio pushed-screen shell', () => {
     it.each([
@@ -125,7 +149,7 @@ describe('Studio pushed-screen shell', () => {
             expect(source).not.toContain('calc(var(--mobile-nav)');
         }
         expect(promptHistorySource).not.toMatch(/max-height:\s*14rem;[\s\S]*?overflow:\s*auto;/);
-        expect(orchestrationStudioSource).toMatch(
+        expect(orchestrationStudioContractSource).toMatch(
             /\.safe-text-preview pre,[\s\S]*?\.diff-preview pre\s*\{[^}]*max-height:\s*none;[^}]*overflow-x:\s*auto;[^}]*overflow-y:\s*visible;/s,
         );
     });
@@ -136,7 +160,7 @@ describe('Studio pushed-screen shell', () => {
             taskProfilesSource,
             creatorDocumentsSource,
             contentModuleSource,
-            orchestrationStudioSource,
+            orchestrationStudioContractSource,
         ]) {
             const actionBars = source.match(/<DetailActionBar\b[^>]*>/g) ?? [];
             expect(actionBars.length).toBeGreaterThan(0);

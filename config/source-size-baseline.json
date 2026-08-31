@@ -9,7 +9,6 @@
     "apps/lorepia/src-tauri/src/state.rs": {"bytes": 78974, "lines": 2112},
     "apps/lorepia/src/app/app-controller.ts": {"bytes": 21693, "lines": 566},
     "apps/lorepia/src/features/chat/ChatPane.svelte": {"bytes": 24126, "lines": 600},
-    "apps/lorepia/src/features/orchestration/OrchestrationStudio.svelte": {"bytes": 263299, "lines": 4839},
     "apps/lorepia/src/features/providers/ProviderSettings.svelte": {"bytes": 84143, "lines": 2073},
     "apps/lorepia/src/styles/app.css": {"bytes": 120338, "lines": 4344},
     "crates/chat/src/generation.rs": {"bytes": 104268, "lines": 2799},
