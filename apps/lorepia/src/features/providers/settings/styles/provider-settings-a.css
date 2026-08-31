@@ -1,0 +1,359 @@
+.provider-pane.provider-pane {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    background: var(--bg);
+}
+
+.provider-pane .desktop-settings-page-heading {
+    display: flex;
+    width: 100%;
+    height: 120px;
+    min-height: 120px;
+    align-items: flex-end;
+    padding: 0 var(--settings-gutter) 24px;
+}
+
+.provider-pane .desktop-settings-page-heading h1 {
+    margin: 0;
+    font-size: 24px;
+    font-weight: 600;
+    letter-spacing: -0.025em;
+    line-height: 1.2;
+}
+
+.provider-pane .desktop-settings-page-heading[data-tauri-drag-region] {
+    -webkit-app-region: drag;
+}
+
+.provider-pane .provider-scroll {
+    display: grid;
+    height: 0;
+    min-height: 0;
+    flex: 1 1 0;
+    gap: 16px;
+    padding: 16px var(--settings-gutter) 24px;
+    overflow-y: auto;
+}
+
+.provider-pane .desktop-settings-overview {
+    align-content: start;
+    padding-top: 24px;
+    padding-bottom: 40px;
+    gap: 42px;
+    scrollbar-gutter: auto;
+}
+
+.provider-pane .desktop-settings-section {
+    display: grid;
+    min-width: 0;
+    gap: 10px;
+}
+
+.provider-pane .desktop-settings-section > h2 {
+    padding-inline: 1px;
+    margin: 0;
+    color: var(--ink);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+}
+
+.provider-pane .desktop-settings-card {
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--desktop-workspace-bg);
+    box-shadow: var(--shadow-1);
+}
+
+.provider-pane .desktop-settings-summary-row,
+.provider-pane .desktop-settings-static-row {
+    position: relative;
+    display: grid;
+    width: 100%;
+    min-height: 66px;
+    align-items: center;
+    padding: 10px 14px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--ink);
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 24px;
+    text-align: left;
+}
+
+.provider-pane .desktop-settings-summary-row + .desktop-settings-summary-row,
+.provider-pane .desktop-settings-summary-row + .desktop-settings-static-row,
+.provider-pane .desktop-settings-static-row + .desktop-settings-summary-row {
+    border-top: 0;
+}
+
+.provider-pane .desktop-settings-summary-row + .desktop-settings-summary-row::before,
+.provider-pane .desktop-settings-summary-row + .desktop-settings-static-row::before,
+.provider-pane .desktop-settings-static-row + .desktop-settings-summary-row::before {
+    position: absolute;
+    top: 0;
+    right: 14px;
+    left: 14px;
+    height: 1px;
+    background: var(--line);
+    content: '';
+    pointer-events: none;
+}
+
+.provider-pane .desktop-settings-summary-copy {
+    display: grid;
+    min-width: 0;
+    gap: 3px;
+}
+
+.provider-pane .desktop-settings-summary-copy strong {
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.3;
+}
+
+.provider-pane .desktop-settings-summary-copy small {
+    color: var(--ink-muted);
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 1.38;
+}
+
+.provider-pane .desktop-settings-summary-value {
+    max-width: 210px;
+    overflow: hidden;
+    color: var(--ink-muted);
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.provider-pane .appearance-theme-section {
+    gap: 12px;
+}
+
+.provider-pane .theme-preview-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+}
+
+.provider-pane .theme-preview-option {
+    display: grid;
+    width: 100%;
+    min-width: 0;
+    align-items: stretch;
+    justify-content: stretch;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--ink-muted);
+    grid-template-columns: minmax(0, 1fr);
+    gap: 7px;
+    text-align: left;
+}
+
+.provider-pane .theme-preview-canvas {
+    position: relative;
+    display: grid;
+    width: 100%;
+    height: 174px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: #f5f5f5;
+    grid-template-columns: 30% minmax(0, 1fr);
+}
+
+.provider-pane .theme-preview-option[aria-pressed='true'] .theme-preview-canvas {
+    box-shadow: 0 0 0 2px var(--accent);
+}
+
+.provider-pane .theme-preview-sidebar {
+    background: #dedede;
+}
+
+.provider-pane .theme-preview-main {
+    position: relative;
+    display: grid;
+    align-content: start;
+    padding: 16px 12px;
+    background: #fafafa;
+    gap: 7px;
+}
+
+.provider-pane .theme-preview-title,
+.provider-pane .theme-preview-line,
+.provider-pane .theme-preview-composer {
+    display: block;
+    border-radius: var(--radius-pill);
+    background: #c8c8c8;
+}
+
+.provider-pane .theme-preview-title {
+    width: 42%;
+    height: 6px;
+    margin-bottom: 4px;
+}
+
+.provider-pane .theme-preview-line {
+    width: 56%;
+    height: 4px;
+}
+
+.provider-pane .theme-preview-line-long {
+    width: 78%;
+}
+
+.provider-pane .theme-preview-composer {
+    position: absolute;
+    right: 10px;
+    bottom: 12px;
+    left: 10px;
+    height: 28px;
+    border: 1px solid #dadada;
+    background: #ffffff;
+}
+
+.provider-pane .theme-preview-dark .theme-preview-canvas {
+    border-color: #464646;
+    background: #1f1f1f;
+}
+
+.provider-pane .theme-preview-dark .theme-preview-sidebar {
+    background: #1b1b1b;
+}
+
+.provider-pane .theme-preview-dark .theme-preview-main {
+    background: #1f1f1f;
+}
+
+.provider-pane .theme-preview-dark .theme-preview-title,
+.provider-pane .theme-preview-dark .theme-preview-line {
+    background: #6f6f6f;
+}
+
+.provider-pane .theme-preview-dark .theme-preview-composer {
+    border-color: #414141;
+    background: #282828;
+}
+
+.provider-pane .theme-preview-system .theme-preview-canvas::after {
+    position: absolute;
+    inset: 0 0 0 50%;
+    background: rgb(20 20 20 / 72%);
+    content: '';
+    pointer-events: none;
+}
+
+.provider-pane .theme-preview-label {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    justify-content: center;
+    color: currentcolor;
+    font-size: 12px;
+    font-weight: 500;
+    gap: 5px;
+}
+
+.provider-pane .theme-preview-option[aria-pressed='true'] .theme-preview-label {
+    color: var(--ink);
+}
+
+.provider-pane .theme-preview-label svg {
+    width: 13px;
+    height: 13px;
+    color: var(--accent);
+    stroke-width: 2.2;
+}
+
+.provider-pane .provider-scroll.settings-home-scroll {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    padding-top: clamp(36px, 10.297vw, 45px);
+    padding-bottom: 24px;
+    padding-inline: var(--settings-gutter);
+}
+
+.provider-pane .settings-home-scroll .setting-list {
+    flex: none;
+    justify-content: flex-start;
+}
+
+.provider-pane .settings-detail-scroll {
+    align-content: start;
+    padding-bottom: 24px;
+}
+
+.provider-pane .settings-detail-scroll.detail-scroll-has-actions {
+    padding-bottom: calc(var(--mobile-nav) + 36px + env(safe-area-inset-bottom));
+}
+
+.app-shell[data-layout='mobile'] .provider-pane .settings-detail-scroll {
+    padding-bottom: calc(clamp(10px, 5.492vw, 24px) + env(safe-area-inset-bottom));
+}
+
+.app-shell[data-layout='mobile'] .provider-pane .settings-detail-scroll.detail-scroll-has-actions {
+    padding-bottom: calc(
+        var(--mobile-nav) + clamp(15px, 8.238vw, 36px) + env(safe-area-inset-bottom)
+    );
+}
+
+.app-shell[data-layout='mobile'] .provider-pane .provider-scroll.settings-home-scroll {
+    min-height: 0;
+    padding-top: clamp(25px, 10.297vw, 45px);
+    padding-bottom: calc(
+        var(--mobile-nav) + clamp(11px, 5.95vw, 26px) + env(safe-area-inset-bottom)
+    );
+}
+
+.app-shell[data-layout='mobile'] .provider-pane .settings-home-scroll .setting-list {
+    min-height: 0;
+    /* The fixed tab bar overlays the page, so keep a real scroll tail after the last row. */
+    margin-bottom: calc(
+        var(--mobile-nav) + clamp(11px, 5.95vw, 26px) + env(safe-area-inset-bottom)
+    );
+}
+
+.app-shell[data-layout='desktop'] .provider-pane .provider-scroll.settings-home-scroll {
+    padding-top: clamp(52px, 7.4vh, 68px);
+}
+
+.app-shell[data-layout='desktop'] .provider-pane .settings-detail-scroll {
+    padding-top: 24px;
+    padding-bottom: 40px;
+    gap: 28px;
+    scrollbar-gutter: auto;
+}
+
+.app-shell[data-layout='desktop'] .provider-pane .settings-identity {
+    min-height: 0;
+    justify-items: start;
+    padding: 0 calc(var(--mobile-top-action) + 8px) 26px 0;
+    margin-bottom: 0;
+    gap: 0;
+    text-align: left;
+}
+
+.app-shell[data-layout='desktop'] .provider-pane .settings-avatar-wrap {
+    display: none;
+}
+
+.app-shell[data-layout='desktop'] .provider-pane .settings-identity-copy {
+    justify-items: start;
+}
+
+.app-shell[data-layout='desktop'] .provider-pane .settings-identity-copy h2 {
+    font-size: 28px;
+    font-weight: 600;
+    line-height: 1.2;
+    letter-spacing: -0.025em;
+}

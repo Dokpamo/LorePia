@@ -644,12 +644,10 @@
       }
     },
     "FE-PROV-001": {
-      "baseline_context_bytes": null,
       "commands": [
         "npm run test --prefix apps/lorepia -- src/{features/providers,styles}"
       ],
       "max_context_bytes": 250000,
-      "over_budget_reason": null,
       "paths": {
         "documents": [
           "apps/lorepia/src/AGENTS.md"
@@ -659,7 +657,15 @@
         ],
         "implementation": [
           "apps/lorepia/src/features/providers/settings-contracts.ts",
-          "apps/lorepia/src/features/providers/ProviderCrudPanel.svelte"
+          "apps/lorepia/src/features/providers/settings/AppearanceSection.svelte",
+          "apps/lorepia/src/features/providers/settings/ConnectionSection.svelte",
+          "apps/lorepia/src/features/providers/settings/CredentialSection.svelte",
+          "apps/lorepia/src/features/providers/settings/ModelRouteSection.svelte",
+          "apps/lorepia/src/features/providers/settings/SettingsOverview.svelte",
+          "apps/lorepia/src/features/providers/settings/SettingsToolsSection.svelte",
+          "apps/lorepia/src/features/providers/settings/TemplateSection.svelte",
+          "apps/lorepia/src/features/providers/settings/styles/provider-settings-a.css",
+          "apps/lorepia/src/features/providers/settings/styles/provider-settings-b.css"
         ],
         "tests": [
           "apps/lorepia/src/features/providers/ProviderSettings.test.ts"

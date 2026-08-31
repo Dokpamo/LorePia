@@ -357,8 +357,8 @@
       "sha256": "ec66aa18fc49bb5bc9c03aaf1b17c18763c1dd2b230190b6d5314fb3f74fcccb"
     },
     "src/features/providers/ProviderSettings.svelte": {
-      "hangul_lines": 145,
-      "sha256": "65a5478ea6ff117f494c7854a5cdc9e4187d28dc4278aea3270e51ad23dfe947"
+      "hangul_lines": 15,
+      "sha256": "dc203419d186f825d3b97d4da0bf20da19abc89c244322dd28440d516bb48451"
     },
     "src/features/providers/ProviderSettings.test.ts": {
       "hangul_lines": 116,
@@ -367,6 +367,34 @@
     "src/features/providers/ProviderWorkflows.test.ts": {
       "hangul_lines": 95,
       "sha256": "5e27215451ad59b61bc6256660f6f26726b163dfb2ae6adea81ba51e6db4f77c"
+    },
+    "src/features/providers/settings/AppearanceSection.svelte": {
+      "hangul_lines": 10,
+      "sha256": "a43467aa76bf2e954c76dbd2ade6203c671c0720bd1411eab2acf5b55b6ea6cb"
+    },
+    "src/features/providers/settings/ConnectionSection.svelte": {
+      "hangul_lines": 27,
+      "sha256": "ce6134822502b1464af3a4c66fbc07f94acd3339a4acb9f15434100afda1d164"
+    },
+    "src/features/providers/settings/CredentialSection.svelte": {
+      "hangul_lines": 5,
+      "sha256": "e5e5acfc9586648f991d80e9e4aba9c74a95527719c4b0f6821ee7d98ad3dbb1"
+    },
+    "src/features/providers/settings/ModelRouteSection.svelte": {
+      "hangul_lines": 15,
+      "sha256": "1b75b42814ec7348d26556b2b9ae34d5ef165d4516010e9a4305c0d9e66ae880"
+    },
+    "src/features/providers/settings/SettingsOverview.svelte": {
+      "hangul_lines": 24,
+      "sha256": "982beb70902a5422af72f333d744d6152ab11473d9c96e95c14993e17e9d1737"
+    },
+    "src/features/providers/settings/SettingsToolsSection.svelte": {
+      "hangul_lines": 13,
+      "sha256": "0c0e6245f89e7272ebd0f4195c1e4d5faf154530393bac28ee9213ebcd4af94b"
+    },
+    "src/features/providers/settings/TemplateSection.svelte": {
+      "hangul_lines": 36,
+      "sha256": "9c80bfb87c0960541cf7ab6c0042acbdd22e774c62bc50e8e75c569be0abd8e5"
     },
     "src/lib/ipc/client.test.ts": {
       "hangul_lines": 19,
