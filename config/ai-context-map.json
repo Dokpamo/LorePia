@@ -605,6 +605,13 @@
           "apps/lorepia/src/features/orchestration/orchestration-controller.ts"
         ],
         "implementation": [
+          "apps/lorepia/src/features/orchestration/controllers/context-room-controller.ts",
+          "apps/lorepia/src/features/orchestration/controllers/creator-document-controller.ts",
+          "apps/lorepia/src/features/orchestration/controllers/orchestration-state-controller.ts",
+          "apps/lorepia/src/features/orchestration/controllers/orchestration-state.ts",
+          "apps/lorepia/src/features/orchestration/controllers/plan-interaction-controller.ts",
+          "apps/lorepia/src/features/orchestration/controllers/prompt-task-controller.ts",
+          "apps/lorepia/src/features/orchestration/controllers/workspace-use-case-controller.ts",
           "apps/lorepia/src/features/orchestration/studio-contracts.ts"
         ],
         "tests": [
