@@ -1,0 +1,1801 @@
+{
+  "bootstrap_ref": "00a881131a04cdd998996a7ea03e5462ab72e16b",
+  "direct_external_dependencies": [
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-chat",
+      "kind": "dev",
+      "optional": false,
+      "package": "async-trait",
+      "rename": null,
+      "requirement": "^0.1",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [
+        "serde"
+      ],
+      "from": "lorepia-chat",
+      "kind": "normal",
+      "optional": false,
+      "package": "chrono",
+      "rename": null,
+      "requirement": "^0.4",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [
+        "derive"
+      ],
+      "from": "lorepia-chat",
+      "kind": "normal",
+      "optional": false,
+      "package": "serde",
+      "rename": null,
+      "requirement": "^1.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-chat",
+      "kind": "normal",
+      "optional": false,
+      "package": "serde_json",
+      "rename": null,
+      "requirement": "^1.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [
+        "macros",
+        "rt-multi-thread",
+        "sync",
+        "time"
+      ],
+      "from": "lorepia-chat",
+      "kind": "normal",
+      "optional": false,
+      "package": "tokio",
+      "rename": null,
+      "requirement": "^1.47",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-chat",
+      "kind": "normal",
+      "optional": false,
+      "package": "zeroize",
+      "rename": null,
+      "requirement": "^1.8",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-content",
+      "kind": "dev",
+      "optional": false,
+      "package": "base64",
+      "rename": null,
+      "requirement": "^0.22",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-content",
+      "kind": "normal",
+      "optional": false,
+      "package": "base64",
+      "rename": null,
+      "requirement": "^0.22",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-content",
+      "kind": "dev",
+      "optional": false,
+      "package": "flate2",
+      "rename": null,
+      "requirement": "^1.1",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-content",
+      "kind": "normal",
+      "optional": false,
+      "package": "flate2",
+      "rename": null,
+      "requirement": "^1.1",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-content",
+      "kind": "normal",
+      "optional": false,
+      "package": "hex",
+      "rename": null,
+      "requirement": "^0.4",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [
+        "fs"
+      ],
+      "from": "lorepia-content",
+      "kind": "normal",
+      "optional": false,
+      "package": "rustix",
+      "rename": null,
+      "requirement": "^1.1",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [
+        "derive"
+      ],
+      "from": "lorepia-content",
+      "kind": "normal",
+      "optional": false,
+      "package": "serde",
+      "rename": null,
+      "requirement": "^1.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-content",
+      "kind": "normal",
+      "optional": false,
+      "package": "serde_json",
+      "rename": null,
+      "requirement": "^1.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-content",
+      "kind": "normal",
+      "optional": false,
+      "package": "sha2",
+      "rename": null,
+      "requirement": "^0.10",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-content",
+      "kind": "dev",
+      "optional": false,
+      "package": "tempfile",
+      "rename": null,
+      "requirement": "^3.20",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-content",
+      "kind": "normal",
+      "optional": false,
+      "package": "unicode-normalization",
+      "rename": null,
+      "requirement": "^0.1",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": false,
+      "features": [
+        "deflate"
+      ],
+      "from": "lorepia-content",
+      "kind": "normal",
+      "optional": false,
+      "package": "zip",
+      "rename": null,
+      "requirement": "^4.3",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-core",
+      "kind": "dev",
+      "optional": false,
+      "package": "async-trait",
+      "rename": null,
+      "requirement": "^0.1",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [
+        "serde"
+      ],
+      "from": "lorepia-core",
+      "kind": "normal",
+      "optional": false,
+      "package": "chrono",
+      "rename": null,
+      "requirement": "^0.4",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [
+        "backup",
+        "bundled",
+        "functions"
+      ],
+      "from": "lorepia-core",
+      "kind": "dev",
+      "optional": false,
+      "package": "rusqlite",
+      "rename": null,
+      "requirement": "^0.37",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [
+        "derive"
+      ],
+      "from": "lorepia-core",
+      "kind": "normal",
+      "optional": false,
+      "package": "serde",
+      "rename": null,
+      "requirement": "^1.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-core",
+      "kind": "normal",
+      "optional": false,
+      "package": "serde_json",
+      "rename": null,
+      "requirement": "^1.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-core",
+      "kind": "normal",
+      "optional": false,
+      "package": "sha2",
+      "rename": null,
+      "requirement": "^0.10",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-core",
+      "kind": "dev",
+      "optional": false,
+      "package": "tempfile",
+      "rename": null,
+      "requirement": "^3.20",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [
+        "macros",
+        "rt-multi-thread",
+        "sync",
+        "time"
+      ],
+      "from": "lorepia-core",
+      "kind": "normal",
+      "optional": false,
+      "package": "tokio",
+      "rename": null,
+      "requirement": "^1.47",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-core",
+      "kind": "normal",
+      "optional": false,
+      "package": "url",
+      "rename": null,
+      "requirement": "^2.5",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [
+        "serde",
+        "v4",
+        "v5"
+      ],
+      "from": "lorepia-core",
+      "kind": "normal",
+      "optional": false,
+      "package": "uuid",
+      "rename": null,
+      "requirement": "^1.17",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-core",
+      "kind": "normal",
+      "optional": false,
+      "package": "zeroize",
+      "rename": null,
+      "requirement": "^1.8",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": false,
+      "features": [
+        "deflate"
+      ],
+      "from": "lorepia-core",
+      "kind": "dev",
+      "optional": false,
+      "package": "zip",
+      "rename": null,
+      "requirement": "^4.3",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [
+        "serde"
+      ],
+      "from": "lorepia-domain",
+      "kind": "normal",
+      "optional": false,
+      "package": "chrono",
+      "rename": null,
+      "requirement": "^0.4",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-domain",
+      "kind": "normal",
+      "optional": false,
+      "package": "hex",
+      "rename": null,
+      "requirement": "^0.4",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [
+        "derive"
+      ],
+      "from": "lorepia-domain",
+      "kind": "normal",
+      "optional": false,
+      "package": "serde",
+      "rename": null,
+      "requirement": "^1.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-domain",
+      "kind": "normal",
+      "optional": false,
+      "package": "serde_json",
+      "rename": null,
+      "requirement": "^1.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-domain",
+      "kind": "normal",
+      "optional": false,
+      "package": "sha2",
+      "rename": null,
+      "requirement": "^0.10",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-domain",
+      "kind": "normal",
+      "optional": false,
+      "package": "thiserror",
+      "rename": null,
+      "requirement": "^2.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-domain",
+      "kind": "normal",
+      "optional": false,
+      "package": "url",
+      "rename": null,
+      "requirement": "^2.5",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [
+        "serde",
+        "v4",
+        "v5"
+      ],
+      "from": "lorepia-domain",
+      "kind": "normal",
+      "optional": false,
+      "package": "uuid",
+      "rename": null,
+      "requirement": "^1.17",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-domain",
+      "kind": "normal",
+      "optional": false,
+      "package": "zeroize",
+      "rename": null,
+      "requirement": "^1.8",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [
+        "serde"
+      ],
+      "from": "lorepia-orchestration",
+      "kind": "normal",
+      "optional": false,
+      "package": "chrono",
+      "rename": null,
+      "requirement": "^0.4",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-orchestration",
+      "kind": "normal",
+      "optional": false,
+      "package": "hex",
+      "rename": null,
+      "requirement": "^0.4",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-orchestration",
+      "kind": "normal",
+      "optional": false,
+      "package": "regex",
+      "rename": null,
+      "requirement": "^1.11",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [
+        "derive"
+      ],
+      "from": "lorepia-orchestration",
+      "kind": "normal",
+      "optional": false,
+      "package": "serde",
+      "rename": null,
+      "requirement": "^1.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-orchestration",
+      "kind": "normal",
+      "optional": false,
+      "package": "serde_json",
+      "rename": null,
+      "requirement": "^1.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-orchestration",
+      "kind": "normal",
+      "optional": false,
+      "package": "sha2",
+      "rename": null,
+      "requirement": "^0.10",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-orchestration",
+      "kind": "normal",
+      "optional": false,
+      "package": "thiserror",
+      "rename": null,
+      "requirement": "^2.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-providers",
+      "kind": "normal",
+      "optional": false,
+      "package": "async-trait",
+      "rename": null,
+      "requirement": "^0.1",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-providers",
+      "kind": "normal",
+      "optional": false,
+      "package": "base64",
+      "rename": null,
+      "requirement": "^0.22",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [
+        "serde"
+      ],
+      "from": "lorepia-providers",
+      "kind": "normal",
+      "optional": false,
+      "package": "chrono",
+      "rename": null,
+      "requirement": "^0.4",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-providers",
+      "kind": "normal",
+      "optional": false,
+      "package": "futures-util",
+      "rename": null,
+      "requirement": "^0.3",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-providers",
+      "kind": "normal",
+      "optional": false,
+      "package": "psl",
+      "rename": null,
+      "requirement": "^2.1",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": false,
+      "features": [
+        "json",
+        "rustls-tls",
+        "stream"
+      ],
+      "from": "lorepia-providers",
+      "kind": "normal",
+      "optional": false,
+      "package": "reqwest",
+      "rename": null,
+      "requirement": "^0.12",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-providers",
+      "kind": "normal",
+      "optional": false,
+      "package": "ring",
+      "rename": null,
+      "requirement": "^0.17",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [
+        "derive"
+      ],
+      "from": "lorepia-providers",
+      "kind": "normal",
+      "optional": false,
+      "package": "serde",
+      "rename": null,
+      "requirement": "^1.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-providers",
+      "kind": "normal",
+      "optional": false,
+      "package": "serde_json",
+      "rename": null,
+      "requirement": "^1.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-providers",
+      "kind": "normal",
+      "optional": false,
+      "package": "sha2",
+      "rename": null,
+      "requirement": "^0.10",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [
+        "macros",
+        "rt-multi-thread",
+        "sync",
+        "time"
+      ],
+      "from": "lorepia-providers",
+      "kind": "normal",
+      "optional": false,
+      "package": "tokio",
+      "rename": null,
+      "requirement": "^1.47",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-providers",
+      "kind": "normal",
+      "optional": false,
+      "package": "url",
+      "rename": null,
+      "requirement": "^2.5",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-providers",
+      "kind": "normal",
+      "optional": false,
+      "package": "zeroize",
+      "rename": null,
+      "requirement": "^1.8",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [
+        "serde"
+      ],
+      "from": "lorepia-shell-api",
+      "kind": "normal",
+      "optional": false,
+      "package": "chrono",
+      "rename": null,
+      "requirement": "^0.4",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [
+        "backup",
+        "bundled",
+        "functions"
+      ],
+      "from": "lorepia-shell-api",
+      "kind": "dev",
+      "optional": false,
+      "package": "rusqlite",
+      "rename": null,
+      "requirement": "^0.37",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [
+        "backup",
+        "bundled",
+        "functions"
+      ],
+      "from": "lorepia-shell-api",
+      "kind": "normal",
+      "optional": true,
+      "package": "rusqlite",
+      "rename": null,
+      "requirement": "^0.37",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [
+        "derive"
+      ],
+      "from": "lorepia-shell-api",
+      "kind": "normal",
+      "optional": false,
+      "package": "serde",
+      "rename": null,
+      "requirement": "^1.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-shell-api",
+      "kind": "normal",
+      "optional": false,
+      "package": "serde_json",
+      "rename": null,
+      "requirement": "^1.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-shell-api",
+      "kind": "dev",
+      "optional": false,
+      "package": "sha2",
+      "rename": null,
+      "requirement": "^0.10",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-shell-api",
+      "kind": "dev",
+      "optional": false,
+      "package": "tempfile",
+      "rename": null,
+      "requirement": "^3.20",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-shell-api",
+      "kind": "normal",
+      "optional": true,
+      "package": "tempfile",
+      "rename": null,
+      "requirement": "^3.20",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [
+        "macros",
+        "rt-multi-thread",
+        "sync",
+        "time"
+      ],
+      "from": "lorepia-shell-api",
+      "kind": "normal",
+      "optional": false,
+      "package": "tokio",
+      "rename": null,
+      "requirement": "^1.47",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-shell-api",
+      "kind": "normal",
+      "optional": false,
+      "package": "zeroize",
+      "rename": null,
+      "requirement": "^1.8",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": false,
+      "features": [
+        "deflate"
+      ],
+      "from": "lorepia-shell-api",
+      "kind": "dev",
+      "optional": false,
+      "package": "zip",
+      "rename": null,
+      "requirement": "^4.3",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [
+        "serde"
+      ],
+      "from": "lorepia-storage",
+      "kind": "normal",
+      "optional": false,
+      "package": "chrono",
+      "rename": null,
+      "requirement": "^0.4",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-storage",
+      "kind": "normal",
+      "optional": false,
+      "package": "hex",
+      "rename": null,
+      "requirement": "^0.4",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [
+        "backup",
+        "bundled",
+        "functions"
+      ],
+      "from": "lorepia-storage",
+      "kind": "normal",
+      "optional": false,
+      "package": "rusqlite",
+      "rename": null,
+      "requirement": "^0.37",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [
+        "fs"
+      ],
+      "from": "lorepia-storage",
+      "kind": "normal",
+      "optional": false,
+      "package": "rustix",
+      "rename": null,
+      "requirement": "^1.1",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": "cfg(any(target_os = \"android\", target_os = \"linux\", target_vendor = \"apple\"))"
+    },
+    {
+      "default_features": true,
+      "features": [
+        "derive"
+      ],
+      "from": "lorepia-storage",
+      "kind": "normal",
+      "optional": false,
+      "package": "serde",
+      "rename": null,
+      "requirement": "^1.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-storage",
+      "kind": "normal",
+      "optional": false,
+      "package": "serde_json",
+      "rename": null,
+      "requirement": "^1.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-storage",
+      "kind": "normal",
+      "optional": false,
+      "package": "sha2",
+      "rename": null,
+      "requirement": "^0.10",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-storage",
+      "kind": "dev",
+      "optional": false,
+      "package": "tempfile",
+      "rename": null,
+      "requirement": "^3.20",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-storage",
+      "kind": "normal",
+      "optional": false,
+      "package": "url",
+      "rename": null,
+      "requirement": "^2.5",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [
+        "serde",
+        "v4",
+        "v5"
+      ],
+      "from": "lorepia-storage",
+      "kind": "normal",
+      "optional": false,
+      "package": "uuid",
+      "rename": null,
+      "requirement": "^1.17",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [
+        "Win32_Foundation",
+        "Win32_Storage_FileSystem"
+      ],
+      "from": "lorepia-storage",
+      "kind": "normal",
+      "optional": false,
+      "package": "windows-sys",
+      "rename": null,
+      "requirement": "^0.61",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": "cfg(windows)"
+    },
+    {
+      "default_features": true,
+      "features": [
+        "derive"
+      ],
+      "from": "lorepia-tauri",
+      "kind": "normal",
+      "optional": false,
+      "package": "serde",
+      "rename": null,
+      "requirement": "^1.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-tauri",
+      "kind": "build",
+      "optional": false,
+      "package": "serde_json",
+      "rename": null,
+      "requirement": "^1.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-tauri",
+      "kind": "dev",
+      "optional": false,
+      "package": "serde_json",
+      "rename": null,
+      "requirement": "^1.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-tauri",
+      "kind": "build",
+      "optional": false,
+      "package": "sha2",
+      "rename": null,
+      "requirement": "^0.10",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-tauri",
+      "kind": "dev",
+      "optional": false,
+      "package": "sha2",
+      "rename": null,
+      "requirement": "^0.10",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-tauri",
+      "kind": "normal",
+      "optional": false,
+      "package": "sha2",
+      "rename": null,
+      "requirement": "^0.10",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-tauri",
+      "kind": "normal",
+      "optional": false,
+      "package": "tauri",
+      "rename": null,
+      "requirement": "=2.11.5",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-tauri",
+      "kind": "build",
+      "optional": false,
+      "package": "tauri-build",
+      "rename": null,
+      "requirement": "=2.6.3",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-tauri",
+      "kind": "dev",
+      "optional": false,
+      "package": "tempfile",
+      "rename": null,
+      "requirement": "^3.20",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [
+        "macros",
+        "rt-multi-thread",
+        "sync",
+        "time"
+      ],
+      "from": "lorepia-tauri",
+      "kind": "normal",
+      "optional": false,
+      "package": "tokio",
+      "rename": null,
+      "requirement": "^1.47",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [
+        "serde",
+        "v4",
+        "v5"
+      ],
+      "from": "lorepia-tauri",
+      "kind": "normal",
+      "optional": false,
+      "package": "uuid",
+      "rename": null,
+      "requirement": "^1.17",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": false,
+      "features": [
+        "deflate"
+      ],
+      "from": "lorepia-tauri",
+      "kind": "dev",
+      "optional": false,
+      "package": "zip",
+      "rename": null,
+      "requirement": "^4.3",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "tauri-plugin-lorepia-platform",
+      "kind": "normal",
+      "optional": false,
+      "package": "core-foundation",
+      "rename": null,
+      "requirement": "^0.10",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": "cfg(target_os = \"macos\")"
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "tauri-plugin-lorepia-platform",
+      "kind": "normal",
+      "optional": false,
+      "package": "libc",
+      "rename": null,
+      "requirement": "^0.2",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": "cfg(unix)"
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "tauri-plugin-lorepia-platform",
+      "kind": "normal",
+      "optional": false,
+      "package": "objc2",
+      "rename": null,
+      "requirement": "^0.6",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": "cfg(target_os = \"macos\")"
+    },
+    {
+      "default_features": false,
+      "features": [
+        "NSAlert",
+        "NSApplication",
+        "NSButton",
+        "NSControl",
+        "NSOpenPanel",
+        "NSPanel",
+        "NSPasteboard",
+        "NSResponder",
+        "NSSavePanel",
+        "NSView",
+        "NSWindow"
+      ],
+      "from": "tauri-plugin-lorepia-platform",
+      "kind": "normal",
+      "optional": false,
+      "package": "objc2-app-kit",
+      "rename": null,
+      "requirement": "^0.3",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": "cfg(target_os = \"macos\")"
+    },
+    {
+      "default_features": false,
+      "features": [
+        "NSArray",
+        "NSPathUtilities",
+        "NSString",
+        "NSURL"
+      ],
+      "from": "tauri-plugin-lorepia-platform",
+      "kind": "normal",
+      "optional": false,
+      "package": "objc2-foundation",
+      "rename": null,
+      "requirement": "^0.3",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": "cfg(target_os = \"macos\")"
+    },
+    {
+      "default_features": true,
+      "features": [
+        "fs"
+      ],
+      "from": "tauri-plugin-lorepia-platform",
+      "kind": "normal",
+      "optional": false,
+      "package": "rustix",
+      "rename": null,
+      "requirement": "^1.1",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": "cfg(unix)"
+    },
+    {
+      "default_features": true,
+      "features": [
+        "OSX_10_15"
+      ],
+      "from": "tauri-plugin-lorepia-platform",
+      "kind": "normal",
+      "optional": false,
+      "package": "security-framework-sys",
+      "rename": null,
+      "requirement": "^2.17",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": "cfg(target_os = \"macos\")"
+    },
+    {
+      "default_features": true,
+      "features": [
+        "derive"
+      ],
+      "from": "tauri-plugin-lorepia-platform",
+      "kind": "normal",
+      "optional": false,
+      "package": "serde",
+      "rename": null,
+      "requirement": "^1.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "tauri-plugin-lorepia-platform",
+      "kind": "dev",
+      "optional": false,
+      "package": "serde_json",
+      "rename": null,
+      "requirement": "^1.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "tauri-plugin-lorepia-platform",
+      "kind": "normal",
+      "optional": false,
+      "package": "sha2",
+      "rename": null,
+      "requirement": "^0.10",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": false,
+      "features": [],
+      "from": "tauri-plugin-lorepia-platform",
+      "kind": "normal",
+      "optional": false,
+      "package": "tauri",
+      "rename": null,
+      "requirement": "=2.11.5",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [
+        "build"
+      ],
+      "from": "tauri-plugin-lorepia-platform",
+      "kind": "build",
+      "optional": false,
+      "package": "tauri-plugin",
+      "rename": null,
+      "requirement": "=2.6.3",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "tauri-plugin-lorepia-platform",
+      "kind": "dev",
+      "optional": false,
+      "package": "tempfile",
+      "rename": null,
+      "requirement": "^3.20",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [
+        "macros",
+        "rt-multi-thread",
+        "sync",
+        "time"
+      ],
+      "from": "tauri-plugin-lorepia-platform",
+      "kind": "normal",
+      "optional": false,
+      "package": "tokio",
+      "rename": null,
+      "requirement": "^1.47",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [
+        "serde",
+        "v4",
+        "v5"
+      ],
+      "from": "tauri-plugin-lorepia-platform",
+      "kind": "normal",
+      "optional": false,
+      "package": "uuid",
+      "rename": null,
+      "requirement": "^1.17",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
+      "features": [
+        "ApplicationModel_DataTransfer",
+        "Foundation",
+        "Security_Credentials",
+        "Storage",
+        "Storage_Pickers",
+        "Storage_Streams",
+        "Win32_Foundation",
+        "Win32_Security",
+        "Win32_Security_Cryptography",
+        "Win32_Storage_FileSystem",
+        "Win32_System_Com",
+        "Win32_System_DataExchange",
+        "Win32_System_Threading",
+        "Win32_System_WinRT",
+        "Win32_UI_Shell",
+        "Win32_UI_WindowsAndMessaging"
+      ],
+      "from": "tauri-plugin-lorepia-platform",
+      "kind": "normal",
+      "optional": false,
+      "package": "windows",
+      "rename": null,
+      "requirement": "^0.61",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": "cfg(windows)"
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "tauri-plugin-lorepia-platform",
+      "kind": "normal",
+      "optional": false,
+      "package": "zeroize",
+      "rename": null,
+      "requirement": "^1.8",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    }
+  ],
+  "package_features": {
+    "lorepia-core": {
+      "test-support": []
+    },
+    "lorepia-shell-api": {
+      "test-support": [
+        "dep:lorepia-storage",
+        "dep:rusqlite",
+        "dep:tempfile",
+        "lorepia-core/test-support"
+      ]
+    },
+    "lorepia-tauri": {
+      "custom-protocol": [
+        "tauri/custom-protocol"
+      ]
+    },
+    "tauri-plugin-lorepia-platform": {
+      "default": [],
+      "wry": [
+        "tauri/wry"
+      ]
+    }
+  },
+  "version": 1,
+  "workspace_dependencies": [
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-chat",
+      "kind": "normal",
+      "optional": false,
+      "rename": null,
+      "requirement": "*",
+      "target": null,
+      "to": "lorepia-domain"
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-chat",
+      "kind": "normal",
+      "optional": false,
+      "rename": null,
+      "requirement": "*",
+      "target": null,
+      "to": "lorepia-orchestration"
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-chat",
+      "kind": "normal",
+      "optional": false,
+      "rename": null,
+      "requirement": "*",
+      "target": null,
+      "to": "lorepia-providers"
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-content",
+      "kind": "normal",
+      "optional": false,
+      "rename": null,
+      "requirement": "*",
+      "target": null,
+      "to": "lorepia-domain"
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-core",
+      "kind": "normal",
+      "optional": false,
+      "rename": null,
+      "requirement": "*",
+      "target": null,
+      "to": "lorepia-chat"
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-core",
+      "kind": "normal",
+      "optional": false,
+      "rename": null,
+      "requirement": "*",
+      "target": null,
+      "to": "lorepia-content"
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-core",
+      "kind": "normal",
+      "optional": false,
+      "rename": null,
+      "requirement": "*",
+      "target": null,
+      "to": "lorepia-domain"
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-core",
+      "kind": "normal",
+      "optional": false,
+      "rename": null,
+      "requirement": "*",
+      "target": null,
+      "to": "lorepia-orchestration"
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-core",
+      "kind": "normal",
+      "optional": false,
+      "rename": null,
+      "requirement": "*",
+      "target": null,
+      "to": "lorepia-providers"
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-core",
+      "kind": "normal",
+      "optional": false,
+      "rename": null,
+      "requirement": "*",
+      "target": null,
+      "to": "lorepia-storage"
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-orchestration",
+      "kind": "normal",
+      "optional": false,
+      "rename": null,
+      "requirement": "*",
+      "target": null,
+      "to": "lorepia-domain"
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-providers",
+      "kind": "normal",
+      "optional": false,
+      "rename": null,
+      "requirement": "*",
+      "target": null,
+      "to": "lorepia-domain"
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-providers",
+      "kind": "normal",
+      "optional": false,
+      "rename": null,
+      "requirement": "*",
+      "target": null,
+      "to": "lorepia-orchestration"
+    },
+    {
+      "default_features": true,
+      "features": [
+        "test-support"
+      ],
+      "from": "lorepia-shell-api",
+      "kind": "dev",
+      "optional": false,
+      "rename": null,
+      "requirement": "*",
+      "target": null,
+      "to": "lorepia-core"
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-shell-api",
+      "kind": "normal",
+      "optional": false,
+      "rename": null,
+      "requirement": "*",
+      "target": null,
+      "to": "lorepia-core"
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-shell-api",
+      "kind": "dev",
+      "optional": false,
+      "rename": null,
+      "requirement": "*",
+      "target": null,
+      "to": "lorepia-storage"
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-shell-api",
+      "kind": "normal",
+      "optional": true,
+      "rename": null,
+      "requirement": "*",
+      "target": null,
+      "to": "lorepia-storage"
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-storage",
+      "kind": "normal",
+      "optional": false,
+      "rename": null,
+      "requirement": "*",
+      "target": null,
+      "to": "lorepia-domain"
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-storage",
+      "kind": "normal",
+      "optional": false,
+      "rename": null,
+      "requirement": "*",
+      "target": null,
+      "to": "lorepia-orchestration"
+    },
+    {
+      "default_features": true,
+      "features": [
+        "test-support"
+      ],
+      "from": "lorepia-tauri",
+      "kind": "dev",
+      "optional": false,
+      "rename": null,
+      "requirement": "*",
+      "target": null,
+      "to": "lorepia-shell-api"
+    },
+    {
+      "default_features": true,
+      "features": [],
+      "from": "lorepia-tauri",
+      "kind": "normal",
+      "optional": false,
+      "rename": null,
+      "requirement": "*",
+      "target": null,
+      "to": "lorepia-shell-api"
+    },
+    {
+      "default_features": true,
+      "features": [
+        "wry"
+      ],
+      "from": "lorepia-tauri",
+      "kind": "normal",
+      "optional": false,
+      "rename": null,
+      "requirement": "*",
+      "target": null,
+      "to": "tauri-plugin-lorepia-platform"
+    }
+  ],
+  "workspace_packages": [
+    {
+      "manifest": "crates/chat/Cargo.toml",
+      "name": "lorepia-chat"
+    },
+    {
+      "manifest": "crates/content/Cargo.toml",
+      "name": "lorepia-content"
+    },
+    {
+      "manifest": "crates/core/Cargo.toml",
+      "name": "lorepia-core"
+    },
+    {
+      "manifest": "crates/domain/Cargo.toml",
+      "name": "lorepia-domain"
+    },
+    {
+      "manifest": "crates/orchestration/Cargo.toml",
+      "name": "lorepia-orchestration"
+    },
+    {
+      "manifest": "crates/providers/Cargo.toml",
+      "name": "lorepia-providers"
+    },
+    {
+      "manifest": "crates/shell-api/Cargo.toml",
+      "name": "lorepia-shell-api"
+    },
+    {
+      "manifest": "crates/storage/Cargo.toml",
+      "name": "lorepia-storage"
+    },
+    {
+      "manifest": "apps/lorepia/src-tauri/Cargo.toml",
+      "name": "lorepia-tauri"
+    },
+    {
+      "manifest": "plugins/lorepia-platform/Cargo.toml",
+      "name": "tauri-plugin-lorepia-platform"
+    }
+  ]
+}
