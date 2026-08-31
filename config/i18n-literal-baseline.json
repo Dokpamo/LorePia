@@ -56,6 +56,10 @@
       "hangul_lines": 9,
       "sha256": "dfb896444a7f7f6c06dad1fa93314bada48c1310a534cebad946b55d54abc5e1"
     },
+    "src/features/chat/ChatErrorRegion.svelte": {
+      "hangul_lines": 7,
+      "sha256": "44e2c64feaa5ad6dafff31ffb5b0872e6bfc614a6d1fb6d994356a8c278aefd5"
+    },
     "src/features/chat/ChatFullscreenComposer.svelte": {
       "hangul_lines": 4,
       "sha256": "ca328acf1ecca4eeb344bf77edbe2323651b1e7f8f08aa5af3f5a0273329093f"
@@ -64,13 +68,25 @@
       "hangul_lines": 11,
       "sha256": "ad3aec1f6d57f8b37a48dec74e086549c88535a47e5a257deadba09b38aa95fb"
     },
+    "src/features/chat/ChatMessageList.svelte": {
+      "hangul_lines": 18,
+      "sha256": "f849fccbaf493912ef22b528e091904ce80624fe983005e861ba492fda389d53"
+    },
     "src/features/chat/ChatPane.svelte": {
-      "hangul_lines": 76,
-      "sha256": "464b880b971a8a7ccd62dbe1a60943a21a6d495b0099f6ba720b3e3854cd4edc"
+      "hangul_lines": 27,
+      "sha256": "267e1097e0e5b13f2962f39a007ec273f1fb706065b94a6b35ea91583a193c95"
     },
     "src/features/chat/ChatPane.test.ts": {
       "hangul_lines": 70,
       "sha256": "8d5a1cc81ee4d4ccb175ba8d3bd302509e1f7e99248b1e43f321345bb95985eb"
+    },
+    "src/features/chat/ChatRoomControls.svelte": {
+      "hangul_lines": 13,
+      "sha256": "a42660ce8fe30be5eec7cb85ca7aabe688e9ac168a112cf961478793ed92b6d0"
+    },
+    "src/features/chat/ChatViewport.svelte": {
+      "hangul_lines": 5,
+      "sha256": "ceed5752470ca7653f63b00241d3832df407ae032bd981dcae628f1103c8c0e7"
     },
     "src/features/chat/GenerationAttemptApprovals.test.ts": {
       "hangul_lines": 17,
@@ -87,6 +103,10 @@
     "src/features/chat/PortableRuntimeControls.svelte": {
       "hangul_lines": 19,
       "sha256": "ea0f456482b183555497389f80866333ec96d4d98773ce4e52e8effa3882052d"
+    },
+    "src/features/chat/chat-scroll.svelte.ts": {
+      "hangul_lines": 4,
+      "sha256": "052e83f76a0201a464c990820b41edf10c98467615901eb4893a8f4562a60bd4"
     },
     "src/features/chat/chat-stream.test.ts": {
       "hangul_lines": 4,
@@ -107,6 +127,10 @@
     "src/features/chat/markdown.test.ts": {
       "hangul_lines": 8,
       "sha256": "633d834e9f6b23795dc620d1544e55d0fbca9a1e13279e9f8eecbf14c1484e12"
+    },
+    "src/features/chat/portable-runtime-lifecycle.svelte.ts": {
+      "hangul_lines": 2,
+      "sha256": "89f578ec779345c152a1d62cd9a0be386f8156a2f6abb91a6710db1c5cfcbfcb"
     },
     "src/features/chat/portable-runtime.test.ts": {
       "hangul_lines": 2,
