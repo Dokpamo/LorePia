@@ -2,7 +2,7 @@
   "baseline_commit": "01af428da8ea64f6028d7fef276b10bfa6fd9f79",
   "completion": {
     "approved_hotspot_exception_count": 0,
-    "ledger_sha256": "d9e9291f10663ac8aed8d91c31eaf83ff2a6ecb727054deb15a4a46bffff5ca7",
+    "ledger_sha256": "f5128297b707ca094f6e29a7fc928dc0d6e1088ac0a59293a7aee51c7f8c328e",
     "overall_status": "incomplete",
     "phase_gates": {
       "A": {
@@ -12,7 +12,7 @@
           "status": "not_run"
         },
         "local_validation": {
-          "commit": "e79b955e510b95cb992c284661ff182621635028",
+          "commit": "bbe313f611aef2304f3ecf0ad29fbcc86c2054b8",
           "status": "pass"
         },
         "status": "incomplete",
@@ -30,7 +30,7 @@
           "status": "not_run"
         },
         "local_validation": {
-          "commit": "e79b955e510b95cb992c284661ff182621635028",
+          "commit": "bbe313f611aef2304f3ecf0ad29fbcc86c2054b8",
           "status": "pass"
         },
         "status": "incomplete",
@@ -48,7 +48,7 @@
           "status": "not_run"
         },
         "local_validation": {
-          "commit": "e79b955e510b95cb992c284661ff182621635028",
+          "commit": "bbe313f611aef2304f3ecf0ad29fbcc86c2054b8",
           "status": "pass"
         },
         "status": "incomplete",
@@ -66,7 +66,7 @@
           "status": "not_run"
         },
         "local_validation": {
-          "commit": "e79b955e510b95cb992c284661ff182621635028",
+          "commit": "bbe313f611aef2304f3ecf0ad29fbcc86c2054b8",
           "status": "pass"
         },
         "status": "incomplete",
@@ -84,7 +84,7 @@
           "status": "not_run"
         },
         "local_validation": {
-          "commit": "e79b955e510b95cb992c284661ff182621635028",
+          "commit": "bbe313f611aef2304f3ecf0ad29fbcc86c2054b8",
           "status": "pass"
         },
         "status": "incomplete",
@@ -102,7 +102,7 @@
           "status": "not_run"
         },
         "local_validation": {
-          "commit": "e79b955e510b95cb992c284661ff182621635028",
+          "commit": "bbe313f611aef2304f3ecf0ad29fbcc86c2054b8",
           "status": "pass"
         },
         "status": "incomplete",
@@ -220,7 +220,7 @@
       },
       "ENF-004": {
         "evidence_commits": [
-          "e79b955e510b95cb992c284661ff182621635028"
+          "bbe313f611aef2304f3ecf0ad29fbcc86c2054b8"
         ],
         "status": "complete"
       },
@@ -7337,7 +7337,7 @@
   "ratchets": {
     "config/ai-context-map.json": "75e96d928addcf32d74fbf036904f75f2a09dedf604c9f1690ae50ca3616f1f2",
     "config/core-storage-public-api-baseline.json": "c86c10d701180070ec6742d3424deb2784cb0c5e5628b6b809093befa5c3c46b",
-    "config/refactoring/completion-status.json": "d9e9291f10663ac8aed8d91c31eaf83ff2a6ecb727054deb15a4a46bffff5ca7",
+    "config/refactoring/completion-status.json": "f5128297b707ca094f6e29a7fc928dc0d6e1088ac0a59293a7aee51c7f8c328e",
     "config/refactoring/task-manifest.yaml": "82fc4032640615ae4d07fbbd1b9e5fc2473b07e49fd3933c40e58c4122328d0e",
     "config/source-size-baseline.json": "c60120e09e2666cb60a48f674dd6e658688cb366bc5c443998e4b26ffdf20be2",
     "config/test-source-size-baseline.json": "df6f4c17681bdf50baa6ee3959c3e6e696222bb32cedf6f267ed8d94f92824ae"

@@ -5,32 +5,32 @@
   "phase_gates": {
     "A": {
       "github_checks": {"commit": null, "run_url": null, "status": "not_run"},
-      "local_validation": {"commit": "e79b955e510b95cb992c284661ff182621635028", "status": "pass"},
+      "local_validation": {"commit": "bbe313f611aef2304f3ecf0ad29fbcc86c2054b8", "status": "pass"},
       "status": "incomplete"
     },
     "B": {
       "github_checks": {"commit": null, "run_url": null, "status": "not_run"},
-      "local_validation": {"commit": "e79b955e510b95cb992c284661ff182621635028", "status": "pass"},
+      "local_validation": {"commit": "bbe313f611aef2304f3ecf0ad29fbcc86c2054b8", "status": "pass"},
       "status": "incomplete"
     },
     "C": {
       "github_checks": {"commit": null, "run_url": null, "status": "not_run"},
-      "local_validation": {"commit": "e79b955e510b95cb992c284661ff182621635028", "status": "pass"},
+      "local_validation": {"commit": "bbe313f611aef2304f3ecf0ad29fbcc86c2054b8", "status": "pass"},
       "status": "incomplete"
     },
     "D": {
       "github_checks": {"commit": null, "run_url": null, "status": "not_run"},
-      "local_validation": {"commit": "e79b955e510b95cb992c284661ff182621635028", "status": "pass"},
+      "local_validation": {"commit": "bbe313f611aef2304f3ecf0ad29fbcc86c2054b8", "status": "pass"},
       "status": "incomplete"
     },
     "E": {
       "github_checks": {"commit": null, "run_url": null, "status": "not_run"},
-      "local_validation": {"commit": "e79b955e510b95cb992c284661ff182621635028", "status": "pass"},
+      "local_validation": {"commit": "bbe313f611aef2304f3ecf0ad29fbcc86c2054b8", "status": "pass"},
       "status": "incomplete"
     },
     "F": {
       "github_checks": {"commit": null, "run_url": null, "status": "not_run"},
-      "local_validation": {"commit": "e79b955e510b95cb992c284661ff182621635028", "status": "pass"},
+      "local_validation": {"commit": "bbe313f611aef2304f3ecf0ad29fbcc86c2054b8", "status": "pass"},
       "status": "incomplete"
     }
   },
@@ -52,7 +52,7 @@
     "ENF-001": {"evidence_commits": ["00a881131a04cdd998996a7ea03e5462ab72e16b"], "status": "complete"},
     "ENF-002": {"evidence_commits": ["0bfafdd32a1d7b58c6c8fb261eb8b5c8f32a62b5"], "status": "complete"},
     "ENF-003": {"evidence_commits": ["49e6df6bf496f08a9c39d1ab9e4a795a9494ce4c"], "status": "complete"},
-    "ENF-004": {"evidence_commits": ["e79b955e510b95cb992c284661ff182621635028"], "status": "complete"},
+    "ENF-004": {"evidence_commits": ["bbe313f611aef2304f3ecf0ad29fbcc86c2054b8"], "status": "complete"},
     "FE-APP-001": {"evidence_commits": ["1cc8065c71f131f19d369e958c34816ddaacfa60"], "status": "complete"},
     "FE-APP-002": {"evidence_commits": ["afb9054f61f3e628e5c7d4908aef4e6eaf7c418d"], "status": "complete"},
     "FE-APP-003": {"evidence_commits": ["d28582f927744d6fc1796e76600e982f4b407775"], "status": "complete"},
