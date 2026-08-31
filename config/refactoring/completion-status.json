@@ -5,32 +5,32 @@
   "phase_gates": {
     "A": {
       "github_checks": {"commit": null, "run_url": null, "status": "not_run"},
-      "local_validation": {"commit": "c24a99d784ff3bf278c3a0363b69f0e67cb98a5e", "status": "pass"},
+      "local_validation": {"commit": "84e63d91890424607c02b8b15b464550bf42347e", "status": "pass"},
       "status": "incomplete"
     },
     "B": {
       "github_checks": {"commit": null, "run_url": null, "status": "not_run"},
-      "local_validation": {"commit": "c24a99d784ff3bf278c3a0363b69f0e67cb98a5e", "status": "pass"},
+      "local_validation": {"commit": "84e63d91890424607c02b8b15b464550bf42347e", "status": "pass"},
       "status": "incomplete"
     },
     "C": {
       "github_checks": {"commit": null, "run_url": null, "status": "not_run"},
-      "local_validation": {"commit": "c24a99d784ff3bf278c3a0363b69f0e67cb98a5e", "status": "pass"},
+      "local_validation": {"commit": "84e63d91890424607c02b8b15b464550bf42347e", "status": "pass"},
       "status": "incomplete"
     },
     "D": {
       "github_checks": {"commit": null, "run_url": null, "status": "not_run"},
-      "local_validation": {"commit": "c24a99d784ff3bf278c3a0363b69f0e67cb98a5e", "status": "pass"},
+      "local_validation": {"commit": "84e63d91890424607c02b8b15b464550bf42347e", "status": "pass"},
       "status": "incomplete"
     },
     "E": {
       "github_checks": {"commit": null, "run_url": null, "status": "not_run"},
-      "local_validation": {"commit": "c24a99d784ff3bf278c3a0363b69f0e67cb98a5e", "status": "pass"},
+      "local_validation": {"commit": "84e63d91890424607c02b8b15b464550bf42347e", "status": "pass"},
       "status": "incomplete"
     },
     "F": {
       "github_checks": {"commit": null, "run_url": null, "status": "not_run"},
-      "local_validation": {"commit": "c24a99d784ff3bf278c3a0363b69f0e67cb98a5e", "status": "pass"},
+      "local_validation": {"commit": "84e63d91890424607c02b8b15b464550bf42347e", "status": "pass"},
       "status": "incomplete"
     }
   },
@@ -49,10 +49,10 @@
     "CORE-ORCH-002": {"evidence_commits": ["d921418878ce06238be47652ac10a4ba2fec17c4"], "status": "complete"},
     "CORE-ORCH-003": {"evidence_commits": ["71ad36626c59a6a221ab5f406fcf3c2fd6cbfbad"], "status": "complete"},
     "CORE-PROV-001": {"evidence_commits": ["72706b7d9771e614167e6c7ca751871970847a34"], "status": "complete"},
-    "ENF-001": {"evidence_commits": ["00a881131a04cdd998996a7ea03e5462ab72e16b"], "status": "complete"},
+    "ENF-001": {"evidence_commits": ["00a881131a04cdd998996a7ea03e5462ab72e16b", "a9ad4d293b5889600e719e9b132a7a86f52d83b7", "c24a99d784ff3bf278c3a0363b69f0e67cb98a5e"], "status": "complete"},
     "ENF-002": {"evidence_commits": ["0bfafdd32a1d7b58c6c8fb261eb8b5c8f32a62b5"], "status": "complete"},
     "ENF-003": {"evidence_commits": ["49e6df6bf496f08a9c39d1ab9e4a795a9494ce4c"], "status": "complete"},
-    "ENF-004": {"evidence_commits": ["bbe313f611aef2304f3ecf0ad29fbcc86c2054b8"], "status": "complete"},
+    "ENF-004": {"evidence_commits": ["095bc1b76ac5a2a0ea3e4f2287b5d8a96cf17850", "4779f2fa0341e7e08f80f60cda9e4877e5d51a34", "84e63d91890424607c02b8b15b464550bf42347e", "bbe313f611aef2304f3ecf0ad29fbcc86c2054b8", "cd5f24bb73600478c68ca8a5bfbae5c2ccbce50f", "e733b893497e7cac1b99576947e5d07669d2a287"], "status": "complete"},
     "FE-APP-001": {"evidence_commits": ["1cc8065c71f131f19d369e958c34816ddaacfa60"], "status": "complete"},
     "FE-APP-002": {"evidence_commits": ["afb9054f61f3e628e5c7d4908aef4e6eaf7c418d"], "status": "complete"},
     "FE-APP-003": {"evidence_commits": ["d28582f927744d6fc1796e76600e982f4b407775"], "status": "complete"},
@@ -63,10 +63,10 @@
     "FE-CSS-001": {"evidence_commits": ["ace8105c7bcad425a751490b77c136fa1800df67"], "status": "complete"},
     "FE-ORCH-001": {"evidence_commits": ["17edcafc64afa04429a93bd18b6e104cdb59d9fb"], "status": "complete"},
     "FE-ORCH-002": {"evidence_commits": ["153c30f746b72876dcd3916a0dc4aabd735a6f2c"], "status": "complete"},
-    "FE-PROV-001": {"evidence_commits": ["b5518ef7abeb8548c0a3f03ec590ab27c72ce13f"], "status": "complete"},
+    "FE-PROV-001": {"evidence_commits": ["8b54cb69a6dbb6e81a928d263ba7c686c01429f4", "b5518ef7abeb8548c0a3f03ec590ab27c72ce13f"], "status": "complete"},
     "GOV-001": {"evidence_commits": ["cb44fe1a9b14bfe366a404f6c70d8aac00a18cbf"], "status": "complete"},
-    "GOV-002": {"evidence_commits": ["3f02bcc55a3cd44d9082acb5364f3abb351e9569"], "status": "complete"},
-    "GOV-003": {"evidence_commits": ["98e854effb89617147ee51f99dbebb5a5fcd1ccd"], "status": "complete"},
+    "GOV-002": {"evidence_commits": ["0c201c459bdbd96f9e7314d6f3cf93bd43c34a8f", "3f02bcc55a3cd44d9082acb5364f3abb351e9569", "7113d5320c00ac88adda72321f7c057c3c648576", "9a48ef8cad4f9b42b74d9683e928f0eda85dca57", "b260db06739ad8cfdc57d14ee9d0502b5091566b"], "status": "complete"},
+    "GOV-003": {"evidence_commits": ["17101f7a91198db95d3ff9d02a0f2234d9249d8f", "5147a4b8c5be2af987b9ddef8a15bdf6024d4352", "541565970335c44e753f9559eee8e66f07fcc5f8", "647f021937836e2d41161ce07af1675d6e8b38c1", "98e854effb89617147ee51f99dbebb5a5fcd1ccd", "b851d633b6a0cce66ccee5f1120a179b0e1933db"], "status": "complete"},
     "GOV-004": {"evidence_commits": ["aeb8da021d3be098e002636c44695787d2cceca7"], "status": "complete"},
     "IPC-001": {"evidence_commits": ["a54891a262361b460991cc9b4cdc31827e056017"], "status": "complete"},
     "IPC-002": {"evidence_commits": ["0efdcef52d2ae872f10373e9efca1636d732f410"], "status": "complete"},
@@ -74,7 +74,7 @@
     "STOR-API-001": {"evidence_commits": ["e9d896ed2bce07fda4c183b5deb50fad798d17d9"], "status": "complete"},
     "STOR-DB-001": {"evidence_commits": ["e543fed64440e86d10e7ba5127d941e17b813873"], "status": "complete"},
     "STOR-DB-002": {"evidence_commits": ["03f8be0dca426262eeca5cc7569f46385ab8b7a8"], "status": "complete"},
-    "STOR-DB-003": {"evidence_commits": ["dd5d4b8dfa6d807aa1de03c3dd730a9d44f1d0e4"], "status": "complete"},
+    "STOR-DB-003": {"evidence_commits": ["c4a65e69e5572704169ca51fb06134d6571407e8", "dd5d4b8dfa6d807aa1de03c3dd730a9d44f1d0e4"], "status": "complete"},
     "STOR-DISC-001": {"evidence_commits": ["2cbaa21999d73efcf706a9de4f2b50281618ac69"], "status": "complete"},
     "STOR-DISC-002": {"evidence_commits": ["814827b1f4f917525ec196c9218e1e7506311ab3"], "status": "complete"},
     "STOR-DISC-003": {"evidence_commits": ["a6746f66295b32456de74dae6b25e5d6756edd8d"], "status": "complete"},

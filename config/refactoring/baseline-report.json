@@ -2,7 +2,7 @@
   "baseline_commit": "01af428da8ea64f6028d7fef276b10bfa6fd9f79",
   "completion": {
     "approved_hotspot_exception_count": 0,
-    "ledger_sha256": "b90ab0f6b8434af59d77ec025fc542355c7670222d1101d1fcf3fd6ab3c611d5",
+    "ledger_sha256": "2e6842312c8eab4ee66481ca86937a6a2dbcbb9032ef0ca0c26aeed3d1fd238a",
     "overall_status": "incomplete",
     "phase_gates": {
       "A": {
@@ -12,7 +12,7 @@
           "status": "not_run"
         },
         "local_validation": {
-          "commit": "c24a99d784ff3bf278c3a0363b69f0e67cb98a5e",
+          "commit": "84e63d91890424607c02b8b15b464550bf42347e",
           "status": "pass"
         },
         "status": "incomplete",
@@ -30,7 +30,7 @@
           "status": "not_run"
         },
         "local_validation": {
-          "commit": "c24a99d784ff3bf278c3a0363b69f0e67cb98a5e",
+          "commit": "84e63d91890424607c02b8b15b464550bf42347e",
           "status": "pass"
         },
         "status": "incomplete",
@@ -48,7 +48,7 @@
           "status": "not_run"
         },
         "local_validation": {
-          "commit": "c24a99d784ff3bf278c3a0363b69f0e67cb98a5e",
+          "commit": "84e63d91890424607c02b8b15b464550bf42347e",
           "status": "pass"
         },
         "status": "incomplete",
@@ -66,7 +66,7 @@
           "status": "not_run"
         },
         "local_validation": {
-          "commit": "c24a99d784ff3bf278c3a0363b69f0e67cb98a5e",
+          "commit": "84e63d91890424607c02b8b15b464550bf42347e",
           "status": "pass"
         },
         "status": "incomplete",
@@ -84,7 +84,7 @@
           "status": "not_run"
         },
         "local_validation": {
-          "commit": "c24a99d784ff3bf278c3a0363b69f0e67cb98a5e",
+          "commit": "84e63d91890424607c02b8b15b464550bf42347e",
           "status": "pass"
         },
         "status": "incomplete",
@@ -102,7 +102,7 @@
           "status": "not_run"
         },
         "local_validation": {
-          "commit": "c24a99d784ff3bf278c3a0363b69f0e67cb98a5e",
+          "commit": "84e63d91890424607c02b8b15b464550bf42347e",
           "status": "pass"
         },
         "status": "incomplete",
@@ -202,7 +202,9 @@
       },
       "ENF-001": {
         "evidence_commits": [
-          "00a881131a04cdd998996a7ea03e5462ab72e16b"
+          "00a881131a04cdd998996a7ea03e5462ab72e16b",
+          "a9ad4d293b5889600e719e9b132a7a86f52d83b7",
+          "c24a99d784ff3bf278c3a0363b69f0e67cb98a5e"
         ],
         "status": "complete"
       },
@@ -220,7 +222,12 @@
       },
       "ENF-004": {
         "evidence_commits": [
-          "bbe313f611aef2304f3ecf0ad29fbcc86c2054b8"
+          "095bc1b76ac5a2a0ea3e4f2287b5d8a96cf17850",
+          "4779f2fa0341e7e08f80f60cda9e4877e5d51a34",
+          "84e63d91890424607c02b8b15b464550bf42347e",
+          "bbe313f611aef2304f3ecf0ad29fbcc86c2054b8",
+          "cd5f24bb73600478c68ca8a5bfbae5c2ccbce50f",
+          "e733b893497e7cac1b99576947e5d07669d2a287"
         ],
         "status": "complete"
       },
@@ -286,6 +293,7 @@
       },
       "FE-PROV-001": {
         "evidence_commits": [
+          "8b54cb69a6dbb6e81a928d263ba7c686c01429f4",
           "b5518ef7abeb8548c0a3f03ec590ab27c72ce13f"
         ],
         "status": "complete"
@@ -298,13 +306,22 @@
       },
       "GOV-002": {
         "evidence_commits": [
-          "3f02bcc55a3cd44d9082acb5364f3abb351e9569"
+          "0c201c459bdbd96f9e7314d6f3cf93bd43c34a8f",
+          "3f02bcc55a3cd44d9082acb5364f3abb351e9569",
+          "7113d5320c00ac88adda72321f7c057c3c648576",
+          "9a48ef8cad4f9b42b74d9683e928f0eda85dca57",
+          "b260db06739ad8cfdc57d14ee9d0502b5091566b"
         ],
         "status": "complete"
       },
       "GOV-003": {
         "evidence_commits": [
-          "98e854effb89617147ee51f99dbebb5a5fcd1ccd"
+          "17101f7a91198db95d3ff9d02a0f2234d9249d8f",
+          "5147a4b8c5be2af987b9ddef8a15bdf6024d4352",
+          "541565970335c44e753f9559eee8e66f07fcc5f8",
+          "647f021937836e2d41161ce07af1675d6e8b38c1",
+          "98e854effb89617147ee51f99dbebb5a5fcd1ccd",
+          "b851d633b6a0cce66ccee5f1120a179b0e1933db"
         ],
         "status": "complete"
       },
@@ -352,6 +369,7 @@
       },
       "STOR-DB-003": {
         "evidence_commits": [
+          "c4a65e69e5572704169ca51fb06134d6571407e8",
           "dd5d4b8dfa6d807aa1de03c3dd730a9d44f1d0e4"
         ],
         "status": "complete"
@@ -7337,7 +7355,7 @@
   "ratchets": {
     "config/ai-context-map.json": "75e96d928addcf32d74fbf036904f75f2a09dedf604c9f1690ae50ca3616f1f2",
     "config/core-storage-public-api-baseline.json": "c86c10d701180070ec6742d3424deb2784cb0c5e5628b6b809093befa5c3c46b",
-    "config/refactoring/completion-status.json": "b90ab0f6b8434af59d77ec025fc542355c7670222d1101d1fcf3fd6ab3c611d5",
+    "config/refactoring/completion-status.json": "2e6842312c8eab4ee66481ca86937a6a2dbcbb9032ef0ca0c26aeed3d1fd238a",
     "config/refactoring/task-manifest.yaml": "90a2365b949430d97d588d44818afe3d348329284c48631c900de5d1de47fd58",
     "config/source-size-baseline.json": "ae256c2584456303ac0e0e270b14082eee4b7fc3eb187f4986d450aae79f68c5",
     "config/test-source-size-baseline.json": "7df20cb344d52000b8581a25ae04afd808b46bc32fe5cfd4c3e0d26ba5f8f861"
