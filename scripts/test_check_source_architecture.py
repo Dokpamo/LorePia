@@ -2397,17 +2397,126 @@ class SourceArchitectureTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             checker = root / "scripts/check_source_architecture.py"
+            checker_test = root / "scripts/test_check_source_architecture.py"
             production = root / "crates/sample/src/lib.rs"
+            source_policy = root / "config/source-size-baseline.json"
+            test_policy = root / "config/test-source-size-baseline.json"
             api_policy = root / "config/core-storage-public-api-baseline.json"
-            checker.parent.mkdir(parents=True)
-            production.parent.mkdir(parents=True)
-            api_policy.parent.mkdir(parents=True)
+            dependency_policy = root / "config/refactoring/dependency-architecture.json"
+            audit = root / "docs/architecture/storage-public-api-audit.md"
+            for path in (
+                checker,
+                checker_test,
+                production,
+                source_policy,
+                test_policy,
+                api_policy,
+            ):
+                path.parent.mkdir(parents=True, exist_ok=True)
             checker.write_text("before\n", encoding="utf-8")
+            checker_test.write_text("before\n", encoding="utf-8")
             production.write_text("before\n", encoding="utf-8")
-            api_policy.write_text(
-                '{"version":1,"allowed_stored_reexports":[]}\n',
-                encoding="utf-8",
+            source_policy.write_text('{"version":1}\n', encoding="utf-8")
+            test_policy.write_text('{"version":1}\n', encoding="utf-8")
+            api_policy.write_text('{"version":1}\n', encoding="utf-8")
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.invalid"],
+                cwd=root,
+                check=True,
             )
+            subprocess.run(
+                ["git", "config", "user.name", "Test"], cwd=root, check=True
+            )
+
+            def commit(message: str) -> str:
+                subprocess.run(["git", "add", "."], cwd=root, check=True)
+                subprocess.run(
+                    ["git", "commit", "-qm", message], cwd=root, check=True
+                )
+                return subprocess.run(
+                    ["git", "rev-parse", "HEAD"],
+                    cwd=root,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip()
+
+            bootstrap_ref = commit("bootstrap")
+            checker.write_text("source enforcement\n", encoding="utf-8")
+            checker_test.write_text("source enforcement\n", encoding="utf-8")
+            source_policy.write_text('{"version":2}\n', encoding="utf-8")
+            test_policy.write_text('{"version":2}\n', encoding="utf-8")
+            source_enforcement_ref = commit("source enforcement")
+            self.assertEqual(
+                require_v2_bootstrap_transition(
+                    root,
+                    bootstrap_ref,
+                    source_policy,
+                    test_policy,
+                    source_enforcement_ref,
+                ),
+                source_enforcement_ref,
+            )
+
+            checker.write_text("API enforcement\n", encoding="utf-8")
+            checker_test.write_text("API enforcement\n", encoding="utf-8")
+            api_policy.write_text('{"version":2}\n', encoding="utf-8")
+            dependency_policy.parent.mkdir(parents=True, exist_ok=True)
+            dependency_policy.write_text('{"version":1}\n', encoding="utf-8")
+            audit.parent.mkdir(parents=True, exist_ok=True)
+            audit.write_text("reviewed\n", encoding="utf-8")
+            api_enforcement_ref = commit("API enforcement")
+            self.assertEqual(
+                require_enf002_bootstrap_transition(
+                    root,
+                    source_enforcement_ref,
+                    api_policy,
+                    dependency_policy,
+                    api_enforcement_ref,
+                ),
+                api_enforcement_ref,
+            )
+
+            production.write_text("later source change\n", encoding="utf-8")
+            untracked = root / "crates/sample/src/new.rs"
+            untracked.write_text("pub fn new_surface() {}\n", encoding="utf-8")
+            require_v2_bootstrap_transition(
+                root,
+                bootstrap_ref,
+                source_policy,
+                test_policy,
+                source_enforcement_ref,
+            )
+            require_enf002_bootstrap_transition(
+                root,
+                source_enforcement_ref,
+                api_policy,
+                dependency_policy,
+                api_enforcement_ref,
+            )
+
+    def test_committed_bootstrap_transition_rejects_smuggled_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            checker = root / "scripts/check_source_architecture.py"
+            checker_test = root / "scripts/test_check_source_architecture.py"
+            production = root / "crates/sample/src/lib.rs"
+            source_policy = root / "config/source-size-baseline.json"
+            test_policy = root / "config/test-source-size-baseline.json"
+            for path in (
+                checker,
+                checker_test,
+                production,
+                source_policy,
+                test_policy,
+            ):
+                path.parent.mkdir(parents=True, exist_ok=True)
+            checker.write_text("before\n", encoding="utf-8")
+            checker_test.write_text("before\n", encoding="utf-8")
+            production.write_text("before\n", encoding="utf-8")
+            source_policy.write_text('{"version":1}\n', encoding="utf-8")
+            test_policy.write_text('{"version":1}\n', encoding="utf-8")
             subprocess.run(["git", "init", "-q"], cwd=root, check=True)
             subprocess.run(
                 ["git", "config", "user.email", "test@example.invalid"],
@@ -2418,9 +2527,7 @@ class SourceArchitectureTests(unittest.TestCase):
                 ["git", "config", "user.name", "Test"], cwd=root, check=True
             )
             subprocess.run(["git", "add", "."], cwd=root, check=True)
-            subprocess.run(
-                ["git", "commit", "-qm", "bootstrap"], cwd=root, check=True
-            )
+            subprocess.run(["git", "commit", "-qm", "bootstrap"], cwd=root, check=True)
             bootstrap_ref = subprocess.run(
                 ["git", "rev-parse", "HEAD"],
                 cwd=root,
@@ -2429,44 +2536,162 @@ class SourceArchitectureTests(unittest.TestCase):
                 text=True,
             ).stdout.strip()
 
-            checker.write_text("after\n", encoding="utf-8")
-            later_exact_paths = {
-                ".github/workflows/ci.yml",
-                "config/ai-context-map.json",
-                "scripts/check_ai_context_map.py",
-                "scripts/check_github_workflow_security.py",
-                "scripts/report_refactoring_baseline.py",
-                "scripts/test_check_ai_context_map.py",
-                "scripts/test_check_github_workflow_security.py",
-                "scripts/test_report_refactoring_baseline.py",
-            }
-            for relative_path in later_exact_paths:
-                candidate = root / relative_path
-                candidate.parent.mkdir(parents=True, exist_ok=True)
-                candidate.write_text("later enforcement\n", encoding="utf-8")
-            for relative_path in (
-                "config/refactoring/completion.json",
-                "docs/refactoring/completion.md",
-            ):
-                candidate = root / relative_path
-                candidate.parent.mkdir(parents=True, exist_ok=True)
-                candidate.write_text("later enforcement\n", encoding="utf-8")
-            require_v2_bootstrap_transition(root, bootstrap_ref)
-            require_enf002_bootstrap_transition(root, bootstrap_ref)
+            checker.write_text("enforcement\n", encoding="utf-8")
+            checker_test.write_text("enforcement\n", encoding="utf-8")
+            source_policy.write_text('{"version":2}\n', encoding="utf-8")
+            test_policy.write_text('{"version":2}\n', encoding="utf-8")
+            production.write_text("smuggled\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(
+                ["git", "commit", "-qm", "bad enforcement"], cwd=root, check=True
+            )
+            enforcement_ref = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=root,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
 
-            production.write_text("after\n", encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "unexpected changed path"):
-                require_v2_bootstrap_transition(root, bootstrap_ref)
-            with self.assertRaisesRegex(ValueError, "unexpected changed path"):
-                require_enf002_bootstrap_transition(root, bootstrap_ref)
+                require_v2_bootstrap_transition(
+                    root,
+                    bootstrap_ref,
+                    source_policy,
+                    test_policy,
+                    enforcement_ref,
+                )
 
-            production.write_text("before\n", encoding="utf-8")
-            untracked = root / "crates/sample/src/new.rs"
-            untracked.write_text("pub fn new_surface() {}\n", encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "new.rs"):
-                require_v2_bootstrap_transition(root, bootstrap_ref)
-            with self.assertRaisesRegex(ValueError, "new.rs"):
-                require_enf002_bootstrap_transition(root, bootstrap_ref)
+    def test_enforcement_commit_must_be_direct_child_of_bootstrap(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            checker = root / "scripts/check_source_architecture.py"
+            checker_test = root / "scripts/test_check_source_architecture.py"
+            source_policy = root / "config/source-size-baseline.json"
+            test_policy = root / "config/test-source-size-baseline.json"
+            for path in (checker, checker_test, source_policy, test_policy):
+                path.parent.mkdir(parents=True, exist_ok=True)
+            checker.write_text("before\n", encoding="utf-8")
+            checker_test.write_text("before\n", encoding="utf-8")
+            source_policy.write_text('{"version":1}\n', encoding="utf-8")
+            test_policy.write_text('{"version":1}\n', encoding="utf-8")
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.invalid"],
+                cwd=root,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "Test"], cwd=root, check=True
+            )
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-qm", "bootstrap"], cwd=root, check=True)
+            bootstrap_ref = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=root,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+
+            note = root / "notes.txt"
+            note.write_text("intermediate\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(
+                ["git", "commit", "-qm", "intermediate"], cwd=root, check=True
+            )
+            checker.write_text("enforcement\n", encoding="utf-8")
+            checker_test.write_text("enforcement\n", encoding="utf-8")
+            source_policy.write_text('{"version":2}\n', encoding="utf-8")
+            test_policy.write_text('{"version":2}\n', encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(
+                ["git", "commit", "-qm", "enforcement"], cwd=root, check=True
+            )
+            enforcement_ref = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=root,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+
+            with self.assertRaisesRegex(ValueError, "single-parent direct child"):
+                require_v2_bootstrap_transition(
+                    root,
+                    bootstrap_ref,
+                    source_policy,
+                    test_policy,
+                    enforcement_ref,
+                )
+
+    def test_enforcement_commit_must_be_ancestor_of_head(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            checker = root / "scripts/check_source_architecture.py"
+            checker_test = root / "scripts/test_check_source_architecture.py"
+            source_policy = root / "config/source-size-baseline.json"
+            test_policy = root / "config/test-source-size-baseline.json"
+            for path in (checker, checker_test, source_policy, test_policy):
+                path.parent.mkdir(parents=True, exist_ok=True)
+            checker.write_text("before\n", encoding="utf-8")
+            checker_test.write_text("before\n", encoding="utf-8")
+            source_policy.write_text('{"version":1}\n', encoding="utf-8")
+            test_policy.write_text('{"version":1}\n', encoding="utf-8")
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.invalid"],
+                cwd=root,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "Test"], cwd=root, check=True
+            )
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-qm", "bootstrap"], cwd=root, check=True)
+            bootstrap_ref = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=root,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+
+            checker.write_text("enforcement\n", encoding="utf-8")
+            checker_test.write_text("enforcement\n", encoding="utf-8")
+            source_policy.write_text('{"version":2}\n', encoding="utf-8")
+            test_policy.write_text('{"version":2}\n', encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(
+                ["git", "commit", "-qm", "enforcement"], cwd=root, check=True
+            )
+            enforcement_ref = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=root,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            subprocess.run(
+                ["git", "checkout", "-qb", "other", bootstrap_ref],
+                cwd=root,
+                check=True,
+            )
+            note = root / "notes.txt"
+            note.write_text("other branch\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(
+                ["git", "commit", "-qm", "other"], cwd=root, check=True
+            )
+
+            with self.assertRaisesRegex(ValueError, "ancestor of HEAD"):
+                require_v2_bootstrap_transition(
+                    root,
+                    bootstrap_ref,
+                    source_policy,
+                    test_policy,
+                    enforcement_ref,
+                )
 
     def test_v2_config_requires_every_language_for_every_kind(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

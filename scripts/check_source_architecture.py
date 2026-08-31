@@ -26,7 +26,9 @@ DEFAULT_CORE_STORAGE_API_CONFIG = (
 DEFAULT_DEPENDENCY_ARCHITECTURE_CONFIG = (
     REPO_ROOT / "config" / "refactoring" / "dependency-architecture.json"
 )
-ENF002_BOOTSTRAP_REF = "00a881131a04cdd998996a7ea03e5462ab72e16b"
+SOURCE_SIZE_V2_ENFORCEMENT_REF = "00a881131a04cdd998996a7ea03e5462ab72e16b"
+ENF002_BOOTSTRAP_REF = SOURCE_SIZE_V2_ENFORCEMENT_REF
+ENF002_ENFORCEMENT_REF = "0bfafdd32a1d7b58c6c8fb261eb8b5c8f32a62b5"
 SOURCE_ROOTS = (
     "apps/lorepia/src",
     "apps/lorepia/src-tauri",
@@ -49,38 +51,18 @@ SOURCE_KINDS = ("facade", "generated", "production")
 TEST_SOURCE_KINDS = ("test",)
 CONVENTIONAL_FACADE_NAMES = {"index.ts", "lib.rs", "mod.rs"}
 V2_BOOTSTRAP_EDIT_PATHS = {
-    ".github/workflows/ci.yml",
-    "config/core-storage-public-api-baseline.json",
-    "config/refactoring/dependency-architecture.json",
     "config/source-size-baseline.json",
     "config/test-source-size-baseline.json",
-    "docs/architecture/storage-public-api-audit.md",
     "scripts/check_source_architecture.py",
     "scripts/test_check_source_architecture.py",
 }
 ENF002_BOOTSTRAP_EDIT_PATHS = {
-    ".github/workflows/ci.yml",
     "config/core-storage-public-api-baseline.json",
     "config/refactoring/dependency-architecture.json",
     "docs/architecture/storage-public-api-audit.md",
     "scripts/check_source_architecture.py",
     "scripts/test_check_source_architecture.py",
 }
-LATER_ENFORCEMENT_EDIT_PATHS = {
-    "config/ai-context-map.json",
-    "scripts/check_ai_context_map.py",
-    "scripts/check_github_workflow_security.py",
-    "scripts/report_refactoring_baseline.py",
-    "scripts/test_check_ai_context_map.py",
-    "scripts/test_check_github_workflow_security.py",
-    "scripts/test_report_refactoring_baseline.py",
-}
-ENFORCEMENT_EDIT_PREFIXES = {
-    "config/refactoring/",
-    "docs/refactoring/",
-}
-V2_BOOTSTRAP_EDIT_PATHS.update(LATER_ENFORCEMENT_EDIT_PATHS)
-ENF002_BOOTSTRAP_EDIT_PATHS.update(LATER_ENFORCEMENT_EDIT_PATHS)
 FORBIDDEN_ORCHESTRATION_DEPENDENCIES = {
     "diesel",
     "hyper",
@@ -1179,9 +1161,11 @@ def require_commit(root: Path, ref: str, *, label: str) -> None:
         raise ValueError(f"{label} is not a commit: {ref}")
 
 
-def enforcement_changed_paths(root: Path, bootstrap_ref: str) -> set[str]:
+def enforcement_changed_paths(
+    root: Path, bootstrap_ref: str, enforcement_ref: str
+) -> set[str]:
     changed = subprocess.run(
-        ["git", "diff", "--name-only", bootstrap_ref, "--"],
+        ["git", "diff", "--name-only", bootstrap_ref, enforcement_ref, "--"],
         cwd=root,
         check=False,
         capture_output=True,
@@ -1189,83 +1173,154 @@ def enforcement_changed_paths(root: Path, bootstrap_ref: str) -> set[str]:
     )
     if changed.returncode != 0:
         raise ValueError(f"cannot inspect bootstrap changes: {changed.stderr.strip()}")
-    untracked = subprocess.run(
-        ["git", "ls-files", "--others", "--exclude-standard"],
+    return set(changed.stdout.splitlines())
+
+
+def require_reviewed_enforcement_commit(
+    root: Path,
+    bootstrap_ref: str,
+    enforcement_ref: str,
+    *,
+    label: str,
+) -> None:
+    require_commit(root, bootstrap_ref, label=f"{label} bootstrap_ref")
+    require_commit(root, enforcement_ref, label=f"{label} enforcement_ref")
+    ancestry = subprocess.run(
+        ["git", "rev-list", "--parents", "-n", "1", enforcement_ref],
         cwd=root,
         check=False,
         capture_output=True,
         text=True,
     )
-    if untracked.returncode != 0:
-        raise ValueError(f"cannot inspect untracked bootstrap paths: {untracked.stderr.strip()}")
-    return set(changed.stdout.splitlines()) | set(untracked.stdout.splitlines())
-
-
-def unexpected_enforcement_paths(
-    paths: set[str], allowed_paths: set[str]
-) -> list[str]:
-    return sorted(
-        path
-        for path in paths
-        if path not in allowed_paths
-        and not any(path.startswith(prefix) for prefix in ENFORCEMENT_EDIT_PREFIXES)
-    )
-
-
-def require_v2_bootstrap_transition(root: Path, bootstrap_ref: str) -> None:
-    require_commit(root, bootstrap_ref, label="source-size bootstrap_ref")
+    if ancestry.returncode != 0:
+        raise ValueError(
+            f"cannot inspect {label} enforcement ancestry: {ancestry.stderr.strip()}"
+        )
+    commit_and_parents = ancestry.stdout.split()
+    if len(commit_and_parents) != 2 or commit_and_parents[1] != bootstrap_ref:
+        raise ValueError(
+            f"{label} enforcement_ref must be the single-parent direct child of bootstrap_ref"
+        )
     ancestor = subprocess.run(
-        ["git", "merge-base", "--is-ancestor", bootstrap_ref, "HEAD"],
+        ["git", "merge-base", "--is-ancestor", enforcement_ref, "HEAD"],
         cwd=root,
         check=False,
         capture_output=True,
         text=True,
     )
     if ancestor.returncode != 0:
-        raise ValueError("source-size bootstrap_ref must be an ancestor of HEAD")
-    unexpected = unexpected_enforcement_paths(
-        enforcement_changed_paths(root, bootstrap_ref), V2_BOOTSTRAP_EDIT_PATHS
+        raise ValueError(f"{label} enforcement_ref must be an ancestor of HEAD")
+
+
+def unexpected_enforcement_paths(
+    paths: set[str], allowed_paths: set[str]
+) -> list[str]:
+    return sorted(paths - allowed_paths)
+
+
+def require_v2_bootstrap_transition(
+    root: Path,
+    bootstrap_ref: str,
+    config_path: Path | None = None,
+    test_config_path: Path | None = None,
+    enforcement_ref: str = SOURCE_SIZE_V2_ENFORCEMENT_REF,
+) -> str:
+    require_reviewed_enforcement_commit(
+        root,
+        bootstrap_ref,
+        enforcement_ref,
+        label="source-size v2",
     )
+    transition_config = config_path or root / "config" / "source-size-baseline.json"
+    transition_test_config = (
+        test_config_path or root / "config" / "test-source-size-baseline.json"
+    )
+    for policy_path, label in (
+        (transition_config, "source"),
+        (transition_test_config, "test"),
+    ):
+        bootstrap_policy = load_json_at_ref(root, policy_path, bootstrap_ref)
+        enforcement_policy = load_json_at_ref(root, policy_path, enforcement_ref)
+        if not isinstance(bootstrap_policy, dict) or bootstrap_policy.get("version") != 1:
+            raise ValueError(
+                f"source-size bootstrap_ref must contain the v1 {label} policy"
+            )
+        if not isinstance(enforcement_policy, dict) or enforcement_policy.get("version") != 2:
+            raise ValueError(
+                f"source-size enforcement_ref must contain the v2 {label} policy"
+            )
+    changed_paths = enforcement_changed_paths(root, bootstrap_ref, enforcement_ref)
+    unexpected = unexpected_enforcement_paths(changed_paths, V2_BOOTSTRAP_EDIT_PATHS)
     if unexpected:
         raise ValueError(
             "v2 bootstrap must be based on the exact pre-enforcement tree; "
             f"unexpected changed path: {unexpected[0]}"
         )
+    missing = sorted(V2_BOOTSTRAP_EDIT_PATHS - changed_paths)
+    if missing:
+        raise ValueError(
+            "v2 enforcement commit is missing a reviewed path: "
+            f"{missing[0]}"
+        )
+    return enforcement_ref
 
 
-def require_enf002_bootstrap_transition(root: Path, bootstrap_ref: str) -> None:
-    require_commit(root, bootstrap_ref, label="ENF-002 bootstrap_ref")
+def require_enf002_bootstrap_transition(
+    root: Path,
+    bootstrap_ref: str,
+    config_path: Path | None = None,
+    dependency_config_path: Path | None = None,
+    enforcement_ref: str = ENF002_ENFORCEMENT_REF,
+) -> str:
+    require_reviewed_enforcement_commit(
+        root,
+        bootstrap_ref,
+        enforcement_ref,
+        label="ENF-002",
+    )
+    transition_config = (
+        config_path or root / "config" / "core-storage-public-api-baseline.json"
+    )
+    transition_dependency_config = (
+        dependency_config_path
+        or root / "config" / "refactoring" / "dependency-architecture.json"
+    )
     api_at_ref = load_json_at_ref(
         root,
-        root / "config" / "core-storage-public-api-baseline.json",
+        transition_config,
         bootstrap_ref,
     )
     if not isinstance(api_at_ref, dict) or api_at_ref.get("version") != 1:
         raise ValueError("ENF-002 bootstrap_ref must identify the version 1 API policy tree")
     dependency_at_ref = load_json_at_ref(
         root,
-        root / "config" / "refactoring" / "dependency-architecture.json",
+        transition_dependency_config,
         bootstrap_ref,
     )
     if dependency_at_ref is not None:
         raise ValueError("ENF-002 bootstrap_ref must predate the dependency policy")
-    ancestor = subprocess.run(
-        ["git", "merge-base", "--is-ancestor", bootstrap_ref, "HEAD"],
-        cwd=root,
-        check=False,
-        capture_output=True,
-        text=True,
+    enforcement_api = load_json_at_ref(root, transition_config, enforcement_ref)
+    enforcement_dependency = load_json_at_ref(
+        root, transition_dependency_config, enforcement_ref
     )
-    if ancestor.returncode != 0:
-        raise ValueError("ENF-002 bootstrap_ref must be an ancestor of HEAD")
-    unexpected = unexpected_enforcement_paths(
-        enforcement_changed_paths(root, bootstrap_ref), ENF002_BOOTSTRAP_EDIT_PATHS
-    )
+    if not isinstance(enforcement_api, dict) or enforcement_api.get("version") != 2:
+        raise ValueError("ENF-002 enforcement_ref must contain the v2 public API policy")
+    if not isinstance(enforcement_dependency, dict):
+        raise ValueError("ENF-002 enforcement_ref must contain the dependency policy")
+    changed_paths = enforcement_changed_paths(root, bootstrap_ref, enforcement_ref)
+    unexpected = unexpected_enforcement_paths(changed_paths, ENF002_BOOTSTRAP_EDIT_PATHS)
     if unexpected:
         raise ValueError(
             "ENF-002 bootstrap must be based on the exact pre-enforcement tree; "
             f"unexpected changed path: {unexpected[0]}"
         )
+    missing = sorted(ENF002_BOOTSTRAP_EDIT_PATHS - changed_paths)
+    if missing:
+        raise ValueError(
+            "ENF-002 enforcement commit is missing a reviewed path: "
+            f"{missing[0]}"
+        )
+    return enforcement_ref
 
 
 def load_base_config(root: Path, config_path: Path, base_ref: str) -> dict[str, Any] | None:
@@ -5318,6 +5373,21 @@ def main() -> int:
             or bootstrap_test_configuration.get("version") != 1
         ):
             raise ValueError("source-size bootstrap_ref must identify the v1 policy tree")
+        source_enforcement_ref = require_v2_bootstrap_transition(
+            root, bootstrap_ref, config, test_config
+        )
+        enforced_source_config = load_json_at_ref(
+            root, config, source_enforcement_ref
+        )
+        enforced_test_config = load_json_at_ref(
+            root, test_config, source_enforcement_ref
+        )
+        if not isinstance(enforced_source_config, dict) or not isinstance(
+            enforced_test_config, dict
+        ):
+            raise ValueError(
+                "source-size enforcement commit must contain both v2 policies"
+            )
         failures, measurements = evaluate_source_sizes(
             root, config, base_ref=args.base_ref
         )
@@ -5339,6 +5409,14 @@ def main() -> int:
                 bootstrap=bootstrap_test_configuration,
             )
         )
+        failures.extend(
+            evaluate_baseline_changes(source_configuration, enforced_source_config)
+        )
+        failures.extend(
+            evaluate_test_baseline_changes(
+                test_configuration, enforced_test_config
+            )
+        )
         measurements.extend(test_measurements)
         core_storage_api = load_core_storage_api_config(core_storage_api_config)
         dependency_policy = load_dependency_architecture_config(dependency_config)
@@ -5355,6 +5433,34 @@ def main() -> int:
             root,
             core_storage_api["bootstrap_ref"],
             label="ENF-002 bootstrap_ref",
+        )
+        enf002_enforcement_ref = require_enf002_bootstrap_transition(
+            root,
+            core_storage_api["bootstrap_ref"],
+            core_storage_api_config,
+            dependency_config,
+        )
+        enforced_core_storage_api = load_json_at_ref(
+            root, core_storage_api_config, enf002_enforcement_ref
+        )
+        enforced_dependency_policy = load_json_at_ref(
+            root, dependency_config, enf002_enforcement_ref
+        )
+        if not isinstance(enforced_core_storage_api, dict) or not isinstance(
+            enforced_dependency_policy, dict
+        ):
+            raise ValueError(
+                "ENF-002 enforcement commit must contain both reviewed policies"
+            )
+        failures.extend(
+            evaluate_core_storage_api_baseline_changes(
+                core_storage_api, enforced_core_storage_api
+            )
+        )
+        failures.extend(
+            evaluate_dependency_policy_changes(
+                dependency_policy, enforced_dependency_policy
+            )
         )
         parent_paths = {
             *source_configuration["baselines"],
@@ -5380,10 +5486,6 @@ def main() -> int:
                             base_test_config,
                         )
                     )
-            if (base_config is not None and base_config.get("version") == 1) or (
-                base_test_config is not None and base_test_config.get("version") == 1
-            ):
-                require_v2_bootstrap_transition(root, bootstrap_ref)
             base_core_storage_api = load_json_at_ref(
                 root, core_storage_api_config, args.base_ref
             )
@@ -5403,15 +5505,6 @@ def main() -> int:
                     evaluate_dependency_policy_changes(
                         dependency_policy, base_dependency_policy
                     )
-                )
-            if (
-                base_core_storage_api is None
-                or not isinstance(base_core_storage_api, dict)
-                or base_core_storage_api.get("version") != 2
-                or base_dependency_policy is None
-            ):
-                require_enf002_bootstrap_transition(
-                    root, core_storage_api["bootstrap_ref"]
                 )
             directory_deltas, parent_deltas, parent_child_deltas = source_aggregate_deltas(
                 root,
