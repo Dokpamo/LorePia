@@ -1215,13 +1215,11 @@
       }
     },
     "TAURI-001": {
-      "baseline_context_bytes": 273371,
       "commands": [
         "cargo test -p lorepia-tauri --lib provider_commands::tests",
         "python3 scripts/generate_ipc_commands.py --check"
       ],
       "max_context_bytes": 250000,
-      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
       "paths": {
         "documents": [
           "docs/adr/0004-ipc-command-registry.md"
@@ -1231,10 +1229,19 @@
         ],
         "implementation": [
           "apps/lorepia/src-tauri/src/lib.rs",
-          "config/ipc-commands.json"
+          "config/ipc-commands.json",
+          "apps/lorepia/src-tauri/src/provider_commands/connections.rs",
+          "apps/lorepia/src-tauri/src/provider_commands/credentials.rs",
+          "apps/lorepia/src-tauri/src/provider_commands/model_routes.rs",
+          "apps/lorepia/src-tauri/src/provider_commands/model_sync.rs",
+          "apps/lorepia/src-tauri/src/provider_commands/capabilities.rs",
+          "apps/lorepia/src-tauri/src/provider_commands/catalog.rs",
+          "apps/lorepia/src-tauri/src/provider_commands/discovery.rs"
         ],
         "tests": [
-          "scripts/test_generate_ipc_commands.py"
+          "apps/lorepia/src-tauri/src/provider_commands/tests/provider_access.rs",
+          "apps/lorepia/src-tauri/src/provider_commands/tests/credential_install.rs",
+          "apps/lorepia/src-tauri/src/provider_commands/tests/compensation.rs"
         ]
       }
     },
