@@ -74,19 +74,22 @@
 - `config.rs`: data-root configuration and discovery recovery ownership.
 - `app.rs`: `Core`/`CoreInner` lifecycle and the remaining compatibility/
   delegation facade; feature-grouped unit tests live under `app/tests/`.
-- `app/generation_events.rs`, `generation_workflow.rs`: admission, ordered
-  subscriptions, provider execution, checkpointing, persistence, and events.
+- `app/generation/`, `generation_events.rs`, `generation_workflow.rs`:
+  operation identity, admission, credential lifetime, target/prompt/send flow,
+  ordered subscriptions, checkpointing, persistence, and events.
 - `app/model_sync.rs`, `runtime_control.rs`, `runtime_generation.rs`,
   `portable_runtime_state.rs`: model jobs, owned runtime, auxiliary generation,
   and scoped portable state.
 - `provider_discovery*.rs`, `provider_discovery/`: durable discovery,
   credential-free deterministic work, views, and compatibility fixtures.
-- `provider_credential.rs`, `catalog.rs`: native-vault coordination and signed
-  provider catalog lifecycle.
-- `content_package.rs`: staged content review and commit.
+- `app/providers/`, `provider_credential.rs`, `catalog.rs`: provider facade,
+  native-vault coordination, reconciliation, and signed catalog lifecycle.
+- `app/imports/`, `content_package.rs`, `content_package/`: staged content
+  import, inspection, review, commit, and lifecycle coordination.
 - `content_export.rs`: Rust-only, path-private native export handoff.
 - `asset_delivery.rs`: path-free renderer descriptor and bounded range facade.
-- `orchestration.rs`, `orchestration_runtime.rs`, `module_orchestration.rs`,
+- `orchestration.rs`, `orchestration/`, `orchestration_runtime.rs`,
+  `orchestration_runtime/`, `module_orchestration.rs`,
   `transform_documents.rs`: orchestration use cases and durable runtime work.
 - `interaction_*`, `message_display_projection.rs`: interaction outbox,
   Core-owned views, and display projections.
@@ -100,8 +103,9 @@
 - Extraction: run a baseline, move symbols unchanged into a context-named child
   module, keep facade delegation, use minimum visibility, then lower the
   measured source-size baseline.
-- Ordinary chat generation: read `app.rs`, both generation child modules,
-  Storage attempt APIs, and chat vertical tests together.
+- Ordinary chat generation: use the owning context-map entry to select the
+  focused `app/generation/` modules, then read Storage attempt APIs and chat
+  vertical tests together.
 - Storage-facing change: use an existing semantic repository operation. If a
   new Storage operation is required, stop unless the task authorizes
   `crates/storage/**`, then read its guide. Never pass a

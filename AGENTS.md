@@ -151,9 +151,17 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 npm run check --prefix apps/lorepia
 npm run test --prefix apps/lorepia
-python3 -m unittest scripts/test_generate_ipc_commands.py scripts/test_check_source_architecture.py
+python3 -m unittest \
+  scripts/test_generate_ipc_commands.py \
+  scripts/test_check_ai_context_map.py \
+  scripts/test_check_source_architecture.py \
+  scripts/test_report_refactoring_baseline.py \
+  scripts/test_check_github_workflow_security.py
 python3 scripts/generate_ipc_commands.py --check
+python3 scripts/report_refactoring_baseline.py --check
+python3 scripts/check_ai_context_map.py --strict-budget --base-ref "$(git merge-base HEAD main)"
 python3 scripts/check_source_architecture.py --base-ref "$(git merge-base HEAD main)"
+python3 scripts/check_github_workflow_security.py
 ```
 
 Local checks do not replace the cross-platform Rust, Frontend, Android

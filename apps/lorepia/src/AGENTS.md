@@ -29,14 +29,17 @@ entry or use production data, Tauri IPC, credentials, database, or host files.
 - `App.svelte` owns transient navigation, responsive layout, gestures, and open
   panel state. It creates one shared client and the root feature controllers,
   then disposes subscriptions/controllers on unmount.
-- `LorepiaAppController` owns the root store, request epochs, serialized provider
+- `LorepiaAppController` owns the root store and composes the memory, provider,
+  discovery, stream, generation, library, import, and conversation controllers.
+- `app/controllers/` owns the corresponding request epochs, serialized
   mutations, stream verification/reconciliation, and generation nonce/resume
-  authority.
+  authority; `app/operations/` supplies their shared race primitives.
 - Orchestration, content-package, module-lifecycle, prompt-history, persona,
   interaction-room, and generation-approval controllers own their bounded async
   state and authority.
-- `ChatPane.svelte` owns local composer, focus, scroll/virtualization, utility
-  gesture, and portable-runtime view lifecycle.
+- `ChatPane.svelte` wires the chat surfaces and owns view-local subscriptions
+  and teardown. Its interaction-room, portable-runtime, scroll, message-action,
+  composer, and utility-swipe helpers own their focused lifecycle/state.
 - DB transactions, CAS/recovery, durable generation state, and credential
   material are not renderer state.
 
@@ -72,7 +75,8 @@ entry or use production data, Tauri IPC, credentials, database, or host files.
 
 ## Module Map
 
-- `app/`: root shell, state/controller, and provider helper flow.
+- `app/`: root shell/state facade; `app/controllers/` owns feature workflow
+  authority and `app/operations/` owns epochs, identities, and serialization.
 - `components/`: shared controls and detail-page primitives.
 - `features/chat/`: transcript/composer, verified stream handling,
   virtualization, approvals/interactions, and portable runtime/workers.
@@ -86,7 +90,9 @@ entry or use production data, Tauri IPC, credentials, database, or host files.
   `t(...)` in imperative code, including imperative code inside Svelte files.
 - `preview/`: fixed in-memory demo data/client only.
 - `styles/`: global Paper & Ink tokens and responsive/semantic contracts.
-- Tests are colocated as `*.test.ts`; shared setup lives in `tests/setup.ts`.
+- Tests are colocated as `*.test.ts` or grouped under feature `tests/` shards
+  such as `app/tests`, `chat/tests`, and `orchestration/tests`; shared setup
+  lives in `tests/setup.ts`.
 
 ## Common Change Recipes
 
