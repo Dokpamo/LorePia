@@ -2,20 +2,20 @@
   "baseline_commit": "01af428da8ea64f6028d7fef276b10bfa6fd9f79",
   "completion": {
     "approved_hotspot_exception_count": 0,
-    "ledger_sha256": "2e6842312c8eab4ee66481ca86937a6a2dbcbb9032ef0ca0c26aeed3d1fd238a",
-    "overall_status": "incomplete",
+    "ledger_sha256": "4953800f2a0584a25d5761b3788dca46bfbe35dd296dde8845c53031d6e1bd03",
+    "overall_status": "complete",
     "phase_gates": {
       "A": {
         "github_checks": {
-          "commit": null,
-          "run_url": null,
-          "status": "not_run"
+          "commit": "f43053edf1dc954d19dd407f3bec493b0ece03f5",
+          "run_url": "https://github.com/Dokpamo/LorePia/actions/runs/33448947014",
+          "status": "pass"
         },
         "local_validation": {
           "commit": "84e63d91890424607c02b8b15b464550bf42347e",
           "status": "pass"
         },
-        "status": "incomplete",
+        "status": "complete",
         "task_count": 4,
         "task_status_counts": {
           "blocked": 0,
@@ -25,15 +25,15 @@
       },
       "B": {
         "github_checks": {
-          "commit": null,
-          "run_url": null,
-          "status": "not_run"
+          "commit": "f43053edf1dc954d19dd407f3bec493b0ece03f5",
+          "run_url": "https://github.com/Dokpamo/LorePia/actions/runs/33448947014",
+          "status": "pass"
         },
         "local_validation": {
           "commit": "84e63d91890424607c02b8b15b464550bf42347e",
           "status": "pass"
         },
-        "status": "incomplete",
+        "status": "complete",
         "task_count": 8,
         "task_status_counts": {
           "blocked": 0,
@@ -43,15 +43,15 @@
       },
       "C": {
         "github_checks": {
-          "commit": null,
-          "run_url": null,
-          "status": "not_run"
+          "commit": "f43053edf1dc954d19dd407f3bec493b0ece03f5",
+          "run_url": "https://github.com/Dokpamo/LorePia/actions/runs/33448947014",
+          "status": "pass"
         },
         "local_validation": {
           "commit": "84e63d91890424607c02b8b15b464550bf42347e",
           "status": "pass"
         },
-        "status": "incomplete",
+        "status": "complete",
         "task_count": 14,
         "task_status_counts": {
           "blocked": 0,
@@ -61,15 +61,15 @@
       },
       "D": {
         "github_checks": {
-          "commit": null,
-          "run_url": null,
-          "status": "not_run"
+          "commit": "f43053edf1dc954d19dd407f3bec493b0ece03f5",
+          "run_url": "https://github.com/Dokpamo/LorePia/actions/runs/33448947014",
+          "status": "pass"
         },
         "local_validation": {
           "commit": "84e63d91890424607c02b8b15b464550bf42347e",
           "status": "pass"
         },
-        "status": "incomplete",
+        "status": "complete",
         "task_count": 13,
         "task_status_counts": {
           "blocked": 0,
@@ -79,15 +79,15 @@
       },
       "E": {
         "github_checks": {
-          "commit": null,
-          "run_url": null,
-          "status": "not_run"
+          "commit": "f43053edf1dc954d19dd407f3bec493b0ece03f5",
+          "run_url": "https://github.com/Dokpamo/LorePia/actions/runs/33448947014",
+          "status": "pass"
         },
         "local_validation": {
           "commit": "84e63d91890424607c02b8b15b464550bf42347e",
           "status": "pass"
         },
-        "status": "incomplete",
+        "status": "complete",
         "task_count": 16,
         "task_status_counts": {
           "blocked": 0,
@@ -97,15 +97,15 @@
       },
       "F": {
         "github_checks": {
-          "commit": null,
-          "run_url": null,
-          "status": "not_run"
+          "commit": "f43053edf1dc954d19dd407f3bec493b0ece03f5",
+          "run_url": "https://github.com/Dokpamo/LorePia/actions/runs/33448946987",
+          "status": "pass"
         },
         "local_validation": {
           "commit": "84e63d91890424607c02b8b15b464550bf42347e",
           "status": "pass"
         },
-        "status": "incomplete",
+        "status": "complete",
         "task_count": 4,
         "task_status_counts": {
           "blocked": 0,
@@ -7355,7 +7355,7 @@
   "ratchets": {
     "config/ai-context-map.json": "75e96d928addcf32d74fbf036904f75f2a09dedf604c9f1690ae50ca3616f1f2",
     "config/core-storage-public-api-baseline.json": "c86c10d701180070ec6742d3424deb2784cb0c5e5628b6b809093befa5c3c46b",
-    "config/refactoring/completion-status.json": "2e6842312c8eab4ee66481ca86937a6a2dbcbb9032ef0ca0c26aeed3d1fd238a",
+    "config/refactoring/completion-status.json": "4953800f2a0584a25d5761b3788dca46bfbe35dd296dde8845c53031d6e1bd03",
     "config/refactoring/task-manifest.yaml": "90a2365b949430d97d588d44818afe3d348329284c48631c900de5d1de47fd58",
     "config/source-size-baseline.json": "ae256c2584456303ac0e0e270b14082eee4b7fc3eb187f4986d450aae79f68c5",
     "config/test-source-size-baseline.json": "7df20cb344d52000b8581a25ae04afd808b46bc32fe5cfd4c3e0d26ba5f8f861"

@@ -1,37 +1,37 @@
 {
   "approved_hotspot_exceptions": [],
   "expected_task_count": 59,
-  "overall_status": "incomplete",
+  "overall_status": "complete",
   "phase_gates": {
     "A": {
-      "github_checks": {"commit": null, "run_url": null, "status": "not_run"},
+      "github_checks": {"commit": "f43053edf1dc954d19dd407f3bec493b0ece03f5", "run_url": "https://github.com/Dokpamo/LorePia/actions/runs/33448947014", "status": "pass"},
       "local_validation": {"commit": "84e63d91890424607c02b8b15b464550bf42347e", "status": "pass"},
-      "status": "incomplete"
+      "status": "complete"
     },
     "B": {
-      "github_checks": {"commit": null, "run_url": null, "status": "not_run"},
+      "github_checks": {"commit": "f43053edf1dc954d19dd407f3bec493b0ece03f5", "run_url": "https://github.com/Dokpamo/LorePia/actions/runs/33448947014", "status": "pass"},
       "local_validation": {"commit": "84e63d91890424607c02b8b15b464550bf42347e", "status": "pass"},
-      "status": "incomplete"
+      "status": "complete"
     },
     "C": {
-      "github_checks": {"commit": null, "run_url": null, "status": "not_run"},
+      "github_checks": {"commit": "f43053edf1dc954d19dd407f3bec493b0ece03f5", "run_url": "https://github.com/Dokpamo/LorePia/actions/runs/33448947014", "status": "pass"},
       "local_validation": {"commit": "84e63d91890424607c02b8b15b464550bf42347e", "status": "pass"},
-      "status": "incomplete"
+      "status": "complete"
     },
     "D": {
-      "github_checks": {"commit": null, "run_url": null, "status": "not_run"},
+      "github_checks": {"commit": "f43053edf1dc954d19dd407f3bec493b0ece03f5", "run_url": "https://github.com/Dokpamo/LorePia/actions/runs/33448947014", "status": "pass"},
       "local_validation": {"commit": "84e63d91890424607c02b8b15b464550bf42347e", "status": "pass"},
-      "status": "incomplete"
+      "status": "complete"
     },
     "E": {
-      "github_checks": {"commit": null, "run_url": null, "status": "not_run"},
+      "github_checks": {"commit": "f43053edf1dc954d19dd407f3bec493b0ece03f5", "run_url": "https://github.com/Dokpamo/LorePia/actions/runs/33448947014", "status": "pass"},
       "local_validation": {"commit": "84e63d91890424607c02b8b15b464550bf42347e", "status": "pass"},
-      "status": "incomplete"
+      "status": "complete"
     },
     "F": {
-      "github_checks": {"commit": null, "run_url": null, "status": "not_run"},
+      "github_checks": {"commit": "f43053edf1dc954d19dd407f3bec493b0ece03f5", "run_url": "https://github.com/Dokpamo/LorePia/actions/runs/33448946987", "status": "pass"},
       "local_validation": {"commit": "84e63d91890424607c02b8b15b464550bf42347e", "status": "pass"},
-      "status": "incomplete"
+      "status": "complete"
     }
   },
   "policy": "A complete task requires ancestor commit evidence. A complete phase requires task completion plus commit-bound local and GitHub evidence. Overall completion also requires every P0 plan target to be met or explicitly approved.",

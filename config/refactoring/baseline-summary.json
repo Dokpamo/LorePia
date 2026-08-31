@@ -1,37 +1,37 @@
 {
   "baseline_commit": "01af428da8ea64f6028d7fef276b10bfa6fd9f79",
   "completion": {
-    "overall_status": "incomplete",
+    "overall_status": "complete",
     "phase_gates": {
       "A": {
-        "github_checks": "not_run",
+        "github_checks": "pass",
         "local_validation": "pass",
-        "status": "incomplete"
+        "status": "complete"
       },
       "B": {
-        "github_checks": "not_run",
+        "github_checks": "pass",
         "local_validation": "pass",
-        "status": "incomplete"
+        "status": "complete"
       },
       "C": {
-        "github_checks": "not_run",
+        "github_checks": "pass",
         "local_validation": "pass",
-        "status": "incomplete"
+        "status": "complete"
       },
       "D": {
-        "github_checks": "not_run",
+        "github_checks": "pass",
         "local_validation": "pass",
-        "status": "incomplete"
+        "status": "complete"
       },
       "E": {
-        "github_checks": "not_run",
+        "github_checks": "pass",
         "local_validation": "pass",
-        "status": "incomplete"
+        "status": "complete"
       },
       "F": {
-        "github_checks": "not_run",
+        "github_checks": "pass",
         "local_validation": "pass",
-        "status": "incomplete"
+        "status": "complete"
       }
     },
     "task_status_counts": {
@@ -42,7 +42,7 @@
     "unresolved_plan_target_count": 0
   },
   "format_version": 1,
-  "full_report_sha256": "39320aa10575355cf96735481531da598fb7ff1c6a976e70e20c663b20104b02",
+  "full_report_sha256": "18b2eae8e70a6fec0df806ad929d8ac8c6cd8f5ca582faa49dcfefcc3ec00d07",
   "remaining_hotspots": {
     "approved_exception_count": 0,
     "configured_ratchet_count": 55,
