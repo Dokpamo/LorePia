@@ -28,6 +28,28 @@ export interface MessageCollectionSnapshot {
     indexesById: Readonly<Record<string, number | undefined>>;
 }
 
+export class DisplayMessageProjection {
+    #itemsSource: MessageDto[] | null = null;
+    #liveAssistantMessageId: string | null = null;
+    #items: MessageDto[] = [];
+
+    project(items: MessageDto[], liveAssistantMessageId: string | null): MessageDto[] {
+        if (
+            this.#itemsSource === items &&
+            this.#liveAssistantMessageId === liveAssistantMessageId
+        ) {
+            return this.#items;
+        }
+        this.#itemsSource = items;
+        this.#liveAssistantMessageId = liveAssistantMessageId;
+        this.#items =
+            liveAssistantMessageId === null
+                ? items
+                : items.filter((message) => message.id !== liveAssistantMessageId);
+        return this.#items;
+    }
+}
+
 interface ScrollAnchorSnapshot {
     messageId: string;
     relativeTop: number;
@@ -41,6 +63,40 @@ interface ChatScrollLifecycleOptions {
     messageDayKey(value: string): string;
     onMemorySourceMissing(): void;
     onMemorySourceFocused(request: MemoryRecordSourceNavigationDto): void;
+}
+
+const KOREAN_WEEKDAYS = ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일'];
+
+function parsedMessageDate(value: string): Date | null {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+}
+
+export function messageDayKey(value: string): string {
+    const date = parsedMessageDate(value);
+    if (date === null) return value.slice(0, 10);
+    return [
+        String(date.getFullYear()),
+        String(date.getMonth() + 1).padStart(2, '0'),
+        String(date.getDate()).padStart(2, '0'),
+    ].join('-');
+}
+
+export function formatMessageDay(value: string): string {
+    const date = parsedMessageDate(value);
+    if (date === null) return '날짜를 확인할 수 없음';
+    return `${String(date.getFullYear())}년 ${String(date.getMonth() + 1)}월 ${String(
+        date.getDate(),
+    )}일 ${KOREAN_WEEKDAYS[date.getDay()] ?? ''}`;
+}
+
+export function formatMessageTime(value: string): string {
+    const date = parsedMessageDate(value);
+    if (date === null) return '--:--';
+    return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(
+        2,
+        '0',
+    )}`;
 }
 
 function createMessageCollectionSnapshot(items: MessageDto[]): MessageCollectionSnapshot {

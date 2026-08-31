@@ -3,10 +3,12 @@ import type {
     GenerationSelectionInput,
     MessageDto,
     OrchestrationVariableMapDto,
+    ProviderWorkspaceDto,
 } from '../../lib/ipc/contracts';
 import { t } from '../../lib/i18n';
 import type { PersonaClientApi } from '../personas/persona-contracts';
 import type { InteractionRoomCapableClient } from './interaction-room-controller';
+import type { PortableRuntimeModelBudgetSnapshot } from './portable-runtime-model-policy';
 import {
     PortableCharacterRuntime,
     createPortableRuntimeGrant,
@@ -23,6 +25,8 @@ export type PortableRuntimePhase = 'idle' | 'blocked' | 'loading' | 'ready' | 'b
 
 interface PortableRuntimeLifecycleOptions {
     currentMessages: () => MessageDto[];
+    displayMessages: () => MessageDto[];
+    providerWorkspace: () => ProviderWorkspaceDto;
     primarySelection: () => GenerationSelectionInput | null;
     onNotice: (message: string) => void;
 }
@@ -96,9 +100,82 @@ export class PortableRuntimeLifecycle {
         return this.#grantProfile === this.profile ? this.#grant : null;
     }
 
-    get capabilities(): PortableRuntimeCapability[] {
-        return this.profile === null ? [] : requiredPortableRuntimeCapabilities(this.profile);
-    }
+    capabilities = $derived.by<PortableRuntimeCapability[]>(() =>
+        this.profile === null ? [] : requiredPortableRuntimeCapabilities(this.profile),
+    );
+
+    variables = $derived.by<Record<string, string>>(() => {
+        void this.revision;
+        if (this.runtime !== null) return this.runtime.variables;
+        if (!(this.activeGrant?.capabilities.includes('profile:read') ?? false)) return {};
+        return this.profile?.initial_variables ?? {};
+    });
+
+    displayApproved = $derived(this.activeGrant?.capabilities.includes('ui:write') ?? false);
+
+    canReadChat = $derived(this.activeGrant?.capabilities.includes('chat:read') ?? false);
+
+    background = $derived.by(() => {
+        void this.revision;
+        if (!this.displayApproved) return '';
+        return this.runtime?.backgroundMarkup ?? this.profile?.background_markup ?? '';
+    });
+
+    lastCharacterMessage = $derived.by(() => {
+        void this.revision;
+        if (!this.canReadChat) return '';
+        const message = [...this.options.displayMessages()]
+            .reverse()
+            .find((candidate) => candidate.role === 'assistant');
+        return message === undefined ? '' : this.effectiveText(message);
+    });
+
+    auxiliaryModelOptions = $derived.by(() => {
+        const workspace = this.options.providerWorkspace();
+        const options: {
+            value: string;
+            label: string;
+            selection: GenerationSelectionInput | null;
+        }[] = [{ value: '', label: '현재 기본 생성 모델', selection: null }];
+        for (const preset of workspace.presets) {
+            const route = workspace.routes.find(
+                (candidate) => candidate.id === preset.model_route_id,
+            );
+            options.push({
+                value: `target:${preset.id}`,
+                label: `${route?.display_name ?? route?.model_id ?? preset.model_route_id} · ${preset.display_name}`,
+                selection: {
+                    kind: 'target',
+                    target: {
+                        model_route_id: preset.model_route_id,
+                        generation_preset_id: preset.id,
+                    },
+                },
+            });
+        }
+        for (const profile of workspace.legacy_profiles) {
+            options.push({
+                value: `legacy:${profile.id}`,
+                label: `${profile.display_name} · ${profile.model}`,
+                selection: { kind: 'legacy_profile', provider_profile_id: profile.id },
+            });
+        }
+        return options;
+    });
+
+    selectedAuxiliaryModel = $derived.by(() => {
+        void this.revision;
+        const selection = this.runtime?.auxiliarySelection;
+        if (selection === null || selection === undefined) return '';
+        return selection.kind === 'target'
+            ? `target:${selection.target.generation_preset_id}`
+            : `legacy:${selection.provider_profile_id}`;
+    });
+
+    modelBudget = $derived.by<PortableRuntimeModelBudgetSnapshot | null>(() => {
+        void this.revision;
+        return this.runtime?.modelBudget ?? null;
+    });
 
     get requiresLuaRuntime(): boolean {
         return (
@@ -312,6 +389,49 @@ export class PortableRuntimeLifecycle {
         return (await this.runtime?.cancelActiveModelCall()) ?? 'not_found';
     }
 
+    displayText(message: MessageDto): string {
+        void this.revision;
+        return this.runtime?.displayText(message) ?? message.content;
+    }
+
+    effectiveText(message: MessageDto): string {
+        return this.runtime?.effectiveText(message) ?? message.content;
+    }
+
+    optionValue(key: string): string {
+        void this.revision;
+        return this.runtime?.optionValue(key) ?? '';
+    }
+
+    async dispatchInput(
+        content: string,
+        sendMessage: (
+            content: string,
+            variableOverrides?: OrchestrationVariableMapDto,
+        ) => Promise<boolean>,
+    ): Promise<boolean | null> {
+        let runtime = this.runtime;
+        if (this.requiresLuaRuntime && this.activeGrant !== null && runtime === null) {
+            const portableRuntimePreparationFallbackNotice =
+                '캐릭터 기능을 준비하는 중입니다. 잠시 뒤 다시 보내세요.';
+            const copyNotice = this.error ?? portableRuntimePreparationFallbackNotice;
+            this.options.onNotice(copyNotice);
+            return null;
+        }
+        const prepared = await this.prepareInput(content);
+        let preparedContent = content;
+        let handledByRuntime = false;
+        if (prepared !== null) {
+            runtime = prepared.runtime;
+            preparedContent = prepared.text;
+            handledByRuntime = prepared.handledByRuntime;
+        }
+        if (handledByRuntime) return true;
+        return runtime === null
+            ? sendMessage(preparedContent)
+            : sendMessage(preparedContent, this.generationVariableOverrides(runtime));
+    }
+
     async prepareInput(content: string): Promise<{
         runtime: PortableCharacterRuntime;
         text: string;
@@ -351,6 +471,11 @@ export class PortableRuntimeLifecycle {
         this.revision += 1;
     }
 
+    setAuxiliaryModel(value: string): void {
+        const option = this.auxiliaryModelOptions.find((candidate) => candidate.value === value);
+        this.setAuxiliarySelection(option?.selection ?? null);
+    }
+
     async handleAction(action: string): Promise<void> {
         const runtime = this.runtime;
         if (runtime === null) return;
@@ -374,6 +499,10 @@ export class PortableRuntimeLifecycle {
         const dismissed = this.error;
         this.error = null;
         return dismissed;
+    }
+
+    dismissErrorNotice(notice: string): string {
+        return notice === this.dismissError() ? '' : notice;
     }
 
     fail(error: unknown, fallback: string): string {
