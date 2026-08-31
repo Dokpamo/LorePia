@@ -91,8 +91,8 @@ entry or use production data, Tauri IPC, credentials, database, or host files.
 - `preview/`: fixed in-memory demo data/client only.
 - `styles/`: global Paper & Ink tokens and responsive/semantic contracts.
 - Tests are colocated as `*.test.ts` or grouped under feature `tests/` shards
-  such as `app/tests`, `chat/tests`, and `orchestration/tests`; shared setup
-  lives in `tests/setup.ts`.
+  such as `app/tests`, `features/chat/tests`, and
+  `features/orchestration/tests`; shared setup lives in `tests/setup.ts`.
 
 ## Common Change Recipes
 
