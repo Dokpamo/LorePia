@@ -42,7 +42,7 @@
     "unresolved_plan_target_count": 0
   },
   "format_version": 1,
-  "full_report_sha256": "af69f38fec46f5565a978a7d39a2a68744fe725fe057c3c4e4b5c3f92a81bcef",
+  "full_report_sha256": "d5e0fa1421ab1821e79e88a6f2aa6aa795c39203c924d3dde3d3d6cde83937d0",
   "remaining_hotspots": {
     "approved_exception_count": 0,
     "configured_ratchet_count": 57,

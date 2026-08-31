@@ -7340,7 +7340,7 @@
     "config/refactoring/completion-status.json": "b90ab0f6b8434af59d77ec025fc542355c7670222d1101d1fcf3fd6ab3c611d5",
     "config/refactoring/task-manifest.yaml": "82fc4032640615ae4d07fbbd1b9e5fc2473b07e49fd3933c40e58c4122328d0e",
     "config/source-size-baseline.json": "40e0f72954f09e4eca308fd1befd0a16fd3094dbd23114aeef603937aea029ec",
-    "config/test-source-size-baseline.json": "df6f4c17681bdf50baa6ee3959c3e6e696222bb32cedf6f267ed8d94f92824ae"
+    "config/test-source-size-baseline.json": "7df20cb344d52000b8581a25ae04afd808b46bc32fe5cfd4c3e0d26ba5f8f861"
   },
   "remaining_hotspots": {
     "configured_ratchets": {
@@ -7427,12 +7427,12 @@
         },
         {
           "authority": "config/test-source-size-baseline.json#baselines/apps/lorepia/src/styles/hover-contract.test.ts",
-          "current_bytes": 91336,
+          "current_bytes": 91320,
           "current_lines": 1339,
           "hard_target_bytes": 61440,
           "hard_target_lines": 1200,
           "path": "apps/lorepia/src/styles/hover-contract.test.ts",
-          "ratchet_bytes": 91336,
+          "ratchet_bytes": 91320,
           "ratchet_lines": 1339,
           "status": "active-over-hard-target"
         },
@@ -8425,7 +8425,7 @@
         },
         {
           "approved_exception": null,
-          "bytes": 91336,
+          "bytes": 91320,
           "disposition": "unresolved",
           "hard_target_bytes": 61440,
           "hard_target_lines": 1200,
@@ -8435,7 +8435,7 @@
           "path": "apps/lorepia/src/styles/hover-contract.test.ts",
           "ratchet": {
             "authority": "config/test-source-size-baseline.json#baselines/apps/lorepia/src/styles/hover-contract.test.ts",
-            "bytes": 91336,
+            "bytes": 91320,
             "kind": "configured-baseline",
             "lines": 1339
           }
