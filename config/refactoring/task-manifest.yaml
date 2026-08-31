@@ -1495,7 +1495,8 @@
       "phase": "D",
       "summary": "Extract runtime plan, interaction, and module runtime coordination.",
       "depends_on": [
-        "CORE-ORCH-001"
+        "CORE-ORCH-001",
+        "STOR-INT-003"
       ],
       "read_first": [
         "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
@@ -1503,12 +1504,15 @@
         "AGENTS.md",
         "crates/core/AGENTS.md",
         "crates/core/src/orchestration_runtime.rs",
+        "crates/core/src/module_orchestration.rs",
         "crates/core/tests/ordinary_interaction_sealed_replay.rs",
         "config/source-size-baseline.json"
       ],
       "allowed_paths": [
         "crates/core/src/orchestration_runtime.rs",
         "crates/core/src/orchestration_runtime/**",
+        "crates/core/src/module_orchestration.rs",
+        "crates/core/src/module_orchestration/**",
         "config/source-size-baseline.json",
         "config/test-source-size-baseline.json"
       ],
