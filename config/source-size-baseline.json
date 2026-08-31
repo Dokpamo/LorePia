@@ -6,7 +6,6 @@
   },
   "baselines": {
     "apps/lorepia/src-tauri/src/contract.rs": {"bytes": 84557, "lines": 2174},
-    "apps/lorepia/src-tauri/src/credential_operations.rs": {"bytes": 192563, "lines": 4813},
     "apps/lorepia/src-tauri/src/state.rs": {"bytes": 78974, "lines": 2112},
     "apps/lorepia/src/app/app-controller.ts": {"bytes": 126165, "lines": 3216},
     "apps/lorepia/src/features/chat/ChatPane.svelte": {"bytes": 115371, "lines": 2665},
