@@ -717,22 +717,29 @@
       }
     },
     "IPC-001": {
-      "baseline_context_bytes": null,
       "commands": [
         "npm run test --prefix apps/lorepia -- src/lib/ipc/client.test.ts",
         "python3 scripts/generate_ipc_commands.py --check"
       ],
       "max_context_bytes": 250000,
-      "over_budget_reason": null,
       "paths": {
         "documents": [
-          "apps/lorepia/src/AGENTS.md",
           "docs/adr/0004-ipc-command-registry.md"
         ],
         "entrypoints": [
           "apps/lorepia/src/lib/ipc/contracts.ts"
         ],
         "implementation": [
+          "apps/lorepia/src/lib/ipc/contracts/character.ts",
+          "apps/lorepia/src/lib/ipc/contracts/common.ts",
+          "apps/lorepia/src/lib/ipc/contracts/conversation.ts",
+          "apps/lorepia/src/lib/ipc/contracts/discovery.ts",
+          "apps/lorepia/src/lib/ipc/contracts/generation.ts",
+          "apps/lorepia/src/lib/ipc/contracts/import.ts",
+          "apps/lorepia/src/lib/ipc/contracts/memory.ts",
+          "apps/lorepia/src/lib/ipc/contracts/orchestration.ts",
+          "apps/lorepia/src/lib/ipc/contracts/platform.ts",
+          "apps/lorepia/src/lib/ipc/contracts/provider.ts",
           "config/ipc-commands.json"
         ],
         "tests": [
