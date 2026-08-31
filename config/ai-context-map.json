@@ -436,11 +436,17 @@
           "apps/lorepia/src/app/app-controller.ts"
         ],
         "implementation": [
+          "apps/lorepia/src/app/controllers/chat-stream-controller.ts",
+          "apps/lorepia/src/app/controllers/controller-context.ts",
+          "apps/lorepia/src/app/controllers/generation-controller.ts",
+          "apps/lorepia/src/app/operations/epoch-guard.ts",
+          "apps/lorepia/src/app/operations/operation-identity.ts",
           "apps/lorepia/src/features/chat/chat-stream.ts"
         ],
         "tests": [
           "apps/lorepia/src/features/chat/chat-stream.test.ts",
-          "apps/lorepia/src/app/tests/app-controller.chat-stream.test.ts"
+          "apps/lorepia/src/app/tests/app-controller.chat-stream.test.ts",
+          "apps/lorepia/src/app/tests/app-controller.generation-identity.test.ts"
         ]
       }
     },
