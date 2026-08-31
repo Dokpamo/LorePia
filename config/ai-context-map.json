@@ -453,7 +453,7 @@
     "FE-APP-004": {
       "baseline_context_bytes": null,
       "commands": [
-        "npm run test --prefix apps/lorepia -- src/app/tests/app-controller.provider-selection.test.ts src/app/tests/app-controller.provider-discovery.test.ts"
+        "npm run test --prefix apps/lorepia -- src/app/tests/app-controller.memory-retry.test.ts src/app/tests/app-controller.provider-selection.test.ts src/app/tests/app-controller.provider-discovery.test.ts"
       ],
       "max_context_bytes": 250000,
       "over_budget_reason": null,
@@ -465,12 +465,20 @@
           "apps/lorepia/src/app/app-controller.ts"
         ],
         "implementation": [
-          "apps/lorepia/src/features/providers/settings-contracts.ts"
+          "apps/lorepia/src/app/controllers/controller-context.ts",
+          "apps/lorepia/src/app/controllers/discovery-controller.ts",
+          "apps/lorepia/src/app/controllers/memory-controller.ts",
+          "apps/lorepia/src/app/controllers/provider-controller.ts",
+          "apps/lorepia/src/app/operations/epoch-guard.ts",
+          "apps/lorepia/src/app/operations/serialized-mutation.ts",
+          "apps/lorepia/src/app/provider-credential.ts",
+          "apps/lorepia/src/app/provider-discovery-flow.ts"
         ],
         "tests": [
+          "apps/lorepia/src/app/tests/app-controller-provider-test-support.ts",
+          "apps/lorepia/src/app/tests/app-controller.memory-retry.test.ts",
           "apps/lorepia/src/app/tests/app-controller.provider-selection.test.ts",
-          "apps/lorepia/src/app/tests/app-controller.provider-discovery.test.ts",
-          "apps/lorepia/src/features/providers/ProviderWorkflows.test.ts"
+          "apps/lorepia/src/app/tests/app-controller.provider-discovery.test.ts"
         ]
       }
     },
