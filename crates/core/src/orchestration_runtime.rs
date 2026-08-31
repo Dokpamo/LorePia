@@ -5,6 +5,7 @@
 //! conversation lineage, active content policy, model capabilities, and
 //! compare-and-swap inputs before asking storage to mutate durable state.
 
+mod interaction;
 mod module_runtime;
 mod plan;
 
@@ -18,25 +19,22 @@ use std::{
 
 use chrono::Utc;
 use lorepia_domain::{
-    ApiFamily, AssetId, AuxiliaryTaskKind, CapabilityKey, ConversationBranch, ConversationBranchId,
-    ConversationId, CoreError, CoreErrorCode, CoreResult, GenerationId, GenerationTarget,
-    InteractionAction, InteractionEffect, InteractionEvent, InteractionProposalDecision,
-    InteractionProposalRecord, InteractionProposalRecordId, InteractionProposalStatus,
-    InteractionRule, InteractionRuleId, InteractionRuleSet, InteractionRuleSetId, InteractionState,
-    KnowledgeEntryId, MemoryJob, MemoryJobId, MemoryJobKind, MemoryJobStatus, MemoryKind,
+    ApiFamily, AuxiliaryTaskKind, CapabilityKey, ConversationBranchId, ConversationId, CoreError,
+    CoreErrorCode, CoreResult, GenerationId, GenerationTarget, InteractionAction,
+    InteractionEffect, InteractionEvent, InteractionProposalDecision, InteractionProposalRecord,
+    InteractionProposalRecordId, InteractionProposalStatus, InteractionRule, InteractionRuleId,
+    InteractionState, MemoryJob, MemoryJobId, MemoryJobKind, MemoryJobStatus, MemoryKind,
     MemoryProfile, MemoryProfileId, MemoryRecord, MemoryRecordId, Message, MessageId, MessageRole,
     MessageStatus, ModelAvailability, ModelRouteId, PromptPreset, PromptPresetId, Provenance,
     ProviderConnection, ProviderConnectionId, Sha256Digest, SourceKind, TaskProfile, TaskProfileId,
-    TransformPhase, TransformSet, TransformSetId, UiRegion, ValidateOrchestration, VariableMap,
+    TransformPhase, TransformSet, TransformSetId, ValidateOrchestration, VariableMap,
     VersionedJson,
 };
 use lorepia_orchestration::{
-    AppliedModuleRuntimePlan, InteractionCompileOptions, InteractionContext, InteractionEngine,
-    InteractionLimits, InteractionOutcome, InteractionRuleStatus, InteractionTemplateValues,
-    KnowledgeWorkBudget, MemoryJobKeyInput, MemorySemanticScore, ModuleMergeReview,
-    TransformApplyOptions, TransformCompileOptions, TransformContext, TransformLimits,
-    TransformPipeline, TransformResult, decide_pending, derive_memory_job_idempotency_key,
-    expire_pending_proposal,
+    AppliedModuleRuntimePlan, InteractionOutcome, InteractionRuleStatus, KnowledgeWorkBudget,
+    MemoryJobKeyInput, MemorySemanticScore, ModuleMergeReview, TransformApplyOptions,
+    TransformCompileOptions, TransformContext, TransformLimits, TransformPipeline, TransformResult,
+    decide_pending, derive_memory_job_idempotency_key, expire_pending_proposal,
 };
 use lorepia_providers::{
     AdapterRegistry, EmbeddingProvider, EmbeddingPurpose, EmbeddingRequest, EmbeddingRunOutcome,
@@ -49,30 +47,39 @@ use lorepia_storage::{
     GenerationAttemptProposalDecision, GenerationAttemptProposalDecisionCommit,
     GenerationAttemptStatus, GenerationBeforeEventEvidence, InteractionActionResultStatus,
     InteractionActionResultWrite, InteractionChoiceSelectionCommit, InteractionDerivedEventCommit,
-    InteractionDerivedEventWrite, InteractionDerivedOccurrenceCommit,
-    InteractionEvaluationAssetDiagnostic, InteractionEvaluationKnowledgeRevision,
-    InteractionEvaluationLimits, InteractionEvaluationSeal, InteractionEvaluationTemplateValues,
+    InteractionDerivedEventWrite, InteractionDerivedOccurrenceCommit, InteractionEvaluationSeal,
     InteractionEventCommit, InteractionEventOccurrenceLookup, InteractionKnowledgeBinding,
-    InteractionPolicyRuleSetRevision, InteractionPolicySnapshot, InteractionProposalApprovalCommit,
-    InteractionProposalRejectionCommit, InteractionProposalWrite, InteractionStateKey,
-    KnowledgeEmbeddingCoverageQuery, LifecycleOccurrenceKind, MemoryEmbeddingJobInput,
-    MemoryEmbeddingJobSeed, MemoryEmbeddingQuery, MemoryEmbeddingRecord, MemoryJobEnqueue,
-    MemoryJobFinish, MemoryJobInterruption, MemoryQueryEmbeddingIntent, MemoryQueryEmbeddingStatus,
-    MemoryRecordExclusionScope, MemoryRecordUserPatch, ObjectRevision,
-    RetryableGenerationAttemptProjection, StoredGenerationAttempt, StoredGenerationAttemptProposal,
-    StoredInteractionDerivedEvent, StoredInteractionEvent, StoredInteractionProposal,
-    StoredInteractionState, StoredLifecycleOccurrence, StoredMemoryJobQueueEntry,
-    StoredMemoryQueryEmbedding, StoredRevision, generation_attempt_derived_chain_sha256,
+    InteractionPolicySnapshot, InteractionProposalApprovalCommit,
+    InteractionProposalRejectionCommit, InteractionProposalWrite, KnowledgeEmbeddingCoverageQuery,
+    LifecycleOccurrenceKind, MemoryEmbeddingJobInput, MemoryEmbeddingJobSeed, MemoryEmbeddingQuery,
+    MemoryEmbeddingRecord, MemoryJobEnqueue, MemoryJobFinish, MemoryJobInterruption,
+    MemoryQueryEmbeddingIntent, MemoryQueryEmbeddingStatus, MemoryRecordExclusionScope,
+    MemoryRecordUserPatch, ObjectRevision, RetryableGenerationAttemptProjection,
+    StoredGenerationAttempt, StoredGenerationAttemptProposal, StoredInteractionDerivedEvent,
+    StoredInteractionEvent, StoredInteractionProposal, StoredInteractionState,
+    StoredLifecycleOccurrence, StoredMemoryJobQueueEntry, StoredMemoryQueryEmbedding,
+    StoredRevision, generation_attempt_derived_chain_sha256,
     generation_attempt_derived_closure_sha256, generation_attempt_derived_event_sha256,
     generation_attempt_derived_transition_commit_sha256,
     generation_attempt_derived_transition_sha256, interaction_action_sha256,
-    interaction_evaluation_seal_sha256, interaction_policy_sha256,
-    interaction_proposal_review_sha256, memory_job_input_fingerprint,
+    interaction_evaluation_seal_sha256, interaction_proposal_review_sha256,
+    memory_job_input_fingerprint,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use self::module_runtime::{ApprovedRuntimeAsset, ResolvedModuleRuntime, module_plan_error};
+#[cfg(test)]
+use self::interaction::interaction_evaluation_limits;
+pub(crate) use self::interaction::interaction_state_key;
+pub use self::interaction::{
+    InteractionEventReview, InteractionReviewRequest, InteractionRuleSetRevision,
+};
+use self::interaction::{
+    PreparedInteractionReview, ResolvedInteractionPolicy, initial_interaction_state,
+    interaction_knowledge_bindings, interaction_policy_snapshot, interaction_seed,
+    reconcile_interaction_knowledge_state, validate_interaction_evaluation_seal,
+};
+use self::module_runtime::{ResolvedModuleRuntime, module_plan_error};
 pub(crate) use self::module_runtime::{
     apply_exact_transform_runtime_overlay, collect_exact_component_import_approvals,
 };
@@ -230,50 +237,6 @@ pub struct MemoryJobExecutionResult {
     pub record: Option<Revisioned<MemoryRecord>>,
 }
 
-/// Read-only interaction review request.
-///
-/// A generic event may be previewed by creator tooling. Mutation uses the
-/// crate-private commit path below, so native callers cannot forge lifecycle
-/// events such as `BeforeGeneration` or `MessageCommitted`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct InteractionReviewRequest {
-    pub conversation_id: ConversationId,
-    pub branch_id: ConversationBranchId,
-    pub expected_head: Option<MessageId>,
-    pub event: InteractionEvent,
-}
-
-/// Immutable rule-set identity included in an interaction review hash.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct InteractionRuleSetRevision {
-    pub rule_set_id: InteractionRuleSetId,
-    pub revision: u64,
-    pub revision_id: String,
-    pub sha256: String,
-}
-
-/// A deterministic review of one event against current durable state.
-///
-/// `review_sha256` commits to the request, state revision, exact rule-set
-/// revisions, derived capabilities, effects, and next state. It contains no
-/// credential and is recomputed immediately before a commit.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct InteractionEventReview {
-    pub request: InteractionReviewRequest,
-    pub expected_state_revision: u64,
-    pub event_epoch_seconds: i64,
-    /// Exact full-context module activation plan used by this review.
-    #[serde(default)]
-    pub module_plan_sha256: Option<String>,
-    pub rule_sets: Vec<InteractionRuleSetRevision>,
-    pub supported_capabilities: Vec<CapabilityKey>,
-    pub outcome: InteractionOutcome,
-    pub review_sha256: String,
-}
-
 /// A decision can identify only one exact durable proposal record.
 ///
 /// No action name or arguments are accepted. Approval dispatches the proposal
@@ -411,48 +374,6 @@ enum MemorySummaryHeadAuthority {
 }
 
 #[derive(Debug, Clone)]
-struct ResolvedInteractionPolicy {
-    module_plan_sha256: Option<String>,
-    rule_sets: Vec<InteractionRuleSet>,
-    rule_set_revisions: Vec<InteractionRuleSetRevision>,
-    knowledge_revisions: BTreeMap<KnowledgeEntryId, String>,
-    asset_action_diagnostics: BTreeMap<(String, u32), VersionedJson>,
-    approved_import_source_ids: BTreeSet<String>,
-    variables: VariableMap,
-    supported_capabilities: Vec<CapabilityKey>,
-    character_name: String,
-}
-
-#[derive(Serialize)]
-#[serde(deny_unknown_fields)]
-struct RuntimeInteractionKnowledgeRevision<'a> {
-    entry_id: &'a KnowledgeEntryId,
-    book_revision_id: &'a str,
-}
-
-#[derive(Serialize)]
-#[serde(deny_unknown_fields)]
-struct RuntimeInteractionAssetDiagnostic<'a> {
-    rule_id: &'a str,
-    action_ordinal: u32,
-    diagnostic: &'a VersionedJson,
-}
-
-#[derive(Serialize)]
-#[serde(deny_unknown_fields)]
-struct RuntimeExecutableInteractionPolicy<'a> {
-    schema_version: u32,
-    rule_sets: &'a [InteractionRuleSet],
-    rule_set_revisions: &'a [InteractionRuleSetRevision],
-    knowledge_revisions: Vec<RuntimeInteractionKnowledgeRevision<'a>>,
-    asset_action_diagnostics: Vec<RuntimeInteractionAssetDiagnostic<'a>>,
-    approved_import_source_ids: &'a BTreeSet<String>,
-    variables: &'a VariableMap,
-    supported_capabilities: &'a [CapabilityKey],
-    character_name: &'a str,
-}
-
-#[derive(Debug, Clone)]
 struct ResolvedPromptRuntimePolicy {
     preset: PromptPreset,
     preset_revision_id: String,
@@ -461,14 +382,6 @@ struct ResolvedPromptRuntimePolicy {
     transform_sets: Vec<TransformSet>,
     transform_revisions: Vec<RuntimeTransformRevision>,
     approved_import_source_ids: BTreeSet<String>,
-}
-
-#[derive(Debug, Clone)]
-struct PreparedInteractionReview {
-    public: InteractionEventReview,
-    policy: ResolvedInteractionPolicy,
-    evaluation_seal: InteractionEvaluationSeal,
-    deterministic_seed: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -2656,34 +2569,6 @@ impl Core {
         })
     }
 
-    /// Produces a read-only deterministic interaction review. It never
-    /// initializes or mutates durable state.
-    pub fn preview_interaction_event(
-        &self,
-        request: &InteractionReviewRequest,
-    ) -> CoreResult<InteractionEventReview> {
-        self.validate_runtime_branch_head(
-            &request.conversation_id,
-            &request.branch_id,
-            request.expected_head.as_ref(),
-        )?;
-        let (state, knowledge) = match self
-            .storage()
-            .get_interaction_state_snapshot(&request.conversation_id, &request.branch_id)
-        {
-            Ok(snapshot) => (snapshot.state, snapshot.knowledge),
-            Err(error) if error.code == CoreErrorCode::NotFound => {
-                let policy =
-                    self.resolve_interaction_policy(&request.conversation_id, &request.branch_id)?;
-                (initial_interaction_state(&policy), Vec::new())
-            }
-            Err(error) => return Err(error),
-        };
-        Ok(self
-            .prepare_interaction_review_from_state(request, state, &knowledge, None, true)?
-            .public)
-    }
-
     /// Commits one trusted durable lifecycle occurrence.
     ///
     /// A persisted outbox occurrence may legitimately lag behind the branch
@@ -3640,42 +3525,6 @@ impl Core {
         Ok(project_interaction_choice_selection_receipt(receipt))
     }
 
-    pub(crate) fn validate_runtime_branch_identity(
-        &self,
-        conversation_id: &ConversationId,
-        branch_id: &ConversationBranchId,
-    ) -> CoreResult<ConversationBranch> {
-        let conversation = self.storage().get_conversation(conversation_id)?;
-        let branch = self.storage().get_conversation_branch(branch_id)?;
-        if branch.conversation_id != *conversation_id {
-            return Err(CoreError::new(
-                CoreErrorCode::NotFound,
-                "conversation branch was not found in the conversation",
-                false,
-            ));
-        }
-        // Reading the conversation above is intentional: it verifies that the
-        // caller cannot pair an otherwise valid branch with a deleted or
-        // unrelated conversation identity.
-        let _ = conversation;
-        Ok(branch)
-    }
-
-    fn validate_runtime_branch_head(
-        &self,
-        conversation_id: &ConversationId,
-        branch_id: &ConversationBranchId,
-        expected_head: Option<&MessageId>,
-    ) -> CoreResult<ConversationBranch> {
-        let branch = self.validate_runtime_branch_identity(conversation_id, branch_id)?;
-        if branch.head_message_id.as_ref() != expected_head {
-            return Err(CoreError::invalid(
-                "conversation branch head changed before orchestration runtime review",
-            ));
-        }
-        Ok(branch)
-    }
-
     fn derive_memory_summary_source(
         &self,
         request: &EnqueueMemorySummaryRequest,
@@ -3850,96 +3699,6 @@ impl Core {
         Ok(covered_ranges)
     }
 
-    fn resolve_interaction_policy(
-        &self,
-        conversation_id: &ConversationId,
-        branch_id: &ConversationBranchId,
-    ) -> CoreResult<ResolvedInteractionPolicy> {
-        let modules = self.resolve_runtime_modules(conversation_id, branch_id)?;
-        self.resolve_interaction_policy_from_modules(conversation_id, modules)
-    }
-
-    fn resolve_sealed_interaction_policy(
-        &self,
-        conversation_id: &ConversationId,
-        branch_id: &ConversationBranchId,
-        sealed: &InteractionPolicySnapshot,
-        evaluation_seal: &InteractionEvaluationSeal,
-    ) -> CoreResult<ResolvedInteractionPolicy> {
-        if interaction_policy_sha256(sealed)? != evaluation_seal.policy_sha256.as_str() {
-            return Err(CoreError::new(
-                CoreErrorCode::StorageCorrupted,
-                "sealed derived interaction policy hash is inconsistent",
-                false,
-            ));
-        }
-        if let Ok(modules) = self.resolve_runtime_modules(conversation_id, branch_id)
-            && let Ok(current) = Self::resolve_interaction_policy_from_modules_with_evaluation_seal(
-                &modules,
-                evaluation_seal,
-            )
-            && interaction_policy_snapshot(&current) == *sealed
-        {
-            validate_interaction_evaluation_seal(
-                &current,
-                chrono::DateTime::from_timestamp(evaluation_seal.event_epoch_seconds, 0)
-                    .ok_or_else(|| {
-                        CoreError::new(
-                            CoreErrorCode::StorageCorrupted,
-                            "sealed derived interaction timestamp is invalid",
-                            false,
-                        )
-                    })?,
-                evaluation_seal,
-            )?;
-            return Ok(current);
-        }
-        let modules = if let Some(applied_plan_sha256) = sealed.module_plan_sha256.as_deref() {
-            let applied_plan_sha256 =
-                Sha256Digest::parse(applied_plan_sha256.to_owned()).map_err(CoreError::invalid)?;
-            let applied = self
-                .storage()
-                .get_historical_applied_module_runtime_plan(&applied_plan_sha256)?;
-            if applied.review.context.conversation_id.as_deref() != Some(conversation_id.0.as_str())
-                || applied.review.context.branch_id.as_deref() != Some(branch_id.0.as_str())
-            {
-                return Err(CoreError::new(
-                    CoreErrorCode::StorageCorrupted,
-                    "sealed derived interaction module plan belongs to another branch",
-                    false,
-                ));
-            }
-            self.materialize_resolved_module_runtime(&applied)?
-        } else {
-            ResolvedModuleRuntime::default()
-        };
-        let resolved = Self::resolve_interaction_policy_from_modules_with_evaluation_seal(
-            &modules,
-            evaluation_seal,
-        )?;
-        if interaction_policy_snapshot(&resolved) != *sealed {
-            return Err(CoreError::new(
-                CoreErrorCode::StorageCorrupted,
-                "sealed derived interaction policy cannot be reconstructed exactly",
-                false,
-            ));
-        }
-        validate_interaction_evaluation_seal(
-            &resolved,
-            chrono::DateTime::from_timestamp(evaluation_seal.event_epoch_seconds, 0).ok_or_else(
-                || {
-                    CoreError::new(
-                        CoreErrorCode::StorageCorrupted,
-                        "sealed derived interaction timestamp is invalid",
-                        false,
-                    )
-                },
-            )?,
-            evaluation_seal,
-        )?;
-        Ok(resolved)
-    }
-
     fn resolve_generation_attempt_proposal_policy(
         &self,
         proposal: &StoredGenerationAttemptProposal,
@@ -4037,429 +3796,6 @@ impl Core {
         })?;
         validate_interaction_evaluation_seal(&policy, event_at, &proposal.origin_evaluation_seal)?;
         Ok(policy)
-    }
-
-    fn resolve_interaction_policy_for_proposed_branch(
-        &self,
-        conversation_id: &ConversationId,
-        branch_id: &ConversationBranchId,
-        applied_plan: Option<&AppliedModuleRuntimePlan>,
-    ) -> CoreResult<ResolvedInteractionPolicy> {
-        let modules = if let Some(applied_plan) = applied_plan {
-            let expected_context =
-                self.content_module_context_for_proposed_branch(conversation_id, branch_id)?;
-            applied_plan.verify().map_err(module_plan_error)?;
-            if applied_plan.review.context != expected_context {
-                return Err(CoreError::invalid(
-                    "applied module plan does not match the proposed interaction branch",
-                ));
-            }
-            self.materialize_resolved_module_runtime(applied_plan)?
-        } else {
-            ResolvedModuleRuntime::default()
-        };
-        self.resolve_interaction_policy_from_modules(conversation_id, modules)
-    }
-
-    fn resolve_interaction_policy_from_modules(
-        &self,
-        conversation_id: &ConversationId,
-        modules: ResolvedModuleRuntime,
-    ) -> CoreResult<ResolvedInteractionPolicy> {
-        let conversation = self.storage().get_conversation(conversation_id)?;
-        let character = self.storage().get_character(&conversation.character_id)?;
-        let variables = modules.variables.clone();
-        let mut rule_sets = Vec::with_capacity(modules.interaction_rule_sets.len());
-        let mut rule_set_revisions = Vec::with_capacity(modules.interaction_rule_sets.len());
-        for stored in &modules.interaction_rule_sets {
-            rule_set_revisions.push(InteractionRuleSetRevision {
-                rule_set_id: stored.value.id.clone(),
-                revision: stored.revision,
-                revision_id: stored.revision_id.clone(),
-                sha256: stored.sha256.clone(),
-            });
-            rule_sets.push(stored.value.clone());
-        }
-        let asset_action_diagnostics =
-            self.validate_interaction_asset_actions(&mut rule_sets, &modules.assets);
-        let mut knowledge_revisions = BTreeMap::new();
-        for stored in &modules.knowledge_books {
-            for entry in &stored.value.entries {
-                if knowledge_revisions
-                    .insert(entry.id.clone(), stored.revision_id.clone())
-                    .is_some()
-                {
-                    return Err(CoreError::invalid(
-                        "active interaction knowledge entry IDs are ambiguous",
-                    ));
-                }
-            }
-        }
-
-        Ok(ResolvedInteractionPolicy {
-            module_plan_sha256: modules.plan_sha256,
-            rule_sets,
-            rule_set_revisions,
-            knowledge_revisions,
-            asset_action_diagnostics,
-            approved_import_source_ids: modules.approved_import_source_ids,
-            variables,
-            supported_capabilities: self.runtime_selected_capabilities()?,
-            character_name: character.name,
-        })
-    }
-
-    fn resolve_interaction_policy_from_modules_with_evaluation_seal(
-        modules: &ResolvedModuleRuntime,
-        sealed: &InteractionEvaluationSeal,
-    ) -> CoreResult<ResolvedInteractionPolicy> {
-        if modules.variables != sealed.policy_variables
-            || modules
-                .approved_import_source_ids
-                .iter()
-                .ne(sealed.approved_import_source_ids.iter())
-        {
-            return Err(CoreError::new(
-                CoreErrorCode::StorageCorrupted,
-                "sealed interaction module variables or import approvals changed",
-                false,
-            ));
-        }
-        let mut rule_sets = Vec::with_capacity(modules.interaction_rule_sets.len());
-        let mut rule_set_revisions = Vec::with_capacity(modules.interaction_rule_sets.len());
-        for stored in &modules.interaction_rule_sets {
-            rule_set_revisions.push(InteractionRuleSetRevision {
-                rule_set_id: stored.value.id.clone(),
-                revision: stored.revision,
-                revision_id: stored.revision_id.clone(),
-                sha256: stored.sha256.clone(),
-            });
-            rule_sets.push(stored.value.clone());
-        }
-        let mut knowledge_revisions = BTreeMap::new();
-        for stored in &modules.knowledge_books {
-            for entry in &stored.value.entries {
-                if knowledge_revisions
-                    .insert(entry.id.clone(), stored.revision_id.clone())
-                    .is_some()
-                {
-                    return Err(CoreError::invalid(
-                        "sealed interaction knowledge entry IDs are ambiguous",
-                    ));
-                }
-            }
-        }
-        let sealed_knowledge = sealed
-            .knowledge_revisions
-            .iter()
-            .map(|revision| (revision.entry_id.clone(), revision.book_revision_id.clone()))
-            .collect::<BTreeMap<_, _>>();
-        if knowledge_revisions != sealed_knowledge {
-            return Err(CoreError::new(
-                CoreErrorCode::StorageCorrupted,
-                "sealed interaction knowledge revisions changed",
-                false,
-            ));
-        }
-        let asset_action_diagnostics = apply_sealed_interaction_asset_diagnostics(
-            &mut rule_sets,
-            &sealed.asset_action_diagnostics,
-        )?;
-        let character_name = sealed
-            .template_values
-            .character_name
-            .clone()
-            .ok_or_else(|| {
-                CoreError::new(
-                    CoreErrorCode::StorageCorrupted,
-                    "sealed interaction character template value is missing",
-                    false,
-                )
-            })?;
-        let policy = ResolvedInteractionPolicy {
-            module_plan_sha256: modules.plan_sha256.clone(),
-            rule_sets,
-            rule_set_revisions,
-            knowledge_revisions,
-            asset_action_diagnostics,
-            approved_import_source_ids: modules.approved_import_source_ids.clone(),
-            variables: modules.variables.clone(),
-            supported_capabilities: sealed.supported_capabilities.clone(),
-            character_name,
-        };
-        if executable_interaction_policy_sha256(&policy)? != sealed.executable_rule_sets_sha256 {
-            return Err(CoreError::new(
-                CoreErrorCode::StorageCorrupted,
-                "sealed executable interaction policy changed",
-                false,
-            ));
-        }
-        Ok(policy)
-    }
-
-    fn validate_interaction_asset_actions(
-        &self,
-        rule_sets: &mut [InteractionRuleSet],
-        assets: &BTreeMap<AssetId, ApprovedRuntimeAsset>,
-    ) -> BTreeMap<(String, u32), VersionedJson> {
-        let mut diagnostics = BTreeMap::new();
-        for rule_set in rule_sets {
-            for rule in &mut rule_set.rules {
-                for (ordinal, action) in rule.actions.iter().enumerate() {
-                    let validation = match action {
-                        InteractionAction::ShowAsset { asset_id, region } => assets
-                            .get(asset_id)
-                            .ok_or_else(|| {
-                                CoreError::new(
-                                    CoreErrorCode::PermissionDenied,
-                                    "interaction asset is not selected by the approved module plan",
-                                    false,
-                                )
-                            })
-                            .and_then(|asset| {
-                                self.validate_approved_runtime_asset(asset, Some(*region))
-                            }),
-                        InteractionAction::PlayAudio { asset_id } => assets
-                            .get(asset_id)
-                            .ok_or_else(|| {
-                                CoreError::new(
-                                    CoreErrorCode::PermissionDenied,
-                                    "interaction audio is not selected by the approved module plan",
-                                    false,
-                                )
-                            })
-                            .and_then(|asset| self.validate_approved_runtime_asset(asset, None)),
-                        _ => continue,
-                    };
-                    if let Err(error) = validation {
-                        // Disable the whole rule before evaluation. This is
-                        // deliberately fail-closed: a sibling mutation must
-                        // not commit after its asset side effect was rejected.
-                        rule.enabled = false;
-                        let ordinal = u32::try_from(ordinal).unwrap_or(u32::MAX);
-                        diagnostics.insert(
-                            (rule.id.as_str().to_owned(), ordinal),
-                            VersionedJson {
-                                schema_version: 1,
-                                value: serde_json::json!({
-                                    "diagnostic": "approved_asset_validation_failed",
-                                    "error_code": format!("{:?}", error.code),
-                                    "message": error.message,
-                                }),
-                            },
-                        );
-                    }
-                }
-            }
-        }
-        diagnostics
-    }
-
-    fn validate_approved_runtime_asset(
-        &self,
-        asset: &ApprovedRuntimeAsset,
-        region: Option<UiRegion>,
-    ) -> CoreResult<()> {
-        let expected = crate::AssetDeliveryDescriptor::try_from(asset.descriptor.clone())?;
-        let actual = self.resolve_asset_delivery_by_sha256(&asset.descriptor.sha256)?;
-        if actual != expected {
-            return Err(CoreError::new(
-                CoreErrorCode::StorageCorrupted,
-                "approved module asset differs from its verified CAS descriptor",
-                false,
-            ));
-        }
-        let compatible = match region {
-            None | Some(UiRegion::Audio) => actual.kind == crate::AssetDeliveryKind::Audio,
-            Some(
-                UiRegion::Message
-                | UiRegion::Background
-                | UiRegion::CharacterPortrait
-                | UiRegion::StatusPanel,
-            ) => matches!(
-                actual.kind,
-                crate::AssetDeliveryKind::Image | crate::AssetDeliveryKind::Video
-            ),
-        };
-        if !compatible {
-            return Err(CoreError::new(
-                CoreErrorCode::UnsafeArchive,
-                "approved module asset is incompatible with the requested renderer region",
-                false,
-            ));
-        }
-        if asset.module_id.is_empty()
-            || asset.module_revision_id.is_empty()
-            || asset.component_sha256.is_empty()
-        {
-            return Err(CoreError::new(
-                CoreErrorCode::StorageCorrupted,
-                "approved module asset is missing plan-bound evidence",
-                false,
-            ));
-        }
-        Ok(())
-    }
-
-    fn prepare_interaction_review_from_state(
-        &self,
-        request: &InteractionReviewRequest,
-        state: InteractionState,
-        existing_knowledge: &[InteractionKnowledgeBinding],
-        explicit_event_at: Option<chrono::DateTime<Utc>>,
-        enforce_current_head: bool,
-    ) -> CoreResult<PreparedInteractionReview> {
-        let branch = if enforce_current_head {
-            self.validate_runtime_branch_head(
-                &request.conversation_id,
-                &request.branch_id,
-                request.expected_head.as_ref(),
-            )?
-        } else {
-            self.validate_runtime_branch_identity(&request.conversation_id, &request.branch_id)?
-        };
-        let policy =
-            self.resolve_interaction_policy(&request.conversation_id, &request.branch_id)?;
-        let event_at = explicit_event_at.unwrap_or(branch.updated_at);
-        Self::prepare_interaction_review_with_policy(
-            request,
-            state,
-            existing_knowledge,
-            event_at,
-            policy,
-        )
-    }
-
-    fn prepare_proposed_branch_interaction_review_from_state(
-        &self,
-        request: &InteractionReviewRequest,
-        state: InteractionState,
-        existing_knowledge: &[InteractionKnowledgeBinding],
-        event_at: chrono::DateTime<Utc>,
-        applied_plan: Option<&AppliedModuleRuntimePlan>,
-    ) -> CoreResult<PreparedInteractionReview> {
-        let policy = self.resolve_interaction_policy_for_proposed_branch(
-            &request.conversation_id,
-            &request.branch_id,
-            applied_plan,
-        )?;
-        Self::prepare_interaction_review_with_policy(
-            request,
-            state,
-            existing_knowledge,
-            event_at,
-            policy,
-        )
-    }
-
-    fn prepare_interaction_review_with_policy(
-        request: &InteractionReviewRequest,
-        state: InteractionState,
-        existing_knowledge: &[InteractionKnowledgeBinding],
-        event_at: chrono::DateTime<Utc>,
-        policy: ResolvedInteractionPolicy,
-    ) -> CoreResult<PreparedInteractionReview> {
-        let evaluation_seal = interaction_evaluation_seal(&policy, event_at)?;
-        Self::prepare_interaction_review_with_evaluation_seal(
-            request,
-            state,
-            existing_knowledge,
-            event_at,
-            policy,
-            evaluation_seal,
-        )
-    }
-
-    fn prepare_interaction_review_with_evaluation_seal(
-        request: &InteractionReviewRequest,
-        state: InteractionState,
-        existing_knowledge: &[InteractionKnowledgeBinding],
-        event_at: chrono::DateTime<Utc>,
-        policy: ResolvedInteractionPolicy,
-        evaluation_seal: InteractionEvaluationSeal,
-    ) -> CoreResult<PreparedInteractionReview> {
-        validate_interaction_evaluation_seal(&policy, event_at, &evaluation_seal)?;
-        let deterministic_seed = interaction_seed(
-            request,
-            state.revision,
-            &policy.rule_set_revisions,
-            event_at.timestamp(),
-        )?;
-        Self::prepare_interaction_review_with_sealed_authority(
-            request,
-            state,
-            existing_knowledge,
-            event_at,
-            policy,
-            evaluation_seal,
-            deterministic_seed,
-        )
-    }
-
-    fn prepare_interaction_review_with_sealed_authority(
-        request: &InteractionReviewRequest,
-        state: InteractionState,
-        existing_knowledge: &[InteractionKnowledgeBinding],
-        event_at: chrono::DateTime<Utc>,
-        policy: ResolvedInteractionPolicy,
-        evaluation_seal: InteractionEvaluationSeal,
-        deterministic_seed: u64,
-    ) -> CoreResult<PreparedInteractionReview> {
-        validate_interaction_evaluation_seal(&policy, event_at, &evaluation_seal)?;
-        let (mut state, _) =
-            reconcile_interaction_knowledge_state(state, &policy, existing_knowledge)?;
-        if state.revision == 0 && state.variables.values.is_empty() {
-            state.variables = evaluation_seal.policy_variables.clone();
-        }
-        let engine = InteractionEngine::compile_with_options(
-            &policy.rule_sets,
-            interaction_limits_from_evaluation(&evaluation_seal.limits),
-            &InteractionCompileOptions {
-                approved_import_source_ids: policy.approved_import_source_ids.clone(),
-            },
-        )
-        .map_err(interaction_error)?;
-        let event_epoch_seconds = event_at.timestamp();
-        let mut outcome = engine
-            .handle_event(
-                &state,
-                &request.event,
-                &InteractionContext {
-                    deterministic_seed,
-                    event_epoch_seconds,
-                    model_capabilities: evaluation_seal.supported_capabilities.clone(),
-                    template_values: interaction_engine_template_values(
-                        &evaluation_seal.template_values,
-                    ),
-                },
-            )
-            .map_err(interaction_error)?;
-        normalize_interaction_event_revision(&state, &mut outcome)?;
-        let expected_state_revision = state.revision;
-        let review_sha256 = interaction_review_sha256(
-            request,
-            expected_state_revision,
-            event_epoch_seconds,
-            policy.module_plan_sha256.as_deref(),
-            &policy.rule_set_revisions,
-            &policy.supported_capabilities,
-            &outcome,
-        )?;
-        Ok(PreparedInteractionReview {
-            public: InteractionEventReview {
-                request: request.clone(),
-                expected_state_revision,
-                event_epoch_seconds,
-                module_plan_sha256: policy.module_plan_sha256.clone(),
-                rule_sets: policy.rule_set_revisions.clone(),
-                supported_capabilities: policy.supported_capabilities.clone(),
-                outcome,
-                review_sha256,
-            },
-            policy,
-            evaluation_seal,
-            deterministic_seed,
-        })
     }
 
     fn apply_memory_input_transforms(
@@ -4913,267 +4249,6 @@ fn finalize_generation_attempt_derived_closure(
     Ok(closure)
 }
 
-fn initial_interaction_state(policy: &ResolvedInteractionPolicy) -> InteractionState {
-    InteractionState {
-        variables: policy.variables.clone(),
-        manually_active_knowledge: Vec::new(),
-        proposals: Vec::new(),
-        revision: 0,
-    }
-}
-
-fn apply_sealed_interaction_asset_diagnostics(
-    rule_sets: &mut [InteractionRuleSet],
-    diagnostics: &[InteractionEvaluationAssetDiagnostic],
-) -> CoreResult<BTreeMap<(String, u32), VersionedJson>> {
-    let mut sealed = BTreeMap::new();
-    for diagnostic in diagnostics {
-        let key = (diagnostic.rule_id.clone(), diagnostic.action_ordinal);
-        if sealed.insert(key, diagnostic.diagnostic.clone()).is_some() {
-            return Err(CoreError::new(
-                CoreErrorCode::StorageCorrupted,
-                "sealed interaction asset diagnostic is duplicated",
-                false,
-            ));
-        }
-        let mut matched = false;
-        for rule in rule_sets.iter_mut().flat_map(|set| set.rules.iter_mut()) {
-            if rule.id.as_str() != diagnostic.rule_id {
-                continue;
-            }
-            if matched {
-                return Err(CoreError::new(
-                    CoreErrorCode::StorageCorrupted,
-                    "sealed interaction asset diagnostic rule is ambiguous",
-                    false,
-                ));
-            }
-            let action_index = usize::try_from(diagnostic.action_ordinal)
-                .map_err(|_| CoreError::invalid("sealed asset action ordinal overflowed"))?;
-            let action = rule.actions.get(action_index).ok_or_else(|| {
-                CoreError::new(
-                    CoreErrorCode::StorageCorrupted,
-                    "sealed interaction asset diagnostic action is missing",
-                    false,
-                )
-            })?;
-            if !matches!(
-                action,
-                InteractionAction::ShowAsset { .. } | InteractionAction::PlayAudio { .. }
-            ) {
-                return Err(CoreError::new(
-                    CoreErrorCode::StorageCorrupted,
-                    "sealed interaction asset diagnostic targets a non-asset action",
-                    false,
-                ));
-            }
-            rule.enabled = false;
-            matched = true;
-        }
-        if !matched {
-            return Err(CoreError::new(
-                CoreErrorCode::StorageCorrupted,
-                "sealed interaction asset diagnostic rule is missing",
-                false,
-            ));
-        }
-    }
-    Ok(sealed)
-}
-
-fn interaction_policy_snapshot(policy: &ResolvedInteractionPolicy) -> InteractionPolicySnapshot {
-    InteractionPolicySnapshot {
-        module_plan_sha256: policy.module_plan_sha256.clone(),
-        rule_sets: policy
-            .rule_set_revisions
-            .iter()
-            .map(|revision| InteractionPolicyRuleSetRevision {
-                rule_set_id: revision.rule_set_id.clone(),
-                revision_id: revision.revision_id.clone(),
-                sha256: revision.sha256.clone(),
-            })
-            .collect(),
-    }
-}
-
-fn runtime_interaction_template_values(
-    policy: &ResolvedInteractionPolicy,
-    event_at: chrono::DateTime<Utc>,
-) -> InteractionEvaluationTemplateValues {
-    InteractionEvaluationTemplateValues {
-        character_name: Some(policy.character_name.clone()),
-        user_name: Some("User".to_owned()),
-        persona_name: None,
-        persona_description: None,
-        current_date: Some(event_at.format("%Y-%m-%d").to_string()),
-        current_time: Some(event_at.format("%H:%M:%S%:z").to_string()),
-    }
-}
-
-fn interaction_engine_template_values(
-    sealed: &InteractionEvaluationTemplateValues,
-) -> InteractionTemplateValues {
-    InteractionTemplateValues {
-        character_name: sealed.character_name.clone(),
-        user_name: sealed.user_name.clone(),
-        persona_name: sealed.persona_name.clone(),
-        persona_description: sealed.persona_description.clone(),
-        current_date: sealed.current_date.clone(),
-        current_time: sealed.current_time.clone(),
-    }
-}
-
-fn executable_interaction_policy_sha256(
-    policy: &ResolvedInteractionPolicy,
-) -> CoreResult<Sha256Digest> {
-    let knowledge_revisions = policy
-        .knowledge_revisions
-        .iter()
-        .map(
-            |(entry_id, book_revision_id)| RuntimeInteractionKnowledgeRevision {
-                entry_id,
-                book_revision_id,
-            },
-        )
-        .collect();
-    let asset_action_diagnostics = policy
-        .asset_action_diagnostics
-        .iter()
-        .map(
-            |((rule_id, action_ordinal), diagnostic)| RuntimeInteractionAssetDiagnostic {
-                rule_id,
-                action_ordinal: *action_ordinal,
-                diagnostic,
-            },
-        )
-        .collect();
-    Sha256Digest::parse(versioned_digest(&RuntimeExecutableInteractionPolicy {
-        schema_version: 1,
-        rule_sets: &policy.rule_sets,
-        rule_set_revisions: &policy.rule_set_revisions,
-        knowledge_revisions,
-        asset_action_diagnostics,
-        approved_import_source_ids: &policy.approved_import_source_ids,
-        variables: &policy.variables,
-        supported_capabilities: &policy.supported_capabilities,
-        character_name: &policy.character_name,
-    })?)
-    .map_err(CoreError::invalid)
-}
-
-fn interaction_evaluation_limits(limits: InteractionLimits) -> InteractionEvaluationLimits {
-    InteractionEvaluationLimits {
-        max_rule_sets: limits.max_rule_sets,
-        max_rules: limits.max_rules,
-        max_actions_per_event: limits.max_actions_per_event,
-        max_actions_per_rule: limits.max_actions_per_rule,
-        max_condition_depth: limits.max_condition_depth,
-        max_condition_nodes: limits.max_condition_nodes,
-        max_template_depth: limits.max_template_depth,
-        max_template_parts: limits.max_template_parts,
-        max_variables: limits.max_variables,
-        max_proposals: limits.max_proposals,
-        max_pending_proposals: limits.max_pending_proposals,
-        max_effects: limits.max_effects,
-        max_choices: limits.max_choices,
-        max_dice_count: limits.max_dice_count,
-        max_dice_sides: limits.max_dice_sides,
-        max_text_chars: limits.max_text_chars,
-        max_identifier_bytes: limits.max_identifier_bytes,
-    }
-}
-
-fn interaction_limits_from_evaluation(limits: &InteractionEvaluationLimits) -> InteractionLimits {
-    InteractionLimits {
-        max_rule_sets: limits.max_rule_sets,
-        max_rules: limits.max_rules,
-        max_actions_per_event: limits.max_actions_per_event,
-        max_actions_per_rule: limits.max_actions_per_rule,
-        max_condition_depth: limits.max_condition_depth,
-        max_condition_nodes: limits.max_condition_nodes,
-        max_template_depth: limits.max_template_depth,
-        max_template_parts: limits.max_template_parts,
-        max_variables: limits.max_variables,
-        max_proposals: limits.max_proposals,
-        max_pending_proposals: limits.max_pending_proposals,
-        max_effects: limits.max_effects,
-        max_choices: limits.max_choices,
-        max_dice_count: limits.max_dice_count,
-        max_dice_sides: limits.max_dice_sides,
-        max_text_chars: limits.max_text_chars,
-        max_identifier_bytes: limits.max_identifier_bytes,
-    }
-}
-
-fn interaction_evaluation_seal(
-    policy: &ResolvedInteractionPolicy,
-    event_at: chrono::DateTime<Utc>,
-) -> CoreResult<InteractionEvaluationSeal> {
-    let policy_snapshot = interaction_policy_snapshot(policy);
-    let policy_sha256 = Sha256Digest::parse(interaction_policy_sha256(&policy_snapshot)?)
-        .map_err(CoreError::invalid)?;
-    let knowledge_revisions = policy
-        .knowledge_revisions
-        .iter()
-        .map(
-            |(entry_id, book_revision_id)| InteractionEvaluationKnowledgeRevision {
-                entry_id: entry_id.clone(),
-                book_revision_id: book_revision_id.clone(),
-            },
-        )
-        .collect();
-    let asset_action_diagnostics = policy
-        .asset_action_diagnostics
-        .iter()
-        .map(
-            |((rule_id, action_ordinal), diagnostic)| InteractionEvaluationAssetDiagnostic {
-                rule_id: rule_id.clone(),
-                action_ordinal: *action_ordinal,
-                diagnostic: diagnostic.clone(),
-            },
-        )
-        .collect();
-    Ok(InteractionEvaluationSeal {
-        schema_version: 1,
-        engine_contract_version: 1,
-        policy_sha256,
-        executable_rule_sets_sha256: executable_interaction_policy_sha256(policy)?,
-        knowledge_revisions,
-        asset_action_diagnostics,
-        approved_import_source_ids: policy.approved_import_source_ids.iter().cloned().collect(),
-        policy_variables: policy.variables.clone(),
-        supported_capabilities: policy.supported_capabilities.clone(),
-        template_values: runtime_interaction_template_values(policy, event_at),
-        event_epoch_seconds: event_at.timestamp(),
-        limits: interaction_evaluation_limits(InteractionLimits::default()),
-        seed_contract_version: 1,
-    })
-}
-
-fn validate_interaction_evaluation_seal(
-    policy: &ResolvedInteractionPolicy,
-    event_at: chrono::DateTime<Utc>,
-    sealed: &InteractionEvaluationSeal,
-) -> CoreResult<()> {
-    interaction_evaluation_seal_sha256(sealed)?;
-    let expected = interaction_evaluation_seal(policy, event_at)?;
-    if &expected != sealed {
-        return Err(CoreError::new(
-            CoreErrorCode::StorageCorrupted,
-            "sealed interaction evaluation context cannot be reconstructed exactly",
-            false,
-        ));
-    }
-    Ok(())
-}
-
-pub(crate) fn interaction_state_key(
-    conversation_id: &ConversationId,
-    branch_id: &ConversationBranchId,
-) -> CoreResult<InteractionStateKey> {
-    lorepia_storage::interaction_state_key_for_branch(conversation_id, branch_id)
-}
-
 fn validate_runtime_occurrence_id(value: &str) -> CoreResult<()> {
     if value.is_empty()
         || value.len() > 256
@@ -5220,213 +4295,7 @@ fn validate_interaction_event_authority_binding(
     }
 }
 
-fn interaction_knowledge_bindings(
-    state: &InteractionState,
-    policy: &ResolvedInteractionPolicy,
-    existing: &[InteractionKnowledgeBinding],
-) -> CoreResult<Vec<InteractionKnowledgeBinding>> {
-    let existing = existing
-        .iter()
-        .map(|binding| (binding.entry_id.clone(), binding))
-        .collect::<BTreeMap<_, _>>();
-    let mut bindings = state
-        .manually_active_knowledge
-        .iter()
-        .map(|entry_id| {
-            if let Some(binding) = existing.get(entry_id) {
-                let current_revision = policy.knowledge_revisions.get(entry_id).ok_or_else(|| {
-                    CoreError::invalid(format!(
-                        "stale interaction knowledge entry {} is absent from the approved module plan",
-                        entry_id.as_str()
-                    ))
-                })?;
-                if binding.book_revision_id != *current_revision {
-                    return Err(CoreError::invalid(format!(
-                        "stale interaction knowledge entry {} is bound to a different book revision",
-                        entry_id.as_str()
-                    )));
-                }
-                return Ok((*binding).clone());
-            }
-            let book_revision_id = policy.knowledge_revisions.get(entry_id).ok_or_else(|| {
-                CoreError::invalid(format!(
-                    "interaction knowledge entry {} has no approved exact book revision",
-                    entry_id.as_str()
-                ))
-            })?;
-            Ok(InteractionKnowledgeBinding {
-                book_revision_id: book_revision_id.clone(),
-                entry_id: entry_id.clone(),
-            })
-        })
-        .collect::<CoreResult<Vec<_>>>()?;
-    bindings.sort();
-    Ok(bindings)
-}
-
-fn reconcile_interaction_knowledge_state(
-    mut state: InteractionState,
-    policy: &ResolvedInteractionPolicy,
-    existing: &[InteractionKnowledgeBinding],
-) -> CoreResult<(InteractionState, Vec<InteractionKnowledgeBinding>)> {
-    let state_entries = state
-        .manually_active_knowledge
-        .iter()
-        .cloned()
-        .collect::<BTreeSet<_>>();
-    let mut existing_by_entry = BTreeMap::new();
-    for binding in existing {
-        if existing_by_entry
-            .insert(binding.entry_id.clone(), binding)
-            .is_some()
-        {
-            return Err(CoreError::new(
-                CoreErrorCode::StorageCorrupted,
-                "durable interaction knowledge contains a duplicate entry binding",
-                false,
-            ));
-        }
-    }
-    if state_entries.len() != state.manually_active_knowledge.len()
-        || state_entries.len() != existing_by_entry.len()
-        || state_entries
-            .iter()
-            .any(|entry_id| !existing_by_entry.contains_key(entry_id))
-    {
-        return Err(CoreError::new(
-            CoreErrorCode::StorageCorrupted,
-            "durable interaction knowledge does not match the active state",
-            false,
-        ));
-    }
-
-    let mut bindings = existing
-        .iter()
-        .filter(|binding| {
-            policy.knowledge_revisions.get(&binding.entry_id) == Some(&binding.book_revision_id)
-        })
-        .cloned()
-        .collect::<Vec<_>>();
-    bindings.sort();
-    state.manually_active_knowledge = bindings
-        .iter()
-        .map(|binding| binding.entry_id.clone())
-        .collect();
-    Ok((state, bindings))
-}
-
-#[cfg(test)]
-mod interaction_knowledge_binding_revision_tests {
-    use std::collections::{BTreeMap, BTreeSet};
-
-    use lorepia_domain::{InteractionState, KnowledgeEntryId, VariableMap, VersionedJson};
-    use lorepia_storage::InteractionKnowledgeBinding;
-
-    use super::{
-        ResolvedInteractionPolicy, interaction_knowledge_bindings,
-        reconcile_interaction_knowledge_state,
-    };
-
-    #[test]
-    fn stale_manual_knowledge_binding_becomes_inert_when_entry_is_removed() {
-        let entry_id = KnowledgeEntryId::from("shared-entry");
-        let state = InteractionState {
-            variables: VariableMap::default(),
-            manually_active_knowledge: vec![entry_id.clone()],
-            proposals: Vec::new(),
-            revision: 7,
-        };
-        let policy = ResolvedInteractionPolicy {
-            module_plan_sha256: None,
-            rule_sets: Vec::new(),
-            rule_set_revisions: Vec::new(),
-            knowledge_revisions: BTreeMap::new(),
-            asset_action_diagnostics: BTreeMap::<(String, u32), VersionedJson>::new(),
-            approved_import_source_ids: BTreeSet::new(),
-            variables: VariableMap::default(),
-            supported_capabilities: Vec::new(),
-            character_name: "Character".to_owned(),
-        };
-        let existing = [InteractionKnowledgeBinding {
-            book_revision_id: "book-old".to_owned(),
-            entry_id,
-        }];
-
-        let (state, existing) = reconcile_interaction_knowledge_state(state, &policy, &existing)
-            .expect("removed knowledge authority must be reconciled");
-        let bindings = interaction_knowledge_bindings(&state, &policy, &existing)
-            .expect("removed knowledge authority must become inert");
-        assert!(state.manually_active_knowledge.is_empty());
-        assert!(bindings.is_empty());
-    }
-
-    #[test]
-    fn stale_manual_knowledge_binding_does_not_rebind_to_a_new_book_revision() {
-        let entry_id = KnowledgeEntryId::from("shared-entry");
-        let state = InteractionState {
-            variables: VariableMap::default(),
-            manually_active_knowledge: vec![entry_id.clone()],
-            proposals: Vec::new(),
-            revision: 7,
-        };
-        let policy = ResolvedInteractionPolicy {
-            module_plan_sha256: None,
-            rule_sets: Vec::new(),
-            rule_set_revisions: Vec::new(),
-            knowledge_revisions: BTreeMap::from([(entry_id.clone(), "book-new".to_owned())]),
-            asset_action_diagnostics: BTreeMap::<(String, u32), VersionedJson>::new(),
-            approved_import_source_ids: BTreeSet::new(),
-            variables: VariableMap::default(),
-            supported_capabilities: Vec::new(),
-            character_name: "Character".to_owned(),
-        };
-        let existing = [InteractionKnowledgeBinding {
-            book_revision_id: "book-old".to_owned(),
-            entry_id,
-        }];
-
-        let (state, existing) = reconcile_interaction_knowledge_state(state, &policy, &existing)
-            .expect("revision-drifted knowledge authority must be reconciled");
-        let bindings = interaction_knowledge_bindings(&state, &policy, &existing)
-            .expect("revision-drifted knowledge authority must become inert");
-        assert!(state.manually_active_knowledge.is_empty());
-        assert!(bindings.is_empty());
-    }
-
-    #[test]
-    fn exact_manual_knowledge_binding_keeps_its_existing_authority() {
-        let entry_id = KnowledgeEntryId::from("shared-entry");
-        let state = InteractionState {
-            variables: VariableMap::default(),
-            manually_active_knowledge: vec![entry_id.clone()],
-            proposals: Vec::new(),
-            revision: 7,
-        };
-        let policy = ResolvedInteractionPolicy {
-            module_plan_sha256: None,
-            rule_sets: Vec::new(),
-            rule_set_revisions: Vec::new(),
-            knowledge_revisions: BTreeMap::from([(entry_id.clone(), "book-exact".to_owned())]),
-            asset_action_diagnostics: BTreeMap::<(String, u32), VersionedJson>::new(),
-            approved_import_source_ids: BTreeSet::new(),
-            variables: VariableMap::default(),
-            supported_capabilities: Vec::new(),
-            character_name: "Character".to_owned(),
-        };
-        let existing = InteractionKnowledgeBinding {
-            book_revision_id: "book-exact".to_owned(),
-            entry_id,
-        };
-
-        let (state, bindings) =
-            reconcile_interaction_knowledge_state(state, &policy, std::slice::from_ref(&existing))
-                .expect("exact knowledge authority must remain reconciled");
-        let bindings = interaction_knowledge_bindings(&state, &policy, &bindings)
-            .expect("exact knowledge authority remains valid");
-        assert_eq!(bindings, vec![existing]);
-    }
-}
-
+include!("orchestration_runtime/interaction/tests/knowledge_binding_revision.rs");
 fn interaction_commit_artifacts(
     previous: &InteractionState,
     outcome: &InteractionOutcome,
@@ -5879,58 +4748,6 @@ fn memory_record_from_provider_output(
         .validate()
         .map_err(|error| CoreError::invalid(format!("invalid generated memory record: {error}")))?;
     Ok(record)
-}
-
-fn normalize_interaction_event_revision(
-    previous: &InteractionState,
-    outcome: &mut InteractionOutcome,
-) -> CoreResult<()> {
-    if !outcome.state_changed {
-        outcome.state.revision = previous
-            .revision
-            .checked_add(1)
-            .ok_or_else(|| CoreError::invalid("interaction state revision overflowed"))?;
-        outcome.state_changed = true;
-    }
-    Ok(())
-}
-
-fn interaction_seed(
-    request: &InteractionReviewRequest,
-    state_revision: u64,
-    rule_sets: &[InteractionRuleSetRevision],
-    event_epoch_seconds: i64,
-) -> CoreResult<u64> {
-    let digest = versioned_digest(&(
-        "lorepia.interaction-seed.v1",
-        request,
-        state_revision,
-        rule_sets,
-        event_epoch_seconds,
-    ))?;
-    let bytes = hex_prefix_bytes(&digest)?;
-    Ok(u64::from_be_bytes(bytes))
-}
-
-fn interaction_review_sha256(
-    request: &InteractionReviewRequest,
-    state_revision: u64,
-    event_epoch_seconds: i64,
-    module_plan_sha256: Option<&str>,
-    rule_sets: &[InteractionRuleSetRevision],
-    supported_capabilities: &[CapabilityKey],
-    outcome: &InteractionOutcome,
-) -> CoreResult<String> {
-    versioned_digest(&(
-        "lorepia.interaction-review.v1",
-        request,
-        state_revision,
-        event_epoch_seconds,
-        module_plan_sha256,
-        rule_sets,
-        supported_capabilities,
-        outcome,
-    ))
 }
 
 fn versioned_sha256<T: Serialize>(value: &T) -> CoreResult<String> {
