@@ -50,6 +50,14 @@ import { t } from '../lib/i18n';
 import { LorepiaClientError, normalizeClientError } from '../lib/ipc/errors';
 import { ChatStreamVerifier } from '../features/chat/chat-stream';
 import { INITIAL_APP_STATE, type ChatState, type LorepiaAppState } from './app-state';
+import { EpochGuard } from './operations/epoch-guard';
+import {
+    GenerationOperationIdentityAuthority,
+    generationOperationIdentity,
+    generationSelectionOperationIdentity,
+    type GenerationOperationInputAuthority,
+} from './operations/operation-identity';
+import { SerializedMutation } from './operations/serialized-mutation';
 import { credentialKey, discoveryCredentialTarget } from './provider-credential';
 import {
     drainProviderDiscoveryEvents,
@@ -247,53 +255,18 @@ function captureAnnouncement(status: NativeCaptureStatusDto, success: string): s
     }
 }
 
-function generationSelectionOperationIdentity(
-    selection: GenerationSelectionInput,
-): readonly string[] {
-    return selection.kind === 'target'
-        ? [selection.kind, selection.target.model_route_id, selection.target.generation_preset_id]
-        : [selection.kind, selection.provider_profile_id];
-}
-
-function generationOperationIdentity(parts: readonly unknown[]): string {
-    // Every caller supplies an explicit array with no object-valued members. JSON therefore
-    // produces an unambiguous, order-stable identity without retaining user input in a map.
-    return JSON.stringify(parts);
-}
-
-interface RetainedGenerationOperation {
-    identity: string;
-    nonce: string;
-}
-
-interface StagedGenerationAttemptRetry {
-    identity: string | null;
-    generationAttemptId: string;
-}
-
-type OrdinaryGenerationOperationContext =
-    | { kind: 'new'; authority: RetainedGenerationOperation }
-    | {
-          kind: 'resume';
-          identity: string;
-          generationAttemptId: string;
-      };
-
-type OrdinaryGenerationOperationInputAuthority =
-    { operation_nonce: string } | { generation_attempt_id: string };
-
 export class LorepiaAppController {
     private readonly mutable = writable<LorepiaAppState>(structuredClone(INITIAL_APP_STATE));
     readonly state: Readable<LorepiaAppState> = this.mutable;
 
-    private appEpoch = 0;
-    private conversationEpoch = 0;
-    private memoryQueryRetryEpoch = 0;
-    private streamEpoch = 0;
-    private providerEpoch = 0;
-    private providerSettingsEpoch = 0;
-    private discoveryRequestEpoch = 0;
-    private providerSettingsMutationTail: Promise<void> = Promise.resolve();
+    private readonly appEpoch = new EpochGuard();
+    private readonly conversationEpoch = new EpochGuard();
+    private readonly memoryQueryRetryEpoch = new EpochGuard();
+    private readonly streamEpoch = new EpochGuard();
+    private readonly providerEpoch = new EpochGuard();
+    private readonly providerSettingsEpoch = new EpochGuard();
+    private readonly discoveryRequestEpoch = new EpochGuard();
+    private readonly providerSettingsMutations = new SerializedMutation();
     private reconcileInFlight: symbol | null = null;
     private reconcileBufferedItems: ChatStreamItemDto[] = [];
     private streamVerifier: ChatStreamVerifier | null = null;
@@ -302,8 +275,7 @@ export class LorepiaAppController {
     private pendingTextDelta = '';
     private pendingReasoningDelta = '';
     private memorySupervisorUnlisten: (() => void) | null = null;
-    private retainedGenerationOperation: RetainedGenerationOperation | null = null;
-    private stagedGenerationAttemptRetry: StagedGenerationAttemptRetry | null = null;
+    private readonly generationOperations = new GenerationOperationIdentityAuthority();
     private roomGenerationTarget: {
         conversation_id: string;
         branch_id: string;
@@ -314,81 +286,11 @@ export class LorepiaAppController {
     constructor(private readonly client: LorepiaClient) {}
 
     beginNewGenerationOperation(): void {
-        this.retainedGenerationOperation = null;
-        this.stagedGenerationAttemptRetry = null;
+        this.generationOperations.beginNewOperation();
     }
 
     stageGenerationAttemptRetry(generationAttemptId: string): boolean {
-        if (
-            generationAttemptId.length === 0 ||
-            Array.from(generationAttemptId).length > 256 ||
-            new TextEncoder().encode(generationAttemptId).byteLength > 512 ||
-            /\p{Cc}/u.test(generationAttemptId)
-        ) {
-            return false;
-        }
-        this.stagedGenerationAttemptRetry = {
-            identity: this.retainedGenerationOperation?.identity ?? null,
-            generationAttemptId,
-        };
-        return true;
-    }
-
-    private generationOperationAuthority(identity: string): RetainedGenerationOperation {
-        if (this.retainedGenerationOperation?.identity === identity) {
-            return this.retainedGenerationOperation;
-        }
-        const authority = { identity, nonce: globalThis.crypto.randomUUID() };
-        this.retainedGenerationOperation = authority;
-        return authority;
-    }
-
-    private completeGenerationOperation(authority: RetainedGenerationOperation): void {
-        const retained = this.retainedGenerationOperation;
-        if (retained?.identity === authority.identity && retained.nonce === authority.nonce) {
-            this.retainedGenerationOperation = null;
-        }
-    }
-
-    private generationOperationContext(identity: string): OrdinaryGenerationOperationContext {
-        const staged = this.stagedGenerationAttemptRetry;
-        if (staged !== null) {
-            staged.identity ??= identity;
-            if (staged.identity === identity) {
-                return {
-                    kind: 'resume',
-                    identity,
-                    generationAttemptId: staged.generationAttemptId,
-                };
-            }
-            this.stagedGenerationAttemptRetry = null;
-        }
-        return { kind: 'new', authority: this.generationOperationAuthority(identity) };
-    }
-
-    private completeGenerationOperationContext(context: OrdinaryGenerationOperationContext): void {
-        if (context.kind === 'new') {
-            this.completeGenerationOperation(context.authority);
-            return;
-        }
-        const staged = this.stagedGenerationAttemptRetry;
-        if (
-            staged?.identity === context.identity &&
-            staged.generationAttemptId === context.generationAttemptId
-        ) {
-            this.stagedGenerationAttemptRetry = null;
-            if (this.retainedGenerationOperation?.identity === context.identity) {
-                this.retainedGenerationOperation = null;
-            }
-        }
-    }
-
-    private generationOperationContextInput(
-        context: OrdinaryGenerationOperationContext,
-    ): OrdinaryGenerationOperationInputAuthority {
-        return context.kind === 'new'
-            ? { operation_nonce: context.authority.nonce }
-            : { generation_attempt_id: context.generationAttemptId };
+        return this.generationOperations.stageAttemptRetry(generationAttemptId);
     }
 
     private update(updater: (state: LorepiaAppState) => LorepiaAppState): void {
@@ -400,7 +302,7 @@ export class LorepiaAppController {
     }
 
     async start(): Promise<void> {
-        const epoch = ++this.appEpoch;
+        const epoch = this.appEpoch.advance();
         this.update((state) => ({
             ...state,
             bootstrap: { ...state.bootstrap, phase: 'loading', error: null },
@@ -408,7 +310,7 @@ export class LorepiaAppController {
         try {
             const snapshot = await this.client.bootstrapSnapshot();
             ensureCompatible(snapshot);
-            if (epoch !== this.appEpoch) return;
+            if (!this.appEpoch.isCurrent(epoch)) return;
             this.update((state) => ({
                 ...state,
                 bootstrap: { phase: 'ready', error: null, value: snapshot },
@@ -419,7 +321,7 @@ export class LorepiaAppController {
                 this.connectMemorySupervisor(epoch),
             ]);
         } catch (error: unknown) {
-            if (epoch !== this.appEpoch) return;
+            if (!this.appEpoch.isCurrent(epoch)) return;
             this.update((state) => ({
                 ...state,
                 bootstrap: { phase: 'error', error: errorLabel(error), value: null },
@@ -442,10 +344,11 @@ export class LorepiaAppController {
         let subscriptionFailed = false;
         try {
             const unlisten = await this.client.subscribeMemorySupervisorStatus((status) => {
-                if (parentEpoch !== this.appEpoch || !isMemorySupervisorStatus(status)) return;
+                if (!this.appEpoch.isCurrent(parentEpoch) || !isMemorySupervisorStatus(status))
+                    return;
                 this.applyMemorySupervisorStatus(status);
             });
-            if (parentEpoch !== this.appEpoch) {
+            if (!this.appEpoch.isCurrent(parentEpoch)) {
                 unlisten();
                 return;
             }
@@ -456,13 +359,13 @@ export class LorepiaAppController {
 
         try {
             const status = await this.client.getMemorySupervisorStatus();
-            if (parentEpoch !== this.appEpoch) return;
+            if (!this.appEpoch.isCurrent(parentEpoch)) return;
             if (!isMemorySupervisorStatus(status)) {
                 throw new Error('invalid memory supervisor status');
             }
             this.applyMemorySupervisorStatus(status);
         } catch {
-            if (parentEpoch !== this.appEpoch) return;
+            if (!this.appEpoch.isCurrent(parentEpoch)) return;
             this.update((state) => ({
                 ...state,
                 memory_supervisor: {
@@ -503,20 +406,20 @@ export class LorepiaAppController {
         });
     }
 
-    async loadLibrary(parentEpoch = this.appEpoch): Promise<void> {
+    async loadLibrary(parentEpoch = this.appEpoch.current()): Promise<void> {
         this.update((state) => ({
             ...state,
             library: { ...state.library, phase: 'loading', error: null },
         }));
         try {
             const characters = await this.client.listCharacters();
-            if (parentEpoch !== this.appEpoch) return;
+            if (!this.appEpoch.isCurrent(parentEpoch)) return;
             this.update((state) => ({
                 ...state,
                 library: { phase: 'ready', error: null, characters },
             }));
         } catch (error: unknown) {
-            if (parentEpoch !== this.appEpoch) return;
+            if (!this.appEpoch.isCurrent(parentEpoch)) return;
             this.update((state) => ({
                 ...state,
                 library: { ...state.library, phase: 'error', error: errorLabel(error) },
@@ -601,7 +504,7 @@ export class LorepiaAppController {
     }
 
     async selectCharacter(character: CharacterDto): Promise<void> {
-        const epoch = ++this.conversationEpoch;
+        const epoch = this.conversationEpoch.advance();
         this.detachStream();
         this.update((state) => ({
             ...state,
@@ -630,14 +533,14 @@ export class LorepiaAppController {
         const conversationsRequest = this.client
             .listConversations(character.id)
             .then((items) => {
-                if (epoch !== this.conversationEpoch) return;
+                if (!this.conversationEpoch.isCurrent(epoch)) return;
                 this.update((state) => ({
                     ...state,
                     conversations: { phase: 'ready', error: null, items },
                 }));
             })
             .catch((error: unknown) => {
-                if (epoch !== this.conversationEpoch) return;
+                if (!this.conversationEpoch.isCurrent(epoch)) return;
                 this.update((state) => ({
                     ...state,
                     conversations: { phase: 'error', error: errorLabel(error), items: [] },
@@ -646,7 +549,7 @@ export class LorepiaAppController {
         const greetingCatalogRequest = this.client
             .getCharacterGreetingCatalog(character.id)
             .then((catalog) => {
-                if (epoch !== this.conversationEpoch) return;
+                if (!this.conversationEpoch.isCurrent(epoch)) return;
                 if (catalog.character_id !== character.id) {
                     this.update((state) => ({
                         ...state,
@@ -670,7 +573,7 @@ export class LorepiaAppController {
                 }));
             })
             .catch((error: unknown) => {
-                if (epoch !== this.conversationEpoch) return;
+                if (!this.conversationEpoch.isCurrent(epoch)) return;
                 this.update((state) => ({
                     ...state,
                     greeting_catalog: {
@@ -725,7 +628,7 @@ export class LorepiaAppController {
             this.announce(t('chat.notice.greeting_reselect'));
             return false;
         }
-        const epoch = ++this.conversationEpoch;
+        const epoch = this.conversationEpoch.advance();
         try {
             const conversation = await this.client.createConversation(
                 character.id,
@@ -736,7 +639,7 @@ export class LorepiaAppController {
                     greeting_id: greetingId,
                 },
             );
-            if (epoch !== this.conversationEpoch) return false;
+            if (!this.conversationEpoch.isCurrent(epoch)) return false;
             this.update((state) => ({
                 ...state,
                 conversations: {
@@ -751,7 +654,7 @@ export class LorepiaAppController {
             this.prepareConversationLoad(conversation);
             return await this.loadPreparedConversation(conversation, epoch);
         } catch (error: unknown) {
-            if (epoch !== this.conversationEpoch) return false;
+            if (!this.conversationEpoch.isCurrent(epoch)) return false;
             this.update((state) => ({
                 ...state,
                 conversations: {
@@ -765,7 +668,7 @@ export class LorepiaAppController {
     }
 
     private prepareConversationLoad(conversation: ConversationDto): void {
-        ++this.memoryQueryRetryEpoch;
+        this.memoryQueryRetryEpoch.advance();
         this.detachStream();
         this.update((state) => ({
             ...state,
@@ -797,7 +700,7 @@ export class LorepiaAppController {
             const messages = await this.client.listBranchMessages(
                 conversationState.active_branch_id,
             );
-            if (epoch !== this.conversationEpoch) return false;
+            if (!this.conversationEpoch.isCurrent(epoch)) return false;
             this.update((state) => ({
                 ...state,
                 selected_conversation: conversation,
@@ -809,7 +712,7 @@ export class LorepiaAppController {
             this.resumePendingGeneration(messages);
             return true;
         } catch (error: unknown) {
-            if (epoch !== this.conversationEpoch) return false;
+            if (!this.conversationEpoch.isCurrent(epoch)) return false;
             this.update((state) => ({
                 ...state,
                 messages: { phase: 'error', error: errorLabel(error), items: [] },
@@ -819,11 +722,11 @@ export class LorepiaAppController {
     }
 
     async selectConversation(conversation: ConversationDto): Promise<boolean> {
-        const epoch = ++this.conversationEpoch;
+        const epoch = this.conversationEpoch.advance();
         this.prepareConversationLoad(conversation);
         try {
             const opened = await this.client.openExistingConversation(conversation.id);
-            if (epoch !== this.conversationEpoch) return false;
+            if (!this.conversationEpoch.isCurrent(epoch)) return false;
             this.update((state) => ({
                 ...state,
                 selected_conversation: opened,
@@ -836,7 +739,7 @@ export class LorepiaAppController {
             }));
             return await this.loadPreparedConversation(opened, epoch);
         } catch (error: unknown) {
-            if (epoch !== this.conversationEpoch) return false;
+            if (!this.conversationEpoch.isCurrent(epoch)) return false;
             this.update((state) => ({
                 ...state,
                 messages: { phase: 'error', error: errorLabel(error), items: [] },
@@ -848,8 +751,8 @@ export class LorepiaAppController {
     async selectBranch(branchId: string): Promise<void> {
         const conversation = get(this.mutable).selected_conversation;
         if (conversation === null) return;
-        const epoch = ++this.conversationEpoch;
-        ++this.memoryQueryRetryEpoch;
+        const epoch = this.conversationEpoch.advance();
+        this.memoryQueryRetryEpoch.advance();
         this.detachStream();
         this.update((state) => ({
             ...state,
@@ -867,7 +770,7 @@ export class LorepiaAppController {
         try {
             const conversationState = await this.client.selectBranch(conversation.id, branchId);
             const messages = await this.client.listBranchMessages(branchId);
-            if (epoch !== this.conversationEpoch) return;
+            if (!this.conversationEpoch.isCurrent(epoch)) return;
             this.update((state) => ({
                 ...state,
                 conversation_state: conversationState,
@@ -876,7 +779,7 @@ export class LorepiaAppController {
             void this.refreshMemoryQueryRetries();
             this.resumePendingGeneration(messages);
         } catch (error: unknown) {
-            if (epoch !== this.conversationEpoch) return;
+            if (!this.conversationEpoch.isCurrent(epoch)) return;
             this.update((state) => ({
                 ...state,
                 messages: { ...state.messages, phase: 'error', error: errorLabel(error) },
@@ -1001,7 +904,7 @@ export class LorepiaAppController {
             ...generationSelectionOperationIdentity(selection),
             JSON.stringify(variableOverrides),
         ]);
-        const operationContext = this.generationOperationContext(operationIdentity);
+        const operationContext = this.generationOperations.context(operationIdentity);
         this.clearMemoryQueryRetryNotice();
         const { epoch, streamId } = this.prepareStream(
             conversation.id,
@@ -1021,11 +924,11 @@ export class LorepiaAppController {
                     ...(variableOverrides.values.length === 0
                         ? {}
                         : { variable_overrides: structuredClone(variableOverrides) }),
-                    ...this.generationOperationContextInput(operationContext),
+                    ...this.generationOperations.input(operationContext),
                 },
                 streamId,
                 (item) => {
-                    if (epoch !== this.streamEpoch || this.activeStreamId !== streamId) {
+                    if (!this.streamEpoch.isCurrent(epoch) || this.activeStreamId !== streamId) {
                         void this.disposeStream(streamId);
                         return;
                     }
@@ -1033,7 +936,7 @@ export class LorepiaAppController {
                     else buffered.push(item);
                 },
             );
-            if (epoch !== this.streamEpoch || this.activeStreamId !== streamId) {
+            if (!this.streamEpoch.isCurrent(epoch) || this.activeStreamId !== streamId) {
                 void this.disposeStream(streamId);
                 return false;
             }
@@ -1057,10 +960,10 @@ export class LorepiaAppController {
             }));
             ready = true;
             for (const item of buffered) {
-                if (epoch !== this.streamEpoch || this.activeStreamId !== streamId) break;
+                if (!this.streamEpoch.isCurrent(epoch) || this.activeStreamId !== streamId) break;
                 this.acceptStreamItem(item, epoch, streamId);
             }
-            this.completeGenerationOperationContext(operationContext);
+            this.generationOperations.complete(operationContext);
             return true;
         } catch (error: unknown) {
             this.failStream(epoch, streamId, error);
@@ -1096,14 +999,14 @@ export class LorepiaAppController {
         let ready = false;
         try {
             const started = await this.client.sendReviewedPrompt(input, streamId, (item) => {
-                if (epoch !== this.streamEpoch || this.activeStreamId !== streamId) {
+                if (!this.streamEpoch.isCurrent(epoch) || this.activeStreamId !== streamId) {
                     void this.disposeStream(streamId);
                     return;
                 }
                 if (ready) this.acceptStreamItem(item, epoch, streamId);
                 else buffered.push(item);
             });
-            if (epoch !== this.streamEpoch || this.activeStreamId !== streamId) {
+            if (!this.streamEpoch.isCurrent(epoch) || this.activeStreamId !== streamId) {
                 void this.disposeStream(streamId);
                 return false;
             }
@@ -1127,7 +1030,7 @@ export class LorepiaAppController {
             }));
             ready = true;
             for (const item of buffered) {
-                if (epoch !== this.streamEpoch || this.activeStreamId !== streamId) break;
+                if (!this.streamEpoch.isCurrent(epoch) || this.activeStreamId !== streamId) break;
                 this.acceptStreamItem(item, epoch, streamId);
             }
             return true;
@@ -1197,7 +1100,7 @@ export class LorepiaAppController {
         start: (
             state: LorepiaAppState,
             selection: GenerationSelectionInput,
-            operationAuthority: OrdinaryGenerationOperationInputAuthority,
+            operationAuthority: GenerationOperationInputAuthority,
             streamId: string,
             onItem: (item: ChatStreamItemDto) => void,
         ) => Promise<MessageActionGenerationDto> | null,
@@ -1223,7 +1126,7 @@ export class LorepiaAppController {
             replacementText,
             ...generationSelectionOperationIdentity(selection),
         ]);
-        const operationContext = this.generationOperationContext(operationIdentity);
+        const operationContext = this.generationOperations.context(operationIdentity);
 
         this.clearMemoryQueryRetryNotice();
         const { epoch, streamId } = this.beginStreamReceiver();
@@ -1234,10 +1137,10 @@ export class LorepiaAppController {
             const started = await start(
                 state,
                 selection,
-                this.generationOperationContextInput(operationContext),
+                this.generationOperations.input(operationContext),
                 streamId,
                 (item) => {
-                    if (epoch !== this.streamEpoch || this.activeStreamId !== streamId) {
+                    if (!this.streamEpoch.isCurrent(epoch) || this.activeStreamId !== streamId) {
                         void this.disposeStream(streamId);
                         return;
                     }
@@ -1247,7 +1150,7 @@ export class LorepiaAppController {
             );
             if (
                 started === null ||
-                epoch !== this.streamEpoch ||
+                !this.streamEpoch.isCurrent(epoch) ||
                 this.activeStreamId !== streamId
             ) {
                 void this.disposeStream(streamId);
@@ -1259,12 +1162,12 @@ export class LorepiaAppController {
                 started.branch.id,
             );
             const messages = await this.client.listBranchMessages(started.branch.id);
-            if (epoch !== this.streamEpoch || this.activeStreamId !== streamId) {
+            if (!this.streamEpoch.isCurrent(epoch) || this.activeStreamId !== streamId) {
                 void this.disposeStream(streamId);
                 return false;
             }
             const pendingAssistant = this.pendingAssistantMessage(messages, started.generation_id);
-            ++this.memoryQueryRetryEpoch;
+            this.memoryQueryRetryEpoch.advance();
             this.streamVerifier = new ChatStreamVerifier({
                 conversationId: conversation.id,
                 branchId: started.branch.id,
@@ -1296,7 +1199,7 @@ export class LorepiaAppController {
             void this.refreshMemoryQueryRetries();
             ready = true;
             for (const item of buffered) this.acceptStreamItem(item, epoch, streamId);
-            this.completeGenerationOperationContext(operationContext);
+            this.generationOperations.complete(operationContext);
             return true;
         } catch (error: unknown) {
             this.failStream(epoch, streamId, error);
@@ -1314,9 +1217,9 @@ export class LorepiaAppController {
         const conversationId = conversation.id;
         const scopeKey = `${conversationId}:${branchId}`;
         const expectedHead = this.activeBranchHead(state);
-        const epoch = this.conversationEpoch;
+        const epoch = this.conversationEpoch.current();
         const isCurrentBranchSnapshot = (current: LorepiaAppState): boolean =>
-            epoch === this.conversationEpoch &&
+            this.conversationEpoch.isCurrent(epoch) &&
             current.selected_conversation?.id === conversationId &&
             current.conversation_state?.active_branch_id === branchId &&
             this.activeBranchHead(current) === expectedHead;
@@ -1375,7 +1278,7 @@ export class LorepiaAppController {
         const conversationId = state.selected_conversation?.id;
         const branchId = state.conversation_state?.active_branch_id;
         if (conversationId === undefined || branchId === undefined) {
-            ++this.memoryQueryRetryEpoch;
+            this.memoryQueryRetryEpoch.advance();
             this.update((current) => ({
                 ...current,
                 memory_query_retries: {
@@ -1390,7 +1293,7 @@ export class LorepiaAppController {
             return;
         }
         if (state.memory_query_retries.busy_id !== null) return;
-        const requestEpoch = ++this.memoryQueryRetryEpoch;
+        const requestEpoch = this.memoryQueryRetryEpoch.advance();
         this.update((current) => ({
             ...current,
             memory_query_retries: {
@@ -1422,7 +1325,7 @@ export class LorepiaAppController {
                 jobResult.status === 'rejected' ? errorLabel(jobResult.reason) : null;
             const current = get(this.mutable);
             if (
-                requestEpoch !== this.memoryQueryRetryEpoch ||
+                !this.memoryQueryRetryEpoch.isCurrent(requestEpoch) ||
                 current.selected_conversation?.id !== conversationId ||
                 current.conversation_state?.active_branch_id !== branchId
             ) {
@@ -1467,7 +1370,7 @@ export class LorepiaAppController {
         } catch (error: unknown) {
             const current = get(this.mutable);
             if (
-                requestEpoch !== this.memoryQueryRetryEpoch ||
+                !this.memoryQueryRetryEpoch.isCurrent(requestEpoch) ||
                 current.selected_conversation?.id !== conversationId ||
                 current.conversation_state?.active_branch_id !== branchId
             ) {
@@ -1528,7 +1431,7 @@ export class LorepiaAppController {
             this.announce(t('memory.retry.notice.acknowledge'));
             return false;
         }
-        ++this.memoryQueryRetryEpoch;
+        this.memoryQueryRetryEpoch.advance();
         this.update((current) => ({
             ...current,
             memory_query_retries: {
@@ -1639,7 +1542,7 @@ export class LorepiaAppController {
             this.announce(t('memory.retry.notice.acknowledge'));
             return false;
         }
-        ++this.memoryQueryRetryEpoch;
+        this.memoryQueryRetryEpoch.advance();
         this.update((current) => ({
             ...current,
             memory_query_retries: {
@@ -1730,7 +1633,7 @@ export class LorepiaAppController {
     private beginStreamReceiver(): { epoch: number; streamId: string } {
         this.detachStream();
         const streamId = this.activateStreamReceiver();
-        return { epoch: this.streamEpoch, streamId };
+        return { epoch: this.streamEpoch.current(), streamId };
     }
 
     private activateStreamReceiver(): string {
@@ -1776,7 +1679,7 @@ export class LorepiaAppController {
 
     private failStream(epoch: number, streamId: string, error: unknown): void {
         void this.disposeStream(streamId);
-        if (epoch !== this.streamEpoch) return;
+        if (!this.streamEpoch.isCurrent(epoch)) return;
         this.cancelPendingDeltas();
         this.update((state) => ({
             ...state,
@@ -1835,7 +1738,7 @@ export class LorepiaAppController {
                 sequenceBaseline,
                 streamId,
                 (item) => {
-                    if (epoch !== this.streamEpoch || this.activeStreamId !== streamId) {
+                    if (!this.streamEpoch.isCurrent(epoch) || this.activeStreamId !== streamId) {
                         void this.disposeStream(streamId);
                         return;
                     }
@@ -1843,7 +1746,7 @@ export class LorepiaAppController {
                     else buffered.push(item);
                 },
             );
-            if (epoch !== this.streamEpoch || this.activeStreamId !== streamId) {
+            if (!this.streamEpoch.isCurrent(epoch) || this.activeStreamId !== streamId) {
                 void this.disposeStream(streamId);
                 return false;
             }
@@ -1867,13 +1770,13 @@ export class LorepiaAppController {
             }));
             ready = true;
             for (const item of buffered) {
-                if (epoch !== this.streamEpoch || this.activeStreamId !== streamId) break;
+                if (!this.streamEpoch.isCurrent(epoch) || this.activeStreamId !== streamId) break;
                 this.acceptStreamItem(item, epoch, streamId);
             }
             return true;
         } catch (error: unknown) {
             void this.disposeStream(streamId);
-            if (epoch !== this.streamEpoch) return false;
+            if (!this.streamEpoch.isCurrent(epoch)) return false;
             const normalized = normalizeClientError(error);
             if (
                 normalized.code === 'generation_reattachment_unavailable' &&
@@ -1885,7 +1788,7 @@ export class LorepiaAppController {
             ) {
                 return false;
             }
-            if (epoch !== this.streamEpoch) return false;
+            if (!this.streamEpoch.isCurrent(epoch)) return false;
             this.streamVerifier = null;
             this.cancelPendingDeltas();
             this.update((state) => ({
@@ -1912,7 +1815,7 @@ export class LorepiaAppController {
                 this.client.listBranchMessages(conversationState.active_branch_id),
             ]);
             if (
-                epoch !== this.streamEpoch ||
+                !this.streamEpoch.isCurrent(epoch) ||
                 get(this.mutable).selected_conversation?.id !== conversationId
             ) {
                 return false;
@@ -1963,7 +1866,7 @@ export class LorepiaAppController {
 
     private acceptStreamItem(item: ChatStreamItemDto, epoch: number, streamId: string): void {
         if (this.reconcileInFlight !== null) {
-            if (epoch === this.streamEpoch && this.activeStreamId === streamId) {
+            if (this.streamEpoch.isCurrent(epoch) && this.activeStreamId === streamId) {
                 this.reconcileBufferedItems.push(item);
             }
             return;
@@ -2079,7 +1982,7 @@ export class LorepiaAppController {
             clearTimeout(this.deltaFlushTimer);
             this.deltaFlushTimer = null;
         }
-        if (epoch !== this.streamEpoch) {
+        if (!this.streamEpoch.isCurrent(epoch)) {
             this.pendingTextDelta = '';
             this.pendingReasoningDelta = '';
             return;
@@ -2133,13 +2036,13 @@ export class LorepiaAppController {
         }));
         try {
             await this.disposeStream(streamId);
-            if (epoch !== this.streamEpoch) return;
+            if (!this.streamEpoch.isCurrent(epoch)) return;
             const conversationState = await this.client.getConversationState(conversation.id);
             const [branches, messages] = await Promise.all([
                 this.client.listBranches(conversation.id),
                 this.client.listBranchMessages(conversationState.active_branch_id),
             ]);
-            if (epoch !== this.streamEpoch) return;
+            if (!this.streamEpoch.isCurrent(epoch)) return;
             const pendingAssistant = this.pendingAssistantMessage(messages, generationId);
             this.streamVerifier = null;
             this.update((state) => ({
@@ -2188,7 +2091,7 @@ export class LorepiaAppController {
             );
         } catch (error: unknown) {
             void this.disposeStream(streamId);
-            if (epoch !== this.streamEpoch) return;
+            if (!this.streamEpoch.isCurrent(epoch)) return;
             this.update((state) => ({
                 ...state,
                 chat: {
@@ -2221,8 +2124,8 @@ export class LorepiaAppController {
     }
 
     async loadProviders(): Promise<void> {
-        const epoch = ++this.providerEpoch;
-        const settingsEpoch = this.providerSettingsEpoch;
+        const epoch = this.providerEpoch.advance();
+        const settingsEpoch = this.providerSettingsEpoch.current();
         this.update((state) => ({
             ...state,
             providers: { ...state.providers, phase: 'loading', error: null },
@@ -2277,7 +2180,7 @@ export class LorepiaAppController {
                     this.client.listProviderModelSyncs(connection.id, 20),
                 ),
             );
-            if (epoch !== this.providerEpoch) return;
+            if (!this.providerEpoch.isCurrent(epoch)) return;
             this.update((state) => ({
                 ...state,
                 providers: {
@@ -2289,10 +2192,9 @@ export class LorepiaAppController {
                         legacy_profiles: overview.legacy_profiles,
                         routes,
                         presets: presetGroups.flat(),
-                        settings:
-                            settingsEpoch === this.providerSettingsEpoch
-                                ? overview.settings
-                                : state.providers.workspace.settings,
+                        settings: this.providerSettingsEpoch.isCurrent(settingsEpoch)
+                            ? overview.settings
+                            : state.providers.workspace.settings,
                         credential_statuses: Object.fromEntries(
                             credentialStates.map(({ target, status }) => [
                                 credentialKey(target),
@@ -2341,7 +2243,7 @@ export class LorepiaAppController {
                 },
             }));
         } catch (error: unknown) {
-            if (epoch !== this.providerEpoch) return;
+            if (!this.providerEpoch.isCurrent(epoch)) return;
             this.update((state) => ({
                 ...state,
                 providers: {
@@ -2561,17 +2463,12 @@ export class LorepiaAppController {
     }
 
     private storeProviderSettings(settings: AppSettingsDto): void {
-        ++this.providerSettingsEpoch;
+        this.providerSettingsEpoch.advance();
         this.updateProviderWorkspace((workspace) => ({ ...workspace, settings }));
     }
 
     private enqueueProviderSettingsMutation<T>(mutation: () => Promise<T>): Promise<T> {
-        const pending = this.providerSettingsMutationTail.then(mutation);
-        this.providerSettingsMutationTail = pending.then(
-            () => undefined,
-            () => undefined,
-        );
-        return pending;
+        return this.providerSettingsMutations.enqueue(mutation);
     }
 
     private storeModelSyncJob(job: ModelSyncJobDto): void {
@@ -2803,7 +2700,7 @@ export class LorepiaAppController {
     }
 
     async refreshProviderDiscovery(sessionId: string): Promise<void> {
-        const requestEpoch = ++this.discoveryRequestEpoch;
+        const requestEpoch = this.discoveryRequestEpoch.advance();
         this.updateProviderWorkspace((workspace) => ({
             ...workspace,
             selected_discovery_id: sessionId,
@@ -2813,7 +2710,7 @@ export class LorepiaAppController {
 
     private isCurrentDiscoveryRequest(sessionId: string, requestEpoch: number): boolean {
         return (
-            requestEpoch === this.discoveryRequestEpoch &&
+            this.discoveryRequestEpoch.isCurrent(requestEpoch) &&
             get(this.mutable).providers.workspace.selected_discovery_id === sessionId
         );
     }
@@ -2920,7 +2817,7 @@ export class LorepiaAppController {
     async pollSelectedProviderDiscoveryEvents(): Promise<void> {
         const selectedId = get(this.mutable).providers.workspace.selected_discovery_id;
         if (selectedId === null) return;
-        const requestEpoch = ++this.discoveryRequestEpoch;
+        const requestEpoch = this.discoveryRequestEpoch.advance();
         try {
             const result = await drainProviderDiscoveryEvents(this.client, selectedId, () =>
                 this.isCurrentDiscoveryRequest(selectedId, requestEpoch),
@@ -3187,7 +3084,7 @@ export class LorepiaAppController {
     private detachStream(): void {
         const streamId = this.activeStreamId;
         this.activeStreamId = null;
-        ++this.streamEpoch;
+        this.streamEpoch.advance();
         this.streamVerifier = null;
         this.reconcileInFlight = null;
         this.reconcileBufferedItems = [];
@@ -3196,11 +3093,11 @@ export class LorepiaAppController {
     }
 
     destroy(): void {
-        ++this.appEpoch;
-        ++this.conversationEpoch;
-        ++this.memoryQueryRetryEpoch;
-        ++this.providerEpoch;
-        ++this.discoveryRequestEpoch;
+        this.appEpoch.advance();
+        this.conversationEpoch.advance();
+        this.memoryQueryRetryEpoch.advance();
+        this.providerEpoch.advance();
+        this.discoveryRequestEpoch.advance();
         this.memorySupervisorUnlisten?.();
         this.memorySupervisorUnlisten = null;
         this.detachStream();
