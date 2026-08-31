@@ -12,7 +12,6 @@
     "apps/lorepia/src/features/orchestration/OrchestrationStudio.svelte": {"bytes": 263299, "lines": 4839},
     "apps/lorepia/src/features/orchestration/orchestration-controller.ts": {"bytes": 111702, "lines": 2818},
     "apps/lorepia/src/features/providers/ProviderSettings.svelte": {"bytes": 84143, "lines": 2073},
-    "apps/lorepia/src/lib/ipc/client.ts": {"bytes": 60531, "lines": 1678},
     "apps/lorepia/src/styles/app.css": {"bytes": 120338, "lines": 4344},
     "crates/chat/src/generation.rs": {"bytes": 104268, "lines": 2799},
     "crates/content/src/package.rs": {"bytes": 116140, "lines": 3179},

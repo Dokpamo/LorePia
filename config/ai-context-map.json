@@ -748,12 +748,10 @@
       }
     },
     "IPC-002": {
-      "baseline_context_bytes": 271728,
       "commands": [
         "npm run test --prefix apps/lorepia -- src/lib/ipc"
       ],
       "max_context_bytes": 250000,
-      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
       "paths": {
         "documents": [
           "apps/lorepia/src/AGENTS.md"
@@ -762,7 +760,17 @@
           "apps/lorepia/src/lib/ipc/client.ts"
         ],
         "implementation": [
-          "apps/lorepia/src/lib/ipc/contracts.ts"
+          "apps/lorepia/src/lib/ipc/clients/content-import.ts",
+          "apps/lorepia/src/lib/ipc/clients/conversation.ts",
+          "apps/lorepia/src/lib/ipc/clients/discovery.ts",
+          "apps/lorepia/src/lib/ipc/clients/interaction.ts",
+          "apps/lorepia/src/lib/ipc/clients/library.ts",
+          "apps/lorepia/src/lib/ipc/clients/module-lifecycle.ts",
+          "apps/lorepia/src/lib/ipc/clients/orchestration.ts",
+          "apps/lorepia/src/lib/ipc/clients/provider.ts",
+          "apps/lorepia/src/lib/ipc/clients/transport.ts",
+          "apps/lorepia/src/lib/ipc/contracts.ts",
+          "config/ipc-commands.json"
         ],
         "tests": [
           "apps/lorepia/src/lib/ipc/client.test.ts"
