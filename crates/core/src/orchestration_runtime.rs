@@ -5,6 +5,9 @@
 //! conversation lineage, active content policy, model capabilities, and
 //! compare-and-swap inputs before asking storage to mutate durable state.
 
+mod module_runtime;
+mod plan;
+
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     future::Future,
@@ -15,26 +18,25 @@ use std::{
 
 use chrono::Utc;
 use lorepia_domain::{
-    ApiFamily, AssetDescriptor, AssetId, AuxiliaryTaskKind, CapabilityKey, CapabilityValue,
-    ConversationBranch, ConversationBranchId, ConversationId, ConversationMode, CoreError,
-    CoreErrorCode, CoreResult, GenerationId, GenerationTarget, InteractionAction,
-    InteractionEffect, InteractionEvent, InteractionProposalDecision, InteractionProposalRecord,
-    InteractionProposalRecordId, InteractionProposalStatus, InteractionRule, InteractionRuleId,
-    InteractionRuleSet, InteractionRuleSetId, InteractionState, KnowledgeEntryId, MemoryJob,
-    MemoryJobId, MemoryJobKind, MemoryJobStatus, MemoryKind, MemoryProfile, MemoryProfileId,
-    MemoryRecord, MemoryRecordId, Message, MessageId, MessageRole, MessageStatus,
-    ModelAvailability, ModelRouteId, ModuleComponentRef, ModuleScope, PromptPreset, PromptPresetId,
-    Provenance, ProviderConnection, ProviderConnectionId, Sha256Digest, SourceKind, SupportStatus,
-    TaskProfile, TaskProfileId, TransformPhase, TransformSet, TransformSetId, UiRegion,
-    ValidateOrchestration, VariableMap, VersionedJson,
+    ApiFamily, AssetId, AuxiliaryTaskKind, CapabilityKey, ConversationBranch, ConversationBranchId,
+    ConversationId, CoreError, CoreErrorCode, CoreResult, GenerationId, GenerationTarget,
+    InteractionAction, InteractionEffect, InteractionEvent, InteractionProposalDecision,
+    InteractionProposalRecord, InteractionProposalRecordId, InteractionProposalStatus,
+    InteractionRule, InteractionRuleId, InteractionRuleSet, InteractionRuleSetId, InteractionState,
+    KnowledgeEntryId, MemoryJob, MemoryJobId, MemoryJobKind, MemoryJobStatus, MemoryKind,
+    MemoryProfile, MemoryProfileId, MemoryRecord, MemoryRecordId, Message, MessageId, MessageRole,
+    MessageStatus, ModelAvailability, ModelRouteId, PromptPreset, PromptPresetId, Provenance,
+    ProviderConnection, ProviderConnectionId, Sha256Digest, SourceKind, TaskProfile, TaskProfileId,
+    TransformPhase, TransformSet, TransformSetId, UiRegion, ValidateOrchestration, VariableMap,
+    VersionedJson,
 };
 use lorepia_orchestration::{
     AppliedModuleRuntimePlan, InteractionCompileOptions, InteractionContext, InteractionEngine,
     InteractionLimits, InteractionOutcome, InteractionRuleStatus, InteractionTemplateValues,
     KnowledgeWorkBudget, MemoryJobKeyInput, MemorySemanticScore, ModuleMergeReview,
-    ModuleResolutionContext, ResolvedModuleComponent, TransformApplyOptions,
-    TransformCompileOptions, TransformContext, TransformLimits, TransformPipeline, TransformResult,
-    decide_pending, derive_memory_job_idempotency_key, expire_pending_proposal,
+    TransformApplyOptions, TransformCompileOptions, TransformContext, TransformLimits,
+    TransformPipeline, TransformResult, decide_pending, derive_memory_job_idempotency_key,
+    expire_pending_proposal,
 };
 use lorepia_providers::{
     AdapterRegistry, EmbeddingProvider, EmbeddingPurpose, EmbeddingRequest, EmbeddingRunOutcome,
@@ -56,12 +58,11 @@ use lorepia_storage::{
     KnowledgeEmbeddingCoverageQuery, LifecycleOccurrenceKind, MemoryEmbeddingJobInput,
     MemoryEmbeddingJobSeed, MemoryEmbeddingQuery, MemoryEmbeddingRecord, MemoryJobEnqueue,
     MemoryJobFinish, MemoryJobInterruption, MemoryQueryEmbeddingIntent, MemoryQueryEmbeddingStatus,
-    MemoryRecordExclusionScope, MemoryRecordUserPatch, ModuleRevisionComponentSnapshot,
-    ObjectRevision, PromptPresetBinding, RetryableGenerationAttemptProjection,
-    StoredGenerationAttempt, StoredGenerationAttemptProposal, StoredInteractionDerivedEvent,
-    StoredInteractionEvent, StoredInteractionProposal, StoredInteractionState,
-    StoredLifecycleOccurrence, StoredMemoryJobQueueEntry, StoredMemoryQueryEmbedding,
-    StoredRevision, built_in_prompt_presets, generation_attempt_derived_chain_sha256,
+    MemoryRecordExclusionScope, MemoryRecordUserPatch, ObjectRevision,
+    RetryableGenerationAttemptProjection, StoredGenerationAttempt, StoredGenerationAttemptProposal,
+    StoredInteractionDerivedEvent, StoredInteractionEvent, StoredInteractionProposal,
+    StoredInteractionState, StoredLifecycleOccurrence, StoredMemoryJobQueueEntry,
+    StoredMemoryQueryEmbedding, StoredRevision, generation_attempt_derived_chain_sha256,
     generation_attempt_derived_closure_sha256, generation_attempt_derived_event_sha256,
     generation_attempt_derived_transition_commit_sha256,
     generation_attempt_derived_transition_sha256, interaction_action_sha256,
@@ -71,6 +72,10 @@ use lorepia_storage::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use self::module_runtime::{ApprovedRuntimeAsset, ResolvedModuleRuntime, module_plan_error};
+pub(crate) use self::module_runtime::{
+    apply_exact_transform_runtime_overlay, collect_exact_component_import_approvals,
+};
 use crate::{
     ConnectionBoundCredential, Core, InteractionChoiceSelectionReceipt, Revisioned,
     app::{
@@ -403,26 +408,6 @@ enum ProcessedCoreLifecycleOccurrence {
 enum MemorySummaryHeadAuthority {
     CurrentBranchHead,
     HistoricalCommittedHead,
-}
-
-#[derive(Debug, Clone, Default)]
-struct ResolvedModuleRuntime {
-    plan_sha256: Option<String>,
-    variables: VariableMap,
-    transform_sets: Vec<ObjectRevision<TransformSet>>,
-    interaction_rule_sets: Vec<ObjectRevision<InteractionRuleSet>>,
-    knowledge_books: Vec<ObjectRevision<lorepia_domain::KnowledgeBook>>,
-    assets: BTreeMap<AssetId, ApprovedRuntimeAsset>,
-    approved_import_source_ids: BTreeSet<String>,
-    approved_module_sources: BTreeSet<(String, String, String)>,
-}
-
-#[derive(Debug, Clone)]
-struct ApprovedRuntimeAsset {
-    descriptor: AssetDescriptor,
-    module_id: String,
-    module_revision_id: String,
-    component_sha256: String,
 }
 
 #[derive(Debug, Clone)]
@@ -3865,430 +3850,6 @@ impl Core {
         Ok(covered_ranges)
     }
 
-    fn resolve_runtime_modules(
-        &self,
-        conversation_id: &ConversationId,
-        branch_id: &ConversationBranchId,
-    ) -> CoreResult<ResolvedModuleRuntime> {
-        let conversation = self.storage().get_conversation(conversation_id)?;
-        let branch = self.storage().get_conversation_branch(branch_id)?;
-        if branch.conversation_id != *conversation_id {
-            return Err(CoreError::new(
-                CoreErrorCode::NotFound,
-                "conversation branch was not found in the conversation",
-                false,
-            ));
-        }
-        let persona_id = self
-            .storage()
-            .get_conversation_persona_selection(conversation_id)?
-            .map(|selection| selection.value.persona_id);
-        let context = ModuleResolutionContext {
-            local_user_id: self.storage().load_settings()?.local_user_id,
-            persona_id,
-            character_id: Some(conversation.character_id.clone()),
-            conversation_id: Some(conversation_id.0.clone()),
-            branch_id: Some(branch_id.0.clone()),
-            supported_capabilities: crate::module_orchestration::SUPPORTED_CONTENT_CAPABILITIES
-                .to_vec(),
-        };
-        let bindings = self.storage().list_all_module_bindings()?;
-        let has_applicable_approved_binding = bindings.iter().any(|stored| {
-            stored.deleted_at.is_none()
-                && stored.value.enabled
-                && stored.value.approved
-                && module_binding_applies_to_runtime(&stored.value, &context)
-        });
-        if !has_applicable_approved_binding {
-            return Ok(ResolvedModuleRuntime::default());
-        }
-
-        // Exactly one full-context applied plan is authoritative. Replaying
-        // each binding's historical activation plan independently would
-        // resurrect components that lost a later composition conflict.
-        let approved = self.resolve_applied_content_module_runtime_plan(&context)?;
-        self.materialize_resolved_module_runtime(&approved)
-    }
-
-    /// Resolves one not-yet-materialized branch against the exact runtime
-    /// module context that the later atomic branch append will promote.
-    ///
-    /// `None` is authoritative only when no approved binding applies. It is
-    /// distinct from a failed or ambiguous materialization, both of which fail
-    /// closed before any generation attempt can advance.
-    pub(crate) fn preview_module_runtime_authority_for_proposed_branch(
-        &self,
-        conversation_id: &ConversationId,
-        branch_id: &ConversationBranchId,
-    ) -> CoreResult<(ModuleMergeReview, Option<AppliedModuleRuntimePlan>)> {
-        let context =
-            self.content_module_context_for_proposed_branch(conversation_id, branch_id)?;
-        let review = self.review_current_content_module_runtime(&context)?;
-        if review.ordered_bindings.is_empty() {
-            return Ok((review, None));
-        }
-        let approved = self
-            .storage()
-            .preview_applied_module_runtime_plan(&review)?;
-        approved.verify().map_err(module_plan_error)?;
-        if approved.review.context != context {
-            return Err(CoreError::new(
-                CoreErrorCode::StorageCorrupted,
-                "previewed module plan differs from its proposed branch context",
-                false,
-            ));
-        }
-        Ok((review, Some(approved)))
-    }
-
-    fn materialize_resolved_module_runtime(
-        &self,
-        approved: &AppliedModuleRuntimePlan,
-    ) -> CoreResult<ResolvedModuleRuntime> {
-        approved.verify().map_err(module_plan_error)?;
-        let ordered_binding_ids = approved
-            .plan
-            .ordered_binding_ids
-            .iter()
-            .map(lorepia_domain::ModuleBindingId::as_str)
-            .collect::<BTreeSet<_>>();
-        let mut approved_module_sources = BTreeSet::new();
-        for source in approved.plan.components.iter().flat_map(|component| {
-            std::iter::once(&component.selected_source).chain(component.coalesced_sources.iter())
-        }) {
-            if !ordered_binding_ids.contains(source.binding_id.as_str()) {
-                return Err(CoreError::new(
-                    CoreErrorCode::StorageCorrupted,
-                    "approved module component names a source outside the approved binding order",
-                    false,
-                ));
-            }
-            approved_module_sources.insert((
-                source.module_id.as_str().to_owned(),
-                source.revision_id.as_str().to_owned(),
-                source.revision_source_sha256.as_str().to_owned(),
-            ));
-        }
-
-        let mut runtime = ResolvedModuleRuntime {
-            plan_sha256: Some(approved.applied_plan_sha256.as_str().to_owned()),
-            variables: approved.plan.effective_variable_overrides.clone(),
-            approved_module_sources,
-            ..ResolvedModuleRuntime::default()
-        };
-        for component in &approved.plan.components {
-            self.materialize_runtime_component(&mut runtime, component)?;
-        }
-        runtime.variables.validate().map_err(|error| {
-            CoreError::invalid(format!("module variables are invalid: {error}"))
-        })?;
-        runtime
-            .transform_sets
-            .sort_by(|left, right| left.value.id.cmp(&right.value.id));
-        runtime
-            .knowledge_books
-            .sort_by(|left, right| left.value.id.cmp(&right.value.id));
-        Ok(runtime)
-    }
-
-    fn materialize_runtime_component(
-        &self,
-        runtime: &mut ResolvedModuleRuntime,
-        component: &ResolvedModuleComponent,
-    ) -> CoreResult<()> {
-        let snapshot = self.load_approved_content_module_component(
-            &crate::module_orchestration::ApprovedContentModuleComponent {
-                component: component.component.clone(),
-                component_sha256: component.sha256.clone(),
-                selected_source: component.selected_source.clone(),
-                runtime_enabled: component.runtime_enabled,
-            },
-        )?;
-        match (&component.component, snapshot) {
-            (
-                ModuleComponentRef::TransformSet { .. },
-                ModuleRevisionComponentSnapshot::TransformSet(mut transform_set),
-            ) => {
-                apply_exact_transform_runtime_overlay(
-                    &mut transform_set.value,
-                    component.runtime_enabled,
-                );
-                if component.runtime_enabled {
-                    collect_exact_component_import_approvals(
-                        &transform_set.value.provenance,
-                        transform_set
-                            .value
-                            .rules
-                            .iter()
-                            .map(|rule| &rule.provenance),
-                        &mut runtime.approved_import_source_ids,
-                    )?;
-                }
-                runtime.transform_sets.push(transform_set);
-            }
-            (
-                ModuleComponentRef::InteractionRuleSet { .. },
-                ModuleRevisionComponentSnapshot::InteractionRuleSet(mut rule_set),
-            ) => {
-                apply_exact_interaction_runtime_overlay(
-                    &mut rule_set.value,
-                    component.runtime_enabled,
-                );
-                if component.runtime_enabled {
-                    collect_exact_component_import_approvals(
-                        &rule_set.value.provenance,
-                        rule_set.value.rules.iter().map(|rule| &rule.provenance),
-                        &mut runtime.approved_import_source_ids,
-                    )?;
-                }
-                runtime.interaction_rule_sets.push(rule_set);
-            }
-            (
-                ModuleComponentRef::KnowledgeBook { .. },
-                ModuleRevisionComponentSnapshot::KnowledgeBook(book),
-            ) => runtime.knowledge_books.push(book),
-            (
-                ModuleComponentRef::Asset { id },
-                ModuleRevisionComponentSnapshot::Asset(descriptor),
-            ) => Self::materialize_runtime_asset(runtime, component, id, descriptor)?,
-            (
-                ModuleComponentRef::PromptBlock { .. },
-                ModuleRevisionComponentSnapshot::PromptBlock(_),
-            )
-            | (ModuleComponentRef::Control { .. }, ModuleRevisionComponentSnapshot::Control(_)) => {
-            }
-            _ => {
-                return Err(CoreError::new(
-                    CoreErrorCode::StorageCorrupted,
-                    "approved module component resolved to the wrong immutable type",
-                    false,
-                ));
-            }
-        }
-        Ok(())
-    }
-
-    fn materialize_runtime_asset(
-        runtime: &mut ResolvedModuleRuntime,
-        component: &ResolvedModuleComponent,
-        id: &AssetId,
-        descriptor: AssetDescriptor,
-    ) -> CoreResult<()> {
-        if descriptor.id != *id {
-            return Err(CoreError::new(
-                CoreErrorCode::StorageCorrupted,
-                "approved module asset identity differs from its component",
-                false,
-            ));
-        }
-        let evidence = ApprovedRuntimeAsset {
-            descriptor,
-            module_id: component.selected_source.module_id.as_str().to_owned(),
-            module_revision_id: component.selected_source.revision_id.as_str().to_owned(),
-            component_sha256: component.sha256.as_str().to_owned(),
-        };
-        if runtime.assets.insert(id.clone(), evidence).is_some() {
-            return Err(CoreError::new(
-                CoreErrorCode::StorageCorrupted,
-                "approved module plan contains duplicate asset identities",
-                false,
-            ));
-        }
-        Ok(())
-    }
-
-    fn supported_capabilities_for_route(
-        &self,
-        route_id: &ModelRouteId,
-    ) -> CoreResult<Vec<CapabilityKey>> {
-        const KEYS: [CapabilityKey; 16] = [
-            CapabilityKey::Streaming,
-            CapabilityKey::Reasoning,
-            CapabilityKey::PromptCaching,
-            CapabilityKey::ToolCalling,
-            CapabilityKey::ParallelToolCalling,
-            CapabilityKey::StructuredOutput,
-            CapabilityKey::JsonMode,
-            CapabilityKey::ImageInput,
-            CapabilityKey::AudioInput,
-            CapabilityKey::AudioOutput,
-            CapabilityKey::Logprobs,
-            CapabilityKey::Seed,
-            CapabilityKey::Batch,
-            CapabilityKey::Background,
-            CapabilityKey::ContextWindow,
-            CapabilityKey::MaxOutputTokens,
-        ];
-        let mut supported = Vec::new();
-        for key in KEYS {
-            let Some(capability) = self.effective_capability(route_id, key)? else {
-                continue;
-            };
-            if capability.has_conflict
-                || capability.selected_is_stale
-                || matches!(
-                    capability.selected.status,
-                    SupportStatus::Unsupported | SupportStatus::Unknown
-                )
-                || matches!(capability.selected.value, CapabilityValue::Boolean(false))
-            {
-                continue;
-            }
-            supported.push(key);
-        }
-        Ok(supported)
-    }
-
-    fn runtime_selected_capabilities(&self) -> CoreResult<Vec<CapabilityKey>> {
-        let settings = self.storage().load_settings()?;
-        settings.selected_model_route_id.as_ref().map_or_else(
-            || Ok(Vec::new()),
-            |route_id| self.supported_capabilities_for_route(route_id),
-        )
-    }
-
-    fn select_memory_prompt_binding(
-        &self,
-        scopes: &[(ModuleScope, Option<&str>)],
-    ) -> CoreResult<Option<PromptPresetBinding>> {
-        for &(scope, target_id) in scopes {
-            if scope == ModuleScope::Persona && target_id.is_none() {
-                continue;
-            }
-            let mut enabled = self
-                .storage()
-                .list_prompt_preset_bindings(scope, target_id)?
-                .into_iter()
-                .filter(|stored| stored.deleted_at.is_none() && stored.value.enabled)
-                .collect::<Vec<_>>();
-            enabled.sort_by(|left, right| {
-                right
-                    .value
-                    .priority
-                    .cmp(&left.value.priority)
-                    .then_with(|| left.value.id.cmp(&right.value.id))
-            });
-            if enabled.len() > 1 && enabled[0].value.priority == enabled[1].value.priority {
-                return Err(CoreError::invalid(
-                    "multiple prompt bindings with equal priority apply to memory runtime",
-                ));
-            }
-            if let Some(stored) = enabled.into_iter().next() {
-                if !stored.value.memory_enabled {
-                    return Err(CoreError::new(
-                        CoreErrorCode::PermissionDenied,
-                        "memory is disabled by the active prompt binding",
-                        false,
-                    ));
-                }
-                return Ok(Some(stored.value));
-            }
-        }
-        Ok(None)
-    }
-
-    fn resolve_runtime_prompt_policy(
-        &self,
-        conversation_id: &ConversationId,
-        branch_id: &ConversationBranchId,
-    ) -> CoreResult<ResolvedPromptRuntimePolicy> {
-        let conversation = self.storage().get_conversation(conversation_id)?;
-        let state = self.storage().get_conversation_state(conversation_id)?;
-        let persona_target = self
-            .storage()
-            .get_conversation_persona_selection(conversation_id)?
-            .map(|selection| selection.value.persona_id.as_str().to_owned());
-        let scopes = [
-            (ModuleScope::Branch, Some(branch_id.0.as_str())),
-            (ModuleScope::Conversation, Some(conversation_id.0.as_str())),
-            (
-                ModuleScope::Character,
-                Some(conversation.character_id.as_str()),
-            ),
-            (ModuleScope::Persona, persona_target.as_deref()),
-            (ModuleScope::User, None),
-            (ModuleScope::App, None),
-        ];
-        let selected_binding = self.select_memory_prompt_binding(&scopes)?;
-        let preset_id = selected_binding.as_ref().map_or_else(
-            || match state.selected_mode {
-                ConversationMode::Chat => built_in_prompt_presets()[0].id.clone(),
-                ConversationMode::Story => built_in_prompt_presets()[1].id.clone(),
-            },
-            |binding| binding.prompt_preset_id.clone(),
-        );
-        let stored_preset = self.storage().get_prompt_preset(&preset_id)?;
-        let preset_revision_id = stored_preset.revision_id.clone().ok_or_else(|| {
-            CoreError::internal("prompt preset is missing immutable revision identity")
-        })?;
-        if let Some(binding) = &selected_binding
-            && let Some(pinned) = &binding.pinned_revision_id
-            && pinned != &preset_revision_id
-        {
-            return Err(CoreError::invalid(
-                "active prompt binding no longer matches its pinned revision",
-            ));
-        }
-
-        let modules = self.resolve_runtime_modules(conversation_id, branch_id)?;
-        self.validate_prompt_preset_module_dependencies(&preset_revision_id, &modules)?;
-        let mut variables = stored_preset.value.default_values.clone();
-        if let Some(binding) = &selected_binding {
-            merge_variables(&mut variables, &binding.variable_overrides);
-        }
-        merge_variables(&mut variables, &modules.variables);
-        let approved_import_source_ids = modules.approved_import_source_ids.clone();
-        let exact_preset_transform_sets = self
-            .storage()
-            .get_prompt_preset_transform_set_revisions(&preset_revision_id)?;
-        variables.validate().map_err(|error| {
-            CoreError::invalid(format!("memory runtime variables are invalid: {error}"))
-        })?;
-
-        let mut transform_sets =
-            Vec::with_capacity(exact_preset_transform_sets.len() + modules.transform_sets.len());
-        let mut transform_revisions =
-            Vec::with_capacity(exact_preset_transform_sets.len() + modules.transform_sets.len());
-        for exact in exact_preset_transform_sets {
-            transform_revisions.push(RuntimeTransformRevision {
-                transform_set_id: exact.value.id.clone(),
-                revision: exact.revision,
-                revision_id: exact.revision_id,
-                sha256: exact.sha256,
-            });
-            transform_sets.push(exact.value);
-        }
-        for stored in &modules.transform_sets {
-            if transform_sets
-                .iter()
-                .any(|transform_set| transform_set.id == stored.value.id)
-            {
-                return Err(CoreError::invalid(
-                    "prompt preset and approved module select the same transform set ambiguously",
-                ));
-            }
-            transform_revisions.push(RuntimeTransformRevision {
-                transform_set_id: stored.value.id.clone(),
-                revision: stored.revision,
-                revision_id: stored.revision_id.clone(),
-                sha256: stored.sha256.clone(),
-            });
-            transform_sets.push(stored.value.clone());
-        }
-        transform_revisions
-            .sort_by(|left, right| left.transform_set_id.cmp(&right.transform_set_id));
-        transform_sets.sort_by(|left, right| left.id.cmp(&right.id));
-        Ok(ResolvedPromptRuntimePolicy {
-            preset: stored_preset.value,
-            preset_revision_id,
-            module_plan_sha256: modules.plan_sha256,
-            variables,
-            transform_sets,
-            transform_revisions,
-            approved_import_source_ids,
-        })
-    }
-
     fn resolve_interaction_policy(
         &self,
         conversation_id: &ConversationId,
@@ -4740,34 +4301,6 @@ impl Core {
         Ok(())
     }
 
-    fn validate_prompt_preset_module_dependencies(
-        &self,
-        prompt_preset_revision_id: &str,
-        modules: &ResolvedModuleRuntime,
-    ) -> CoreResult<()> {
-        let dependencies = self
-            .storage()
-            .get_prompt_preset_module_dependencies(prompt_preset_revision_id)?;
-        for dependency in dependencies {
-            let identity = (
-                dependency.module_id.as_str().to_owned(),
-                dependency.module_revision_id.as_str().to_owned(),
-                dependency.source_sha256.as_str().to_owned(),
-            );
-            if !modules.approved_module_sources.contains(&identity) {
-                return Err(CoreError::new(
-                    CoreErrorCode::PermissionDenied,
-                    format!(
-                        "prompt preset module dependency {} is not present at its exact approved revision",
-                        dependency.module_id.as_str()
-                    ),
-                    false,
-                ));
-            }
-        }
-        Ok(())
-    }
-
     fn prepare_interaction_review_from_state(
         &self,
         request: &InteractionReviewRequest,
@@ -5037,133 +4570,6 @@ pub(crate) fn core_lifecycle_retry_seconds(delivery_attempts: u64) -> i64 {
         .checked_shl(exponent)
         .unwrap_or(MAX_CORE_LIFECYCLE_RETRY_SECONDS)
         .min(MAX_CORE_LIFECYCLE_RETRY_SECONDS)
-}
-
-fn module_binding_applies_to_runtime(
-    binding: &lorepia_domain::ModuleBinding,
-    context: &ModuleResolutionContext,
-) -> bool {
-    match binding.scope {
-        ModuleScope::App | ModuleScope::User => {
-            binding.target_id.is_none() && binding.conversation_id.is_none()
-        }
-        ModuleScope::Persona => {
-            binding.target_id.as_deref()
-                == context
-                    .persona_id
-                    .as_ref()
-                    .map(lorepia_domain::PersonaId::as_str)
-        }
-        ModuleScope::Character => binding.target_id == context.character_id,
-        ModuleScope::Conversation => binding.target_id == context.conversation_id,
-        ModuleScope::Branch => {
-            binding.target_id == context.branch_id
-                && binding
-                    .conversation_id
-                    .as_ref()
-                    .map(|conversation_id| conversation_id.0.as_str())
-                    == context.conversation_id.as_deref()
-        }
-    }
-}
-
-pub(crate) fn apply_exact_transform_runtime_overlay(
-    transform_set: &mut TransformSet,
-    runtime_enabled: bool,
-) {
-    if !runtime_enabled {
-        transform_set.enabled = false;
-        for rule in &mut transform_set.rules {
-            rule.enabled = false;
-            rule.imported_enabled = false;
-        }
-        return;
-    }
-    if is_imported_runtime_provenance(&transform_set.provenance) {
-        transform_set.enabled = transform_set.imported_author_enabled;
-    }
-    for rule in &mut transform_set.rules {
-        if is_imported_runtime_provenance(&rule.provenance) {
-            rule.enabled = rule.imported_author_enabled;
-            rule.imported_enabled = rule.imported_author_enabled;
-        }
-    }
-}
-
-fn apply_exact_interaction_runtime_overlay(
-    rule_set: &mut InteractionRuleSet,
-    runtime_enabled: bool,
-) {
-    for rule in &mut rule_set.rules {
-        if !runtime_enabled {
-            rule.enabled = false;
-        } else if is_imported_runtime_provenance(&rule.provenance) {
-            rule.enabled = rule.imported_author_enabled;
-        }
-    }
-}
-
-fn is_imported_runtime_provenance(provenance: &Provenance) -> bool {
-    matches!(
-        provenance.source_kind,
-        SourceKind::ImportedPackage | SourceKind::ImportedStandard
-    )
-}
-
-pub(crate) fn collect_exact_component_import_approvals<'a>(
-    component_provenance: &Provenance,
-    child_provenance: impl IntoIterator<Item = &'a Provenance>,
-    approvals: &mut BTreeSet<String>,
-) -> CoreResult<()> {
-    let component_source = imported_runtime_source_id(component_provenance)?;
-    if let Some(source_id) = component_source {
-        approvals.insert(source_id.to_owned());
-    }
-    for provenance in child_provenance {
-        let Some(source_id) = imported_runtime_source_id(provenance)? else {
-            continue;
-        };
-        if component_source.is_some_and(|component| component != source_id) {
-            return Err(CoreError::new(
-                CoreErrorCode::PermissionDenied,
-                "an imported approved component contains a child from a different source",
-                false,
-            ));
-        }
-        approvals.insert(source_id.to_owned());
-    }
-    Ok(())
-}
-
-fn imported_runtime_source_id(provenance: &Provenance) -> CoreResult<Option<&str>> {
-    if matches!(
-        provenance.source_kind,
-        SourceKind::ImportedPackage | SourceKind::ImportedStandard
-    ) {
-        return provenance
-            .source_id
-            .as_deref()
-            .filter(|source_id| !source_id.is_empty())
-            .map(Some)
-            .ok_or_else(|| {
-                CoreError::new(
-                    CoreErrorCode::PermissionDenied,
-                    "approved imported runtime content has no source identity",
-                    false,
-                )
-            });
-    }
-    Ok(None)
-}
-
-fn module_plan_error(error: impl std::fmt::Display) -> CoreError {
-    CoreError::invalid(format!("invalid approved module runtime plan: {error}"))
-}
-
-fn merge_variables(target: &mut VariableMap, source: &VariableMap) {
-    for binding in &source.values {
-        target.insert(binding.variable.clone(), binding.value.clone());
-    }
 }
 
 #[derive(Debug)]
