@@ -32,8 +32,12 @@ class GithubWorkflowSecurityTests(unittest.TestCase):
             ci = root / ".github/workflows/ci.yml"
             text = ci.read_text(encoding="utf-8")
             text = text.replace(
-                'python3 scripts/check_ai_context_map.py --base-ref "$SOURCE_RATCHET_BASE"',
-                '# python3 scripts/check_ai_context_map.py --base-ref "$SOURCE_RATCHET_BASE"',
+                'python3 scripts/check_ai_context_map.py --strict-budget --base-ref "$SOURCE_RATCHET_BASE"',
+                '# python3 scripts/check_ai_context_map.py --strict-budget --base-ref "$SOURCE_RATCHET_BASE"',
+            )
+            text = text.replace(
+                "python3 scripts/report_refactoring_baseline.py --check",
+                "# python3 scripts/report_refactoring_baseline.py --check",
             )
             text = text.replace(
                 "scripts/test_check_ai_context_map.py \\\n",
@@ -51,6 +55,8 @@ class GithubWorkflowSecurityTests(unittest.TestCase):
 
             failures = evaluate_workflow_security(root)
             self.assertTrue(any("--base-ref" in item for item in failures))
+            self.assertTrue(any("--strict-budget" in item for item in failures))
+            self.assertTrue(any("report_refactoring_baseline.py" in item for item in failures))
             self.assertTrue(any("test_check_ai_context_map.py" in item for item in failures))
             self.assertTrue(
                 any("test_check_github_workflow_security.py" in item for item in failures)

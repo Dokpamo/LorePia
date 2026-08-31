@@ -1,0 +1,100 @@
+{
+  "approved_hotspot_exceptions": [],
+  "expected_task_count": 59,
+  "overall_status": "incomplete",
+  "phase_gates": {
+    "A": {
+      "github_checks": {"commit": null, "run_url": null, "status": "not_run"},
+      "local_validation": {"commit": null, "status": "pending"},
+      "status": "incomplete"
+    },
+    "B": {
+      "github_checks": {"commit": null, "run_url": null, "status": "not_run"},
+      "local_validation": {"commit": null, "status": "pending"},
+      "status": "incomplete"
+    },
+    "C": {
+      "github_checks": {"commit": null, "run_url": null, "status": "not_run"},
+      "local_validation": {"commit": null, "status": "pending"},
+      "status": "incomplete"
+    },
+    "D": {
+      "github_checks": {"commit": null, "run_url": null, "status": "not_run"},
+      "local_validation": {"commit": null, "status": "pending"},
+      "status": "incomplete"
+    },
+    "E": {
+      "github_checks": {"commit": null, "run_url": null, "status": "not_run"},
+      "local_validation": {"commit": null, "status": "pending"},
+      "status": "incomplete"
+    },
+    "F": {
+      "github_checks": {"commit": null, "run_url": null, "status": "not_run"},
+      "local_validation": {"commit": null, "status": "pending"},
+      "status": "incomplete"
+    }
+  },
+  "policy": "A complete task requires ancestor commit evidence. A complete phase requires task completion plus commit-bound local and GitHub evidence. Overall completion also requires every P0 plan target to be met or explicitly approved.",
+  "tasks": {
+    "CORE-APP-001": {"evidence_commits": ["fabc73d2b5ccdb297063db8699e005c9b1c4eca4"], "status": "complete"},
+    "CORE-CONTENT-001": {"evidence_commits": ["8f5f656798c3f8a6c36e37289cd6e71563ffe631"], "status": "complete"},
+    "CORE-DISC-001": {"evidence_commits": ["3dca161034494c553de52fc709c09f3e4c4f0400"], "status": "complete"},
+    "CORE-DISC-002": {"evidence_commits": ["779e8c0e7a6655cc91487c22e1479afa9b2667a7"], "status": "complete"},
+    "CORE-DISC-003": {"evidence_commits": ["d129075fc40bee1d01a4d23b5f40b19aaf3abf15"], "status": "complete"},
+    "CORE-GEN-001": {"evidence_commits": ["ab75c7737584c52936b862bbe06a1a5f56f038fe"], "status": "complete"},
+    "CORE-GEN-002": {"evidence_commits": ["be220f31e6fbc29dcf7e98c5ad8abd1d91d014b7"], "status": "complete"},
+    "CORE-GEN-003": {"evidence_commits": ["691f694d124e05717df0e1badad213aee74ebc23"], "status": "complete"},
+    "CORE-IMPORT-001": {"evidence_commits": ["5be70e92e4b0d52d65b063e4d84b4c7ff2b4faa8"], "status": "complete"},
+    "CORE-ORCH-001": {"evidence_commits": ["8e3f66126f9e64baff2895a27951e3dc40f47269"], "status": "complete"},
+    "CORE-ORCH-002": {"evidence_commits": ["d921418878ce06238be47652ac10a4ba2fec17c4"], "status": "complete"},
+    "CORE-ORCH-003": {"evidence_commits": ["71ad36626c59a6a221ab5f406fcf3c2fd6cbfbad"], "status": "complete"},
+    "CORE-PROV-001": {"evidence_commits": ["72706b7d9771e614167e6c7ca751871970847a34"], "status": "complete"},
+    "ENF-001": {"evidence_commits": ["00a881131a04cdd998996a7ea03e5462ab72e16b"], "status": "complete"},
+    "ENF-002": {"evidence_commits": ["0bfafdd32a1d7b58c6c8fb261eb8b5c8f32a62b5"], "status": "complete"},
+    "ENF-003": {"evidence_commits": ["49e6df6bf496f08a9c39d1ab9e4a795a9494ce4c"], "status": "complete"},
+    "ENF-004": {"evidence_commits": [], "status": "in_progress"},
+    "FE-APP-001": {"evidence_commits": ["1cc8065c71f131f19d369e958c34816ddaacfa60"], "status": "complete"},
+    "FE-APP-002": {"evidence_commits": ["afb9054f61f3e628e5c7d4908aef4e6eaf7c418d"], "status": "complete"},
+    "FE-APP-003": {"evidence_commits": ["d28582f927744d6fc1796e76600e982f4b407775"], "status": "complete"},
+    "FE-APP-004": {"evidence_commits": ["5b80c8b63da048c4a5912f87fced56e808e6e0f3"], "status": "complete"},
+    "FE-CHAT-001": {"evidence_commits": ["90113966c075a8fb5c16f9b3db9857e93c3e29e0"], "status": "complete"},
+    "FE-CHAT-002": {"evidence_commits": ["48374083e25f40d94cd208469542502fa18ae6c4"], "status": "complete"},
+    "FE-CHAT-003": {"evidence_commits": ["fde04420504029b30903c4b6be6874042806a8e6"], "status": "complete"},
+    "FE-CSS-001": {"evidence_commits": ["ace8105c7bcad425a751490b77c136fa1800df67"], "status": "complete"},
+    "FE-ORCH-001": {"evidence_commits": ["17edcafc64afa04429a93bd18b6e104cdb59d9fb"], "status": "complete"},
+    "FE-ORCH-002": {"evidence_commits": ["153c30f746b72876dcd3916a0dc4aabd735a6f2c"], "status": "complete"},
+    "FE-PROV-001": {"evidence_commits": ["b5518ef7abeb8548c0a3f03ec590ab27c72ce13f"], "status": "complete"},
+    "GOV-001": {"evidence_commits": ["cb44fe1a9b14bfe366a404f6c70d8aac00a18cbf"], "status": "complete"},
+    "GOV-002": {"evidence_commits": ["3f02bcc55a3cd44d9082acb5364f3abb351e9569"], "status": "complete"},
+    "GOV-003": {"evidence_commits": ["98e854effb89617147ee51f99dbebb5a5fcd1ccd"], "status": "complete"},
+    "GOV-004": {"evidence_commits": ["aeb8da021d3be098e002636c44695787d2cceca7"], "status": "complete"},
+    "IPC-001": {"evidence_commits": ["a54891a262361b460991cc9b4cdc31827e056017"], "status": "complete"},
+    "IPC-002": {"evidence_commits": ["0efdcef52d2ae872f10373e9efca1636d732f410"], "status": "complete"},
+    "SHELL-001": {"evidence_commits": ["9db11603ee97d873939944aa9a3d0ff0bc0fbfaa"], "status": "complete"},
+    "STOR-API-001": {"evidence_commits": ["e9d896ed2bce07fda4c183b5deb50fad798d17d9"], "status": "complete"},
+    "STOR-DB-001": {"evidence_commits": ["e543fed64440e86d10e7ba5127d941e17b813873"], "status": "complete"},
+    "STOR-DB-002": {"evidence_commits": ["03f8be0dca426262eeca5cc7569f46385ab8b7a8"], "status": "complete"},
+    "STOR-DB-003": {"evidence_commits": ["dd5d4b8dfa6d807aa1de03c3dd730a9d44f1d0e4"], "status": "complete"},
+    "STOR-DISC-001": {"evidence_commits": ["2cbaa21999d73efcf706a9de4f2b50281618ac69"], "status": "complete"},
+    "STOR-DISC-002": {"evidence_commits": ["814827b1f4f917525ec196c9218e1e7506311ab3"], "status": "complete"},
+    "STOR-DISC-003": {"evidence_commits": ["a6746f66295b32456de74dae6b25e5d6756edd8d"], "status": "complete"},
+    "STOR-DISC-004": {"evidence_commits": ["67df3de1a6d39f99601b1960e2b6002756f0724b"], "status": "complete"},
+    "STOR-INT-001": {"evidence_commits": ["5ce54d741ba351f554a8f6fb989aba794d1e3cac"], "status": "complete"},
+    "STOR-INT-002": {"evidence_commits": ["79e2130e5ed649de95664c415b4052cbe986648d"], "status": "complete"},
+    "STOR-INT-003": {"evidence_commits": ["10458c95b6984f103143b7333009f21d033511ec"], "status": "complete"},
+    "STOR-ORCH-001": {"evidence_commits": ["e56e7cd7267d79ed6cf35c5692cb37b746711975"], "status": "complete"},
+    "STOR-ORCH-002": {"evidence_commits": ["386735cb646d6a46b66ef3469f34c636382437c1"], "status": "complete"},
+    "STOR-PKG-001": {"evidence_commits": ["cc91e52afa3b5cf51b3df695cf524ce3eb2acd7c"], "status": "complete"},
+    "TAURI-001": {"evidence_commits": ["765478f2dcb7bbccf6cd35d93be423375da1545e"], "status": "complete"},
+    "TAURI-002": {"evidence_commits": ["8d7a9f000d6f9b970369816c309fc609ee8d3ce7"], "status": "complete"},
+    "TEST-CORE-001": {"evidence_commits": ["ba915b505bf0ca6c7f6a1e809f866293981a6fe0"], "status": "complete"},
+    "TEST-FE-001": {"evidence_commits": ["721cddb84ce79179ca34ff9d49719a58aa31cda3"], "status": "complete"},
+    "TEST-FE-002": {"evidence_commits": ["3e02becc4e2a608f79b74a284ff12867cb8fb904"], "status": "complete"},
+    "TEST-FE-003": {"evidence_commits": ["2097b3e2be737c98ad548e7318577d37fbe31194"], "status": "complete"},
+    "TEST-STOR-001": {"evidence_commits": ["40c10b48c2d293ea50e8aaef3c158d5b7f9088c3"], "status": "complete"},
+    "TEST-STOR-002": {"evidence_commits": ["9f3ee0a5afffc9338901bb9199bd418e71e8fa67"], "status": "complete"},
+    "TEST-STOR-003": {"evidence_commits": ["bd5b372777f7400da8af5cbde83101e85ef7914e"], "status": "complete"},
+    "TEST-STOR-004": {"evidence_commits": ["dfee71cbe104a07374a1084bb551ae1722ff92a9"], "status": "complete"}
+  },
+  "version": 2
+}

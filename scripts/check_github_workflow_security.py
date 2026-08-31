@@ -19,7 +19,8 @@ REQUIRED_WORKFLOW_MARKERS = {
         "python3 scripts/check_github_workflow_security.py",
         "scripts/test_check_ai_context_map.py",
         "scripts/test_check_github_workflow_security.py",
-        'python3 scripts/check_ai_context_map.py --base-ref "$SOURCE_RATCHET_BASE"',
+        "python3 scripts/report_refactoring_baseline.py --check",
+        'python3 scripts/check_ai_context_map.py --strict-budget --base-ref "$SOURCE_RATCHET_BASE"',
         "python3 -m unittest scripts/test_generate_ipc_commands.py",
         "python3 scripts/generate_ipc_commands.py --check",
         "python3 scripts/check_source_architecture.py",
@@ -71,7 +72,8 @@ REQUIRED_ACTIVE_CI_LINES = {
     "python3 scripts/check_github_workflow_security.py",
     "scripts/test_check_ai_context_map.py \\",
     "scripts/test_check_github_workflow_security.py \\",
-    'python3 scripts/check_ai_context_map.py --base-ref "$SOURCE_RATCHET_BASE"',
+    "python3 scripts/report_refactoring_baseline.py --check",
+    'python3 scripts/check_ai_context_map.py --strict-budget --base-ref "$SOURCE_RATCHET_BASE"',
 }
 
 

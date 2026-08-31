@@ -715,6 +715,8 @@ def evaluate_context_map(
             task_limit = default_limit
         baseline = raw_entry.get("baseline_context_bytes")
         reason = raw_entry.get("over_budget_reason")
+        if strict_budget and (baseline is not None or reason is not None):
+            failures.append(f"{task_id}: strict budget forbids legacy metadata")
         if baseline is not None and (
             type(baseline) is not int or baseline <= task_limit
         ):

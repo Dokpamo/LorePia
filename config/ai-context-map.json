@@ -358,7 +358,7 @@
       "over_budget_reason": null,
       "paths": {
         "documents": [
-          "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+          "config/refactoring/completion-status.json",
           "config/refactoring/task-manifest.yaml"
         ],
         "entrypoints": [
@@ -697,7 +697,7 @@
           "scripts/report_refactoring_baseline.py"
         ],
         "implementation": [
-          "config/refactoring/baseline-report.json",
+          "config/refactoring/baseline-summary.json",
           ".github/workflows/ci.yml"
         ],
         "tests": [
@@ -888,13 +888,11 @@
       }
     },
     "STOR-DB-001": {
-      "baseline_context_bytes": 564430,
       "commands": [
         "cargo test -p lorepia-storage --lib database::tests",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
       "max_context_bytes": 250000,
-      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
       "paths": {
         "documents": [
           "crates/storage/AGENTS.md",
@@ -918,15 +916,14 @@
       }
     },
     "STOR-DB-002": {
-      "baseline_context_bytes": 597520,
       "commands": [
         "cargo test -p lorepia-storage --test schema_registry_integrity",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
       "max_context_bytes": 250000,
-      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
       "paths": {
         "documents": [
+          "config/source-size-baseline.json",
           "crates/storage/AGENTS.md",
           "docs/adr/0002-storage-transaction-boundaries.md"
         ],
@@ -934,7 +931,6 @@
           "crates/storage/src/database.rs"
         ],
         "implementation": [
-          "crates/storage/src/cutover.rs",
           "crates/storage/src/database/connection.rs",
           "crates/storage/src/database/migration_provider_v4.rs",
           "crates/storage/src/database/migration_registry.rs",
@@ -951,13 +947,11 @@
       }
     },
     "STOR-DB-003": {
-      "baseline_context_bytes": 469362,
       "commands": [
         "cargo test -p lorepia-storage --lib database::tests",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
       "max_context_bytes": 250000,
-      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
       "paths": {
         "documents": [
           "crates/storage/AGENTS.md"
@@ -966,7 +960,6 @@
           "crates/storage/src/database.rs"
         ],
         "implementation": [
-          "crates/storage/src/database/capability_observations.rs",
           "crates/storage/src/database/character_catalog.rs",
           "crates/storage/src/database/generation_presets.rs",
           "crates/storage/src/database/health.rs",
@@ -978,18 +971,17 @@
           "crates/storage/src/database/stats.rs"
         ],
         "tests": [
-          "crates/storage/tests/schema11_release_cutover.rs"
+          "crates/storage/src/database/tests/provider_capabilities.rs",
+          "crates/storage/src/database/tests/provider_catalog_migrations.rs"
         ]
       }
     },
     "STOR-DISC-001": {
-      "baseline_context_bytes": 484115,
       "commands": [
         "cargo test -p lorepia-storage --lib discovery_repository::tests",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
       "max_context_bytes": 250000,
-      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
       "paths": {
         "documents": [
           "crates/storage/AGENTS.md"
@@ -1011,13 +1003,11 @@
       }
     },
     "STOR-DISC-002": {
-      "baseline_context_bytes": 525050,
       "commands": [
         "cargo test -p lorepia-storage --test discovery_state_storage",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
       "max_context_bytes": 250000,
-      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
       "paths": {
         "documents": [
           "crates/storage/AGENTS.md"
@@ -1040,13 +1030,11 @@
       }
     },
     "STOR-DISC-003": {
-      "baseline_context_bytes": 484805,
       "commands": [
         "cargo test -p lorepia-storage --lib discovery_repository::tests",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
       "max_context_bytes": 250000,
-      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
       "paths": {
         "documents": [
           "crates/storage/AGENTS.md"
@@ -1190,13 +1178,11 @@
       }
     },
     "STOR-ORCH-001": {
-      "baseline_context_bytes": 623769,
       "commands": [
         "cargo test -p lorepia-storage --lib orchestration::tests",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
       "max_context_bytes": 250000,
-      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
       "paths": {
         "documents": [
           "crates/storage/AGENTS.md",
@@ -1206,30 +1192,28 @@
           "crates/storage/src/orchestration.rs"
         ],
         "implementation": [
-          "crates/storage/src/orchestration/catalog_documents.rs",
           "crates/storage/src/orchestration/content_module_projection.rs",
           "crates/storage/src/orchestration/content_module_revisions.rs",
           "crates/storage/src/orchestration/document_history.rs",
           "crates/storage/src/orchestration/document_store.rs",
           "crates/storage/src/orchestration/knowledge_memory_profiles.rs",
           "crates/storage/src/orchestration/prompt_bindings.rs",
-          "crates/storage/src/orchestration/prompt_preset_projection.rs",
-          "crates/storage/src/orchestration/prompt_preset_rollback.rs",
           "crates/storage/src/orchestration/transforms_interactions.rs"
         ],
         "tests": [
-          "crates/storage/tests/orchestration_migrations.rs"
+          "crates/storage/src/orchestration/tests/built_in_recovery.rs",
+          "crates/storage/src/orchestration/tests/built_in_presets.rs",
+          "crates/storage/src/orchestration/tests/mod.rs",
+          "crates/storage/src/orchestration/tests/persona_catalog.rs"
         ]
       }
     },
     "STOR-ORCH-002": {
-      "baseline_context_bytes": 332122,
       "commands": [
         "cargo test -p lorepia-storage --lib orchestration::tests",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
       "max_context_bytes": 250000,
-      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
       "paths": {
         "documents": [
           "crates/storage/AGENTS.md",
@@ -1239,18 +1223,18 @@
           "crates/storage/src/orchestration.rs"
         ],
         "implementation": [
-          "crates/storage/src/orchestration/generation_prompt.rs",
-          "crates/storage/src/orchestration/knowledge_memory_runtime.rs",
           "crates/storage/src/orchestration/memory_context.rs",
           "crates/storage/src/orchestration/memory_records.rs",
           "crates/storage/src/orchestration/memory_visibility.rs",
-          "crates/storage/src/orchestration/module_activation.rs",
           "crates/storage/src/orchestration/module_authority.rs",
           "crates/storage/src/orchestration/module_bindings.rs",
-          "crates/storage/src/orchestration/module_runtime.rs",
           "crates/storage/src/orchestration/package_commit_bridge.rs"
         ],
         "tests": [
+          "crates/storage/src/orchestration/tests/memory_head.rs",
+          "crates/storage/src/orchestration/tests/mod.rs",
+          "crates/storage/src/orchestration/tests/prompt_context.rs",
+          "crates/storage/src/orchestration/tests/runtime_evidence.rs",
           "crates/storage/tests/knowledge_embedding_storage.rs"
         ]
       }
@@ -1345,13 +1329,11 @@
       }
     },
     "TEST-CORE-001": {
-      "baseline_context_bytes": 834450,
       "commands": [
         "cargo test -p lorepia-core --lib app::tests",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
       "max_context_bytes": 250000,
-      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
       "paths": {
         "documents": [
           "crates/core/AGENTS.md"
@@ -1452,13 +1434,11 @@
       }
     },
     "TEST-STOR-001": {
-      "baseline_context_bytes": 503848,
       "commands": [
         "cargo test -p lorepia-storage --lib discovery_repository::tests",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
       "max_context_bytes": 250000,
-      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
       "paths": {
         "documents": [
           "crates/storage/AGENTS.md"
@@ -1476,13 +1456,11 @@
       }
     },
     "TEST-STOR-002": {
-      "baseline_context_bytes": 509039,
       "commands": [
         "cargo test -p lorepia-storage --lib database::tests",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
       "max_context_bytes": 250000,
-      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
       "paths": {
         "documents": [
           "crates/storage/AGENTS.md"
@@ -1506,13 +1484,11 @@
       }
     },
     "TEST-STOR-003": {
-      "baseline_context_bytes": 789904,
       "commands": [
         "cargo test -p lorepia-storage --lib interaction_repository::tests",
         "python3 scripts/check_source_architecture.py --base-ref \"$(git merge-base HEAD main)\""
       ],
       "max_context_bytes": 250000,
-      "over_budget_reason": "Legacy monolith pending its planned bounded-context extraction",
       "paths": {
         "documents": [
           "crates/storage/AGENTS.md"
@@ -1559,7 +1535,86 @@
   },
   "default_max_context_bytes": 250000,
   "policy": "Repository-local read starting points, not a security allowlist; reviewed pre-enforcement path migrations preserve entry counts, then base-ref path removals require explicit reviewed replacements",
-  "reviewed_path_migrations": [],
+  "reviewed_path_migrations": [
+    {
+      "from": "config/refactoring/baseline-report.json",
+      "reason": "Use the compact generated baseline summary for routine GOV-001 context.",
+      "task_id": "GOV-001",
+      "to": "config/refactoring/baseline-summary.json"
+    },
+    {
+      "from": "docs/refactoring/lorepia-ai-first-refactoring-master-plan.md",
+      "reason": "Use the focused completion ledger.",
+      "task_id": "ENF-004",
+      "to": "config/refactoring/completion-status.json"
+    },
+    {
+      "from": "crates/storage/src/cutover.rs",
+      "reason": "Replace stale source with the size ratchet.",
+      "task_id": "STOR-DB-002",
+      "to": "config/source-size-baseline.json"
+    },
+    {
+      "from": "crates/storage/src/database/capability_observations.rs",
+      "reason": "Use focused capability tests.",
+      "task_id": "STOR-DB-003",
+      "to": "crates/storage/src/database/tests/provider_capabilities.rs"
+    },
+    {
+      "from": "crates/storage/tests/schema11_release_cutover.rs",
+      "reason": "Use focused catalog migration tests.",
+      "task_id": "STOR-DB-003",
+      "to": "crates/storage/src/database/tests/provider_catalog_migrations.rs"
+    },
+    {
+      "from": "crates/storage/src/orchestration/catalog_documents.rs",
+      "reason": "Use focused catalog tests.",
+      "task_id": "STOR-ORCH-001",
+      "to": "crates/storage/src/orchestration/tests/persona_catalog.rs"
+    },
+    {
+      "from": "crates/storage/src/orchestration/prompt_preset_rollback.rs",
+      "reason": "Use focused prompt-preset recovery tests.",
+      "task_id": "STOR-ORCH-001",
+      "to": "crates/storage/src/orchestration/tests/built_in_recovery.rs"
+    },
+    {
+      "from": "crates/storage/src/orchestration/prompt_preset_projection.rs",
+      "reason": "Use focused built-in preset projection tests.",
+      "task_id": "STOR-ORCH-001",
+      "to": "crates/storage/src/orchestration/tests/built_in_presets.rs"
+    },
+    {
+      "from": "crates/storage/tests/orchestration_migrations.rs",
+      "reason": "Use the focused test index.",
+      "task_id": "STOR-ORCH-001",
+      "to": "crates/storage/src/orchestration/tests/mod.rs"
+    },
+    {
+      "from": "crates/storage/src/orchestration/generation_prompt.rs",
+      "reason": "Use focused prompt-context tests.",
+      "task_id": "STOR-ORCH-002",
+      "to": "crates/storage/src/orchestration/tests/prompt_context.rs"
+    },
+    {
+      "from": "crates/storage/src/orchestration/module_activation.rs",
+      "reason": "Use the focused test index.",
+      "task_id": "STOR-ORCH-002",
+      "to": "crates/storage/src/orchestration/tests/mod.rs"
+    },
+    {
+      "from": "crates/storage/src/orchestration/module_runtime.rs",
+      "reason": "Use focused runtime-evidence tests.",
+      "task_id": "STOR-ORCH-002",
+      "to": "crates/storage/src/orchestration/tests/runtime_evidence.rs"
+    },
+    {
+      "from": "crates/storage/src/orchestration/knowledge_memory_runtime.rs",
+      "reason": "Use focused memory-head runtime tests.",
+      "task_id": "STOR-ORCH-002",
+      "to": "crates/storage/src/orchestration/tests/memory_head.rs"
+    }
+  ],
   "shared_paths": [
     "AGENTS.md"
   ],

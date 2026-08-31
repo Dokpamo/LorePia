@@ -177,6 +177,7 @@ class AiContextMapTests(unittest.TestCase):
             strict_failures, _ = evaluate_context_map(
                 root, config, manifest("GOV-001"), strict_budget=True
             )
+            self.assertTrue(any("legacy metadata" in item for item in strict_failures))
             self.assertTrue(any("above target" in item for item in strict_failures))
 
             large.write_bytes(b"x" * 500)
