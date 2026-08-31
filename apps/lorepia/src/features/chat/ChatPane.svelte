@@ -39,6 +39,11 @@
         OrchestrationState,
     } from '../orchestration/orchestration-controller';
     import { shouldSubmitComposer } from './composer';
+    import {
+        ChatScrollLifecycle,
+        type MessageCollectionSnapshot,
+        type MessageMeasurementInput,
+    } from './chat-scroll.svelte';
     import GenerationAttemptApprovals from './GenerationAttemptApprovals.svelte';
     import InteractionRoomSurface from './InteractionRoomSurface.svelte';
     import PortableRuntimeControls from './PortableRuntimeControls.svelte';
@@ -49,18 +54,7 @@
         type InteractionRoomCapableClient,
         type InteractionRoomState,
     } from './interaction-room-controller';
-    import {
-        VIRTUAL_MESSAGE_BLOCK_PADDING,
-        VIRTUAL_MESSAGE_DOM_LIMIT,
-        VirtualMessageLayoutIndex,
-        VirtualMessageMeasurements,
-        computeAnchoredScrollTop,
-        computeVirtualMessageWindow,
-        findRetainedMessagePredecessorIndex,
-        isVirtualMessageNearBottom,
-        virtualMessageOffset,
-        virtualWindowContainsIndex,
-    } from './virtual-window';
+    import { VIRTUAL_MESSAGE_BLOCK_PADDING } from './virtual-window';
 
     interface Props {
         appState: LorepiaAppState;
@@ -73,27 +67,6 @@
         client?: InteractionRoomCapableClient;
         messageFocusRequest?: (MemoryRecordSourceNavigationDto & { request_id: number }) | null;
         onOpenHome?: () => void;
-    }
-
-    interface MessageMeasurementInput {
-        messageId: string;
-        epoch: number;
-        includesDayDivider: boolean;
-    }
-
-    interface ScrollAnchorSnapshot {
-        messageId: string;
-        relativeTop: number;
-        scrollTop: number;
-        virtualTop: number;
-        preservesPreMutationPosition?: boolean;
-    }
-
-    interface MessageCollectionSnapshot {
-        items: MessageDto[];
-        ids: string[];
-        retainedIds: ReadonlySet<string>;
-        indexesById: Readonly<Record<string, number | undefined>>;
     }
 
     let {
@@ -112,13 +85,6 @@
     let compositionActive = $state(false);
     let sending = $state(false);
     let activeDraftKey = '';
-    let messageScroller = $state<HTMLDivElement | null>(null);
-    let scrollTop = $state(0);
-    let viewportHeight = $state(720);
-    let nearBottom = $state(true);
-    let scrollAnchorEpoch = 0;
-    let anchoredBranchKey = '';
-    let anchoredMessageCount = 0;
     let editingMessageId = $state<string | null>(null);
     let editDraft = $state('');
     let pendingRemoveId = $state<string | null>(null);
@@ -147,25 +113,9 @@
     let interactionRoomKey = '';
     let attemptApprovalRefreshEpoch = $state(0);
     let composerTextarea = $state<HTMLTextAreaElement | null>(null);
-    const messageMeasurements = new VirtualMessageMeasurements();
-    const virtualLayout = new VirtualMessageLayoutIndex();
-    let measurementEpoch = $state(messageMeasurements.epoch);
-    let virtualLayoutRevision = $state(virtualLayout.revision);
-    let measurementFlushQueued = false;
-    let pendingMeasurementEpoch = 0;
-    let messageCollectionEpoch = 0;
-    let pendingMessageCollectionEpoch = 0;
-    let pendingMeasurementScrollEpoch = 0;
-    let pendingMeasurementPinBottom = false;
-    let pendingMeasurementPreserveScrollPosition = false;
-    let pendingMeasurementAnchor: ScrollAnchorSnapshot | null = null;
-    let stableMeasurementAnchor: ScrollAnchorSnapshot | null = null;
-    let stableAnchorCaptureEpoch = 0;
     let cachedDisplayItemsSource: MessageDto[] | null = null;
     let cachedLiveAssistantMessageId: string | null = null;
     let cachedDisplayItems: MessageDto[] = [];
-    let cachedMessageCollection: MessageCollectionSnapshot | null = null;
-    let observedMessageCollection: MessageCollectionSnapshot | null = null;
     let liveResponseAnnouncement = $state('');
     let observedLiveResponsePhase: 'idle' | 'reasoning' | 'answer' = 'idle';
     let observedLiveResponseBranchKey = '';
@@ -175,7 +125,12 @@
     const drafts = new SvelteMap<string, string>();
     let activeMessageActionId = $state<string | null>(null);
     let hoveredMessageActionId = $state<string | null>(null);
-    let stableMessageActionLayoutId: string | null = null;
+    const chatScroll: ChatScrollLifecycle = new ChatScrollLifecycle({
+        currentCollection: (): MessageCollectionSnapshot => messageCollection,
+        messageDayKey,
+        onMemorySourceMissing: notifyMissingMemorySource,
+        onMemorySourceFocused: notifyFocusedMemorySource,
+    });
     let composerExpanded = $state(false);
     let composerCanFullscreen = $state(false);
     let composerOverflows = $state(false);
@@ -473,12 +428,15 @@
                 return;
             }
             chatPane.style.setProperty('--composer-overlay-height', `${String(overlayHeight)}px`);
-            const scroller = messageScroller;
+            const scroller = chatScroll.scroller;
             const composerOwnsFocus = field?.contains(document.activeElement) ?? false;
             const overlayDelta = Number.isFinite(previousOverlayHeight)
                 ? overlayHeight - previousOverlayHeight
                 : 0;
-            if ((!nearBottom && !(composerExpanded && composerOwnsFocus)) || scroller === null) {
+            if (
+                (!chatScroll.nearBottom && !(composerExpanded && composerOwnsFocus)) ||
+                scroller === null
+            ) {
                 return;
             }
             if (
@@ -488,19 +446,19 @@
                 Number.isFinite(previousOverlayHeight)
             ) {
                 const anchoredScrollTop = scroller.scrollTop + overlayDelta;
-                applyProgrammaticScrollPosition(scroller, anchoredScrollTop);
+                chatScroll.applyProgrammaticScrollPosition(scroller, anchoredScrollTop);
                 if (overlayScrollFrame !== null) cancelAnimationFrame(overlayScrollFrame);
                 overlayScrollFrame = requestAnimationFrame(() => {
                     overlayScrollFrame = null;
-                    applyProgrammaticScrollPosition(scroller, anchoredScrollTop);
+                    chatScroll.applyProgrammaticScrollPosition(scroller, anchoredScrollTop);
                 });
                 return;
             }
-            applyProgrammaticScrollPosition(scroller, scroller.scrollHeight);
+            chatScroll.applyProgrammaticScrollPosition(scroller, scroller.scrollHeight);
             if (overlayScrollFrame !== null) cancelAnimationFrame(overlayScrollFrame);
             overlayScrollFrame = requestAnimationFrame(() => {
                 overlayScrollFrame = null;
-                applyProgrammaticScrollPosition(scroller, scroller.scrollHeight);
+                chatScroll.applyProgrammaticScrollPosition(scroller, scroller.scrollHeight);
             });
         };
 
@@ -568,25 +526,6 @@
                 ? items
                 : items.filter((message) => message.id !== liveAssistantMessageId);
         return cachedDisplayItems;
-    }
-
-    function snapshotMessageCollection(items: MessageDto[]): MessageCollectionSnapshot {
-        if (cachedMessageCollection?.items === items) return cachedMessageCollection;
-        const ids = new Array<string>(items.length);
-        const indexesById = Object.create(null) as Record<string, number>;
-        for (let index = 0; index < items.length; index += 1) {
-            const messageId = items[index]?.id;
-            if (messageId === undefined) continue;
-            ids[index] = messageId;
-            indexesById[messageId] = index;
-        }
-        cachedMessageCollection = {
-            items,
-            ids,
-            retainedIds: new Set(ids),
-            indexesById,
-        };
-        return cachedMessageCollection;
     }
 
     const branchKey = $derived(
@@ -738,37 +677,10 @@
         void portableRuntimeRevision;
         return portableRuntime?.modelBudget ?? null;
     });
-    const messageCollection = $derived(snapshotMessageCollection(displayMessageItems));
-    const virtualLayoutSnapshot = $derived({
-        layout: virtualLayout,
-        revision: virtualLayoutRevision,
-    });
-    const virtualWindow = $derived.by(() => {
-        const window = computeVirtualMessageWindow(
-            virtualLayoutSnapshot.layout,
-            Math.max(0, scrollTop - VIRTUAL_MESSAGE_BLOCK_PADDING),
-            viewportHeight,
-        );
-        const firstRenderedMessage = messageCollection.items[window.start];
-        if (firstRenderedMessage === undefined) return window;
-        const firstRenderedDay = messageDayKey(firstRenderedMessage.created_at);
-        let dayStart = window.start;
-        while (dayStart > 0) {
-            const previous = messageCollection.items[dayStart - 1];
-            if (previous === undefined || messageDayKey(previous.created_at) !== firstRenderedDay) {
-                break;
-            }
-            dayStart -= 1;
-        }
-        if (dayStart === window.start || window.end - dayStart > VIRTUAL_MESSAGE_DOM_LIMIT) {
-            return window;
-        }
-        return {
-            ...window,
-            start: dayStart,
-            topSpacer: virtualMessageOffset(virtualLayoutSnapshot.layout, dayStart),
-        };
-    });
+    const messageCollection: MessageCollectionSnapshot = $derived(
+        chatScroll.snapshotMessageCollection(displayMessageItems),
+    );
+    const virtualWindow = $derived.by(() => chatScroll.virtualWindow());
     const visibleMessages = $derived(
         messageCollection.items.slice(virtualWindow.start, virtualWindow.end),
     );
@@ -780,7 +692,7 @@
             messageCollection.indexesById[activeMessageId] === undefined
         ) {
             activeMessageActionId = null;
-            stableMessageActionLayoutId = null;
+            chatScroll.clearStableMessageActionLayout();
         }
     });
 
@@ -917,87 +829,41 @@
 
     $effect(() => {
         const nextKey = branchKey;
-        if (nextKey === anchoredBranchKey) return;
-        const anchorBeforeInvalidation = nearBottom
-            ? null
-            : (stableMeasurementAnchor ?? captureScrollAnchor());
-        anchoredBranchKey = nextKey;
-        measurementEpoch = messageMeasurements.resetScope(nextKey);
-        virtualLayoutRevision = virtualLayout.reset(
-            messageCollection.ids,
-            messageMeasurements.values,
-        );
-        anchoredMessageCount = messageCollection.items.length;
-        editingMessageId = null;
-        pendingRemoveId = null;
-        const epoch = ++scrollAnchorEpoch;
-        if (
-            anchorBeforeInvalidation !== null &&
-            messageCollection.retainedIds.has(anchorBeforeInvalidation.messageId)
-        ) {
-            scheduleMeasurementFlush(anchorBeforeInvalidation);
-        } else {
-            stableMeasurementAnchor = null;
-            nearBottom = true;
-            void scrollToBottom(epoch);
-        }
+        chatScroll.syncBranch(nextKey, () => {
+            editingMessageId = null;
+            pendingRemoveId = null;
+        });
     });
 
     $effect(() => {
         const collection = messageCollection;
-        const previousCollection = observedMessageCollection;
-        const collectionChanged = previousCollection?.items !== collection.items;
-        const anchorBeforeCollectionChange = stableMeasurementAnchor ?? pendingMeasurementAnchor;
-        const anchorRemoved =
-            collectionChanged &&
-            anchorBeforeCollectionChange !== null &&
-            !collection.retainedIds.has(anchorBeforeCollectionChange.messageId);
-        const retainedAnchor = anchorRemoved
-            ? deriveRetainedCollectionAnchor(
-                  anchorBeforeCollectionChange,
-                  previousCollection,
-                  collection,
-              )
-            : anchorBeforeCollectionChange;
-        if (collectionChanged) messageCollectionEpoch += 1;
-        const pruned = messageMeasurements.prune(collection.retainedIds);
-        if (collectionChanged) {
-            virtualLayoutRevision = virtualLayout.reset(collection.ids, messageMeasurements.values);
-            observedMessageCollection = collection;
-        }
-        if (!collectionChanged && !pruned && !anchorRemoved) return;
-        if (anchorRemoved) {
-            stableMeasurementAnchor = retainedAnchor;
-            pendingMeasurementAnchor = retainedAnchor;
-        }
-        const replacementAnchor = nearBottom
-            ? undefined
-            : (retainedAnchor ??
-              (anchorRemoved ? undefined : (captureScrollAnchor() ?? undefined)));
-        if (replacementAnchor !== undefined) stableMeasurementAnchor = replacementAnchor;
-        scheduleMeasurementFlush(replacementAnchor);
+        chatScroll.syncCollection(collection);
     });
 
     $effect(() => {
         const messageCount = messageCollection.items.length;
         const liveResponseLength =
             appState.chat.streaming_text.length + appState.chat.reasoning_text.length;
-        if (messageCount === anchoredMessageCount && liveResponseLength === 0) {
-            return;
-        }
-        anchoredMessageCount = messageCount;
-        if (nearBottom) {
-            const epoch = scrollAnchorEpoch;
-            void scrollToBottom(epoch);
-        }
+        chatScroll.syncMessageGrowth(messageCount, liveResponseLength);
     });
 
     $effect(() => {
         const request = messageFocusRequest;
         if (request === null || request.request_id === handledMessageFocusRequestId) return;
         handledMessageFocusRequestId = request.request_id;
-        void focusMemorySource(request);
+        void chatScroll.focusMemorySource(request);
     });
+
+    function notifyMissingMemorySource(): void {
+        copyNotice = '장기기억 출처 메시지가 현재 로드된 대화 기록에 없습니다.';
+    }
+
+    function notifyFocusedMemorySource(request: MemoryRecordSourceNavigationDto): void {
+        copyNotice =
+            request.start_message_id === request.end_message_id
+                ? '장기기억 출처 메시지로 이동했습니다.'
+                : '장기기억 출처 범위의 첫 메시지로 이동했습니다.';
+    }
 
     $effect(() => {
         if (appState.chat.error === null) dismissedChatError = null;
@@ -1054,363 +920,14 @@
         };
     });
 
-    onMount(() => {
-        const scroller = messageScroller;
-        if (scroller === null || typeof ResizeObserver === 'undefined') {
-            return;
-        }
-        const observer = new ResizeObserver(([entry]) => {
-            if (!entry) return;
-            const anchorBeforeInvalidation = nearBottom
-                ? null
-                : (stableMeasurementAnchor ?? captureScrollAnchor());
-            viewportHeight = entry.contentRect.height;
-            handoffFocusedMessageOutsideWindow(scroller, scroller.scrollTop, viewportHeight);
-            refreshNearBottom(scroller, viewportHeight);
-            const nextMeasurementEpoch = messageMeasurements.setViewportWidth(
-                entry.contentRect.width,
-            );
-            if (nextMeasurementEpoch === measurementEpoch) return;
-            measurementEpoch = nextMeasurementEpoch;
-            virtualLayoutRevision = virtualLayout.reset(
-                messageCollection.ids,
-                messageMeasurements.values,
-            );
-            scheduleMeasurementFlush(anchorBeforeInvalidation ?? undefined);
-        });
-        observer.observe(scroller);
-        return () => {
-            observer.disconnect();
-        };
-    });
-
-    function deriveRetainedCollectionAnchor(
-        removedAnchor: ScrollAnchorSnapshot,
-        previousCollection: MessageCollectionSnapshot | null,
-        nextCollection: MessageCollectionSnapshot,
-    ): ScrollAnchorSnapshot | null {
-        if (previousCollection === null) return null;
-        const removedIndex = previousCollection.indexesById[removedAnchor.messageId];
-        if (
-            removedIndex === undefined ||
-            virtualLayout.idAt(removedIndex) !== removedAnchor.messageId
-        ) {
-            return null;
-        }
-        let retainedIndex = findRetainedMessagePredecessorIndex(
-            previousCollection.ids,
-            removedIndex,
-            nextCollection.retainedIds,
-        );
-        if (retainedIndex === undefined) {
-            for (let index = removedIndex + 1; index < previousCollection.ids.length; index += 1) {
-                const messageId = previousCollection.ids[index];
-                if (messageId !== undefined && nextCollection.retainedIds.has(messageId)) {
-                    retainedIndex = index;
-                    break;
-                }
-            }
-        }
-        if (retainedIndex === undefined) return null;
-        const messageId = previousCollection.ids[retainedIndex];
-        if (messageId === undefined) return null;
-        const previousVirtualTop =
-            VIRTUAL_MESSAGE_BLOCK_PADDING + virtualMessageOffset(virtualLayout, retainedIndex);
-        return {
-            messageId,
-            relativeTop: removedAnchor.relativeTop + previousVirtualTop - removedAnchor.virtualTop,
-            scrollTop: removedAnchor.scrollTop,
-            virtualTop: previousVirtualTop,
-            preservesPreMutationPosition: true,
-        };
-    }
-
-    function captureScrollAnchor(): ScrollAnchorSnapshot | null {
-        if (messageScroller === null) return null;
-        const scrollerTop = messageScroller.getBoundingClientRect().top;
-        const renderedMessages = Array.from(
-            messageScroller.querySelectorAll<HTMLElement>('[data-message-id]'),
-        );
-        const anchor =
-            renderedMessages.find(
-                (element) => element.getBoundingClientRect().bottom > scrollerTop,
-            ) ?? renderedMessages[0];
-        const messageId = anchor?.dataset.messageId;
-        if (anchor === undefined || messageId === undefined) return null;
-        const messageIndex = messageCollection.indexesById[messageId];
-        if (messageIndex === undefined) return null;
-        return {
-            messageId,
-            relativeTop: anchor.getBoundingClientRect().top - scrollerTop,
-            scrollTop: messageScroller.scrollTop,
-            virtualTop:
-                VIRTUAL_MESSAGE_BLOCK_PADDING + virtualMessageOffset(virtualLayout, messageIndex),
-        };
-    }
-
-    function scheduleMeasurementFlush(
-        anchorBeforeInvalidation?: ScrollAnchorSnapshot,
-        preserveScrollPosition = false,
-    ): void {
-        const nextMeasurementEpoch = messageMeasurements.epoch;
-        if (
-            !measurementFlushQueued ||
-            pendingMeasurementEpoch !== nextMeasurementEpoch ||
-            pendingMessageCollectionEpoch !== messageCollectionEpoch
-        ) {
-            pendingMeasurementEpoch = nextMeasurementEpoch;
-            pendingMessageCollectionEpoch = messageCollectionEpoch;
-            pendingMeasurementScrollEpoch = scrollAnchorEpoch;
-            pendingMeasurementPreserveScrollPosition = preserveScrollPosition;
-            pendingMeasurementPinBottom = nearBottom && !preserveScrollPosition;
-            pendingMeasurementAnchor =
-                nearBottom || preserveScrollPosition
-                    ? null
-                    : (anchorBeforeInvalidation ??
-                      stableMeasurementAnchor ??
-                      captureScrollAnchor());
-        } else if (preserveScrollPosition) {
-            pendingMeasurementPreserveScrollPosition = true;
-            pendingMeasurementPinBottom = false;
-            pendingMeasurementAnchor = null;
-        } else if (!pendingMeasurementPreserveScrollPosition && nearBottom) {
-            pendingMeasurementPinBottom = true;
-            pendingMeasurementAnchor = null;
-        }
-        if (measurementFlushQueued) return;
-        measurementFlushQueued = true;
-        queueMicrotask(() => void flushMessageMeasurements());
-    }
-
-    async function flushMessageMeasurements(): Promise<void> {
-        const flushMeasurementEpoch = pendingMeasurementEpoch;
-        const flushMessageCollectionEpoch = pendingMessageCollectionEpoch;
-        const flushScrollEpoch = pendingMeasurementScrollEpoch;
-        const pinBottom = pendingMeasurementPinBottom;
-        const anchor = pendingMeasurementAnchor;
-        measurementFlushQueued = false;
-        pendingMeasurementPinBottom = false;
-        pendingMeasurementPreserveScrollPosition = false;
-        pendingMeasurementAnchor = null;
-        const scroller = messageScroller;
-        if (
-            flushMeasurementEpoch !== messageMeasurements.epoch ||
-            flushMessageCollectionEpoch !== messageCollectionEpoch ||
-            flushScrollEpoch !== scrollAnchorEpoch ||
-            scroller === null
-        ) {
-            return;
-        }
-        let anchorScrollTop = anchor?.scrollTop ?? 0;
-        let anchorRetained = false;
-        if (anchor !== null) {
-            const anchorIndex = messageCollection.indexesById[anchor.messageId];
-            if (anchorIndex !== undefined) {
-                anchorRetained = true;
-                const nextVirtualTop =
-                    VIRTUAL_MESSAGE_BLOCK_PADDING +
-                    virtualMessageOffset(virtualLayout, anchorIndex);
-                anchorScrollTop = computeAnchoredScrollTop(
-                    anchor.scrollTop,
-                    anchor.virtualTop,
-                    nextVirtualTop,
-                );
-                applyProgrammaticScrollPosition(scroller, anchorScrollTop);
-            } else {
-                stableMeasurementAnchor = null;
-            }
-        }
-        await tick();
-        if (
-            flushMeasurementEpoch !== messageMeasurements.epoch ||
-            flushMessageCollectionEpoch !== messageCollectionEpoch ||
-            flushScrollEpoch !== scrollAnchorEpoch
-        ) {
-            return;
-        }
-        if (pinBottom) {
-            applyProgrammaticScrollPosition(scroller, scroller.scrollHeight);
-            stableMeasurementAnchor = null;
-            return;
-        }
-        if (anchor === null) {
-            stableMeasurementAnchor = nearBottom ? null : captureScrollAnchor();
-            return;
-        }
-        if (!anchorRetained) {
-            stableMeasurementAnchor = anchor.preservesPreMutationPosition
-                ? null
-                : nearBottom
-                  ? null
-                  : captureScrollAnchor();
-            return;
-        }
-        const target = Array.from(scroller.querySelectorAll<HTMLElement>('[data-message-id]')).find(
-            (element) => element.dataset.messageId === anchor.messageId,
-        );
-        if (target === undefined) {
-            stableMeasurementAnchor = anchor.preservesPreMutationPosition
-                ? null
-                : nearBottom
-                  ? null
-                  : captureScrollAnchor();
-            return;
-        }
-        const relativeTopAfter =
-            target.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
-        const anchoredScrollTop = computeAnchoredScrollTop(
-            anchorScrollTop,
-            anchor.relativeTop,
-            relativeTopAfter,
-        );
-        applyProgrammaticScrollPosition(scroller, anchoredScrollTop);
-        stableMeasurementAnchor = nearBottom ? null : captureScrollAnchor();
-    }
-
-    function recordMessageMeasurement(epoch: number, messageId: string, height: number): void {
-        if (!messageMeasurements.record(epoch, messageId, height)) return;
-        if (!virtualLayout.updateMeasuredHeight(messageId, height)) return;
-        virtualLayoutRevision = virtualLayout.revision;
-        if (messageScroller !== null) {
-            handoffFocusedMessageOutsideWindow(
-                messageScroller,
-                messageScroller.scrollTop,
-                messageScroller.clientHeight || viewportHeight,
-            );
-        }
-        scheduleMeasurementFlush(undefined, messageId === stableMessageActionLayoutId);
-    }
+    onMount(() => chatScroll.observeScroller());
 
     function measureMessage(node: HTMLElement, input: MessageMeasurementInput) {
-        let observer: ResizeObserver | null = null;
-        const connect = (nextInput: MessageMeasurementInput): void => {
-            observer?.disconnect();
-            observer = null;
-            if (typeof ResizeObserver === 'undefined') return;
-            const { epoch, messageId, includesDayDivider } = nextInput;
-            const dayDivider =
-                includesDayDivider && node.previousElementSibling instanceof HTMLElement
-                    ? node.previousElementSibling.matches('.message-date-divider')
-                        ? node.previousElementSibling
-                        : null
-                    : null;
-            observer = new ResizeObserver((entries) => {
-                const nodeEntry = entries.find((entry) => entry.target === node);
-                const borderBoxHeight = nodeEntry?.borderBoxSize[0]?.blockSize;
-                const rectHeight = node.getBoundingClientRect().height;
-                const messageHeight =
-                    rectHeight > 0
-                        ? rectHeight
-                        : (borderBoxHeight ?? nodeEntry?.contentRect.height ?? 0);
-                const dividerHeight = dayDivider?.getBoundingClientRect().height ?? 0;
-                recordMessageMeasurement(epoch, messageId, messageHeight + dividerHeight);
-            });
-            observer.observe(node);
-            if (dayDivider !== null) observer.observe(dayDivider);
-        };
-        connect(input);
-        return {
-            update: connect,
-            destroy(): void {
-                observer?.disconnect();
-            },
-        };
-    }
-
-    function refreshNearBottom(scroller: HTMLDivElement, currentViewportHeight: number): void {
-        nearBottom = isVirtualMessageNearBottom(
-            scroller.scrollHeight,
-            scroller.scrollTop,
-            currentViewportHeight,
-        );
-        if (nearBottom) stableMeasurementAnchor = null;
-    }
-
-    function handoffFocusedMessageOutsideWindow(
-        scroller: HTMLDivElement,
-        nextScrollTop: number,
-        nextViewportHeight: number,
-    ): void {
-        const activeElement = document.activeElement;
-        if (!(activeElement instanceof HTMLElement) || !scroller.contains(activeElement)) return;
-        const focusedRow = activeElement.closest<HTMLElement>('[data-message-id]');
-        const focusedMessageId = focusedRow?.dataset.messageId;
-        if (focusedMessageId === undefined) return;
-        const focusedIndex = messageCollection.indexesById[focusedMessageId];
-        if (focusedIndex === undefined) {
-            scroller.focus({ preventScroll: true });
-            return;
-        }
-        const nextWindow = computeVirtualMessageWindow(
-            virtualLayout,
-            Math.max(0, nextScrollTop - VIRTUAL_MESSAGE_BLOCK_PADDING),
-            nextViewportHeight,
-        );
-        if (virtualWindowContainsIndex(nextWindow, focusedIndex)) return;
-        scroller.focus({ preventScroll: true });
-    }
-
-    function applyProgrammaticScrollPosition(
-        scroller: HTMLDivElement,
-        nextScrollTop: number,
-    ): void {
-        scroller.scrollTop = nextScrollTop;
-        const currentViewportHeight = scroller.clientHeight || viewportHeight;
-        handoffFocusedMessageOutsideWindow(scroller, scroller.scrollTop, currentViewportHeight);
-        scrollTop = scroller.scrollTop;
-        refreshNearBottom(scroller, currentViewportHeight);
-    }
-
-    async function scrollToBottom(epoch: number): Promise<void> {
-        await tick();
-        if (epoch !== scrollAnchorEpoch || messageScroller === null) return;
-        applyProgrammaticScrollPosition(messageScroller, messageScroller.scrollHeight);
-        stableMeasurementAnchor = null;
-    }
-
-    async function focusMemorySource(request: MemoryRecordSourceNavigationDto): Promise<void> {
-        const index = messageCollection.indexesById[request.start_message_id];
-        if (index === undefined) {
-            copyNotice = '장기기억 출처 메시지가 현재 로드된 대화 기록에 없습니다.';
-            return;
-        }
-        nearBottom = false;
-        ++scrollAnchorEpoch;
-        const targetTop =
-            VIRTUAL_MESSAGE_BLOCK_PADDING + virtualMessageOffset(virtualLayout, index);
-        if (messageScroller !== null) {
-            handoffFocusedMessageOutsideWindow(messageScroller, targetTop, viewportHeight);
-        }
-        scrollTop = targetTop;
-        await tick();
-        if (messageScroller === null) return;
-        applyProgrammaticScrollPosition(messageScroller, targetTop);
-        await tick();
-        copyNotice =
-            request.start_message_id === request.end_message_id
-                ? '장기기억 출처 메시지로 이동했습니다.'
-                : '장기기억 출처 범위의 첫 메시지로 이동했습니다.';
-        await tick();
-        const target = Array.from(
-            messageScroller.querySelectorAll<HTMLElement>('[data-message-id]'),
-        ).find((element) => element.dataset.messageId === request.start_message_id);
-        target?.focus();
-        target?.scrollIntoView({ block: 'center' });
+        return chatScroll.measureMessage(node, input);
     }
 
     function handleScroll(event: Event): void {
-        const element = event.currentTarget as HTMLDivElement;
-        const currentViewportHeight = element.clientHeight || viewportHeight;
-        handoffFocusedMessageOutsideWindow(element, element.scrollTop, currentViewportHeight);
-        scrollTop = element.scrollTop;
-        viewportHeight = currentViewportHeight;
-        refreshNearBottom(element, currentViewportHeight);
-        const captureEpoch = ++stableAnchorCaptureEpoch;
-        if (nearBottom) {
-            stableMeasurementAnchor = null;
-            return;
-        }
-        void captureStableAnchorAfterRender(captureEpoch);
+        chatScroll.handleScroll(event);
     }
 
     function handleMessageScrollPointerDown(event: PointerEvent): void {
@@ -1420,7 +937,7 @@
     }
 
     function activateMessageActions(messageId: string): void {
-        stableMessageActionLayoutId = messageId;
+        chatScroll.stabilizeMessageActionLayout(messageId);
         activeMessageActionId = messageId;
     }
 
@@ -1431,12 +948,6 @@
 
     function unhoverMessageActions(messageId: string): void {
         if (hoveredMessageActionId === messageId) hoveredMessageActionId = null;
-    }
-
-    async function captureStableAnchorAfterRender(captureEpoch: number): Promise<void> {
-        await tick();
-        if (captureEpoch !== stableAnchorCaptureEpoch || nearBottom) return;
-        stableMeasurementAnchor = captureScrollAnchor();
     }
 
     function portableMessageText(message: MessageDto): string {
@@ -2014,7 +1525,7 @@
             aria-label="메시지 기록"
             tabindex="-1"
             style:scroll-behavior="auto"
-            bind:this={messageScroller}
+            bind:this={chatScroll.scroller}
             onpointerdown={handleMessageScrollPointerDown}
             onscroll={handleScroll}
         >
@@ -2073,7 +1584,7 @@
                             data-message-id={message.id}
                             use:measureMessage={{
                                 messageId: message.id,
-                                epoch: measurementEpoch,
+                                epoch: chatScroll.measurementEpoch,
                                 includesDayDivider: showsDay,
                             }}
                             tabindex="-1"
