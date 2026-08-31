@@ -1,8 +1,146 @@
 {
-  "version": 1,
-  "new_file_limits": {
-    "bytes": 102400,
-    "lines": 2000
+  "version": 2,
+  "bootstrap_ref": "ace8105c7bcad425a751490b77c136fa1800df67",
+  "facade_paths": [
+    "apps/lorepia/src-tauri/src/credential_operations.rs",
+    "apps/lorepia/src-tauri/src/main.rs",
+    "apps/lorepia/src-tauri/src/provider_commands.rs",
+    "apps/lorepia/src/app/app-controller.ts",
+    "apps/lorepia/src/features/chat/ChatPane.svelte",
+    "apps/lorepia/src/features/orchestration/OrchestrationStudio.svelte",
+    "apps/lorepia/src/features/orchestration/orchestration-controller.ts",
+    "apps/lorepia/src/features/providers/ProviderSettings.svelte",
+    "apps/lorepia/src/lib/ipc/client.ts",
+    "apps/lorepia/src/lib/ipc/contracts.ts",
+    "apps/lorepia/src/main.ts",
+    "apps/lorepia/src/preview/main.ts",
+    "apps/lorepia/src/styles/app.css",
+    "crates/core/src/app.rs",
+    "crates/core/src/content_package.rs",
+    "crates/core/src/orchestration.rs",
+    "crates/core/src/orchestration_runtime.rs",
+    "crates/core/src/provider_discovery.rs",
+    "crates/shell-api/src/api.rs",
+    "crates/shell-api/src/dto.rs",
+    "crates/storage/src/database.rs",
+    "crates/storage/src/discovery_repository.rs",
+    "crates/storage/src/interaction_repository.rs",
+    "crates/storage/src/orchestration.rs",
+    "crates/storage/src/package_repository.rs"
+  ],
+  "parent_child_groups": {
+    "apps/lorepia/src-tauri/src/credential_operations.rs": [
+      "apps/lorepia/src-tauri/src/credential_operations/"
+    ],
+    "apps/lorepia/src-tauri/src/provider_commands.rs": [
+      "apps/lorepia/src-tauri/src/provider_commands/"
+    ],
+    "apps/lorepia/src/app/app-controller.ts": [
+      "apps/lorepia/src/app/controllers/",
+      "apps/lorepia/src/app/operations/",
+      "apps/lorepia/src/app/tests/"
+    ],
+    "apps/lorepia/src/features/chat/ChatPane.svelte": [
+      "apps/lorepia/src/features/chat/"
+    ],
+    "apps/lorepia/src/features/orchestration/OrchestrationStudio.svelte": [
+      "apps/lorepia/src/features/orchestration/studio/"
+    ],
+    "apps/lorepia/src/features/orchestration/orchestration-controller.ts": [
+      "apps/lorepia/src/features/orchestration/controllers/",
+      "apps/lorepia/src/features/orchestration/tests/"
+    ],
+    "apps/lorepia/src/features/providers/ProviderSettings.svelte": [
+      "apps/lorepia/src/features/providers/settings/"
+    ],
+    "apps/lorepia/src/lib/ipc/client.ts": [
+      "apps/lorepia/src/lib/ipc/clients/"
+    ],
+    "apps/lorepia/src/lib/ipc/contracts.ts": [
+      "apps/lorepia/src/lib/ipc/contracts/"
+    ],
+    "apps/lorepia/src/styles/app.css": [
+      "apps/lorepia/src/styles/app-css.ts",
+      "apps/lorepia/src/styles/app/",
+      "apps/lorepia/src/styles/chat/",
+      "apps/lorepia/src/styles/orchestration/",
+      "apps/lorepia/src/styles/provider/",
+      "apps/lorepia/src/styles/shared/"
+    ],
+    "crates/core/src/app.rs": [
+      "crates/core/src/app/"
+    ],
+    "crates/core/src/content_package.rs": [
+      "crates/core/src/content_package/"
+    ],
+    "crates/core/src/module_orchestration.rs": [
+      "crates/core/src/module_orchestration/"
+    ],
+    "crates/core/src/orchestration.rs": [
+      "crates/core/src/orchestration/"
+    ],
+    "crates/core/src/orchestration_runtime.rs": [
+      "crates/core/src/orchestration_runtime/"
+    ],
+    "crates/core/src/provider_discovery.rs": [
+      "crates/core/src/provider_discovery/"
+    ],
+    "crates/shell-api/src/api.rs": [
+      "crates/shell-api/src/api/"
+    ],
+    "crates/shell-api/src/dto.rs": [
+      "crates/shell-api/src/dto/"
+    ],
+    "crates/storage/src/database.rs": [
+      "crates/storage/src/database/"
+    ],
+    "crates/storage/src/discovery_repository.rs": [
+      "crates/storage/src/discovery_repository/"
+    ],
+    "crates/storage/src/generation_attempt.rs": [
+      "crates/storage/src/generation_attempt/"
+    ],
+    "crates/storage/src/interaction_repository.rs": [
+      "crates/storage/src/interaction_repository/"
+    ],
+    "crates/storage/src/message_display_projection.rs": [
+      "crates/storage/src/message_display_projection/"
+    ],
+    "crates/storage/src/orchestration.rs": [
+      "crates/storage/src/orchestration/"
+    ],
+    "crates/storage/src/package_repository.rs": [
+      "crates/storage/src/package_repository/"
+    ]
+  },
+  "limits": {
+    "facade": {
+      "css": {"bytes": 40960, "lines": 500},
+      "kotlin": {"bytes": 40960, "lines": 500},
+      "lua": {"bytes": 40960, "lines": 500},
+      "rust": {"bytes": 40960, "lines": 500},
+      "svelte": {"bytes": 30720, "lines": 500},
+      "swift": {"bytes": 40960, "lines": 500},
+      "typescript": {"bytes": 40960, "lines": 500}
+    },
+    "generated": {
+      "css": {"bytes": 40960, "lines": 900},
+      "kotlin": {"bytes": 40960, "lines": 900},
+      "lua": {"bytes": 40960, "lines": 900},
+      "rust": {"bytes": 40960, "lines": 900},
+      "svelte": {"bytes": 30720, "lines": 600},
+      "swift": {"bytes": 40960, "lines": 900},
+      "typescript": {"bytes": 40960, "lines": 900}
+    },
+    "production": {
+      "css": {"bytes": 61440, "lines": 2000},
+      "kotlin": {"bytes": 40960, "lines": 900},
+      "lua": {"bytes": 40960, "lines": 900},
+      "rust": {"bytes": 40960, "lines": 900},
+      "svelte": {"bytes": 30720, "lines": 600},
+      "swift": {"bytes": 40960, "lines": 900},
+      "typescript": {"bytes": 40960, "lines": 900}
+    }
   },
   "baselines": {
     "apps/lorepia/src-tauri/src/contract.rs": {"bytes": 84557, "lines": 2174},

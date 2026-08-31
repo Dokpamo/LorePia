@@ -45,9 +45,15 @@
       "lines": 1374
     }
   },
-  "new_test_file_limits": {
-    "bytes": 61440,
-    "lines": 1200
+  "bootstrap_ref": "ace8105c7bcad425a751490b77c136fa1800df67",
+  "limits": {
+    "test": {
+      "kotlin": {"bytes": 61440, "lines": 1200},
+      "rust": {"bytes": 61440, "lines": 1200},
+      "svelte": {"bytes": 61440, "lines": 1200},
+      "swift": {"bytes": 61440, "lines": 1200},
+      "typescript": {"bytes": 61440, "lines": 1200}
+    }
   },
-  "version": 1
+  "version": 2
 }
