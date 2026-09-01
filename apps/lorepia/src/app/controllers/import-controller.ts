@@ -1,5 +1,12 @@
 import { t } from '../../lib/i18n';
+import { normalizeClientError } from '../../lib/ipc/errors';
 import type { AppControllerContext } from './controller-context';
+
+function importErrorLabel(error: unknown, fallback: string): string {
+    return normalizeClientError(error).messageKey === 'error.unsupported_content'
+        ? `${t('import.blocked')}: ${t('error.invalid_input')}`
+        : fallback;
+}
 
 export class ImportController {
     constructor(private readonly context: AppControllerContext) {}
@@ -29,7 +36,7 @@ export class ImportController {
                 ...state,
                 import_flow: {
                     phase: 'error',
-                    error: this.context.errorLabel(error),
+                    error: importErrorLabel(error, this.context.errorLabel(error)),
                     inspection: null,
                 },
             }));
@@ -44,20 +51,35 @@ export class ImportController {
             import_flow: { ...state.import_flow, phase: 'loading', error: null },
         }));
         try {
-            const character = await this.context.client.commitImport(inspection.inspection_id);
-            this.context.update((state) => ({
-                ...state,
-                library: {
-                    phase: 'ready',
-                    error: null,
-                    characters: [
-                        character,
-                        ...state.library.characters.filter((item) => item.id !== character.id),
-                    ],
-                },
-                import_flow: { phase: 'idle', error: null, inspection: null },
-            }));
-            this.context.announce(t('import.notice.added', { name: character.name }));
+            const result = await this.context.client.commitImport(inspection.inspection_id);
+            if (result.kind === 'character') {
+                const { character } = result;
+                this.context.update((state) => ({
+                    ...state,
+                    library: {
+                        phase: 'ready',
+                        error: null,
+                        characters: [
+                            character,
+                            ...state.library.characters.filter((item) => item.id !== character.id),
+                        ],
+                    },
+                    import_flow: { phase: 'idle', error: null, inspection: null },
+                }));
+                this.context.announce(t('import.notice.added', { name: character.name }));
+            } else {
+                this.context.update((state) => ({
+                    ...state,
+                    import_flow: { phase: 'idle', error: null, inspection: null },
+                }));
+                this.context.announce(
+                    t('import.notice.content_added', {
+                        name: result.content.display_name,
+                        documents: result.content.document_count,
+                        assets: result.content.asset_count,
+                    }),
+                );
+            }
         } catch (error: unknown) {
             this.context.update((state) => ({
                 ...state,

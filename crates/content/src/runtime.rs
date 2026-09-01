@@ -3,11 +3,11 @@
 //! The container is recognized from its two-byte header and bounded length
 //! records. File names and source application labels are deliberately ignored.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::OnceLock};
 
 use lorepia_domain::{
-    CharacterRuntimeProfile, CoreError, CoreErrorCode, CoreResult, PortableRuntimeScript,
-    PortableTextTransform, PortableTransformPhase,
+    CharacterRuntimeProfile, CoreError, CoreErrorCode, CoreResult, ImportWarning,
+    PortableRuntimeScript, PortableTextTransform, PortableTransformPhase,
 };
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -39,6 +39,21 @@ pub(crate) struct DecodedRuntimeDocument {
     pub(crate) profile: CharacterRuntimeProfile,
     pub(crate) knowledge_entries: Option<Value>,
     pub(crate) embedded_assets: Vec<DecodedRuntimeAsset>,
+    pub(crate) warnings: Vec<ImportWarning>,
+}
+
+pub(crate) struct DecodedRuntimeMetadata {
+    pub(crate) profile: CharacterRuntimeProfile,
+    pub(crate) knowledge_entries: Option<Value>,
+    pub(crate) asset_metadata: Vec<DecodedRuntimeAssetMetadata>,
+    pub(crate) name: String,
+    pub(crate) description: String,
+    pub(crate) warnings: Vec<ImportWarning>,
+}
+
+pub(crate) struct DecodedRuntimeAssetMetadata {
+    pub(crate) name: String,
+    pub(crate) extension: String,
 }
 
 pub(crate) struct DecodedRuntimeAsset {
@@ -68,18 +83,45 @@ pub(crate) fn decode_runtime_document(
         .checked_add(main_len)
         .filter(|end| *end <= bytes.len())
         .ok_or_else(|| unsupported("runtime document metadata is truncated"))?;
-    let decoded = decode_substitution(&bytes[HEADER_BYTES..main_end])?;
+    let metadata = decode_runtime_metadata(&bytes[HEADER_BYTES..main_end], source_sha256)?;
+    let embedded_asset_bytes = decode_runtime_records(bytes, main_end)?;
+    let embedded_assets = parse_embedded_assets(&metadata.asset_metadata, embedded_asset_bytes)?;
+    Ok(DecodedRuntimeDocument {
+        profile: metadata.profile,
+        knowledge_entries: metadata.knowledge_entries,
+        embedded_assets,
+        warnings: metadata.warnings,
+    })
+}
+
+pub(crate) fn decode_runtime_metadata(
+    encoded: &[u8],
+    source_sha256: &str,
+) -> CoreResult<DecodedRuntimeMetadata> {
+    let decoded = decode_substitution(encoded)?;
     let root: Value = serde_json::from_slice(&decoded)
         .map_err(|error| unsupported(format!("runtime document metadata is invalid: {error}")))?;
-    let module = root
+    decode_runtime_metadata_value(&root, source_sha256)
+}
+
+pub(crate) fn decode_runtime_metadata_value(
+    root: &Value,
+    source_sha256: &str,
+) -> CoreResult<DecodedRuntimeMetadata> {
+    let object = root
+        .as_object()
+        .ok_or_else(|| unsupported("runtime document root must be an object"))?;
+    if object.get("type").and_then(Value::as_str) != Some("risuModule") {
+        return Err(unsupported("runtime document type is not risuModule"));
+    }
+    let module = object
         .get("module")
         .and_then(Value::as_object)
         .ok_or_else(|| unsupported("runtime document has no module object"))?;
-
-    let embedded_asset_bytes = decode_runtime_records(bytes, main_end)?;
-
-    let embedded_assets = parse_embedded_assets(module.get("assets"), embedded_asset_bytes)?;
+    let asset_metadata = parse_asset_metadata(module.get("assets"))?;
     let source_id = format!("card-runtime:{source_sha256}");
+    let capabilities_declared =
+        module.contains_key("requiredCapabilities") || module.contains_key("required_capabilities");
     let required_capabilities = parse_runtime_capabilities(module)?;
     let module_elevated_access = module.get("lowLevelAccess").map_or(Ok(false), |value| {
         value
@@ -87,7 +129,23 @@ pub(crate) fn decode_runtime_document(
             .ok_or_else(|| unsupported("runtime module lowLevelAccess must be a boolean"))
     })?;
     let transforms = parse_transforms(module.get("regex"), &source_id)?;
-    let scripts = parse_scripts(module.get("trigger"), &source_id, module_elevated_access)?;
+    let mut scripts = parse_scripts(module.get("trigger"), &source_id, module_elevated_access)?;
+    let mut warnings = Vec::new();
+    if !capabilities_declared {
+        let elevated_count = scripts
+            .iter()
+            .filter(|script| script.elevated_access)
+            .count();
+        if elevated_count > 0 {
+            scripts.retain(|script| !script.elevated_access);
+            warnings.push(ImportWarning {
+                code: "legacy_elevated_scripts_quarantined".to_owned(),
+                message: format!(
+                    "Quarantined {elevated_count} legacy elevated runtime script(s) because the source does not declare explicit capabilities."
+                ),
+            });
+        }
+    }
     let knowledge_entries = module.get("lorebook").cloned();
     let mut metadata = BTreeMap::new();
     for key in [
@@ -125,10 +183,21 @@ pub(crate) fn decode_runtime_document(
         metadata,
     };
     normalize_runtime_profile_capabilities(&mut profile)?;
-    Ok(DecodedRuntimeDocument {
+    Ok(DecodedRuntimeMetadata {
         profile,
         knowledge_entries,
-        embedded_assets,
+        asset_metadata,
+        name: module
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or("Risu module")
+            .to_owned(),
+        description: module
+            .get("description")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+        warnings,
     })
 }
 
@@ -174,15 +243,12 @@ fn decode_runtime_records(bytes: &[u8], mut cursor: usize) -> CoreResult<Vec<Vec
 }
 
 fn parse_embedded_assets(
-    value: Option<&Value>,
+    metadata: &[DecodedRuntimeAssetMetadata],
     bytes: Vec<Vec<u8>>,
 ) -> CoreResult<Vec<DecodedRuntimeAsset>> {
     if bytes.is_empty() {
         return Ok(Vec::new());
     }
-    let metadata = value
-        .and_then(Value::as_array)
-        .ok_or_else(|| unsupported("runtime assets have no metadata array"))?;
     if metadata.len() != bytes.len() {
         return Err(unsupported(
             "runtime asset metadata count does not match its binary records",
@@ -193,7 +259,34 @@ fn parse_embedded_assets(
         .zip(bytes)
         .enumerate()
         .map(|(index, (metadata, bytes))| {
-            let fields = metadata
+            let name = if metadata.name.trim().is_empty() {
+                format!("embedded-asset-{index}")
+            } else {
+                metadata.name.clone()
+            };
+            if name.len() > 1_024 || name.chars().any(char::is_control) {
+                return Err(unsupported("runtime asset name is invalid"));
+            }
+            Ok(DecodedRuntimeAsset { name, bytes })
+        })
+        .collect()
+}
+
+fn parse_asset_metadata(value: Option<&Value>) -> CoreResult<Vec<DecodedRuntimeAssetMetadata>> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    let values = value
+        .as_array()
+        .ok_or_else(|| unsupported("runtime assets metadata must be an array"))?;
+    if values.len() > 8_192 {
+        return Err(unsupported("runtime assets exceed the 8192-entry limit"));
+    }
+    values
+        .iter()
+        .enumerate()
+        .map(|(index, value)| {
+            let fields = value
                 .as_array()
                 .ok_or_else(|| unsupported("runtime asset metadata must be an array"))?;
             let name = fields
@@ -201,10 +294,19 @@ fn parse_embedded_assets(
                 .and_then(Value::as_str)
                 .filter(|name| !name.trim().is_empty())
                 .map_or_else(|| format!("embedded-asset-{index}"), str::to_owned);
+            let extension = fields
+                .get(2)
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .trim_start_matches('.')
+                .to_ascii_lowercase();
             if name.len() > 1_024 || name.chars().any(char::is_control) {
                 return Err(unsupported("runtime asset name is invalid"));
             }
-            Ok(DecodedRuntimeAsset { name, bytes })
+            if extension.len() > 16 || !extension.bytes().all(|byte| byte.is_ascii_alphanumeric()) {
+                return Err(unsupported("runtime asset extension is invalid"));
+            }
+            Ok(DecodedRuntimeAssetMetadata { name, extension })
         })
         .collect()
 }
@@ -229,8 +331,13 @@ fn parse_transforms(
                 .unwrap_or_default();
             let phase = match kind {
                 "editprocess" => PortableTransformPhase::RequestContext,
+                "editinput" => PortableTransformPhase::RequestContext,
                 "editoutput" => PortableTransformPhase::ProviderOutput,
                 "editdisplay" => PortableTransformPhase::Display,
+                // Risu uses this sentinel for an intentionally inert rule. Its
+                // phase has no runtime effect, but retaining it as disabled
+                // preserves review counts and round-trip metadata.
+                "disabled" => PortableTransformPhase::Display,
                 _ => {
                     return Err(unsupported(format!(
                         "unsupported runtime transform type: {kind}"
@@ -266,10 +373,11 @@ fn parse_transforms(
                 id: format!("card-transform:{}", hex::encode(digest.finalize())),
                 name,
                 phase,
-                enabled: !object
-                    .get("disabled")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false),
+                enabled: kind != "disabled"
+                    && !object
+                        .get("disabled")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false),
                 pattern,
                 replacement,
                 flags,
@@ -344,13 +452,31 @@ fn parse_scripts(
     Ok(scripts)
 }
 
-fn decode_substitution(bytes: &[u8]) -> CoreResult<Vec<u8>> {
-    let map = hex::decode(DECODE_MAP_HEX)
-        .map_err(|error| unsupported(format!("runtime decode table is invalid: {error}")))?;
-    if map.len() != 256 {
-        return Err(unsupported("runtime decode table has an invalid length"));
+pub(crate) fn decode_substitution(bytes: &[u8]) -> CoreResult<Vec<u8>> {
+    let mut decoded = bytes.to_vec();
+    decode_substitution_in_place(&mut decoded)?;
+    Ok(decoded)
+}
+
+pub(crate) fn decode_substitution_in_place(bytes: &mut [u8]) -> CoreResult<()> {
+    static DECODE_MAP: OnceLock<[u8; 256]> = OnceLock::new();
+    let map = if let Some(map) = DECODE_MAP.get() {
+        map
+    } else {
+        let decoded = hex::decode(DECODE_MAP_HEX)
+            .map_err(|error| unsupported(format!("runtime decode table is invalid: {error}")))?;
+        let decoded: [u8; 256] = decoded
+            .try_into()
+            .map_err(|_| unsupported("runtime decode table has an invalid length"))?;
+        let _ = DECODE_MAP.set(decoded);
+        DECODE_MAP
+            .get()
+            .ok_or_else(|| unsupported("runtime decode table could not be initialized"))?
+    };
+    for byte in bytes {
+        *byte = map[usize::from(*byte)];
     }
-    Ok(bytes.iter().map(|byte| map[usize::from(*byte)]).collect())
+    Ok(())
 }
 
 fn canonical_json(value: &Value) -> CoreResult<String> {
@@ -381,8 +507,11 @@ mod tests {
     }
 
     fn runtime_document(module: Value) -> Vec<u8> {
-        let metadata =
-            serde_json::to_vec(&serde_json::json!({ "module": module })).expect("encode metadata");
+        let metadata = serde_json::to_vec(&serde_json::json!({
+            "type": "risuModule",
+            "module": module
+        }))
+        .expect("encode metadata");
         let mut document = vec![MAGIC, VERSION];
         document.extend_from_slice(
             &u32::try_from(metadata.len())
@@ -403,6 +532,7 @@ mod tests {
     #[test]
     fn binary_asset_records_are_paired_with_their_declared_names() {
         let metadata = serde_json::to_vec(&serde_json::json!({
+            "type": "risuModule",
             "module": {
                 "name": "Portable module",
                 "assets": [["portrait.png", "stored-id", "image"]]
@@ -588,23 +718,24 @@ mod tests {
             "lowLevelAccess": false,
             "effect": [{ "type": "script", "code": "return true" }]
         }]);
-        for capabilities in [None, Some(serde_json::json!(["runtime:callbacks"]))] {
-            let mut module = serde_json::json!({
-                "lowLevelAccess": true,
-                "trigger": trigger.clone()
-            });
-            if let Some(capabilities) = capabilities {
-                module
-                    .as_object_mut()
-                    .expect("module object")
-                    .insert("requiredCapabilities".to_owned(), capabilities);
-            }
-            let document = runtime_document(module);
-            let error = decode_runtime_document(&document, &"2".repeat(64))
-                .err()
-                .expect("undeclared module elevation must fail");
-            assert_eq!(error.code, CoreErrorCode::UnsupportedContent);
-        }
+        let legacy = runtime_document(serde_json::json!({
+            "lowLevelAccess": true,
+            "trigger": trigger.clone()
+        }));
+        let decoded = decode_runtime_document(&legacy, &"2".repeat(64))
+            .expect("legacy undeclared elevation is quarantined");
+        assert!(decoded.profile.scripts.is_empty());
+        assert_eq!(decoded.warnings.len(), 1);
+
+        let declared_without_elevation = runtime_document(serde_json::json!({
+            "lowLevelAccess": true,
+            "requiredCapabilities": ["runtime:callbacks"],
+            "trigger": trigger
+        }));
+        let error = decode_runtime_document(&declared_without_elevation, &"2".repeat(64))
+            .err()
+            .expect("an explicit declaration cannot omit required elevated authority");
+        assert_eq!(error.code, CoreErrorCode::UnsupportedContent);
     }
 
     #[test]
@@ -615,10 +746,14 @@ mod tests {
             "effect": [{ "type": "script", "code": "return true" }]
         }]);
         let legacy = runtime_document(serde_json::json!({ "trigger": elevated_trigger.clone() }));
-        let error = decode_runtime_document(&legacy, &"d".repeat(64))
-            .err()
-            .expect("legacy authority must not grant elevated access");
-        assert_eq!(error.code, CoreErrorCode::UnsupportedContent);
+        let decoded = decode_runtime_document(&legacy, &"d".repeat(64))
+            .expect("legacy elevated script is quarantined without rejecting safe content");
+        assert!(decoded.profile.scripts.is_empty());
+        assert_eq!(decoded.warnings.len(), 1);
+        assert_eq!(
+            decoded.warnings[0].code,
+            "legacy_elevated_scripts_quarantined"
+        );
 
         let declared = runtime_document(serde_json::json!({
             "requiredCapabilities": ["runtime:callbacks", "elevated"],

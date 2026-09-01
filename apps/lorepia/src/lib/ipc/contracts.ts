@@ -1,12 +1,14 @@
 export type {
     ImportDynamicContentReviewDto,
+    ImportCommitResultDto,
+    ImportContentKindDto,
     ImportImagePreviewDto,
     ImportInspectionDto,
     ImportIssueDto,
     ImportRegexRuleReviewDto,
     ImportTicketDto,
+    ImportedContentSummaryDto,
 } from './contracts/import';
-
 export type {
     CharacterDisplayTransformDto,
     CharacterRenderAssetDto,
@@ -23,13 +25,11 @@ export type {
     PutPortableRuntimeStateInput,
     PutPortableRuntimeStateResultDto,
 } from './contracts/portable-runtime';
-
 export {
     SUPPORTED_SHELL_API_VERSION,
     SUPPORTED_CORE_API_VERSION,
     SUPPORTED_CHAT_EVENT_VERSION,
 } from './contracts/common';
-
 export type { PlatformKind } from './contracts/platform';
 
 export type { LoadingPhase } from './contracts/common';

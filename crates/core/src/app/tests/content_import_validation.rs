@@ -7,6 +7,58 @@ fn import_and_restart_restore_library() {
 }
 
 #[test]
+fn compatible_import_commits_a_risu_memory_preset_through_the_package_boundary() {
+    let root = tempdir().expect("temp root");
+    let core = Core::open(CoreConfig::new(root.path())).expect("open core");
+    let before = core.list_prompt_presets().expect("prompt presets").len();
+    let mut source = tempfile::Builder::new()
+        .suffix(".json")
+        .tempfile_in(root.path())
+        .expect("memory preset");
+    source
+        .write_all(
+            br#"{"type":"risu","ver":1,"data":{"name":"Hypa import fixture","settings":{"summarizationPrompt":"Keep durable facts and decisions.","chunkSize":1200}}}"#,
+        )
+        .expect("write memory preset");
+    source.flush().expect("flush memory preset");
+
+    let inspection = core.inspect_import(source.path()).expect("inspect Risu JSON");
+    assert_eq!(
+        inspection.kind,
+        lorepia_domain::ContentKind::RisuMemoryPreset
+    );
+    assert!(inspection.is_allowed());
+    let result = core
+        .commit_compatible_import(&inspection.id)
+        .expect("commit compatible import");
+    let crate::ImportCommitResult::Content(summary) = result else {
+        panic!("Risu memory preset must commit as content");
+    };
+    assert_eq!(summary.document_count, 1);
+    assert_eq!(summary.asset_count, 0);
+    assert_eq!(
+        core.get_content_package_import(&summary.import_id)
+            .expect("package import")
+            .status,
+        crate::PackageImportStatus::Completed
+    );
+    let presets = core.list_prompt_presets().expect("prompt presets");
+    assert_eq!(presets.len(), before + 1);
+    assert!(
+        presets
+            .iter()
+            .any(|preset| preset.value.name == "Hypa import fixture · 요약 프롬프트")
+    );
+    assert!(
+        fs::read_dir(core.inner.storage.staging_dir())
+            .expect("staging directory")
+            .next()
+            .is_none(),
+        "compatible import snapshots must be removed after commit"
+    );
+}
+
+#[test]
 fn import_uses_an_owned_snapshot_and_cleans_it_after_commit() {
     let root = tempdir().expect("temp root");
     let core = Core::open(CoreConfig::new(root.path())).expect("open core");

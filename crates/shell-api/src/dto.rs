@@ -23,7 +23,8 @@ pub use library::{
     CharacterDisplayTransformDto, CharacterDto, CharacterGreetingCatalogDto,
     CharacterGreetingKindDto, CharacterGreetingOptionDto, CharacterRenderAssetDto,
     CharacterRenderProfileDto, CharacterRuntimeKnowledgeDto, CharacterRuntimeScriptDto,
-    ContentKindDto, ImportImagePreviewDto, ImportInspectionDto, ImportWarningDto,
+    ContentKindDto, ImportCommitResultDto, ImportImagePreviewDto, ImportInspectionDto,
+    ImportWarningDto, ImportedContentSummaryDto,
 };
 
 #[allow(unused_imports)]

@@ -100,6 +100,15 @@ impl Core {
                         ContentSourceExportKind::CharacterCardV3,
                         character_card_extension(source.path())?,
                     ),
+                    ContentKind::RisuModule
+                    | ContentKind::RisuPreset
+                    | ContentKind::RisuMemoryPreset => {
+                        return Err(CoreError::new(
+                            CoreErrorCode::StorageCorrupted,
+                            "character source resolved to a non-character import kind",
+                            false,
+                        ));
+                    }
                 };
                 Ok(PreparedContentSourceExport {
                     descriptor: ContentSourceExportDescriptor {

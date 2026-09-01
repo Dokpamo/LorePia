@@ -4,10 +4,14 @@ mod adapters;
 mod archive;
 mod capabilities;
 mod hashing;
+mod knowledge_ids;
 mod package;
 mod path;
 mod png;
+mod risu;
 mod runtime;
+mod transport;
+mod warnings;
 
 use std::{
     fs::File,
@@ -24,6 +28,8 @@ use lorepia_domain::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use warnings::{extension_mismatch, promoted_card};
+
 pub use hashing::sha256_file;
 pub use package::{
     ContentCapability, ContentPackageComponent, ContentPackageComponentKind,
@@ -34,11 +40,11 @@ pub use package::{
     inspect_content_package, prepare_content_package_import, revalidate_content_package_selection,
     select_content_package_components, stage_selected_content_package_assets,
 };
-
+pub use risu::{PreparedExternalImport, prepare_external_import};
+pub use transport::extract_single_character_transport;
 const ZIP_LOCAL_FILE_MAGIC: &[u8; 4] = b"PK\x03\x04";
 const ZIP_EMPTY_ARCHIVE_MAGIC: &[u8; 4] = b"PK\x05\x06";
 const ZIP_SPANNED_ARCHIVE_MAGIC: &[u8; 4] = b"PK\x07\x08";
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StagedAsset {
     pub original_path: String,
@@ -48,7 +54,6 @@ pub struct StagedAsset {
     pub size_bytes: u64,
     pub signature_valid: bool,
 }
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreparedImport {
     pub inspection: ImportInspection,
@@ -56,7 +61,6 @@ pub struct PreparedImport {
     pub plan_hash: String,
     pub staged_assets: Vec<StagedAsset>,
 }
-
 /// Normalized card content and review metadata bound to a deterministic hash.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CharacterImportPlan {
@@ -64,7 +68,6 @@ pub struct CharacterImportPlan {
     pub character_content: CharacterContentV1,
     pub plan_hash: String,
 }
-
 struct InspectedCharacterSource {
     kind: ContentKind,
     metadata: adapters::CardMetadata,
@@ -218,7 +221,7 @@ fn lore_regex_rule_reviews(
     )
 }
 
-fn dynamic_content_review(content: &CharacterContentV1) -> ImportDynamicContentReview {
+pub(crate) fn dynamic_content_review(content: &CharacterContentV1) -> ImportDynamicContentReview {
     let mut regex_rules = runtime_regex_rule_reviews(content);
     let (lore_regex_rule_count, enabled_lore_regex_rule_count, mut lore_regex_rules) =
         lore_regex_rule_reviews(content);
@@ -319,7 +322,7 @@ fn inspect_archive_source(
     let nonportable_policy = adapters::NonPortableContentPolicy::Omit;
     let mut inspected = archive::inspect_archive(path, limits, source_sha256, nonportable_policy)?;
     if !matches!(extension, "charx" | "zip") {
-        let mut extension_warnings = inspected_extension_warning(extension, "CHARX/ZIP");
+        let mut extension_warnings = extension_mismatch(extension, "CHARX/ZIP");
         extension_warnings.append(&mut inspected.warnings);
         inspected.warnings = extension_warnings;
     }
@@ -351,8 +354,8 @@ fn inspect_png_source(
     let bytes = std::fs::read(path).map_err(storage_error)?;
     let card = png::extract_card_metadata(&bytes)?;
     let metadata = adapters::parse_card_json_with_source(&card, source_sha256)?;
-    let mut warnings = inspected_extension_warning(extension, "PNG");
-    warnings.extend(promoted_card_warning(&metadata));
+    let mut warnings = extension_mismatch(extension, "PNG");
+    warnings.extend(promoted_card(&metadata));
     Ok(InspectedCharacterSource {
         kind: ContentKind::CharacterCardPng,
         metadata,
@@ -376,8 +379,8 @@ fn inspect_json_source(
     let bytes = std::fs::read(path).map_err(storage_error)?;
     let metadata = adapters::parse_card_json_with_source(&bytes, source_sha256)?;
     let estimated_size = metadata.len_bytes;
-    let mut warnings = inspected_extension_warning(extension, "JSON");
-    warnings.extend(promoted_card_warning(&metadata));
+    let mut warnings = extension_mismatch(extension, "JSON");
+    warnings.extend(promoted_card(&metadata));
     Ok(InspectedCharacterSource {
         kind: ContentKind::CharacterCardV3,
         metadata,
@@ -598,41 +601,6 @@ fn is_zip_signature(magic: [u8; 4]) -> bool {
 /// Logical id given to the PNG source when it is staged as the card avatar.
 pub(crate) const PNG_AVATAR_ASSET_ID: &str = "card.png";
 pub(crate) const PNG_MEDIA_TYPE: &str = "image/png";
-
-/// Tells the reviewer that a V2 card was promoted before anything is committed.
-fn promoted_card_warning(metadata: &adapters::CardMetadata) -> Vec<ImportWarning> {
-    if metadata.promoted_from_v2 {
-        vec![ImportWarning {
-            code: "character_card_v2_promoted".to_owned(),
-            message: "Card declares the V2 specification and was promoted to V3. \
-                      Fields that only V3 defines are empty."
-                .to_owned(),
-        }]
-    } else {
-        Vec::new()
-    }
-}
-
-fn inspected_extension_warning(extension: &str, detected: &str) -> Vec<ImportWarning> {
-    let expected = match detected {
-        "JSON" => extension == "json",
-        "PNG" => extension == "png",
-        _ => matches!(extension, "charx" | "zip"),
-    };
-    if expected {
-        Vec::new()
-    } else {
-        let actual = if extension.is_empty() {
-            "no extension".to_owned()
-        } else {
-            format!(".{extension}")
-        };
-        vec![ImportWarning {
-            code: "extension_mismatch".to_owned(),
-            message: format!("File contents are {detected}, but the file has {actual}."),
-        }]
-    }
-}
 
 fn storage_error(error: std::io::Error) -> CoreError {
     CoreError::new(

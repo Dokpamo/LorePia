@@ -6,6 +6,8 @@
  * reorder them.
  */
 
+import { koImport } from './ko-import';
+
 export const ko = {
     'app.bootstrap.failed': '앱을 시작하지 못했습니다.',
     'app.bootstrap.retry': '다시 시도',
@@ -394,43 +396,7 @@ export const ko = {
     'error.core_unavailable': '로컬 Core를 열 수 없습니다.',
     'error.invalid_input': '입력 내용을 확인해 주세요.',
     'error.unexpected': '예상하지 못한 오류가 발생했습니다.',
-    'import.assets': '에셋',
-    'import.assets.count': '{count}개',
-    'import.blocked': '가져올 수 없음',
-    'import.cancel': '취소',
-    'import.close': '닫기',
-    'import.commit': '서재에 추가',
-    'import.commit.safe': '안전 모드로 가져오기',
-    'import.description.empty': '설명이 없습니다.',
-    'import.dialog.close': '가져오기 검토 닫기',
-    'import.dynamic.elevated': '고급 권한을 요청하는 Lua 스크립트 {count}개',
-    'import.dynamic.capabilities': '카드가 선언한 권한: {capabilities}',
-    'import.dynamic.capabilities.legacy':
-        '이전 형식 카드로, 실행 전에 필요한 권한을 사용자가 직접 선택해야 합니다.',
-    'import.dynamic.capabilities.none': '호스트 권한 없음',
-    'import.dynamic.lua': 'Lua 런타임 스크립트 {count}개',
-    'import.dynamic.markup': '사용자 정의 HTML/CSS 표시',
-    'import.dynamic.model': '선택한 모델을 추가로 호출할 수 있음',
-    'import.dynamic.network': '직접 네트워크·파일·Tauri 접근은 허용되지 않습니다.',
-    'import.dynamic.safe_mode':
-        '가져온 뒤에는 일반 콘텐츠만 열리며, 동적 기능은 대화 설정에서 권한별로 승인해야 합니다.',
-    'import.dynamic.regex': '정규식 변환 {count}개',
-    'import.dynamic.title': '동적 기능과 요청 권한',
-    'import.estimated_size': '예상 저장 크기',
-    'import.inspecting': '로컬 파일을 안전하게 검사하는 중입니다.',
-    'import.kind': '형식',
-    'import.kind.png': 'PNG 카드',
-    'import.notice.added': '{name}을(를) 서재에 추가했습니다.',
-    'import.notice.review': '{name} 가져오기를 검토해 주세요.',
-    'import.regex.checking': '정규식 규칙을 격리된 Worker에서 검사하는 중입니다.',
-    'import.regex.disabled': '유효하지 않거나 제한시간을 넘긴 규칙 {count}개는 비활성화됩니다.',
-    'import.regex.unavailable':
-        '검사를 완료하지 못한 규칙 {count}개는 실행 시 안전하게 건너뜁니다.',
-    'import.regex.valid': '실행 가능한 정규식 규칙의 컴파일 검사를 통과했습니다.',
-    'import.source_size': '원본 크기',
-    'import.title': '가져오기 검토',
-    'import.unsupported_fields': '아직 지원하지 않는 선택 필드',
-    'import.warnings': '확인할 내용',
+    ...koImport,
     'interaction.error.ack_failed': '상호작용 표시 확인에 실패했습니다. Core가 다시 전달합니다.',
     'interaction.error.decision_mismatch': 'Core 제안 결정이 현재 대화 스냅샷과 일치하지 않습니다.',
     'interaction.error.load': '대화 상호작용 상태를 불러오지 못했습니다.',

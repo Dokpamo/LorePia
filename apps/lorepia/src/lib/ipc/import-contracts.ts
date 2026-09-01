@@ -1,4 +1,13 @@
 import type { PortableRuntimeCapabilityDto } from './portable-runtime-contracts';
+import type { CharacterDto } from './contracts/character';
+
+export type ImportContentKindDto =
+    | 'character_card_v3'
+    | 'character_card_png'
+    | 'charx_package'
+    | 'risu_module'
+    | 'risu_preset'
+    | 'risu_memory_preset';
 
 export interface ImportTicketDto {
     ticket_id: string;
@@ -40,7 +49,7 @@ export interface ImportDynamicContentReviewDto {
 
 export interface ImportInspectionDto {
     inspection_id: string;
-    kind: 'character_card_v3' | 'character_card_png' | 'charx_package';
+    kind: ImportContentKindDto;
     display_name: string;
     description: string;
     source_sha256: string;
@@ -54,3 +63,15 @@ export interface ImportInspectionDto {
     unsupported_optional_fields: string[];
     allowed: boolean;
 }
+
+export interface ImportedContentSummaryDto {
+    kind: 'risu_module' | 'risu_preset' | 'risu_memory_preset';
+    import_id: string;
+    display_name: string;
+    document_count: number;
+    asset_count: number;
+}
+
+export type ImportCommitResultDto =
+    | { kind: 'character'; character: CharacterDto }
+    | { kind: 'content'; content: ImportedContentSummaryDto };

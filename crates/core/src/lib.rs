@@ -22,7 +22,8 @@ mod transform_documents;
 
 pub use app::{
     ConnectionBoundCredential, Core, EffectiveCapability, GenerationCredentialAdmissionLease,
-    GenerationEventSubscription, GenerationOperationContext, MAX_GENERATION_OPERATION_NONCE_BYTES,
+    GenerationEventSubscription, GenerationOperationContext, ImportCommitResult,
+    ImportedContentSummary, MAX_GENERATION_OPERATION_NONCE_BYTES,
     MAX_GENERATION_OPERATION_NONCE_CHARS, PortableRuntimeStatePayload, PortableRuntimeStateRecord,
     PortableRuntimeStateSaveResult, PortableRuntimeStateScope, PortableRuntimeStateSnapshot,
     PortableRuntimeStateWrite, ProviderModelRefreshProvenance, ProviderModelRefreshResult,

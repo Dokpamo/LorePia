@@ -96,6 +96,11 @@ class PlatformPolicyTest {
         assertFalse(sanitized.contains('\u0000'))
         assertEquals(PlatformPolicy.MAXIMUM_DISPLAY_NAME_CHARACTERS, sanitized.length)
         assertEquals(".charx", PlatformPolicy.stagingSuffix("card.CHARX"))
+        assertEquals(".jpeg", PlatformPolicy.stagingSuffix("card.JPEG"))
+        assertEquals(".jpg", PlatformPolicy.stagingSuffix("card.jpg"))
+        assertEquals(".png", PlatformPolicy.stagingSuffix("card.png"))
+        assertEquals(".risum", PlatformPolicy.stagingSuffix("module.RISUM"))
+        assertEquals(".risup", PlatformPolicy.stagingSuffix("preset.risup"))
         assertEquals(".pending", PlatformPolicy.stagingSuffix("card.html"))
     }
 

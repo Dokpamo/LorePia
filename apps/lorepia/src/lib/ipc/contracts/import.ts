@@ -2,11 +2,14 @@ import type { OrchestrationModuleScope } from './common';
 
 export type {
     ImportDynamicContentReviewDto,
+    ImportCommitResultDto,
+    ImportContentKindDto,
     ImportImagePreviewDto,
     ImportInspectionDto,
     ImportIssueDto,
     ImportRegexRuleReviewDto,
     ImportTicketDto,
+    ImportedContentSummaryDto,
 } from '../import-contracts';
 
 export interface ContentModuleComponentDto {

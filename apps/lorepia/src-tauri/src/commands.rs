@@ -4,11 +4,11 @@ use lorepia_shell_api::{
     AssetDeliveryDto, BootstrapDto, CharacterDto, CharacterGreetingCatalogDto, ChatStreamItem,
     ConversationBranchDto, ConversationDto, ConversationStateDto, CreateConversationBranchInput,
     CreateConversationInput, EditUserMessageInput, GenerateRuntimeTextInput, GenerationCredential,
-    GenerationPresetDto, GenerationSelectionInput, GenerationStartedDto, ImportInspectionDto,
-    MessageActionGenerationDto, MessageDto, ModelRouteDto, RegenerateAssistantMessageInput,
-    RemoveMessageInput, RequestPreviewDto, ResolveAssetDeliveryInput, RuntimeTextGenerationDto,
-    SecretCredential, SelectConversationBranchInput, SendMessageInput, SetConversationModeInput,
-    StagedImportFile,
+    GenerationPresetDto, GenerationSelectionInput, GenerationStartedDto, ImportCommitResultDto,
+    ImportInspectionDto, MessageActionGenerationDto, MessageDto, ModelRouteDto,
+    RegenerateAssistantMessageInput, RemoveMessageInput, RequestPreviewDto,
+    ResolveAssetDeliveryInput, RuntimeTextGenerationDto, SecretCredential,
+    SelectConversationBranchInput, SendMessageInput, SetConversationModeInput, StagedImportFile,
 };
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, State, ipc::Channel};
@@ -183,10 +183,10 @@ pub async fn inspect_import(
 pub fn commit_import(
     state: State<'_, AppState>,
     request: InspectionRequest,
-) -> CommandResult<CharacterDto> {
+) -> CommandResult<ImportCommitResultDto> {
     state
         .shell()?
-        .commit_import(&request.inspection_id)
+        .commit_compatible_import(&request.inspection_id)
         .map_err(Into::into)
 }
 
@@ -610,13 +610,9 @@ enum StatusOnlyConnectionAccess {
     Unreadable,
 }
 
-/// Resolves only non-secret authority for a status projection.
-///
-/// `InvalidInput` from the settled-access guard is intentionally not enough
-/// to call a slot missing: a prepared or otherwise unresolved install has no
-/// prior authority either. The durable unresolved list distinguishes that
-/// state from a genuinely fresh or removed connection before the raw native
-/// slot is observed.
+/// Resolves non-secret status authority. `InvalidInput` alone cannot call a
+/// slot missing: the durable unresolved list distinguishes pending installs
+/// from fresh or removed connections before native state is observed.
 fn status_only_connection_access(
     shell: &lorepia_shell_api::ShellApi,
     connection_id: &str,

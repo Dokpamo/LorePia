@@ -248,7 +248,9 @@ fn merge_runtime_documents(
             profile,
             knowledge_entries,
             embedded_assets,
+            warnings,
         } = document;
+        state.warnings.extend(warnings);
         if metadata.content.knowledge_book.is_none()
             && let Some(entries) = knowledge_entries
         {
@@ -507,11 +509,8 @@ fn append_archive_summary_warnings(
     ));
 }
 
-/// Detects a valid character-card ZIP that starts after another file payload.
-///
-/// The probe is based on the ZIP end record and a root `card.json`, not the
-/// selected filename. It reads directory metadata only and never executes or
-/// renders archive content.
+/// Detects a character-card ZIP appended to another payload by its end record
+/// and root `card.json`; archive content is never executed or rendered.
 pub(crate) fn has_embedded_character_archive(
     path: &Path,
     limits: ImportLimits,

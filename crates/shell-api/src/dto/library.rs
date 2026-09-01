@@ -3,8 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use chrono::{DateTime, Utc};
 use lorepia_core::{
     AssetDescriptor, Character, CharacterContentV1, CharacterGreetingCatalog,
-    CharacterGreetingKind, CharacterGreetingOption, ContentKind, ImportImagePreview,
-    ImportInspection, ImportWarning,
+    CharacterGreetingKind, CharacterGreetingOption, ContentKind, ImportCommitResult,
+    ImportImagePreview, ImportInspection, ImportWarning, ImportedContentSummary,
 };
 use serde::{Deserialize, Serialize};
 
@@ -345,6 +345,9 @@ pub enum ContentKindDto {
     CharacterCardV3,
     CharacterCardPng,
     CharxPackage,
+    RisuModule,
+    RisuPreset,
+    RisuMemoryPreset,
 }
 
 impl From<ContentKind> for ContentKindDto {
@@ -353,6 +356,51 @@ impl From<ContentKind> for ContentKindDto {
             ContentKind::CharacterCardV3 => Self::CharacterCardV3,
             ContentKind::CharacterCardPng => Self::CharacterCardPng,
             ContentKind::CharxPackage => Self::CharxPackage,
+            ContentKind::RisuModule => Self::RisuModule,
+            ContentKind::RisuPreset => Self::RisuPreset,
+            ContentKind::RisuMemoryPreset => Self::RisuMemoryPreset,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImportedContentSummaryDto {
+    pub kind: ContentKindDto,
+    pub import_id: String,
+    pub display_name: String,
+    pub document_count: u32,
+    pub asset_count: u32,
+}
+
+impl From<ImportedContentSummary> for ImportedContentSummaryDto {
+    fn from(value: ImportedContentSummary) -> Self {
+        Self {
+            kind: value.kind.into(),
+            import_id: value.import_id,
+            display_name: value.display_name,
+            document_count: value.document_count,
+            asset_count: value.asset_count,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ImportCommitResultDto {
+    Character { character: CharacterDto },
+    Content { content: ImportedContentSummaryDto },
+}
+
+impl From<ImportCommitResult> for ImportCommitResultDto {
+    fn from(value: ImportCommitResult) -> Self {
+        match value {
+            ImportCommitResult::Character(character) => Self::Character {
+                character: character.into(),
+            },
+            ImportCommitResult::Content(content) => Self::Content {
+                content: content.into(),
+            },
         }
     }
 }

@@ -1835,6 +1835,7 @@ dependencies = [
  "flate2",
  "hex",
  "lorepia-domain",
+ "ring",
  "rustix",
  "serde",
  "serde_json",

@@ -85,6 +85,13 @@ function hoverIndexes(source: string): number[] {
 }
 
 describe('pointer interaction styling', () => {
+    it('suppresses the native WebView tap highlight without removing keyboard focus', () => {
+        expect(css).toMatch(/:root\s*\{[^}]*-webkit-tap-highlight-color:\s*transparent;/s);
+        expect(css).toMatch(
+            /:where\(button, a, input, textarea, select, \[tabindex\]\):focus-visible\s*\{[^}]*outline:\s*2px solid var\(--accent\);/s,
+        );
+    });
+
     it('keeps settings choices inside the LorePia popover layer', () => {
         const settingsSurfaces = [
             settingsSource,

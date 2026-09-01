@@ -373,20 +373,7 @@ class LorepiaPlatformPlugin(private val activity: Activity) : Plugin(activity) {
             return
         }
         try {
-            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-                addCategory(Intent.CATEGORY_OPENABLE)
-                type = "*/*"
-                putExtra(
-                    Intent.EXTRA_MIME_TYPES,
-                    arrayOf(
-                        "application/json",
-                        "application/zip",
-                        "application/octet-stream",
-                        "image/*",
-                    ),
-                )
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
+            val intent = createImportPickerIntent()
             startActivityForResult(invoke, intent, "onImportPicked")
         } catch (_: Exception) {
             pickerInFlight.set(false)

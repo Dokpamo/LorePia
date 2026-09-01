@@ -205,6 +205,8 @@
     font-synthesis: none;
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
+    /* Android WebView otherwise paints a second blue layer over our own press state. */
+    -webkit-tap-highlight-color: transparent;
     font-size: clamp(9px, 3.661vw, 16px);
     color: var(--ink);
     background: var(--bg);

@@ -1,8 +1,8 @@
 use lorepia_core::InspectionId;
 
 use crate::{
-    CharacterDto, CharacterGreetingCatalogDto, CharacterRenderProfileDto, ImportInspectionDto,
-    ShellError, ShellResult, StagedImportFile,
+    CharacterDto, CharacterGreetingCatalogDto, CharacterRenderProfileDto, ImportCommitResultDto,
+    ImportInspectionDto, ShellError, ShellResult, StagedImportFile,
 };
 
 use super::{ShellApi, validate_identifier};
@@ -65,6 +65,17 @@ impl ShellApi {
         validate_identifier("inspection_id", inspection_id)?;
         self.core
             .commit_import(&InspectionId(inspection_id.to_owned()))
+            .map(Into::into)
+            .map_err(ShellError::from)
+    }
+
+    pub fn commit_compatible_import(
+        &self,
+        inspection_id: &str,
+    ) -> ShellResult<ImportCommitResultDto> {
+        validate_identifier("inspection_id", inspection_id)?;
+        self.core
+            .commit_compatible_import(&InspectionId(inspection_id.to_owned()))
             .map(Into::into)
             .map_err(ShellError::from)
     }

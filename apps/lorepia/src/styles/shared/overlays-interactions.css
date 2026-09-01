@@ -22,7 +22,7 @@
     background: var(--surface-raised);
     box-shadow: var(--shadow-3);
     grid-template-rows: auto minmax(0, 1fr) auto;
-    overflow-y: auto;
+    overflow: hidden;
 }
 
 .modal-header {
@@ -34,11 +34,40 @@
     gap: 10px;
 }
 
+.modal-body {
+    min-width: 0;
+    min-height: 0;
+    padding-bottom: 12px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
 .review-summary {
     display: flex;
-    align-items: center;
+    min-width: 0;
+    align-items: flex-start;
     padding: 16px;
     gap: 14px;
+}
+
+.review-summary > div {
+    min-width: 0;
+    flex: 1;
+}
+
+.review-summary h3,
+.review-description {
+    overflow-wrap: anywhere;
+}
+
+.review-description {
+    display: -webkit-box;
+    overflow: hidden;
+    color: var(--ink-muted);
+    line-height: 1.45;
+    line-clamp: 4;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 4;
 }
 
 .metadata-grid {
@@ -57,6 +86,18 @@
 .metadata-grid dd {
     margin: 0;
     font-size: 0.8125rem;
+    overflow-wrap: anywhere;
+}
+
+.modal-body > .issue-box,
+.modal-body > details {
+    margin: 0 12px 12px;
+}
+
+.modal-card > .modal-actions {
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--line);
+    background: var(--surface-raised);
 }
 
 /* ---------------------------------------------------- home composition */

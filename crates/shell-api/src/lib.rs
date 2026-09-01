@@ -77,10 +77,10 @@ pub use dto::{
     CharacterRenderProfileDto, CharacterRuntimeKnowledgeDto, CharacterRuntimeScriptDto,
     ChatEventDto, ChatEventKindDto, ContentKindDto, ConversationBranchDto, ConversationDto,
     ConversationModeDto, ConversationStateDto, GenerationStartedDto, GenerationTargetDto,
-    GenerationUsageDto, HealthDto, ImportImagePreviewDto, ImportInspectionDto, ImportWarningDto,
-    MessageActionGenerationDto, MessageDisplayProjectionDto, MessageDto, MessageRoleDto,
-    MessageStatusDto, MessageTransformDiagnosticDto, MessageTransformDispositionDto,
-    MessageTransformStageDto,
+    GenerationUsageDto, HealthDto, ImportCommitResultDto, ImportImagePreviewDto,
+    ImportInspectionDto, ImportWarningDto, ImportedContentSummaryDto, MessageActionGenerationDto,
+    MessageDisplayProjectionDto, MessageDto, MessageRoleDto, MessageStatusDto,
+    MessageTransformDiagnosticDto, MessageTransformDispositionDto, MessageTransformStageDto,
 };
 pub use error::{ShellError, ShellErrorCode, ShellResult};
 pub use interaction::{

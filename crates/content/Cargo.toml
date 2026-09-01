@@ -10,6 +10,7 @@ base64.workspace = true
 flate2 = "1.1"
 hex.workspace = true
 lorepia-domain = { path = "../domain" }
+ring.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

@@ -10,6 +10,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use crate::capabilities::{normalize_runtime_profile_capabilities, parse_runtime_capabilities};
+use crate::knowledge_ids::{KnowledgeEntryIds, normalized_knowledge_entry_id};
 
 pub(crate) const MAX_METADATA_BYTES: usize = 4 * 1024 * 1024;
 pub(crate) const MAX_CHARACTER_NAME_BYTES: usize = 1_024;
@@ -43,7 +44,7 @@ pub(crate) struct CardMetadata {
     pub(crate) preferred_image_path: Option<String>,
     pub(crate) len_bytes: u64,
     /// True when the source declared the V2 spec and was promoted to the
-    /// canonical V3 shape. The reviewer is told before anything is committed.
+    /// V3 shape. The reviewer is told before anything is committed.
     pub(crate) promoted_from_v2: bool,
 }
 
@@ -363,12 +364,11 @@ fn parse_portable_knowledge_book(
     }
     let book_name = name.unwrap_or_else(|| "Embedded knowledge".to_owned());
     let mut normalized_entries = Vec::with_capacity(entries.len());
+    let mut entry_ids = KnowledgeEntryIds::default();
     for (index, entry) in entries.iter().enumerate() {
-        normalized_entries.push(parse_portable_knowledge_entry(
-            entry,
-            index,
-            card_source_sha256,
-        )?);
+        let mut normalized = parse_portable_knowledge_entry(entry, index, card_source_sha256)?;
+        entry_ids.make_unique(&mut normalized.id, card_source_sha256, index);
+        normalized_entries.push(normalized);
     }
     let recursive = optional_bool(object, "recursive_scanning", false)?;
     let mut metadata = BTreeMap::new();
@@ -445,14 +445,7 @@ fn parse_portable_knowledge_entry(
             Value::Number(value) => Some(value.to_string()),
             _ => None,
         });
-    let id = raw_id.unwrap_or_else(|| {
-        let mut digest = Sha256::new();
-        digest.update(b"portable-knowledge-entry-v1\0");
-        digest.update(card_source_sha256.as_bytes());
-        digest.update([0]);
-        digest.update(index.to_le_bytes());
-        format!("card-entry:{}", hex::encode(digest.finalize()))
-    });
+    let id = normalized_knowledge_entry_id(raw_id, card_source_sha256, index);
     let mode = object
         .get("mode")
         .and_then(Value::as_str)
@@ -689,14 +682,16 @@ fn value_string_array(value: &Value) -> CoreResult<Vec<String>> {
 }
 
 fn comma_separated_keys(value: &Value) -> CoreResult<Vec<String>> {
-    let value = value
-        .as_str()
-        .ok_or_else(|| unsupported("knowledge keys must be strings"))?;
-    Ok(value
-        .split(',')
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_owned)
+    Ok(value_string_array(value)?
+        .into_iter()
+        .flat_map(|value| {
+            value
+                .split(',')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
         .collect())
 }
 

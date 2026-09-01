@@ -11,7 +11,7 @@ import type {
     ContentSourceExportInput,
     ContentSourceExportReceiptDto,
     ListCompletedContentPackageExportsInput,
-    CharacterDto,
+    ImportCommitResultDto,
     ImportInspectionDto,
     ImportTicketDto,
     ListPendingContentPackageImportsInput,
@@ -90,7 +90,7 @@ export abstract class ContentImportClient extends InteractionClient {
         });
     }
 
-    commitImport(inspectionId: string): Promise<CharacterDto> {
+    commitImport(inspectionId: string): Promise<ImportCommitResultDto> {
         return this.call(LOREPIA_COMMANDS.commitImport, {
             request: { inspection_id: inspectionId },
         });

@@ -238,7 +238,12 @@ internal object PlatformPolicy {
     fun stagingSuffix(displayName: String): String =
         when (displayName.substringAfterLast('.', "").lowercase()) {
             "charx" -> ".charx"
+            "jpeg" -> ".jpeg"
+            "jpg" -> ".jpg"
             "json" -> ".json"
+            "png" -> ".png"
+            "risum" -> ".risum"
+            "risup" -> ".risup"
             "zip" -> ".zip"
             else -> ".pending"
         }
