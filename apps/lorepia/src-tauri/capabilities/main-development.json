@@ -9,6 +9,7 @@
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "allow-bootstrap",
+    "allow-set-system-bar-style",
     "allow-get-memory-supervisor-status",
     "allow-list-characters",
     "allow-get-character",

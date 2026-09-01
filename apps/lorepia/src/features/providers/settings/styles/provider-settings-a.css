@@ -167,7 +167,7 @@
     overflow: hidden;
     border: 1px solid var(--line);
     border-radius: 10px;
-    background: #f5f5f5;
+    background: var(--theme-preview-light-canvas);
     grid-template-columns: 30% minmax(0, 1fr);
 }
 
@@ -176,7 +176,7 @@
 }
 
 .provider-pane .theme-preview-sidebar {
-    background: #dedede;
+    background: var(--theme-preview-light-sidebar);
 }
 
 .provider-pane .theme-preview-main {
@@ -184,7 +184,7 @@
     display: grid;
     align-content: start;
     padding: 16px 12px;
-    background: #fafafa;
+    background: var(--theme-preview-light-main);
     gap: 7px;
 }
 
@@ -193,7 +193,7 @@
 .provider-pane .theme-preview-composer {
     display: block;
     border-radius: var(--radius-pill);
-    background: #c8c8c8;
+    background: var(--theme-preview-light-placeholder);
 }
 
 .provider-pane .theme-preview-title {
@@ -217,37 +217,37 @@
     bottom: 12px;
     left: 10px;
     height: 28px;
-    border: 1px solid #dadada;
-    background: #ffffff;
+    border: 1px solid var(--theme-preview-light-line);
+    background: var(--theme-preview-light-composer);
 }
 
 .provider-pane .theme-preview-dark .theme-preview-canvas {
-    border-color: #464646;
-    background: #1f1f1f;
+    border-color: var(--theme-preview-dark-frame);
+    background: var(--theme-preview-dark-canvas);
 }
 
 .provider-pane .theme-preview-dark .theme-preview-sidebar {
-    background: #1b1b1b;
+    background: var(--theme-preview-dark-sidebar);
 }
 
 .provider-pane .theme-preview-dark .theme-preview-main {
-    background: #1f1f1f;
+    background: var(--theme-preview-dark-canvas);
 }
 
 .provider-pane .theme-preview-dark .theme-preview-title,
 .provider-pane .theme-preview-dark .theme-preview-line {
-    background: #6f6f6f;
+    background: var(--theme-preview-dark-placeholder);
 }
 
 .provider-pane .theme-preview-dark .theme-preview-composer {
-    border-color: #414141;
-    background: #282828;
+    border-color: var(--theme-preview-dark-line);
+    background: var(--theme-preview-dark-composer);
 }
 
 .provider-pane .theme-preview-system .theme-preview-canvas::after {
     position: absolute;
     inset: 0 0 0 50%;
-    background: rgb(20 20 20 / 72%);
+    background: var(--theme-preview-system-overlay);
     content: '';
     pointer-events: none;
 }

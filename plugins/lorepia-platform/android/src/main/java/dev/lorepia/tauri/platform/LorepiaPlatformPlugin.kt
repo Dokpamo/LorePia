@@ -9,6 +9,8 @@ import android.content.Intent
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.provider.OpenableColumns
+import android.view.View
+import android.view.WindowInsetsController
 import androidx.activity.result.ActivityResult
 import androidx.appcompat.app.AppCompatActivity
 import app.tauri.annotation.ActivityCallback
@@ -41,6 +43,11 @@ internal class StagedPathArgs {
 @InvokeArg
 internal class SensitiveCaptureArgs {
     var maximumBytes: Long = 0
+}
+
+@InvokeArg
+internal class SystemBarStyleArgs {
+    var dark: Boolean = false
 }
 
 @InvokeArg
@@ -93,6 +100,41 @@ class LorepiaPlatformPlugin(private val activity: Activity) : Plugin(activity) {
             invoke.resolve(JSObject().put("path", dataRoot.absolutePath))
         } catch (_: Exception) {
             invoke.reject("storage unavailable", "storage_unavailable")
+        }
+    }
+
+    @Command
+    fun setSystemBarStyle(invoke: Invoke) {
+        activity.runOnUiThread {
+            try {
+                val args = invoke.parseArgs(SystemBarStyleArgs::class.java)
+                val window = activity.window
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    val lightAppearance =
+                        WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
+                            WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+                    window.insetsController?.setSystemBarsAppearance(
+                        if (args.dark) 0 else lightAppearance,
+                        lightAppearance,
+                    ) ?: error("system bar controller unavailable")
+                } else {
+                    @Suppress("DEPRECATION")
+                    val current = window.decorView.systemUiVisibility
+                    @Suppress("DEPRECATION")
+                    val lightSystemUi =
+                        View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or
+                            View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+                    @Suppress("DEPRECATION")
+                    window.decorView.systemUiVisibility = if (args.dark) {
+                        current and lightSystemUi.inv()
+                    } else {
+                        current or lightSystemUi
+                    }
+                }
+                invoke.resolve()
+            } catch (_: Exception) {
+                invoke.reject("system bar style unavailable", "internal")
+            }
         }
     }
 

@@ -1,3 +1,4 @@
+mod appearance_commands;
 mod asset_protocol;
 mod channels;
 mod chat_stream_registry;
@@ -118,6 +119,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::bootstrap,
+            appearance_commands::set_system_bar_style,
             commands::get_memory_supervisor_status,
             commands::list_characters,
             commands::get_character,

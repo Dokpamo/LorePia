@@ -2,6 +2,7 @@
   "version": 1,
   "commands": [
     "bootstrap",
+    "set_system_bar_style",
     "get_memory_supervisor_status",
     "list_characters",
     "get_character",

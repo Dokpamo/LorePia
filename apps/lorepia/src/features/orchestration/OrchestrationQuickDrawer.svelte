@@ -890,7 +890,7 @@
         border: 1px solid var(--desktop-divider);
         border-radius: 18px;
         background: var(--desktop-panel-bg, var(--desktop-sidebar-bg));
-        box-shadow: 0 12px 36px rgb(0 0 0 / 16%);
+        box-shadow: var(--popover-shadow);
     }
 
     .quick-drawer:focus {

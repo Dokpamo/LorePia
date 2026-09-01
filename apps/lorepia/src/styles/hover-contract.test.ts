@@ -231,12 +231,6 @@ describe('pointer interaction styling', () => {
         expect(css.match(/--desktop-chat-bubble-bg:\s*#262626;/g)).toHaveLength(2);
         expect(css.match(/--desktop-chat-composer-bg:\s*#202020;/g)).toHaveLength(2);
         expect(css.match(/--desktop-chat-composer-line:\s*#353535;/g)).toHaveLength(2);
-        expect(css.match(/--desktop-settings-sidebar-bg:\s*#1b1b1b;/g)).toHaveLength(2);
-        expect(css.match(/--desktop-settings-workspace-bg:\s*#1f1f1f;/g)).toHaveLength(2);
-        expect(css.match(/--desktop-settings-panel-bg:\s*#282828;/g)).toHaveLength(2);
-        expect(css.match(/--desktop-settings-selection-bg:\s*#3a3a3a;/g)).toHaveLength(2);
-        expect(css.match(/--desktop-settings-divider:\s*#333333;/g)).toHaveLength(2);
-        expect(css.match(/--desktop-settings-control-line:\s*#414141;/g)).toHaveLength(2);
         for (const staleWarmDark of [
             '#20201e',
             '#302f2c',
@@ -269,15 +263,6 @@ describe('pointer interaction styling', () => {
         );
         expect(css).toMatch(
             /\.app-shell\[data-layout='desktop'\]\[data-view='settings'\] \.setting-list\s*\{[^}]*background:\s*var\(--desktop-workspace-bg\);/s,
-        );
-        expect(settingsSource).toMatch(
-            /\.provider-pane \.theme-preview-dark \.theme-preview-canvas\s*\{[^}]*border-color:\s*#464646;[^}]*background:\s*#1f1f1f;/s,
-        );
-        expect(settingsSource).toMatch(
-            /\.provider-pane \.theme-preview-dark \.theme-preview-sidebar\s*\{[^}]*background:\s*#1b1b1b;/s,
-        );
-        expect(settingsSource).toMatch(
-            /\.provider-pane \.theme-preview-dark \.theme-preview-composer\s*\{[^}]*border-color:\s*#414141;[^}]*background:\s*#282828;/s,
         );
     });
     it('puts every pushed-screen action in the same measured toolbar slot', () => {

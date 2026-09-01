@@ -3,6 +3,7 @@
 
 export const LOREPIA_COMMANDS = {
     bootstrap: 'bootstrap',
+    setSystemBarStyle: 'set_system_bar_style',
     getMemorySupervisorStatus: 'get_memory_supervisor_status',
     listCharacters: 'list_characters',
     getCharacter: 'get_character',

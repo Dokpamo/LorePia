@@ -54,6 +54,13 @@ struct SensitiveCaptureArgs {
     maximum_bytes: u64,
 }
 
+#[cfg(target_os = "android")]
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SystemBarStyleArgs {
+    dark: bool,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CredentialEffectConfirmationArgs<'a> {
@@ -86,6 +93,14 @@ impl<R: Runtime> MobilePlatform<R> {
 
     pub(crate) fn data_root(&self) -> &Path {
         &self.data_root
+    }
+
+    #[cfg(target_os = "android")]
+    pub(crate) async fn set_system_bar_style(&self, dark: bool) -> PlatformResult<()> {
+        self.handle
+            .run_mobile_plugin_async::<()>("setSystemBarStyle", SystemBarStyleArgs { dark })
+            .await
+            .map_err(|_| PlatformError::new(PlatformErrorCode::Internal))
     }
 
     pub(crate) async fn confirm_credential_effect(
@@ -429,6 +444,15 @@ impl<R: Runtime> MobilePlatform<R> {
             usize::try_from(maximum_bytes).unwrap_or(MAXIMUM_SENSITIVE_CAPTURE_BYTES),
         )?;
         Ok(captured)
+    }
+}
+
+#[cfg(target_os = "android")]
+impl<R: Runtime> crate::LorepiaPlatform<R> {
+    /// Match Android's edge-to-edge status and navigation icons to the
+    /// renderer-selected palette. The native command remains Rust-only.
+    pub async fn set_system_bar_style(&self, dark: bool) -> PlatformResult<()> {
+        self.inner.set_system_bar_style(dark).await
     }
 }
 

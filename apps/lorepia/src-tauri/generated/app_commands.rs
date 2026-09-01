@@ -3,6 +3,7 @@
 
 const APP_COMMANDS: &[&str] = &[
     "bootstrap",
+    "set_system_bar_style",
     "get_memory_supervisor_status",
     "list_characters",
     "get_character",

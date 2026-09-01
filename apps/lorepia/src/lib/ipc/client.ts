@@ -16,10 +16,20 @@ import type {
 import { LOREPIA_COMMANDS, LOREPIA_EVENTS } from './commands';
 import { ModuleLifecycleClient } from './clients/module-lifecycle';
 import type { LorepiaTransport } from './clients/transport';
+import { normalizeClientError } from './errors';
 
 export { LOREPIA_COMMANDS, LOREPIA_EVENTS };
 
 export type { LorepiaTransport };
+
+/** Keep native edge-to-edge chrome legible without exposing the platform plugin to the webview. */
+export async function syncNativeSystemBarStyle(dark: boolean): Promise<void> {
+    try {
+        await invoke(LOREPIA_COMMANDS.setSystemBarStyle, { request: { dark } });
+    } catch (error: unknown) {
+        throw normalizeClientError(error);
+    }
+}
 
 export class TauriTransport implements LorepiaTransport {
     invoke(commandName: string, args?: Record<string, unknown>): Promise<unknown> {

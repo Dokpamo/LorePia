@@ -95,6 +95,25 @@
     --desktop-settings-muted-ink: var(--desktop-chat-muted-ink);
     --desktop-settings-subtle-ink: var(--desktop-chat-subtle-ink);
 
+    /*
+     * Theme-picker thumbnails compare fixed light and dark specimens. Keeping
+     * this miniature palette here makes that comparison independent of the
+     * active app theme while preventing component-local neutral scales.
+     */
+    --theme-preview-light-canvas: #f5f5f5;
+    --theme-preview-light-sidebar: #dedede;
+    --theme-preview-light-main: #fafafa;
+    --theme-preview-light-placeholder: #c8c8c8;
+    --theme-preview-light-composer: #ffffff;
+    --theme-preview-light-line: #dadada;
+    --theme-preview-dark-canvas: #1f1f1f;
+    --theme-preview-dark-sidebar: #1b1b1b;
+    --theme-preview-dark-placeholder: #6f6f6f;
+    --theme-preview-dark-composer: #282828;
+    --theme-preview-dark-line: #414141;
+    --theme-preview-dark-frame: #464646;
+    --theme-preview-system-overlay: rgb(20 20 20 / 72%);
+
     /* Text, from primary to incidental. */
     --ink: var(--brand-ink);
     --ink-muted: #6f6d68;
@@ -261,16 +280,16 @@
         --desktop-chat-subtle-ink: #858585;
         --desktop-chat-action-ink: #858585;
         --desktop-chat-action-hover-ink: #a7a7a7;
-        --desktop-settings-sidebar-bg: #1b1b1b;
-        --desktop-settings-workspace-bg: #1f1f1f;
-        --desktop-settings-panel-bg: #282828;
-        --desktop-settings-selection-bg: #3a3a3a;
-        --desktop-settings-hover-bg: #303030;
-        --desktop-settings-divider: #333333;
-        --desktop-settings-control-line: #414141;
-        --desktop-settings-ink: #e4e4e4;
-        --desktop-settings-muted-ink: #9c9c9c;
-        --desktop-settings-subtle-ink: #858585;
+        --desktop-settings-sidebar-bg: var(--desktop-sidebar-bg);
+        --desktop-settings-workspace-bg: var(--desktop-workspace-bg);
+        --desktop-settings-panel-bg: var(--desktop-panel-bg);
+        --desktop-settings-selection-bg: var(--desktop-selection-bg);
+        --desktop-settings-hover-bg: var(--desktop-hover-bg);
+        --desktop-settings-divider: var(--desktop-divider);
+        --desktop-settings-control-line: var(--desktop-composer-line);
+        --desktop-settings-ink: var(--desktop-ink);
+        --desktop-settings-muted-ink: var(--desktop-ink-muted);
+        --desktop-settings-subtle-ink: var(--desktop-ink-subtle);
 
         --ink: #e4e4e4;
         --ink-muted: #a3a3a3;
@@ -366,16 +385,16 @@
     --desktop-chat-subtle-ink: #858585;
     --desktop-chat-action-ink: #858585;
     --desktop-chat-action-hover-ink: #a7a7a7;
-    --desktop-settings-sidebar-bg: #1b1b1b;
-    --desktop-settings-workspace-bg: #1f1f1f;
-    --desktop-settings-panel-bg: #282828;
-    --desktop-settings-selection-bg: #3a3a3a;
-    --desktop-settings-hover-bg: #303030;
-    --desktop-settings-divider: #333333;
-    --desktop-settings-control-line: #414141;
-    --desktop-settings-ink: #e4e4e4;
-    --desktop-settings-muted-ink: #9c9c9c;
-    --desktop-settings-subtle-ink: #858585;
+    --desktop-settings-sidebar-bg: var(--desktop-sidebar-bg);
+    --desktop-settings-workspace-bg: var(--desktop-workspace-bg);
+    --desktop-settings-panel-bg: var(--desktop-panel-bg);
+    --desktop-settings-selection-bg: var(--desktop-selection-bg);
+    --desktop-settings-hover-bg: var(--desktop-hover-bg);
+    --desktop-settings-divider: var(--desktop-divider);
+    --desktop-settings-control-line: var(--desktop-composer-line);
+    --desktop-settings-ink: var(--desktop-ink);
+    --desktop-settings-muted-ink: var(--desktop-ink-muted);
+    --desktop-settings-subtle-ink: var(--desktop-ink-subtle);
 
     --ink: #e4e4e4;
     --ink-muted: #a3a3a3;
