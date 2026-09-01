@@ -33,6 +33,28 @@ describe('LorepiaAppController imports', () => {
         });
     });
 
+    it('explains temporary free-space needs for a large import', async () => {
+        const { mockClient } = createAppControllerFixture();
+        const controller = new LorepiaAppController(
+            mockClient({
+                selectImportSource: () =>
+                    Promise.reject(
+                        new LorepiaClientError({
+                            code: 'storage_unavailable',
+                            message_key: 'error.storage_unavailable',
+                            recoverable: true,
+                            operation_id: null,
+                            field_errors: [],
+                        }),
+                    ),
+            }),
+        );
+
+        await controller.beginImport();
+
+        expect(get(controller.state).import_flow.error).toBe(t('import.error.storage_unavailable'));
+    });
+
     it('commits a Risu preset as content without inserting a fake character', async () => {
         const { mockClient } = createAppControllerFixture();
         const inspection = {

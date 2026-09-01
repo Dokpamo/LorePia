@@ -16,7 +16,7 @@ use crate::runtime::{
 };
 
 const RISU_MAGIC: [u8; 2] = [111, 0];
-const RISU_HEADER_BYTES: u64 = 6;
+const RISU_HEADER_BYTES: usize = 6;
 const MAX_MODULE_METADATA_BYTES: usize = 4 * 1024 * 1024;
 const MAX_PRESET_CONTAINER_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_PRESET_DOCUMENT_BYTES: usize = 16 * 1024 * 1024;
@@ -52,7 +52,7 @@ pub(super) fn read_risu_module(
     source_sha256: &str,
 ) -> CoreResult<RisuModuleSource> {
     let mut reader = BufReader::new(File::open(path).map_err(storage_error)?);
-    let mut header = [0_u8; RISU_HEADER_BYTES as usize];
+    let mut header = [0_u8; RISU_HEADER_BYTES];
     reader
         .read_exact(&mut header)
         .map_err(|_| unsupported("Risu module header is truncated"))?;
@@ -250,7 +250,7 @@ pub(super) fn decode_risu_preset(path: &Path) -> CoreResult<Value> {
     if plaintext.len() > MAX_PRESET_DOCUMENT_BYTES {
         return Err(unsupported("Risu preset document exceeds 16 MiB"));
     }
-    let value = read_messagepack(&plaintext, "Risu preset document")?;
+    let value = read_messagepack(plaintext, "Risu preset document")?;
     messagepack_to_json(&value, 0, &mut 0)
 }
 
@@ -271,13 +271,12 @@ fn messagepack_to_json(
         return Err(unsupported("Risu preset structure exceeds the node limit"));
     }
     match value {
-        MessagePackValue::Null => Ok(Value::Null),
+        MessagePackValue::Null | MessagePackValue::Binary(_) => Ok(Value::Null),
         MessagePackValue::Bool(value) => Ok(Value::Bool(*value)),
         MessagePackValue::I64(value) => Ok(Value::from(*value)),
         MessagePackValue::U64(value) => Ok(Value::from(*value)),
         MessagePackValue::F64(value) => Ok(Value::from(*value)),
         MessagePackValue::String(value) => Ok(Value::String(value.clone())),
-        MessagePackValue::Binary(_) => Ok(Value::Null),
         MessagePackValue::Array(values) => values
             .iter()
             .map(|value| messagepack_to_json(value, depth + 1, nodes))

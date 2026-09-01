@@ -330,14 +330,12 @@ fn parse_transforms(
                 .and_then(Value::as_str)
                 .unwrap_or_default();
             let phase = match kind {
-                "editprocess" => PortableTransformPhase::RequestContext,
-                "editinput" => PortableTransformPhase::RequestContext,
+                "editprocess" | "editinput" => PortableTransformPhase::RequestContext,
                 "editoutput" => PortableTransformPhase::ProviderOutput,
-                "editdisplay" => PortableTransformPhase::Display,
                 // Risu uses this sentinel for an intentionally inert rule. Its
                 // phase has no runtime effect, but retaining it as disabled
                 // preserves review counts and round-trip metadata.
-                "disabled" => PortableTransformPhase::Display,
+                "editdisplay" | "disabled" => PortableTransformPhase::Display,
                 _ => {
                     return Err(unsupported(format!(
                         "unsupported runtime transform type: {kind}"

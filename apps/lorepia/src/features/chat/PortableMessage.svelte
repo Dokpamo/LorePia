@@ -12,8 +12,10 @@
     import {
         applyPortableTransforms,
         hasPortableDisplayTransform,
+        mergePortableDisplayVariables,
         type PortableRegexDiagnostic,
         renderPortableDisplay,
+        renderPortableMacros,
     } from './portable-display';
     import { sanitizePortableCss, sanitizePortableTree } from './portable-renderer-policy';
     import {
@@ -39,11 +41,14 @@
         client?: LorepiaClient;
         profile: CharacterRenderProfileDto | null;
         enabled?: boolean;
+        expandMacros?: boolean;
         messageIndex?: number;
         lastMessageId?: number;
         variables?: Record<string, string>;
         backgroundMarkup?: string;
         lastCharacterMessage?: string;
+        characterName?: string;
+        userName?: string;
         onAction?: (action: string) => void;
     }
 
@@ -52,11 +57,14 @@
         client,
         profile,
         enabled = true,
+        expandMacros = enabled,
         messageIndex,
         lastMessageId,
         variables,
         backgroundMarkup,
         lastCharacterMessage = '',
+        characterName,
+        userName,
         onAction,
     }: Props = $props();
     let frame = $state<HTMLIFrameElement | null>(null);
@@ -108,6 +116,22 @@
                 /\{\{(?:raw|audio|bgm)::/i.test(normalizedText) ||
                 hasPortableDisplayTransform(normalizedText, profile.display_transforms)),
     );
+    const displayVariables = $derived(
+        mergePortableDisplayVariables(profile?.initial_variables ?? {}, variables ?? {}),
+    );
+    const portableText = $derived(
+        !expandMacros || profile === null
+            ? normalizedText
+            : renderPortableMacros(
+                  normalizedText,
+                  {
+                      variables: displayVariables,
+                      characterName,
+                      userName,
+                  },
+                  normalizedText,
+              ),
+    );
 
     $effect(() => {
         const target = frame;
@@ -118,7 +142,7 @@
         const activeLastMessageId = lastMessageId;
         const active = usesPortableMarkup;
         const actionHandler = onAction;
-        const activeVariables = variables ?? activeProfile?.initial_variables ?? {};
+        const activeVariables = displayVariables;
         const activeBackgroundMarkup = backgroundMarkup ?? activeProfile?.background_markup ?? '';
         if (!active || target === null || activeProfile === null || activeClient === undefined) {
             return;
@@ -163,6 +187,8 @@
                         chatIndex: activeMessageIndex,
                         lastMessageId: activeLastMessageId,
                         lastCharacterMessage,
+                        characterName,
+                        userName,
                     },
                 ),
             );
@@ -208,6 +234,8 @@
                 chatIndex: activeMessageIndex,
                 lastMessageId: activeLastMessageId,
                 lastCharacterMessage,
+                characterName,
+                userName,
                 onRegexDiagnostic: reportRegexDiagnostic,
                 regexRuleScope: `${activeProfile.character_id}:${activeProfile.character_content_revision_id ?? 'legacy'}`,
             },
@@ -526,7 +554,7 @@
         ></iframe>
     </div>
 {:else}
-    <MarkdownText text={normalizedText} />
+    <MarkdownText text={portableText} />
 {/if}
 {#if regexWarning !== null}
     <p class="portable-regex-warning" role="status">{regexWarning}</p>

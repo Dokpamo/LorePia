@@ -84,53 +84,50 @@ pub(super) fn convert_module(
     let knowledge_book = runtime_knowledge
         .and_then(|reference| reference.embedded)
         .map(|book| book.materialize(provenance.clone()));
+    let warnings = module_warnings(
+        source.metadata.warnings,
+        original_script_count,
+        original_transform_count,
+        retained_transform_count,
+        !source.metadata.profile.background_markup.trim().is_empty(),
+        !source.metadata.profile.toggle_schema.trim().is_empty(),
+        &source.assets,
+    );
+    let documents = module_documents(
+        &name,
+        &description,
+        prefix,
+        provenance,
+        knowledge_book,
+        transform_set,
+        &source.assets,
+    )?;
+    let package_capabilities = module_package_capabilities(&documents, !source.assets.is_empty());
+    Ok(NormalizedExternalContent {
+        kind: ContentKind::RisuModule,
+        name,
+        description,
+        documents,
+        assets: source.assets,
+        package_capabilities,
+        dynamic_content,
+        warnings,
+        unsupported_optional_fields: vec![
+            "trigger scripts (quarantined)".to_owned(),
+            "custom Risu toggle/background runtime".to_owned(),
+        ],
+    })
+}
 
-    let mut warnings = source.metadata.warnings;
-    if original_script_count > 0 {
-        warnings.push(ImportWarning {
-            code: "risu_scripts_quarantined".to_owned(),
-            message: format!(
-                "Quarantined {original_script_count} Risu trigger script(s). LorePia imports only declarative module behavior."
-            ),
-        });
-    }
-    if retained_transform_count < original_transform_count {
-        warnings.push(ImportWarning {
-            code: "risu_regex_rules_quarantined".to_owned(),
-            message: format!(
-                "Quarantined {} disabled or non-portable regex rule(s); {retained_transform_count} safe rule(s) remain available for explicit activation.",
-                original_transform_count - retained_transform_count
-            ),
-        });
-    }
-    if !source.metadata.profile.background_markup.trim().is_empty() {
-        warnings.push(ImportWarning {
-            code: "risu_markup_quarantined".to_owned(),
-            message: "Custom Risu HTML/CSS background markup was quarantined and will not run."
-                .to_owned(),
-        });
-    }
-    if !source.metadata.profile.toggle_schema.trim().is_empty() {
-        warnings.push(ImportWarning {
-            code: "risu_toggle_schema_preserved_inactive".to_owned(),
-            message: "Risu's custom toggle schema is not executed; compatible declarative content was imported inactive."
-                .to_owned(),
-        });
-    }
-    let corrected_asset_types = source
-        .assets
-        .iter()
-        .filter(|asset| asset.declared_extension_mismatch)
-        .count();
-    if corrected_asset_types > 0 {
-        warnings.push(ImportWarning {
-            code: "risu_asset_media_type_corrected".to_owned(),
-            message: format!(
-                "Corrected {corrected_asset_types} asset extension(s) from their verified media signatures."
-            ),
-        });
-    }
-
+fn module_documents(
+    name: &str,
+    description: &str,
+    prefix: &str,
+    provenance: Provenance,
+    knowledge_book: Option<KnowledgeBook>,
+    transform_set: Option<TransformSet>,
+    assets: &[RisuAssetRecord],
+) -> CoreResult<Vec<NormalizedDocumentEntry>> {
     let mut documents = Vec::new();
     let mut dependency_ids = Vec::new();
     let mut knowledge_book_ids = Vec::new();
@@ -160,17 +157,7 @@ pub(super) fn convert_module(
         });
     }
 
-    let mut asset_ids = Vec::new();
-    let mut seen_assets = BTreeSet::new();
-    for (index, asset) in source.assets.iter().enumerate() {
-        if seen_assets.insert(asset.sha256.clone()) {
-            asset_ids.push(lorepia_domain::AssetId::from(format!(
-                "sha256:{}",
-                asset.sha256
-            )));
-            dependency_ids.push(format!("asset-{index}"));
-        }
-    }
+    let asset_ids = module_asset_ids(assets, &mut dependency_ids);
     let mut required_capabilities = Vec::new();
     if !knowledge_book_ids.is_empty() {
         required_capabilities.push(ContentCapability::Knowledge);
@@ -183,7 +170,7 @@ pub(super) fn convert_module(
     }
     let module = ContentModule {
         id: ContentModuleId::from(format!("risu-module-{prefix}")),
-        name: name.clone(),
+        name: name.to_owned(),
         version: "1.0.0".to_owned(),
         schema_version: DOCUMENT_SCHEMA_VERSION,
         prompt_fragments: Vec::new(),
@@ -199,7 +186,7 @@ pub(super) fn convert_module(
             license: "LicenseRef-Risu-User-Content".to_owned(),
             redistribution_allowed: false,
             homepage: None,
-            description: description.clone(),
+            description: description.to_owned(),
             tags: vec!["risu".to_owned(), "imported-module".to_owned()],
             provenance,
         },
@@ -215,7 +202,31 @@ pub(super) fn convert_module(
         depends_on: dependency_ids,
         document: NormalizedDocument::ContentModule(module),
     });
+    Ok(documents)
+}
 
+fn module_asset_ids(
+    assets: &[RisuAssetRecord],
+    dependency_ids: &mut Vec<String>,
+) -> Vec<lorepia_domain::AssetId> {
+    let mut asset_ids = Vec::new();
+    let mut seen_assets = BTreeSet::new();
+    for (index, asset) in assets.iter().enumerate() {
+        if seen_assets.insert(asset.sha256.clone()) {
+            asset_ids.push(lorepia_domain::AssetId::from(format!(
+                "sha256:{}",
+                asset.sha256
+            )));
+            dependency_ids.push(format!("asset-{index}"));
+        }
+    }
+    asset_ids
+}
+
+fn module_package_capabilities(
+    documents: &[NormalizedDocumentEntry],
+    has_assets: bool,
+) -> Vec<&'static str> {
     let mut package_capabilities = vec!["content_modules"];
     if documents
         .iter()
@@ -229,23 +240,65 @@ pub(super) fn convert_module(
     {
         package_capabilities.push("safe_transforms");
     }
-    if !source.assets.is_empty() {
+    if has_assets {
         package_capabilities.push("image_assets");
     }
-    Ok(NormalizedExternalContent {
-        kind: ContentKind::RisuModule,
-        name,
-        description,
-        documents,
-        assets: source.assets,
-        package_capabilities,
-        dynamic_content,
-        warnings,
-        unsupported_optional_fields: vec![
-            "trigger scripts (quarantined)".to_owned(),
-            "custom Risu toggle/background runtime".to_owned(),
-        ],
-    })
+    package_capabilities
+}
+
+fn module_warnings(
+    mut warnings: Vec<ImportWarning>,
+    original_script_count: usize,
+    original_transform_count: usize,
+    retained_transform_count: usize,
+    has_background_markup: bool,
+    has_toggle_schema: bool,
+    assets: &[RisuAssetRecord],
+) -> Vec<ImportWarning> {
+    if original_script_count > 0 {
+        warnings.push(ImportWarning {
+            code: "risu_scripts_quarantined".to_owned(),
+            message: format!(
+                "Quarantined {original_script_count} Risu trigger script(s). LorePia imports only declarative module behavior."
+            ),
+        });
+    }
+    if retained_transform_count < original_transform_count {
+        warnings.push(ImportWarning {
+            code: "risu_regex_rules_quarantined".to_owned(),
+            message: format!(
+                "Quarantined {} disabled or non-portable regex rule(s); {retained_transform_count} safe rule(s) remain available for explicit activation.",
+                original_transform_count - retained_transform_count
+            ),
+        });
+    }
+    if has_background_markup {
+        warnings.push(ImportWarning {
+            code: "risu_markup_quarantined".to_owned(),
+            message: "Custom Risu HTML/CSS background markup was quarantined and will not run."
+                .to_owned(),
+        });
+    }
+    if has_toggle_schema {
+        warnings.push(ImportWarning {
+            code: "risu_toggle_schema_preserved_inactive".to_owned(),
+            message: "Risu's custom toggle schema is not executed; compatible declarative content was imported inactive."
+                .to_owned(),
+        });
+    }
+    let corrected_asset_types = assets
+        .iter()
+        .filter(|asset| asset.declared_extension_mismatch)
+        .count();
+    if corrected_asset_types > 0 {
+        warnings.push(ImportWarning {
+            code: "risu_asset_media_type_corrected".to_owned(),
+            message: format!(
+                "Corrected {corrected_asset_types} asset extension(s) from their verified media signatures."
+            ),
+        });
+    }
+    warnings
 }
 
 pub(super) fn convert_preset(
@@ -295,21 +348,6 @@ pub(super) fn convert_preset(
         ..CharacterContentV1::default()
     });
 
-    let mut documents = Vec::new();
-    let mut transform_set_ids = Vec::new();
-    let mut prompt_dependencies = Vec::new();
-    if let Some(set) = transform_set {
-        transform_set_ids.push(set.id.clone());
-        prompt_dependencies.push("transform".to_owned());
-        documents.push(NormalizedDocumentEntry {
-            id: "transform".to_owned(),
-            path: "transforms/risu-preset-transform.json".to_owned(),
-            kind: "transform",
-            required_capabilities: vec!["safe_transforms"],
-            depends_on: Vec::new(),
-            document: NormalizedDocument::TransformSet(set),
-        });
-    }
     let api_type = object
         .get("apiType")
         .and_then(Value::as_str)
@@ -318,40 +356,50 @@ pub(super) fn convert_preset(
         .get("aiModel")
         .and_then(Value::as_str)
         .unwrap_or("unbound");
-    let preset = PromptPreset {
-        id: PromptPresetId::from(format!("risu-preset-{prefix}")),
-        name: name.clone(),
-        schema_version: DOCUMENT_SCHEMA_VERSION,
+    let metadata_description = format!(
+        "Imported Risu prompt preset. Original API type: {api_type}; model hint: {model}. Provider parameters remain unbound until a LorePia model route is selected."
+    );
+    let documents = preset_documents(
+        &name,
+        prefix,
         blocks,
-        controls: Vec::new(),
-        default_values: VariableMap::default(),
-        default_generation_preset_id: None,
-        memory_profile_id: None,
-        knowledge_book_ids: Vec::new(),
-        transform_set_ids,
-        module_ids: Vec::new(),
         cache_boundaries,
-        metadata: imported_preset_metadata(
-            format!(
-                "Imported Risu prompt preset. Original API type: {api_type}; model hint: {model}. Provider parameters remain unbound until a LorePia model route is selected."
-            ),
-            vec!["risu".to_owned(), "imported-preset".to_owned()],
-            provenance,
-        )?,
-    };
-    preset
-        .validate()
-        .map_err(|error| unsupported(format!("Risu preset cannot be normalized: {error}")))?;
-    documents.push(NormalizedDocumentEntry {
-        id: "prompt".to_owned(),
-        path: "prompt/risu-preset.json".to_owned(),
-        kind: "prompt",
-        required_capabilities: vec!["prompt_presets"],
-        depends_on: prompt_dependencies,
-        document: NormalizedDocument::PromptPreset(preset),
-    });
+        transform_set,
+        provenance,
+        metadata_description,
+    )?;
+    let warnings = preset_warnings(
+        runtime.warnings,
+        skipped_prompt_items,
+        original_transform_count,
+        retained_transform_count,
+    );
+    let mut package_capabilities = vec!["prompt_presets"];
+    if retained_transform_count > 0 {
+        package_capabilities.push("safe_transforms");
+    }
+    Ok(NormalizedExternalContent {
+        kind: ContentKind::RisuPreset,
+        name,
+        description: format!("Risu prompt preset for {model}"),
+        documents,
+        assets: Vec::new(),
+        package_capabilities,
+        dynamic_content,
+        warnings,
+        unsupported_optional_fields: vec![
+            "provider credentials and endpoint overrides".to_owned(),
+            "provider-specific sampling values (unbound)".to_owned(),
+        ],
+    })
+}
 
-    let mut warnings = runtime.warnings;
+fn preset_warnings(
+    mut warnings: Vec<ImportWarning>,
+    skipped_prompt_items: usize,
+    original_transform_count: usize,
+    retained_transform_count: usize,
+) -> Vec<ImportWarning> {
     warnings.push(ImportWarning {
         code: "risu_provider_parameters_unbound".to_owned(),
         message: "Prompt blocks are imported, but provider/model sampling values remain unbound until you choose a LorePia model route."
@@ -374,24 +422,64 @@ pub(super) fn convert_preset(
             ),
         });
     }
-    let mut package_capabilities = vec!["prompt_presets"];
-    if retained_transform_count > 0 {
-        package_capabilities.push("safe_transforms");
+    warnings
+}
+
+fn preset_documents(
+    name: &str,
+    prefix: &str,
+    blocks: Vec<PromptBlock>,
+    cache_boundaries: Vec<CacheBoundary>,
+    transform_set: Option<TransformSet>,
+    provenance: Provenance,
+    metadata_description: String,
+) -> CoreResult<Vec<NormalizedDocumentEntry>> {
+    let mut documents = Vec::new();
+    let mut transform_set_ids = Vec::new();
+    let mut prompt_dependencies = Vec::new();
+    if let Some(set) = transform_set {
+        transform_set_ids.push(set.id.clone());
+        prompt_dependencies.push("transform".to_owned());
+        documents.push(NormalizedDocumentEntry {
+            id: "transform".to_owned(),
+            path: "transforms/risu-preset-transform.json".to_owned(),
+            kind: "transform",
+            required_capabilities: vec!["safe_transforms"],
+            depends_on: Vec::new(),
+            document: NormalizedDocument::TransformSet(set),
+        });
     }
-    Ok(NormalizedExternalContent {
-        kind: ContentKind::RisuPreset,
-        name,
-        description: format!("Risu prompt preset for {model}"),
-        documents,
-        assets: Vec::new(),
-        package_capabilities,
-        dynamic_content,
-        warnings,
-        unsupported_optional_fields: vec![
-            "provider credentials and endpoint overrides".to_owned(),
-            "provider-specific sampling values (unbound)".to_owned(),
-        ],
-    })
+    let preset = PromptPreset {
+        id: PromptPresetId::from(format!("risu-preset-{prefix}")),
+        name: name.to_owned(),
+        schema_version: DOCUMENT_SCHEMA_VERSION,
+        blocks,
+        controls: Vec::new(),
+        default_values: VariableMap::default(),
+        default_generation_preset_id: None,
+        memory_profile_id: None,
+        knowledge_book_ids: Vec::new(),
+        transform_set_ids,
+        module_ids: Vec::new(),
+        cache_boundaries,
+        metadata: imported_preset_metadata(
+            metadata_description,
+            vec!["risu".to_owned(), "imported-preset".to_owned()],
+            provenance,
+        )?,
+    };
+    preset
+        .validate()
+        .map_err(|error| unsupported(format!("Risu preset cannot be normalized: {error}")))?;
+    documents.push(NormalizedDocumentEntry {
+        id: "prompt".to_owned(),
+        path: "prompt/risu-preset.json".to_owned(),
+        kind: "prompt",
+        required_capabilities: vec!["prompt_presets"],
+        depends_on: prompt_dependencies,
+        document: NormalizedDocument::PromptPreset(preset),
+    });
+    Ok(documents)
 }
 
 pub(super) fn convert_memory_preset(
@@ -525,93 +613,107 @@ fn prompt_blocks(
             }
             continue;
         }
-        let name = bounded_name(
-            object
-                .get("name")
-                .and_then(Value::as_str)
-                .unwrap_or_default(),
-            &format!("Risu prompt item {}", index + 1),
-        );
-        let text = object
-            .get("text")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        let role = role_hint(object.get("role").and_then(Value::as_str));
-        let id = format!("risu-block-{prefix}-{index}");
-        let block = match kind {
-            "persona" => dynamic_prompt_block(
-                id,
-                name,
-                PromptBlockKind::UserPersona,
-                BlockSource::UserPersona,
-                RoleHint::User,
-                PlacementZone::CharacterContext,
-                None,
-                provenance,
-            ),
-            "description" => dynamic_prompt_block(
-                id,
-                name,
-                PromptBlockKind::CharacterDescription,
-                BlockSource::CharacterField {
-                    field: lorepia_domain::CharacterField::Description,
-                },
-                role,
-                PlacementZone::CharacterContext,
-                None,
-                provenance,
-            ),
-            "lorebook" => dynamic_prompt_block(
-                id,
-                name,
-                PromptBlockKind::WorldKnowledge,
-                BlockSource::SelectedKnowledge,
-                role,
-                PlacementZone::RetrievedContext,
-                None,
-                provenance,
-            ),
-            "memory" => dynamic_prompt_block(
-                id,
-                name,
-                PromptBlockKind::RetrievedMemory,
-                BlockSource::SelectedMemory,
-                role,
-                PlacementZone::RetrievedContext,
-                None,
-                provenance,
-            ),
-            "authornote" => dynamic_prompt_block(
-                id,
-                name,
-                PromptBlockKind::AuthorNote,
-                BlockSource::AuthorNote,
-                role,
-                PlacementZone::RecentEnhancement,
-                None,
-                provenance,
-            ),
-            "chat" | "chatML" => dynamic_prompt_block(
-                id,
-                name,
-                PromptBlockKind::HistorySlice,
-                BlockSource::History,
-                role,
-                PlacementZone::RecentHistory,
-                Some(HistorySelector::All),
-                provenance,
-            ),
-            "plain" | "postEverything" if !text.trim().is_empty() => {
-                static_prompt_block(id, name, text, role, index, provenance)?
-            }
-            _ => {
-                skipped += 1;
-                continue;
-            }
-        };
-        blocks.push(block);
+        if let Some(block) = prompt_block(object, index, prefix, provenance)? {
+            blocks.push(block);
+        } else {
+            skipped += 1;
+        }
     }
     Ok((blocks, boundaries, skipped))
+}
+
+fn prompt_block(
+    object: &serde_json::Map<String, Value>,
+    index: usize,
+    prefix: &str,
+    provenance: &Provenance,
+) -> CoreResult<Option<PromptBlock>> {
+    let kind = object
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("plain");
+    let name = bounded_name(
+        object
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+        &format!("Risu prompt item {}", index + 1),
+    );
+    let text = object
+        .get("text")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let role = role_hint(object.get("role").and_then(Value::as_str));
+    let id = format!("risu-block-{prefix}-{index}");
+    let block = match kind {
+        "persona" => dynamic_prompt_block(
+            id,
+            name,
+            PromptBlockKind::UserPersona,
+            BlockSource::UserPersona,
+            RoleHint::User,
+            PlacementZone::CharacterContext,
+            None,
+            provenance,
+        ),
+        "description" => dynamic_prompt_block(
+            id,
+            name,
+            PromptBlockKind::CharacterDescription,
+            BlockSource::CharacterField {
+                field: lorepia_domain::CharacterField::Description,
+            },
+            role,
+            PlacementZone::CharacterContext,
+            None,
+            provenance,
+        ),
+        "lorebook" => dynamic_prompt_block(
+            id,
+            name,
+            PromptBlockKind::WorldKnowledge,
+            BlockSource::SelectedKnowledge,
+            role,
+            PlacementZone::RetrievedContext,
+            None,
+            provenance,
+        ),
+        "memory" => dynamic_prompt_block(
+            id,
+            name,
+            PromptBlockKind::RetrievedMemory,
+            BlockSource::SelectedMemory,
+            role,
+            PlacementZone::RetrievedContext,
+            None,
+            provenance,
+        ),
+        "authornote" => dynamic_prompt_block(
+            id,
+            name,
+            PromptBlockKind::AuthorNote,
+            BlockSource::AuthorNote,
+            role,
+            PlacementZone::RecentEnhancement,
+            None,
+            provenance,
+        ),
+        "chat" | "chatML" => dynamic_prompt_block(
+            id,
+            name,
+            PromptBlockKind::HistorySlice,
+            BlockSource::History,
+            role,
+            PlacementZone::RecentHistory,
+            Some(HistorySelector::All),
+            provenance,
+        ),
+        "plain" | "postEverything" if !text.trim().is_empty() => {
+            static_prompt_block(id, name, text, role, index, provenance)?
+        }
+        _ => return Ok(None),
+    };
+    Ok(Some(block))
 }
 
 fn static_prompt_block(

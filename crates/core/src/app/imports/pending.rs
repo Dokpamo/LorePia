@@ -49,7 +49,7 @@ pub(in crate::app) struct PendingImport {
 #[derive(Clone)]
 enum PendingImportPayload {
     Character {
-        character_content: CharacterContentV1,
+        character_content: Box<CharacterContentV1>,
         staged_assets: Vec<StagedAsset>,
     },
     External {
@@ -112,7 +112,7 @@ impl Core {
                         inspection: prepared.inspection,
                         plan_hash: prepared.plan_hash,
                         payload: PendingImportPayload::Character {
-                            character_content: prepared.character_content,
+                            character_content: Box::new(prepared.character_content),
                             staged_assets: prepared.staged_assets,
                         },
                     }
@@ -208,7 +208,7 @@ impl Core {
             ));
         };
         let verification_matches = verified.plan_hash == pending.plan_hash
-            && verified.character_content == *character_content
+            && verified.character_content == **character_content
             && verified.inspection.source_sha256 == pending.inspection.source_sha256
             && verified.inspection.source_size == pending.inspection.source_size
             && verified.inspection.kind == pending.inspection.kind;
@@ -292,11 +292,10 @@ impl Core {
                 "external import payload changed after claim",
             ));
         };
-        let source_matches = fs::metadata(&pending.path)
-            .map(|metadata| metadata.is_file() && metadata.len() == pending.inspection.source_size)
-            .unwrap_or(false)
-            && sha256_file(&pending.path).as_deref()
-                == Ok(pending.inspection.source_sha256.as_str());
+        let source_matches = fs::metadata(&pending.path).is_ok_and(|metadata| {
+            metadata.is_file() && metadata.len() == pending.inspection.source_size
+        }) && sha256_file(&pending.path).as_deref()
+            == Ok(pending.inspection.source_sha256.as_str());
         let package_matches = sha256_file(normalized_package_path).as_deref()
             == Ok(normalized_package_sha256.as_str());
         if !source_matches || !package_matches {

@@ -9,6 +9,7 @@
         OrchestrationController,
         OrchestrationState,
     } from '../orchestration/orchestration-controller';
+    import CharacterAvatar from '../assets/CharacterAvatar.svelte';
     import ChatComposer from './ChatComposer.svelte';
     import ChatErrorRegion from './ChatErrorRegion.svelte';
     import ChatFullscreenComposer from './ChatFullscreenComposer.svelte';
@@ -492,12 +493,9 @@
                         <ChevronDown aria-hidden="true" />
                     </button>
                 {:else}
-                    <span
-                        class="avatar"
-                        aria-hidden="true"
-                        data-tauri-drag-region={titlebarOverlay ? '' : undefined}
-                        >{(appState.selected_character?.name ?? '?').slice(0, 1)}</span
-                    >
+                    <span class="avatar" data-tauri-drag-region={titlebarOverlay ? '' : undefined}>
+                        <CharacterAvatar {client} character={appState.selected_character} />
+                    </span>
                     <div data-tauri-drag-region={titlebarOverlay ? '' : undefined}>
                         <h2
                             id="chat-title"

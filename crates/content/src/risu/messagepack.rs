@@ -125,10 +125,10 @@ impl Parser<'_> {
             0xcd => Ok(MessagePackValue::U64(u64::from(self.u16()?))),
             0xce => Ok(MessagePackValue::U64(u64::from(self.u32()?))),
             0xcf => Ok(MessagePackValue::U64(self.u64()?)),
-            0xd0 => Ok(MessagePackValue::I64(i64::from(self.byte()? as i8))),
-            0xd1 => Ok(MessagePackValue::I64(i64::from(self.u16()? as i16))),
-            0xd2 => Ok(MessagePackValue::I64(i64::from(self.u32()? as i32))),
-            0xd3 => Ok(MessagePackValue::I64(self.u64()? as i64)),
+            0xd0 => Ok(MessagePackValue::I64(i64::from(self.byte()?.cast_signed()))),
+            0xd1 => Ok(MessagePackValue::I64(i64::from(self.u16()?.cast_signed()))),
+            0xd2 => Ok(MessagePackValue::I64(i64::from(self.u32()?.cast_signed()))),
+            0xd3 => Ok(MessagePackValue::I64(self.u64()?.cast_signed())),
             0xd4 => self.extension(1),
             0xd5 => self.extension(2),
             0xd6 => self.extension(4),
@@ -162,7 +162,7 @@ impl Parser<'_> {
                 let len = self.length_u32()?;
                 self.map(len, depth)
             }
-            0xe0..=0xff => Ok(MessagePackValue::I64(i64::from(marker as i8))),
+            0xe0..=0xff => Ok(MessagePackValue::I64(i64::from(marker.cast_signed()))),
         }
     }
 

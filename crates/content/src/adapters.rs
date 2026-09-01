@@ -12,6 +12,10 @@ use sha2::{Digest, Sha256};
 use crate::capabilities::{normalize_runtime_profile_capabilities, parse_runtime_capabilities};
 use crate::knowledge_ids::{KnowledgeEntryIds, normalized_knowledge_entry_id};
 
+mod runtime_variables;
+
+use runtime_variables::parse_runtime_variables;
+
 pub(crate) const MAX_METADATA_BYTES: usize = 4 * 1024 * 1024;
 pub(crate) const MAX_CHARACTER_NAME_BYTES: usize = 1_024;
 pub(crate) const MAX_CHARACTER_NAME_CHARS: usize = 256;
@@ -596,34 +600,6 @@ fn parse_runtime_extensions(
         return Ok(profile);
     }
     Ok(CharacterRuntimeProfile::default())
-}
-
-fn parse_runtime_variables(value: Option<&Value>) -> CoreResult<BTreeMap<String, String>> {
-    let Some(value) = value else {
-        return Ok(BTreeMap::new());
-    };
-    match value {
-        Value::Null => Ok(BTreeMap::new()),
-        Value::String(value) if value.is_empty() => Ok(BTreeMap::new()),
-        Value::Object(values) => values
-            .iter()
-            .map(|(key, value)| Ok((key.clone(), runtime_variable_text(value)?)))
-            .collect(),
-        _ => Ok(BTreeMap::from([(
-            "source".to_owned(),
-            canonical_json(value)?,
-        )])),
-    }
-}
-
-fn runtime_variable_text(value: &Value) -> CoreResult<String> {
-    match value {
-        Value::Null => Ok(String::new()),
-        Value::Bool(value) => Ok(u8::from(*value).to_string()),
-        Value::Number(value) => Ok(value.to_string()),
-        Value::String(value) => Ok(value.clone()),
-        Value::Array(_) | Value::Object(_) => canonical_json(value),
-    }
 }
 
 fn parse_toggle_defaults(schema: &str) -> BTreeMap<String, String> {

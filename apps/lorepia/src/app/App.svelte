@@ -12,6 +12,7 @@
     import { isTauri } from '@tauri-apps/api/core';
     import { tr } from '../lib/i18n';
     import { onMount, untrack } from 'svelte';
+    import { installAndroidBack } from './android-back-navigation';
     import {
         INITIAL_APP_STATE,
         LorepiaAppController,
@@ -55,11 +56,6 @@
     import { createLiveLorepiaClient } from '../lib/ipc/client';
     import type { LorepiaClient, MemoryRecordSourceNavigationDto } from '../lib/ipc/contracts';
 
-    /*
-     * Phones and wide handhelds divide destinations in time under a bottom
-     * bar. Desktop windows have enough room to keep the character/conversation
-     * hierarchy beside the active workspace instead.
-     */
     const DESKTOP_LAYOUT = '(min-width: 900px)';
     const DESKTOP_UTILITY_DOCK = '(min-width: 1280px)';
     const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
@@ -78,7 +74,6 @@
     type MainView = 'home' | 'chat' | 'create' | 'settings';
     type HomeSection = 'characters' | 'conversations';
     type BackSwipePhase = 'idle' | 'tracking' | 'dragging' | 'settling' | 'committing';
-
     interface BackSwipePointer {
         pointerId: number;
         startX: number;
@@ -136,7 +131,6 @@
     let chatThreadOpen = $state(false);
     let chatUtilityOpen = $state(false);
     let chatUtilityAutoCollapsed = $state(false);
-    /* Settings and studio entries open as dedicated screens inside the handheld shell. */
     let settingsSection = $state<SettingsSection | null>(null);
     let settingsDetailPage = $state<SettingsDetailPage>(null);
     let settingsEditorMode = $state<string | null>(null);
@@ -554,9 +548,9 @@
         chatUtilityAutoCollapsed = false;
     }
 
-    function showChat(): void {
+    function showChat(open: boolean | Event = false): void {
         view = 'chat';
-        chatThreadOpen = false;
+        chatThreadOpen = open === true;
         chatUtilityOpen = false;
         chatUtilityAutoCollapsed = false;
     }
@@ -892,6 +886,11 @@
     });
 
     onMount(() => {
+        const disposeAndroidBack = installAndroidBack(
+            mobileRouteDescriptor,
+            performBackSwipeNavigation,
+            showHome,
+        );
         const layout = window.matchMedia(DESKTOP_LAYOUT);
         const utilityDock = window.matchMedia(DESKTOP_UTILITY_DOCK);
         let utilityDockWasWide = utilityDock.matches;
@@ -984,6 +983,7 @@
         });
         void controller.start();
         return () => {
+            disposeAndroidBack();
             resetBackSwipe();
             clearBackSwipeSnapshots();
             cancelSidebarUnmount();
@@ -1059,7 +1059,7 @@
                     state={appState}
                     {controller}
                     client={appClient}
-                    onOpenConversations={() => (homeSection = 'conversations')}
+                    onOpenChat={() => (homeSection = 'conversations')}
                 />
             </section>
 
@@ -1167,7 +1167,7 @@
                         {controller}
                         client={appClient}
                         rootView
-                        onOpenConversations={showChat}
+                        onOpenChat={showChat}
                     />
                 </section>
             {:else if view === 'chat'}

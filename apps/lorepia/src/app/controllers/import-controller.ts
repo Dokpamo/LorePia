@@ -3,9 +3,14 @@ import { normalizeClientError } from '../../lib/ipc/errors';
 import type { AppControllerContext } from './controller-context';
 
 function importErrorLabel(error: unknown, fallback: string): string {
-    return normalizeClientError(error).messageKey === 'error.unsupported_content'
-        ? `${t('import.blocked')}: ${t('error.invalid_input')}`
-        : fallback;
+    const messageKey = normalizeClientError(error).messageKey;
+    if (messageKey === 'error.unsupported_content') {
+        return `${t('import.blocked')}: ${t('error.invalid_input')}`;
+    }
+    if (messageKey === 'error.storage_unavailable') {
+        return t('import.error.storage_unavailable');
+    }
+    return fallback;
 }
 
 export class ImportController {
@@ -86,7 +91,7 @@ export class ImportController {
                 import_flow: {
                     ...state.import_flow,
                     phase: 'error',
-                    error: this.context.errorLabel(error),
+                    error: importErrorLabel(error, this.context.errorLabel(error)),
                 },
             }));
         }

@@ -23,6 +23,8 @@ export const koImport = {
         '가져온 뒤에는 일반 콘텐츠만 열리며, 동적 기능은 대화 설정에서 권한별로 승인해야 합니다.',
     'import.dynamic.title': '동적 기능과 요청 권한',
     'import.estimated_size': '예상 저장 크기',
+    'import.error.storage_unavailable':
+        '저장 공간이 부족하거나 사용할 수 없습니다. 대용량 파일은 가져오는 동안 원본 크기의 약 3배 이상 여유 공간이 필요할 수 있습니다.',
     'import.inspecting': '로컬 파일을 안전하게 검사하는 중입니다.',
     'import.kind': '형식',
     'import.kind.png': 'PNG 카드',

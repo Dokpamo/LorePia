@@ -19,7 +19,7 @@
     };
 
     interface Props {
-        client: LorepiaClient;
+        client: Pick<LorepiaClient, 'resolveAssetDelivery'>;
         selector: AssetDeliverySelector;
         alt: string;
         showMetadata?: boolean;

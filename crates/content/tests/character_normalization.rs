@@ -120,6 +120,34 @@ fn normalizes_all_public_character_fields_and_indexes_unknown_extensions() {
 }
 
 #[test]
+fn parses_risu_line_based_default_variables() {
+    let fixture = json_fixture(
+        br#"{
+            "spec":"chara_card_v3",
+            "data":{
+                "name":"Portable variables",
+                "extensions":{
+                    "risuai":{
+                        "defaultVariables":"lang=1\nstatus_type=0\ncharacter with space=enabled=value"
+                    }
+                }
+            }
+        }"#,
+    );
+
+    let plan = inspect_character_file(fixture.path(), ImportLimits::default()).expect("inspection");
+    let variables = &plan.character_content.runtime.initial_variables;
+
+    assert_eq!(variables.get("lang").map(String::as_str), Some("1"));
+    assert_eq!(variables.get("status_type").map(String::as_str), Some("0"));
+    assert_eq!(
+        variables.get("character with space").map(String::as_str),
+        Some("enabled=value")
+    );
+    assert!(!variables.contains_key("source"));
+}
+
+#[test]
 fn charx_streams_two_thousand_assets_into_bounded_descriptors() {
     let directory = tempdir().expect("temp directory");
     let path = directory.path().join("large.charx");

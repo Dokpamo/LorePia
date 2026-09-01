@@ -66,7 +66,7 @@ describe('LibraryPane safe local sources', () => {
             state,
             controller,
             client: {} as LorepiaClient,
-            onOpenConversations: () => undefined,
+            onOpenChat: () => undefined,
             rootView: true,
         });
 
@@ -93,7 +93,7 @@ describe('LibraryPane safe local sources', () => {
             state,
             controller,
             client: {} as LorepiaClient,
-            onOpenConversations: () => undefined,
+            onOpenChat: () => undefined,
             rootView: true,
         });
 
@@ -133,7 +133,7 @@ describe('LibraryPane safe local sources', () => {
             state,
             controller,
             client: {} as LorepiaClient,
-            onOpenConversations: () => undefined,
+            onOpenChat: () => undefined,
             rootView: true,
         });
 
@@ -170,7 +170,7 @@ describe('LibraryPane safe local sources', () => {
                 state: libraryState(),
                 controller,
                 client: {} as LorepiaClient,
-                onOpenConversations: () => undefined,
+                onOpenChat: () => undefined,
                 rootView: true,
             });
 
@@ -216,7 +216,7 @@ describe('LibraryPane safe local sources', () => {
             state,
             controller,
             client: {} as LorepiaClient,
-            onOpenConversations: () => undefined,
+            onOpenChat: () => undefined,
         });
 
         const search = screen.getByRole('searchbox', { name: '캐릭터 검색' });
@@ -265,7 +265,7 @@ describe('LibraryPane safe local sources', () => {
             state,
             controller,
             client,
-            onOpenConversations: () => undefined,
+            onOpenChat: () => undefined,
         });
 
         const image = await screen.findByRole('img', { name: '라온 캐릭터 이미지' });
@@ -315,7 +315,7 @@ describe('LibraryPane safe local sources', () => {
             state,
             controller,
             client,
-            onOpenConversations: () => undefined,
+            onOpenChat: () => undefined,
         });
 
         await screen.findByRole('img', { name: '라온 캐릭터 이미지' });
@@ -342,7 +342,7 @@ describe('LibraryPane safe local sources', () => {
             state: libraryState(),
             controller,
             client,
-            onOpenConversations: () => undefined,
+            onOpenChat: () => undefined,
         });
         await fireEvent.click(screen.getByRole('button', { name: '라온 캐릭터 소스 내보내기' }));
 
@@ -370,7 +370,7 @@ describe('LibraryPane safe local sources', () => {
             state: libraryState(),
             controller,
             client,
-            onOpenConversations: () => undefined,
+            onOpenChat: () => undefined,
         });
         const exportButton = screen.getByRole('button', { name: '라온 캐릭터 소스 내보내기' });
         await fireEvent.click(exportButton);
@@ -396,7 +396,7 @@ describe('LibraryPane safe local sources', () => {
             state: libraryState(),
             controller,
             client,
-            onOpenConversations: () => undefined,
+            onOpenChat: () => undefined,
         });
         await fireEvent.click(screen.getByRole('button', { name: '라온 캐릭터 소스 내보내기' }));
 
@@ -424,7 +424,7 @@ describe('LibraryPane safe local sources', () => {
             state: libraryState(),
             controller,
             client,
-            onOpenConversations: () => undefined,
+            onOpenChat: () => undefined,
         });
         await fireEvent.click(screen.getByRole('button', { name: '라온 캐릭터 소스 내보내기' }));
 

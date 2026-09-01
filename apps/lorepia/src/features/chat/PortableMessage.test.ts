@@ -302,6 +302,24 @@ describe('PortableMessage', () => {
         expect(view.container.querySelector('strong')).toHaveTextContent('ordinary');
     });
 
+    it('renders safe Risu greeting macros without granting imported UI code', () => {
+        const view = render(PortableMessage, {
+            text: [
+                '{{#if_pure {{equal::{{getvar::lang}}::0}}}}English{{/if}}',
+                '{{#if_pure {{equal::{{getvar::lang}}::1}}}}Hello {{user}}, {{char}}{{/if}}',
+            ].join(''),
+            profile: { ...profile, initial_variables: { lang: '1' } },
+            enabled: false,
+            expandMacros: true,
+            characterName: 'Hunters',
+            userName: 'Tester',
+        });
+
+        expect(view.container.querySelector('.portable-frame')).toBeNull();
+        expect(view.container).toHaveTextContent('Hello Tester, Hunters');
+        expect(view.container).not.toHaveTextContent('{{');
+    });
+
     it('normalizes plain assistant output without rewriting disabled user messages', async () => {
         const client = { resolveAssetDelivery: vi.fn() } as unknown as LorepiaClient;
         const activeProfile = {
