@@ -1,4 +1,5 @@
 use lorepia_core::InspectionId;
+use lorepia_core::{ConversationBranchId, ConversationId};
 
 use crate::{
     CharacterDto, CharacterGreetingCatalogDto, CharacterRenderProfileDto, ImportCommitResultDto,
@@ -30,6 +31,31 @@ impl ShellApi {
         validate_identifier("character_id", character_id)?;
         self.core
             .get_character_content(character_id)
+            .map(|stored| {
+                CharacterRenderProfileDto::from_content(
+                    character_id.to_owned(),
+                    stored.revision_id,
+                    stored.value,
+                )
+            })
+            .map_err(ShellError::from)
+    }
+
+    pub fn get_character_render_profile_for_room(
+        &self,
+        character_id: &str,
+        conversation_id: &str,
+        branch_id: &str,
+    ) -> ShellResult<CharacterRenderProfileDto> {
+        validate_identifier("character_id", character_id)?;
+        validate_identifier("conversation_id", conversation_id)?;
+        validate_identifier("branch_id", branch_id)?;
+        self.core
+            .get_effective_character_content(
+                character_id,
+                &ConversationId(conversation_id.to_owned()),
+                &ConversationBranchId(branch_id.to_owned()),
+            )
             .map(|stored| {
                 CharacterRenderProfileDto::from_content(
                     character_id.to_owned(),

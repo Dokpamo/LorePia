@@ -1949,7 +1949,7 @@ mod tests {
 
     fn simulated_previous_release(root: &Path) -> (PathBuf, u32) {
         assert_eq!(
-            SCHEMA_VERSION, 40,
+            SCHEMA_VERSION, 41,
             "update previous-release fixture for the latest migration"
         );
         let canonical_path = root.join(LEGACY_DATABASE_RELATIVE_PATH);
@@ -1960,7 +1960,7 @@ mod tests {
                 .expect("initialize a fresh current database"),
         );
         let previous = Connection::open(&canonical_path).expect("open previous-release fixture");
-        reverse_latest_additive_migration(&previous);
+        reverse_latest_migration(&previous);
         drop(previous);
         let previous = Connection::open(&canonical_path).expect("reopen previous-release fixture");
         let previous_schema = read_pre_migration_schema_version(&previous)
@@ -1970,57 +1970,17 @@ mod tests {
         (canonical_path, previous_schema)
     }
 
-    fn reverse_latest_additive_migration(connection: &Connection) {
-        const LATEST_ADDITIVE_MIGRATION: &str =
-            include_str!("../migrations/0040_portable_runtime_state.sql");
-
-        let replaced_objects = LATEST_ADDITIVE_MIGRATION
-            .lines()
-            .filter_map(|line| {
-                let mut tokens = line.split_ascii_whitespace();
-                if tokens.next() != Some("DROP") {
-                    return None;
-                }
-                let object_type = tokens.next()?;
-                let name = tokens.next()?.trim_end_matches(';');
-                Some((object_type, name))
-            })
-            .collect::<Vec<_>>();
-        let created_objects = LATEST_ADDITIVE_MIGRATION
-            .lines()
-            .filter_map(|line| {
-                let mut tokens = line.split_ascii_whitespace();
-                if tokens.next() != Some("CREATE") {
-                    return None;
-                }
-                let object_type = tokens.next()?;
-                let (object_type, name) = if object_type == "UNIQUE" {
-                    (tokens.next()?, tokens.next()?)
-                } else {
-                    (object_type, tokens.next()?)
-                };
-                let name = name.trim_end_matches(';');
-                (!replaced_objects.contains(&(object_type, name))).then_some((object_type, name))
-            })
-            .collect::<Vec<_>>();
-
-        assert_eq!(created_objects.len(), 7, "schema-40 inverse object drift");
+    fn reverse_latest_migration(connection: &Connection) {
         connection
             .execute_batch("PRAGMA foreign_keys = OFF;")
             .expect("disable foreign keys for the simulated downgrade");
-        for object_type in ["VIEW", "TRIGGER", "INDEX", "TABLE"] {
-            for (_, name) in created_objects
-                .iter()
-                .rev()
-                .filter(|(candidate_type, _)| *candidate_type == object_type)
-            {
-                connection
-                    .execute(&format!("DROP {object_type} \"{name}\""), [])
-                    .unwrap_or_else(|error| panic!("drop schema-40 {object_type} {name}: {error}"));
-            }
-        }
         connection
-            .execute("DELETE FROM schema_migrations WHERE version = 40", [])
+            .execute_batch(include_str!(
+                "../../../testdata/tauri-upgrade/schema-40-package-capability-requests.sql"
+            ))
+            .expect("restore schema-40 package capability table");
+        connection
+            .execute("DELETE FROM schema_migrations WHERE version = 41", [])
             .expect("remove the simulated latest migration registry row");
         connection
             .execute_batch("PRAGMA foreign_keys = ON; PRAGMA wal_checkpoint(TRUNCATE);")

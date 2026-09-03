@@ -62,6 +62,7 @@
         displayMessages: () => displayMessageItems,
         providerWorkspace: () => appState.providers.workspace,
         primarySelection: () => controller.runtimeGenerationSelection(),
+        sendMessage: controller.sendMessage.bind(controller),
         onNotice: (message) => {
             copyNotice = message;
         },
@@ -176,22 +177,7 @@
     });
     const reasoningEffortLabel = $derived.by(() => {
         const effort = orchestrationState?.workspace.room_config.reasoning_effort;
-        switch (effort) {
-            case 'minimal':
-                return '최소';
-            case 'low':
-                return '낮음';
-            case 'medium':
-                return '중간';
-            case 'high':
-                return '높음';
-            case 'extra_high':
-                return '매우 높음';
-            case 'maximum':
-                return '최대';
-            default:
-                return '';
-        }
+        return effort === undefined ? '' : t(`quick.reasoning.${effort}`);
     });
     const composerConfigurationLabel = $derived(
         [selectedModelLabel, reasoningEffortLabel].filter((value) => value !== '').join(' · '),
@@ -319,7 +305,9 @@
 
     $effect(() => {
         const characterId = appState.selected_character?.id ?? null;
-        return portableRuntimeLifecycle.loadProfile(client, characterId);
+        const conversationId = appState.selected_conversation?.id ?? null;
+        const branchId = appState.conversation_state?.active_branch_id ?? null;
+        return portableRuntimeLifecycle.loadProfile(client, characterId, conversationId, branchId);
     });
 
     $effect(() => {

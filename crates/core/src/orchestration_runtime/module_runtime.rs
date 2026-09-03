@@ -1,19 +1,25 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt::Write as _,
+};
 
 use lorepia_domain::{
-    AssetDescriptor, AssetId, ConversationBranchId, ConversationId, CoreError, CoreErrorCode,
-    CoreResult, InteractionRuleSet, ModuleComponentRef, ModuleScope, Provenance, SourceKind,
-    TransformSet, VariableMap,
+    ActivationRule, AssetDescriptor, AssetId, CharacterContentV1, CharacterKnowledgeBookRef,
+    CharacterRuntimeProfile, ConversationBranchId, ConversationId, CoreError, CoreErrorCode,
+    CoreResult, InteractionRuleSet, KnowledgeBook, KnowledgePlacement, ModuleComponentRef,
+    ModuleScope, PortableKnowledgeBook, PortableKnowledgeEntry, PortableKnowledgePlacement,
+    Provenance, SourceKind, TransformSet, VariableMap,
 };
 use lorepia_orchestration::{
     AppliedModuleRuntimePlan, ModuleMergeReview, ModuleResolutionContext, ResolvedModuleComponent,
 };
 use lorepia_storage::{ModuleRevisionComponentSnapshot, ObjectRevision};
+use sha2::{Digest, Sha256};
 
-use crate::Core;
+use crate::{Core, Revisioned};
 
 #[derive(Debug, Clone, Default)]
-pub(super) struct ResolvedModuleRuntime {
+pub(crate) struct ResolvedModuleRuntime {
     pub(super) plan_sha256: Option<String>,
     pub(super) variables: VariableMap,
     pub(super) transform_sets: Vec<ObjectRevision<TransformSet>>,
@@ -22,6 +28,7 @@ pub(super) struct ResolvedModuleRuntime {
     pub(super) assets: BTreeMap<AssetId, ApprovedRuntimeAsset>,
     pub(super) approved_import_source_ids: BTreeSet<String>,
     pub(super) approved_module_sources: BTreeSet<(String, String, String)>,
+    pub(crate) portable_runtimes: Vec<CharacterRuntimeProfile>,
 }
 
 #[derive(Debug, Clone)]
@@ -33,6 +40,48 @@ pub(super) struct ApprovedRuntimeAsset {
 }
 
 impl Core {
+    /// Returns the exact character content visible to one approved room,
+    /// including portable runtime and assets from its current module plan.
+    pub fn get_effective_character_content(
+        &self,
+        character_id: &str,
+        conversation_id: &ConversationId,
+        branch_id: &ConversationBranchId,
+    ) -> CoreResult<Revisioned<CharacterContentV1>> {
+        let conversation = self.storage().get_conversation(conversation_id)?;
+        let branch = self.storage().get_conversation_branch(branch_id)?;
+        if conversation.character_id != character_id || branch.conversation_id != *conversation_id {
+            return Err(CoreError::new(
+                CoreErrorCode::NotFound,
+                "character runtime room scope does not match the requested character",
+                false,
+            ));
+        }
+        let mut content = self.get_character_content(character_id)?;
+        let runtime = self.resolve_runtime_modules(conversation_id, branch_id)?;
+        merge_portable_module_runtime(&mut content.value, &runtime)?;
+        if let Some(plan_sha256) = runtime.plan_sha256.as_deref() {
+            let mut digest = Sha256::new();
+            digest.update(b"effective-character-runtime-v1\0");
+            digest.update(
+                content
+                    .revision_id
+                    .as_deref()
+                    .unwrap_or("legacy")
+                    .as_bytes(),
+            );
+            digest.update([0]);
+            digest.update(plan_sha256.as_bytes());
+            let mut revision_id = String::with_capacity(64);
+            for byte in digest.finalize() {
+                write!(&mut revision_id, "{byte:02x}")
+                    .expect("writing a digest into a String cannot fail");
+            }
+            content.revision_id = Some(revision_id);
+        }
+        Ok(content)
+    }
+
     pub(super) fn resolve_runtime_modules(
         &self,
         conversation_id: &ConversationId,
@@ -57,8 +106,7 @@ impl Core {
             character_id: Some(conversation.character_id.clone()),
             conversation_id: Some(conversation_id.0.clone()),
             branch_id: Some(branch_id.0.clone()),
-            supported_capabilities: crate::module_orchestration::SUPPORTED_CONTENT_CAPABILITIES
-                .to_vec(),
+            supported_capabilities: crate::module_orchestration::CAPABILITIES.to_vec(),
         };
         let bindings = self.storage().list_all_module_bindings()?;
         let has_applicable_approved_binding = bindings.iter().any(|stored| {
@@ -144,6 +192,31 @@ impl Core {
             approved_module_sources,
             ..ResolvedModuleRuntime::default()
         };
+        for binding in &approved.review.ordered_bindings {
+            let stored = self
+                .storage()
+                .get_content_module_revision(&binding.module_id, &binding.revision_id)?;
+            let expected_source = approved_module_source_hash(approved, binding);
+            if stored.object.value.portable_runtime.is_some() && expected_source.is_none() {
+                return Err(CoreError::new(
+                    CoreErrorCode::StorageCorrupted,
+                    "approved portable runtime module has no immutable source authority",
+                    false,
+                ));
+            }
+            if expected_source
+                .is_some_and(|expected| stored.module_revision.source_hash != expected)
+            {
+                return Err(CoreError::new(
+                    CoreErrorCode::StorageCorrupted,
+                    "approved portable runtime module source changed after review",
+                    false,
+                ));
+            }
+            if let Some(profile) = stored.object.value.portable_runtime {
+                runtime.portable_runtimes.push(profile);
+            }
+        }
         for component in &approved.plan.components {
             self.materialize_runtime_component(&mut runtime, component)?;
         }
@@ -264,6 +337,212 @@ impl Core {
         }
         Ok(())
     }
+}
+
+fn merge_portable_module_runtime(
+    content: &mut CharacterContentV1,
+    resolved: &ResolvedModuleRuntime,
+) -> CoreResult<()> {
+    for incoming in &resolved.portable_runtimes {
+        merge_portable_runtime_profile(&mut content.runtime, incoming);
+    }
+    for descriptor in resolved.assets.values() {
+        if let Some(existing) = content
+            .assets
+            .iter()
+            .find(|asset| asset.id == descriptor.descriptor.id)
+        {
+            if existing != &descriptor.descriptor {
+                return Err(CoreError::new(
+                    CoreErrorCode::StorageCorrupted,
+                    "approved module asset conflicts with the character asset identity",
+                    false,
+                ));
+            }
+        } else {
+            content.assets.push(descriptor.descriptor.clone());
+        }
+    }
+    content.assets.sort_by(|left, right| left.id.cmp(&right.id));
+    merge_portable_runtime_knowledge(content, &resolved.knowledge_books);
+    if let Some(plan_sha256) = resolved.plan_sha256.as_deref() {
+        content.runtime.source_id = Some(format!("approved-module-plan:{plan_sha256}"));
+    }
+    Ok(())
+}
+
+fn merge_portable_runtime_profile(
+    target: &mut CharacterRuntimeProfile,
+    incoming: &CharacterRuntimeProfile,
+) {
+    target
+        .transforms
+        .extend(incoming.transforms.iter().cloned());
+    target.scripts.extend(incoming.scripts.iter().cloned());
+    append_portable_markup(&mut target.background_markup, &incoming.background_markup);
+    append_portable_markup(&mut target.additional_text, &incoming.additional_text);
+    append_portable_markup(&mut target.toggle_schema, &incoming.toggle_schema);
+    target
+        .initial_variables
+        .extend(incoming.initial_variables.clone());
+    target.metadata.extend(incoming.metadata.clone());
+    let mut capabilities = target.required_capabilities.take().unwrap_or_default();
+    capabilities.extend(
+        incoming
+            .required_capabilities
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .copied(),
+    );
+    capabilities.sort_unstable();
+    capabilities.dedup();
+    target.required_capabilities = (!capabilities.is_empty()).then_some(capabilities);
+}
+
+fn append_portable_markup(target: &mut String, incoming: &str) {
+    if incoming.trim().is_empty() {
+        return;
+    }
+    if !target.is_empty() {
+        target.push('\n');
+    }
+    target.push_str(incoming);
+}
+
+fn merge_portable_runtime_knowledge(
+    content: &mut CharacterContentV1,
+    books: &[ObjectRevision<KnowledgeBook>],
+) {
+    if books.is_empty() {
+        return;
+    }
+    let book = content
+        .knowledge_book
+        .get_or_insert_with(|| CharacterKnowledgeBookRef {
+            id: None,
+            name: Some("Effective runtime knowledge".to_owned()),
+            source_sha256: None,
+            embedded: Some(PortableKnowledgeBook {
+                id: lorepia_domain::KnowledgeBookId::from("effective-runtime-knowledge"),
+                name: "Effective runtime knowledge".to_owned(),
+                entries: Vec::new(),
+                scan_depth: 0,
+                token_budget: 0,
+                recursive: false,
+                max_recursion_depth: 0,
+                metadata: BTreeMap::new(),
+            }),
+        })
+        .embedded
+        .get_or_insert_with(|| PortableKnowledgeBook {
+            id: lorepia_domain::KnowledgeBookId::from("effective-runtime-knowledge"),
+            name: "Effective runtime knowledge".to_owned(),
+            entries: Vec::new(),
+            scan_depth: 0,
+            token_budget: 0,
+            recursive: false,
+            max_recursion_depth: 0,
+            metadata: BTreeMap::new(),
+        });
+    for stored in books {
+        book.scan_depth = book.scan_depth.max(stored.value.scan_depth);
+        book.token_budget = book.token_budget.max(stored.value.token_budget.max_tokens);
+        book.recursive |= stored.value.recursive;
+        book.max_recursion_depth = book
+            .max_recursion_depth
+            .max(stored.value.max_recursion_depth);
+        book.entries.extend(
+            stored
+                .value
+                .entries
+                .iter()
+                .map(|entry| portable_runtime_knowledge_entry(stored.value.id.as_str(), entry)),
+        );
+    }
+}
+
+fn portable_runtime_knowledge_entry(
+    book_id: &str,
+    entry: &lorepia_domain::KnowledgeEntry,
+) -> PortableKnowledgeEntry {
+    let mut portable = PortableKnowledgeEntry {
+        id: format!("module:{book_id}:{}", entry.id.as_str()),
+        name: entry.name.clone(),
+        content: entry.content.clone(),
+        enabled: entry.enabled,
+        priority: entry.priority,
+        placement: match entry.placement {
+            KnowledgePlacement::RetrievedContext => PortableKnowledgePlacement::RetrievedContext,
+            KnowledgePlacement::BeforeOlderHistory => {
+                PortableKnowledgePlacement::BeforeOlderHistory
+            }
+            KnowledgePlacement::BeforeRecentHistory => {
+                PortableKnowledgePlacement::BeforeRecentHistory
+            }
+            KnowledgePlacement::PostHistory => PortableKnowledgePlacement::PostHistory,
+        },
+        parent_id: entry.parent_id.as_ref().map(|id| id.as_str().to_owned()),
+        probability_basis_points: entry.activation_probability_basis_points,
+        ..PortableKnowledgeEntry::default()
+    };
+    match &entry.activation {
+        ActivationRule::Always => portable.constant = true,
+        ActivationRule::Keyword {
+            primary,
+            secondary,
+            selective,
+            case_sensitive,
+            whole_word,
+        } => {
+            portable.primary_keys.clone_from(primary);
+            portable.secondary_keys.clone_from(secondary);
+            portable.selective = *selective;
+            portable.case_sensitive = *case_sensitive;
+            portable.whole_word = *whole_word;
+        }
+        ActivationRule::Regex { patterns } => {
+            portable.primary_keys = patterns
+                .iter()
+                .map(|pattern| pattern.pattern.clone())
+                .collect();
+            portable.case_sensitive = patterns.iter().all(|pattern| !pattern.case_insensitive);
+            portable.use_regex = true;
+        }
+        ActivationRule::Manual
+        | ActivationRule::Semantic { .. }
+        | ActivationRule::Condition { .. }
+        | ActivationRule::Any { .. }
+        | ActivationRule::All { .. } => portable.enabled = false,
+    }
+    portable
+}
+
+fn approved_module_source_hash(
+    approved: &AppliedModuleRuntimePlan,
+    binding: &lorepia_domain::ModuleBinding,
+) -> Option<lorepia_domain::Sha256Digest> {
+    approved
+        .plan
+        .components
+        .iter()
+        .flat_map(|component| {
+            std::iter::once(&component.selected_source).chain(component.coalesced_sources.iter())
+        })
+        .find(|source| {
+            source.binding_id == binding.id
+                && source.module_id == binding.module_id
+                && source.revision_id == binding.revision_id
+        })
+        .map(|source| source.revision_source_sha256.clone())
+        .or_else(|| {
+            approved
+                .review
+                .import_approvals
+                .iter()
+                .find(|reviewed| reviewed.binding_id == binding.id)
+                .map(|reviewed| reviewed.evidence.module_revision_source_sha256.clone())
+        })
 }
 
 fn module_binding_applies_to_runtime(

@@ -1,10 +1,11 @@
 //! Ordinary same-branch sends retain their sealed target across approval pauses.
 
+mod support;
+
 use std::{
     future::Future,
     io::{ErrorKind, Read, Write},
     net::{TcpListener, TcpStream},
-    path::{Path, PathBuf},
     pin::Pin,
     sync::mpsc,
     thread,
@@ -47,38 +48,14 @@ use rusqlite::{Connection, params};
 use tempfile::{NamedTempFile, TempDir, tempdir};
 use tokio::sync::watch;
 
+use support::active_database_path;
+
 const CONNECTION_ID: &str = "synthetic-ordinary-sealed-connection";
 const PROFILE_ID: &str = "synthetic-ordinary-sealed-profile";
 const REQUEST_TEXT: &str = "Synthetic ordinary sealed retry";
 const CREDENTIAL_CANARY: &str = "synthetic-ordinary-credential-canary-71a9";
 const TARGET_OPERATION_NONCE: &str = "ordinary-sealed-target-send-v1";
 const PROFILE_OPERATION_NONCE: &str = "ordinary-sealed-profile-send-v1";
-
-fn active_database_path(root: &Path) -> PathBuf {
-    let cutover = root.join("db/schema-cutover");
-    let (_, relative) = std::fs::read_dir(cutover)
-        .expect("read committed database generations")
-        .filter_map(Result::ok)
-        .filter(|entry| entry.path().join("generation-committed.json").is_file())
-        .map(|entry| {
-            let manifest = serde_json::from_slice::<serde_json::Value>(
-                &std::fs::read(entry.path().join("generation-manifest.json"))
-                    .expect("read generation manifest"),
-            )
-            .expect("parse generation manifest");
-            let sequence = manifest["activation_sequence"]
-                .as_u64()
-                .expect("generation activation sequence");
-            let relative = manifest["active_database_relative_path"]
-                .as_str()
-                .expect("active database relative path")
-                .to_owned();
-            (sequence, relative)
-        })
-        .max_by_key(|(sequence, _)| *sequence)
-        .expect("at least one committed database generation");
-    root.join(relative)
-}
 
 struct RejectingTaskCredentialBroker;
 
@@ -295,6 +272,7 @@ fn approval_module(rule_set_id: InteractionRuleSetId) -> ContentModule {
         transform_set_ids: Vec::new(),
         interaction_rule_set_ids: vec![rule_set_id],
         asset_ids: Vec::new(),
+        portable_runtime: None,
         imported_components_enabled: true,
         required_capabilities: vec![ContentCapability::DeclarativeInteractions],
         metadata: PackageMetadata {

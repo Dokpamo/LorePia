@@ -521,6 +521,7 @@ async fn provider_semantic_knowledge_reuses_one_durable_query_for_preview_and_se
                 importance_weight: 1.0,
                 preserve_invalidated_records: true,
                 summary_schema: SummarySchemaId::from("synthetic.provider-semantic.summary-schema"),
+                summary_template: None,
                 provenance: prompt_attempt_test_provenance(
                     "synthetic.provider-semantic.memory-profile",
                 ),

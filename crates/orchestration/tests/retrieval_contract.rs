@@ -210,6 +210,7 @@ fn memory_profile() -> MemoryProfile {
         importance_weight: 1.0,
         preserve_invalidated_records: true,
         summary_schema: SummarySchemaId::from("synthetic.summary-schema"),
+        summary_template: None,
         provenance: provenance(SourceKind::UserCreated),
     }
 }

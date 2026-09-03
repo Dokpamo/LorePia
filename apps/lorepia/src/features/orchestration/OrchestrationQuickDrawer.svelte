@@ -23,6 +23,7 @@
         CreatorControlValue,
         RoomOrchestrationConfigDto,
     } from '../../lib/ipc/contracts';
+    import { creatorControlOptions } from './creator-control-options';
     import type { OrchestrationController, OrchestrationState } from './orchestration-controller';
 
     interface Props {
@@ -693,7 +694,7 @@
                         <fieldset>
                             <legend>{$tr('quick.creator_controls')}</legend>
                             <div class="creator-controls">
-                                {#each orchestrationState.workspace.creator_controls.slice(0, 80) as control (control.id)}
+                                {#each orchestrationState.workspace.creator_controls.slice(0, 256) as control (control.id)}
                                     {#if control.kind === 'toggle'}
                                         <ToggleSwitch
                                             label={control.label}
@@ -708,12 +709,7 @@
                                                 id={`creator-control-${control.id}`}
                                                 label={control.label}
                                                 value={String(controlValue(control))}
-                                                options={control.choices
-                                                    .slice(0, 100)
-                                                    .map((choice) => ({
-                                                        value: choice,
-                                                        label: choice,
-                                                    }))}
+                                                options={creatorControlOptions(control)}
                                                 onSelect={(value: string) =>
                                                     controller.stageCreatorControl(
                                                         control.id,

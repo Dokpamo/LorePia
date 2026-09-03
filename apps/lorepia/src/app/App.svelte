@@ -13,6 +13,7 @@
     import { tr } from '../lib/i18n';
     import { onMount, untrack } from 'svelte';
     import { installAndroidBack } from './android-back-navigation';
+    import { snapshotClone } from './mobile-route-snapshot';
     import {
         INITIAL_APP_STATE,
         LorepiaAppController,
@@ -54,7 +55,11 @@
     } from '../features/personas/persona-controller';
     import type { PersonaClientApi } from '../features/personas/persona-contracts';
     import { createLiveLorepiaClient } from '../lib/ipc/client';
-    import type { LorepiaClient, MemoryRecordSourceNavigationDto } from '../lib/ipc/contracts';
+    import type {
+        ImportCommitResultDto,
+        LorepiaClient,
+        MemoryRecordSourceNavigationDto,
+    } from '../lib/ipc/contracts';
 
     const DESKTOP_LAYOUT = '(min-width: 900px)';
     const DESKTOP_UTILITY_DOCK = '(min-width: 1280px)';
@@ -223,46 +228,6 @@
             };
         }
         return { key: 'home:root', view, pushed: false };
-    }
-
-    function copySnapshotElementState(source: HTMLElement, clone: HTMLElement): void {
-        const sources = [source, ...source.querySelectorAll<HTMLElement>('*')];
-        const clones = [clone, ...clone.querySelectorAll<HTMLElement>('*')];
-        const count = Math.min(sources.length, clones.length);
-        for (let index = 0; index < count; index += 1) {
-            const sourceElement = sources[index];
-            const cloneElement = clones[index];
-            if (!sourceElement || !cloneElement) continue;
-            if (sourceElement.scrollTop !== 0) {
-                cloneElement.dataset.snapshotScrollTop = String(sourceElement.scrollTop);
-            }
-            if (sourceElement.scrollLeft !== 0) {
-                cloneElement.dataset.snapshotScrollLeft = String(sourceElement.scrollLeft);
-            }
-            if (
-                sourceElement instanceof HTMLInputElement &&
-                cloneElement instanceof HTMLInputElement
-            ) {
-                cloneElement.value = sourceElement.value;
-                cloneElement.checked = sourceElement.checked;
-            } else if (
-                sourceElement instanceof HTMLTextAreaElement &&
-                cloneElement instanceof HTMLTextAreaElement
-            ) {
-                cloneElement.value = sourceElement.value;
-            } else if (
-                sourceElement instanceof HTMLSelectElement &&
-                cloneElement instanceof HTMLSelectElement
-            ) {
-                cloneElement.value = sourceElement.value;
-            }
-        }
-    }
-
-    function snapshotClone(source: HTMLElement): HTMLElement {
-        const clone = source.cloneNode(true) as HTMLElement;
-        copySnapshotElementState(source, clone);
-        return clone;
     }
 
     function captureBackSwipeSnapshot(routeKey: string): BackSwipeSnapshot | null {
@@ -581,6 +546,26 @@
         studioSection = next;
         studioDetailPage = null;
         resetStudioDetailScroll();
+    }
+
+    function handleImportCommitted(result: ImportCommitResultDto): void {
+        if (result.kind !== 'content') return;
+
+        view = 'create';
+        chatUtilityOpen = false;
+        chatUtilityAutoCollapsed = false;
+        if (result.content.kind === 'risu_module') {
+            studioSection = 'content';
+            studioDetailPage = 'modules:candidates';
+        } else {
+            studioSection = 'prompt';
+            studioDetailPage = 'profiles';
+        }
+        resetStudioDetailScroll();
+
+        const conversationId = appState.selected_conversation?.id ?? null;
+        const branchId = appState.conversation_state?.active_branch_id ?? null;
+        void orchestrationController.loadContext(conversationId, branchId);
     }
 
     function closeStudioSection(): void {
@@ -1362,6 +1347,6 @@
     </div>
 
     {#if appState.import_flow.phase !== 'idle'}
-        <ImportReviewDialog state={appState} {controller} />
+        <ImportReviewDialog state={appState} {controller} onCommitted={handleImportCommitted} />
     {/if}
 </div>

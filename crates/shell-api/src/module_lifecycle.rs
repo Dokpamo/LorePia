@@ -1,10 +1,8 @@
 //! Hash-bound content-module activation and rollback for the webview.
 //!
-//! The caller may submit only an inert binding draft, exact review/plan hash
-//! echoes, explicit conflict choices, and a caller-stable approval id. Core
-//! recreates every review and performs the durable compare-and-swap. This
-//! module rejects oversized review surfaces instead of truncating authoritative
-//! candidate sets.
+//! Callers submit only inert drafts, exact hashes, explicit choices, and stable
+//! approval ids. Core recreates reviews and performs the durable CAS; oversized
+//! authoritative candidate sets are rejected, never truncated.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -1520,6 +1518,7 @@ mod tests {
             transform_set_ids: Vec::new(),
             interaction_rule_set_ids: Vec::new(),
             asset_ids: Vec::new(),
+            portable_runtime: None,
             imported_components_enabled: false,
             required_capabilities: if prompt_text.is_some() {
                 vec![ContentCapability::PromptFragments]

@@ -261,6 +261,7 @@ fn historical_edit_fork_includes_only_memory_whose_complete_range_precedes_the_f
             importance_weight: 1.0,
             preserve_invalidated_records: true,
             summary_schema: SummarySchemaId::from("synthetic.core.memory-fork.schema"),
+            summary_template: None,
             provenance: provenance(
                 SourceKind::UserCreated,
                 "synthetic.core.memory-fork.profile",

@@ -1141,64 +1141,27 @@ fn checkpoint_and_close(connection: Connection) {
 /// Update the migration constant and the expected version together whenever a
 /// migration is added; the assertion below is what forces that.
 fn downgrade_latest_schema_by_one(path: &Path, current_schema: u32) {
-    const LATEST_MIGRATION: &str = include_str!("../migrations/0040_portable_runtime_state.sql");
-    const LATEST_SCHEMA: u32 = 40;
-    const EXPECTED_SCHEMA_40_OBJECTS: &[(&str, &str)] = &[
-        ("TABLE", "portable_runtime_branch_epochs"),
-        ("TRIGGER", "portable_runtime_branch_epoch_on_branch_insert"),
-        ("TABLE", "portable_runtime_state_sequence"),
-        ("TABLE", "portable_runtime_states"),
-        ("INDEX", "portable_runtime_states_lru"),
-        ("TRIGGER", "portable_runtime_state_scope_guard_insert"),
-        ("TRIGGER", "portable_runtime_state_scope_guard_update"),
-    ];
+    const LATEST_SCHEMA: u32 = 41;
 
     assert_eq!(
         current_schema, LATEST_SCHEMA,
         "update this deterministic previous-release fixture for the new latest migration"
     );
     let connection = Connection::open(path).expect("open current database for fixture downgrade");
-    let created_objects = LATEST_MIGRATION
-        .lines()
-        .filter_map(|line| {
-            let mut tokens = line.split_ascii_whitespace();
-            if tokens.next() != Some("CREATE") {
-                return None;
-            }
-            let object_type = tokens.next()?;
-            let (object_type, name) = if object_type == "UNIQUE" {
-                (tokens.next()?, tokens.next()?)
-            } else {
-                (object_type, tokens.next()?)
-            };
-            Some((object_type, name.trim_end_matches(';')))
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        created_objects.as_slice(),
-        EXPECTED_SCHEMA_40_OBJECTS,
-        "schema-40 inverse must track every additive object"
-    );
     connection
         .execute_batch("PRAGMA foreign_keys = OFF;")
         .expect("disable foreign keys for the previous-release fixture downgrade");
-    for object_type in ["VIEW", "TRIGGER", "INDEX", "TABLE"] {
-        for (_, name) in created_objects
-            .iter()
-            .rev()
-            .filter(|(candidate_type, _)| *candidate_type == object_type)
-        {
-            connection
-                .execute(&format!("DROP {object_type} \"{name}\""), [])
-                .unwrap_or_else(|error| panic!("drop schema-40 {object_type} {name}: {error}"));
-        }
-    }
+    connection
+        .execute_batch(include_str!(
+            "../../../testdata/tauri-upgrade/schema-40-package-capability-requests.sql"
+        ))
+        .expect("restore schema-40 package capability table");
     connection
         .execute(
             "DELETE FROM schema_migrations WHERE version = ?1",
             [LATEST_SCHEMA],
         )
-        .expect("remove schema-40 migration registry row");
+        .expect("remove schema-41 migration registry row");
     connection
         .execute_batch("PRAGMA foreign_keys = ON;")
         .expect("reenable foreign keys after the previous-release fixture downgrade");

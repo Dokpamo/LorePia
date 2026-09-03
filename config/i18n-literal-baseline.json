@@ -73,8 +73,8 @@
       "sha256": "f849fccbaf493912ef22b528e091904ce80624fe983005e861ba492fda389d53"
     },
     "src/features/chat/ChatPane.svelte": {
-      "hangul_lines": 27,
-      "sha256": "267e1097e0e5b13f2962f39a007ec273f1fb706065b94a6b35ea91583a193c95"
+      "hangul_lines": 21,
+      "sha256": "def3e841ee26b06eaad0f908333687860568de2579726e6b6fdce2db2562e726"
     },
     "src/features/chat/ChatPane.test.ts": {
       "hangul_lines": 70,
@@ -269,8 +269,8 @@
       "sha256": "8cb2a3368c353afd806e0ce1d044232ed081f932ebc49a40c55d3007bb62e07f"
     },
     "src/features/orchestration/studio/ContentPackageReview.svelte": {
-      "hangul_lines": 74,
-      "sha256": "0f95818c1805e1d78fca8fe9c123da7a9197ce26c0fc1f9ac7bb3e6564db79f4"
+      "hangul_lines": 73,
+      "sha256": "5a9e556ac2e5fe99967019e4c356ed611846cdf85586705151425ffb549dc6b0"
     },
     "src/features/orchestration/studio/ContentSection.svelte": {
       "hangul_lines": 43,
@@ -297,8 +297,8 @@
       "sha256": "a1e9cc25a6009febeb044c4f05dc5de897bed1978c00c2e0dc552fbacc6e066f"
     },
     "src/features/orchestration/studio/PromptSection.svelte": {
-      "hangul_lines": 20,
-      "sha256": "577d3e66a7cbec4e661faaedb4c53b30d5b42b43993d309560db44666822c4b7"
+      "hangul_lines": 19,
+      "sha256": "72908165148591c6215395620ecb399cceab989aaa482da01464666f2c877280"
     },
     "src/features/orchestration/studio/RuntimePlanSection.svelte": {
       "hangul_lines": 33,

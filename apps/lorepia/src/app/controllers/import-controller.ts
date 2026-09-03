@@ -1,4 +1,5 @@
 import { t } from '../../lib/i18n';
+import type { ImportCommitResultDto } from '../../lib/ipc/contracts';
 import { normalizeClientError } from '../../lib/ipc/errors';
 import type { AppControllerContext } from './controller-context';
 
@@ -48,9 +49,9 @@ export class ImportController {
         }
     }
 
-    async commit(): Promise<void> {
+    async commit(): Promise<ImportCommitResultDto | null> {
         const inspection = this.context.readState().import_flow.inspection;
-        if (inspection?.allowed !== true) return;
+        if (inspection?.allowed !== true) return null;
         this.context.update((state) => ({
             ...state,
             import_flow: { ...state.import_flow, phase: 'loading', error: null },
@@ -85,6 +86,7 @@ export class ImportController {
                     }),
                 );
             }
+            return result;
         } catch (error: unknown) {
             this.context.update((state) => ({
                 ...state,
@@ -94,6 +96,7 @@ export class ImportController {
                     error: importErrorLabel(error, this.context.errorLabel(error)),
                 },
             }));
+            return null;
         }
     }
 

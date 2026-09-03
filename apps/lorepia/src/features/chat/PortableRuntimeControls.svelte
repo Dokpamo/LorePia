@@ -79,6 +79,10 @@
             ? [...new Set([...selectedCapabilities, capability])]
             : selectedCapabilities.filter((candidate) => candidate !== capability);
     }
+
+    function selectAllCompatibilityCapabilities(): void {
+        selectedCapabilities = [...capabilities];
+    }
 </script>
 
 <section class="portable-runtime-controls" aria-label="캐릭터 기능 설정">
@@ -118,9 +122,14 @@
                     </li>
                 {/each}
             </ul>
-            <button type="button" onclick={() => void onApprove()}>
-                {$tr('chat.runtime.permissions.approve_selected')}
-            </button>
+            <div class="portable-runtime-approval-actions">
+                <button type="button" onclick={selectAllCompatibilityCapabilities}>
+                    {$tr('chat.runtime.permissions.select_all')}
+                </button>
+                <button type="button" onclick={() => void onApprove()}>
+                    {$tr('chat.runtime.permissions.approve_selected')}
+                </button>
+            </div>
         </div>
     {:else}
         <button class="portable-runtime-revoke" type="button" onclick={onRevoke}>
@@ -305,6 +314,12 @@
         color: var(--ink);
         font: inherit;
         cursor: pointer;
+    }
+
+    .portable-runtime-approval-actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
     }
 
     .portable-runtime-field {

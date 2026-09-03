@@ -370,6 +370,7 @@
                 <PromptSection
                     {client}
                     {appState}
+                    {appController}
                     {orchestrationState}
                     {controller}
                     bind:detailPage

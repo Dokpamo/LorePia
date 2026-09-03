@@ -107,7 +107,7 @@ describe('LorepiaAppController imports', () => {
         );
 
         await controller.beginImport();
-        await controller.commitImport();
+        const result = await controller.commitImport();
 
         const state = get(controller.state);
         expect(state.import_flow).toEqual({
@@ -116,6 +116,16 @@ describe('LorepiaAppController imports', () => {
             inspection: null,
         });
         expect(state.library.characters).toEqual([]);
+        expect(result).toEqual({
+            kind: 'content',
+            content: {
+                kind: 'risu_preset',
+                import_id: 'package-import-risu',
+                display_name: inspection.display_name,
+                document_count: 2,
+                asset_count: 0,
+            },
+        });
         expect(state.announcement).toBe(
             t('import.notice.content_added', {
                 name: inspection.display_name,

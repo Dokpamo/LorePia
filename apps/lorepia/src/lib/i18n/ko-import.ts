@@ -43,8 +43,10 @@ export const koImport = {
     'import.risu.destination':
         '모듈·프리셋·지식·에셋은 콘텐츠 저장소에 보관되며 캐릭터 서재 항목으로 만들지 않습니다.',
     'import.risu.safety':
-        '안전한 선언형 규칙만 가져옵니다. 스크립트와 HTML/CSS는 실행하지 않고 격리하며, 모델·API 설정은 자동 연결하지 않습니다.',
+        'Lua는 격리된 런타임에서 권한을 승인한 뒤에만 실행합니다. 사용자 HTML/CSS와 직접 네트워크·파일 접근은 실행하지 않으며, 모델·API 설정은 확인 후 연결합니다.',
     'import.risu.title': 'Risu 호환 가져오기',
+    'import.risu.update':
+        '같은 콘텐츠를 다시 가져오면 현재 항목을 최신 호환 변환본으로 갱신합니다. 기존 내용은 이전 리비전으로 보존됩니다.',
     'import.source_size': '원본 크기',
     'import.title': '가져오기 검토',
     'import.unsupported_fields': '아직 지원하지 않는 선택 필드',

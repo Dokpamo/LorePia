@@ -234,7 +234,7 @@ export class LorepiaAppController {
         return this.importController.begin();
     }
 
-    commitImport(): Promise<void> {
+    commitImport() {
         return this.importController.commit();
     }
 

@@ -89,6 +89,7 @@ export type ContentPackageCapabilityDto =
     | 'variables'
     | 'transforms'
     | 'declarative_interactions'
+    | 'portable_runtime'
     | 'image_assets'
     | 'audio_assets'
     | 'video_assets'
@@ -103,7 +104,8 @@ export type ContentPackageCapabilityDto =
     | 'shell'
     | 'credentials';
 
-export type ApprovableContentPackageCapabilityDto = 'transforms' | 'declarative_interactions';
+export type ApprovableContentPackageCapabilityDto =
+    'transforms' | 'declarative_interactions' | 'portable_runtime';
 
 export type ContentPackageCapabilitySupportDto = 'supported' | 'unsupported' | 'approval_required';
 

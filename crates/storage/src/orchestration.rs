@@ -128,9 +128,7 @@ pub(crate) use module_authority::{
 pub use prompt_bindings::{PromptPresetBinding, PromptResponseLength};
 
 /// Largest canonical JSON document accepted by the orchestration repository.
-///
-/// Large content payloads and assets remain in content-addressed storage. The
-/// relational layer stores bounded metadata and declarative configuration.
+/// Large payloads remain in CAS; relational storage keeps bounded metadata.
 pub const MAX_ORCHESTRATION_JSON_BYTES: usize = 2 * 1024 * 1024;
 pub const MAX_ORCHESTRATION_JSON_CHARS: usize = 1_000_000;
 pub const MAX_ORCHESTRATION_JSON_DEPTH: usize = 32;
@@ -474,6 +472,7 @@ pub struct PackageImportRecord {
 }
 
 /// Domain-only content document accepted by an atomic package commit.
+#[allow(clippy::large_enum_variant)] // Keeps the cross-crate API stable.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "document", rename_all = "snake_case")]
 pub enum PackageCommitDocument {

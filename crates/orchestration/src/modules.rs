@@ -287,11 +287,10 @@ impl ApprovedModuleActivationPlan {
 
 /// Exact, hash-bound module composition that trusted runtime code may apply.
 ///
-/// The user-approved activation remains the authority for every selected
-/// component. A runtime materialization re-resolves that authority against a
-/// no-pending-binding review for one concrete room context. Branch inheritance
-/// therefore never fabricates a second user approval: it records the exact
-/// applied parent plan it was derived from and rehashes the child context.
+/// User approval remains authoritative for every selected component. Runtime
+/// re-resolves it against a no-pending-binding review for the concrete room.
+/// Branch inheritance records the exact parent plan rather than fabricating
+/// approval, then hashes the child context.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AppliedModuleRuntimePlan {
@@ -2292,6 +2291,7 @@ mod tests {
             transform_set_ids,
             interaction_rule_set_ids: Vec::new(),
             asset_ids,
+            portable_runtime: None,
             imported_components_enabled: false,
             required_capabilities: vec![ContentCapability::Knowledge],
             metadata: PackageMetadata {

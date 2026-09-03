@@ -22,6 +22,7 @@ import type {
     CharacterDto,
     CharacterGreetingCatalogDto,
     CharacterRenderProfileDto,
+    CharacterRenderProfileScopeInput,
 } from '../contracts';
 
 import { isMemorySupervisorStatus } from '../client-payload-guards';
@@ -63,9 +64,12 @@ export abstract class LibraryClient extends ClientTransportBase {
         });
     }
 
-    getCharacterRenderProfile(characterId: string): Promise<CharacterRenderProfileDto> {
+    getCharacterRenderProfile(
+        characterId: string,
+        scope?: CharacterRenderProfileScopeInput,
+    ): Promise<CharacterRenderProfileDto> {
         return this.call(LOREPIA_COMMANDS.getCharacterRenderProfile, {
-            request: { character_id: characterId },
+            request: { character_id: characterId, ...scope },
         });
     }
 

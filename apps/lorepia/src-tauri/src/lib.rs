@@ -1,6 +1,7 @@
 mod appearance_commands;
 mod asset_protocol;
 mod channels;
+mod character_commands;
 mod chat_stream_registry;
 mod commands;
 pub mod contract;

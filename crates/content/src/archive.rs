@@ -15,9 +15,7 @@ use zip::{ZipArchive, read::ZipFile};
 
 use crate::{
     StagedAsset, adapters,
-    capabilities::{
-        intersect_runtime_profile_capabilities, normalize_runtime_profile_capabilities,
-    },
+    capabilities::{merge_runtime_profile_capabilities, normalize_runtime_profile_capabilities},
     path::validate_archive_path,
     runtime,
 };
@@ -366,7 +364,7 @@ fn merge_runtime_profile(
     target: &mut lorepia_domain::CharacterRuntimeProfile,
     mut incoming: lorepia_domain::CharacterRuntimeProfile,
 ) -> CoreResult<()> {
-    intersect_runtime_profile_capabilities(target, &mut incoming)?;
+    merge_runtime_profile_capabilities(target, &mut incoming)?;
     target.transforms.append(&mut incoming.transforms);
     target.scripts.append(&mut incoming.scripts);
     if target.background_markup.is_empty() {

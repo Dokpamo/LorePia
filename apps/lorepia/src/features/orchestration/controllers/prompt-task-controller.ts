@@ -100,6 +100,32 @@ export class PromptTaskController {
             }));
         }
     }
+
+    stageEditablePromptPreset(
+        patch: Partial<
+            Pick<
+                CreatorPromptPresetDocumentDto,
+                'default_generation_preset_id' | 'memory_profile_id'
+            >
+        >,
+    ): boolean {
+        const state = this.state.snapshot();
+        const document = state.editable_prompt_preset;
+        if (state.phase !== 'ready' || document === null) return false;
+        this.state.invalidatePlanPreviewForContext(state.context_key);
+        this.state.updateForContext(state.context_key, (current) => ({
+            ...current,
+            editable_prompt_preset: {
+                ...document,
+                value: { ...document.value, ...patch, id: document.value.id },
+            },
+            editable_prompt_preset_dirty: true,
+            editable_prompt_preset_error: null,
+            workspace: { ...current.workspace, plan_preview: null },
+        }));
+        return true;
+    }
+
     stageEditablePromptBlock(blockId: string, patch: EditablePromptBlockPatch): boolean {
         const state = this.state.snapshot();
         const document = state.editable_prompt_preset;

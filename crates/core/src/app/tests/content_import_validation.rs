@@ -17,7 +17,7 @@ fn compatible_import_commits_a_risu_memory_preset_through_the_package_boundary()
         .expect("memory preset");
     source
         .write_all(
-            br#"{"type":"risu","ver":1,"data":{"name":"Hypa import fixture","settings":{"summarizationPrompt":"Keep durable facts and decisions.","chunkSize":1200}}}"#,
+            br#"{"type":"risu","ver":1,"data":{"name":"Hypa import fixture","settings":{"summarizationPrompt":"Keep durable facts and decisions.\n{{slot}}","chunkSize":1200}}}"#,
         )
         .expect("write memory preset");
     source.flush().expect("flush memory preset");
@@ -48,6 +48,36 @@ fn compatible_import_commits_a_risu_memory_preset_through_the_package_boundary()
         presets
             .iter()
             .any(|preset| preset.value.name == "Hypa import fixture · 요약 프롬프트")
+    );
+    let first_revision = presets
+        .iter()
+        .find(|preset| preset.value.name == "Hypa import fixture · 요약 프롬프트")
+        .expect("imported prompt preset")
+        .revision;
+
+    let reinspection = core.inspect_import(source.path()).expect("reinspect Risu JSON");
+    let reimport = core
+        .commit_compatible_import(&reinspection.id)
+        .expect("reimport compatible content");
+    let crate::ImportCommitResult::Content(reimported) = reimport else {
+        panic!("reimported Risu memory preset must remain content");
+    };
+    assert_eq!(reimported.document_count, 1);
+    assert_eq!(
+        core.get_content_package_import(&reimported.import_id)
+            .expect("updated package import")
+            .status,
+        crate::PackageImportStatus::Completed
+    );
+    let updated_presets = core.list_prompt_presets().expect("updated prompt presets");
+    assert_eq!(updated_presets.len(), before + 1);
+    assert_eq!(
+        updated_presets
+            .iter()
+            .find(|preset| preset.value.name == "Hypa import fixture · 요약 프롬프트")
+            .expect("updated prompt preset")
+            .revision,
+        first_revision + 1
     );
     assert!(
         fs::read_dir(core.inner.storage.staging_dir())

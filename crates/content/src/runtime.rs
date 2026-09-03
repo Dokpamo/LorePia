@@ -14,6 +14,12 @@ use sha2::{Digest, Sha256};
 
 use crate::capabilities::{normalize_runtime_profile_capabilities, parse_runtime_capabilities};
 
+mod compatibility;
+
+use compatibility::{
+    runtime_profile_metadata, runtime_toggle_defaults, sandbox_legacy_low_level_scripts,
+};
+
 const HEADER_BYTES: usize = 6;
 const MAGIC: u8 = 111;
 const VERSION: u8 = 0;
@@ -122,7 +128,7 @@ pub(crate) fn decode_runtime_metadata_value(
     let source_id = format!("card-runtime:{source_sha256}");
     let capabilities_declared =
         module.contains_key("requiredCapabilities") || module.contains_key("required_capabilities");
-    let required_capabilities = parse_runtime_capabilities(module)?;
+    let mut required_capabilities = parse_runtime_capabilities(module)?;
     let module_elevated_access = module.get("lowLevelAccess").map_or(Ok(false), |value| {
         value
             .as_bool()
@@ -130,38 +136,18 @@ pub(crate) fn decode_runtime_metadata_value(
     })?;
     let transforms = parse_transforms(module.get("regex"), &source_id)?;
     let mut scripts = parse_scripts(module.get("trigger"), &source_id, module_elevated_access)?;
-    let mut warnings = Vec::new();
-    if !capabilities_declared {
-        let elevated_count = scripts
-            .iter()
-            .filter(|script| script.elevated_access)
-            .count();
-        if elevated_count > 0 {
-            scripts.retain(|script| !script.elevated_access);
-            warnings.push(ImportWarning {
-                code: "legacy_elevated_scripts_quarantined".to_owned(),
-                message: format!(
-                    "Quarantined {elevated_count} legacy elevated runtime script(s) because the source does not declare explicit capabilities."
-                ),
-            });
-        }
-    }
+    let warnings = if capabilities_declared {
+        Vec::new()
+    } else {
+        sandbox_legacy_low_level_scripts(&mut scripts, &mut required_capabilities)
+    };
     let knowledge_entries = module.get("lorebook").cloned();
-    let mut metadata = BTreeMap::new();
-    for key in [
-        "name",
-        "description",
-        "namespace",
-        "customModuleToggle",
-        "backgroundEmbedding",
-        "lowLevelAccess",
-        "hideIcon",
-        "assets",
-    ] {
-        if let Some(value) = module.get(key) {
-            metadata.insert(key.to_owned(), canonical_json(value)?);
-        }
-    }
+    let metadata = runtime_profile_metadata(module)?;
+    let toggle_schema = module
+        .get("customModuleToggle")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
     let mut profile = CharacterRuntimeProfile {
         source_id: Some(source_id),
         transform_set_id: None,
@@ -174,12 +160,8 @@ pub(crate) fn decode_runtime_metadata_value(
             .unwrap_or_default()
             .to_owned(),
         additional_text: String::new(),
-        toggle_schema: module
-            .get("customModuleToggle")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_owned(),
-        initial_variables: BTreeMap::new(),
+        initial_variables: runtime_toggle_defaults(&toggle_schema),
+        toggle_schema,
         metadata,
     };
     normalize_runtime_profile_capabilities(&mut profile)?;
@@ -710,20 +692,44 @@ mod tests {
     }
 
     #[test]
-    fn module_low_level_access_requires_an_explicit_elevated_capability() {
+    fn legacy_lua_low_level_access_is_downgraded_to_the_bounded_worker() {
         let trigger = serde_json::json!([{
             "type": "load",
             "lowLevelAccess": false,
-            "effect": [{ "type": "script", "code": "return true" }]
+            "effect": [{
+                "type": "triggerlua",
+                "code": "local chat = getFullChat(triggerId); setChatVar(triggerId, 'count', #chat); return true"
+            }]
         }]);
         let legacy = runtime_document(serde_json::json!({
             "lowLevelAccess": true,
             "trigger": trigger.clone()
         }));
         let decoded = decode_runtime_document(&legacy, &"2".repeat(64))
-            .expect("legacy undeclared elevation is quarantined");
-        assert!(decoded.profile.scripts.is_empty());
+            .expect("legacy undeclared Lua is sandboxed");
+        assert_eq!(decoded.profile.scripts.len(), 1);
+        assert!(!decoded.profile.scripts[0].elevated_access);
+        assert_eq!(
+            decoded.profile.scripts[0]
+                .metadata
+                .get("legacy_low_level_sandboxed")
+                .map(String::as_str),
+            Some("true")
+        );
+        assert_eq!(
+            decoded.profile.required_capabilities,
+            Some(vec![
+                PortableRuntimeCapability::RuntimeCallbacks,
+                PortableRuntimeCapability::ChatRead,
+                PortableRuntimeCapability::StateReadWrite,
+                PortableRuntimeCapability::UiWrite,
+            ])
+        );
         assert_eq!(decoded.warnings.len(), 1);
+        assert_eq!(
+            decoded.warnings[0].code,
+            "legacy_low_level_scripts_sandboxed"
+        );
 
         let declared_without_elevation = runtime_document(serde_json::json!({
             "lowLevelAccess": true,
@@ -737,7 +743,7 @@ mod tests {
     }
 
     #[test]
-    fn elevated_scripts_require_an_actual_elevated_declaration() {
+    fn legacy_non_lua_elevated_scripts_remain_quarantined() {
         let elevated_trigger = serde_json::json!([{
             "type": "load",
             "lowLevelAccess": true,
@@ -750,7 +756,7 @@ mod tests {
         assert_eq!(decoded.warnings.len(), 1);
         assert_eq!(
             decoded.warnings[0].code,
-            "legacy_elevated_scripts_quarantined"
+            "legacy_non_lua_scripts_quarantined"
         );
 
         let declared = runtime_document(serde_json::json!({

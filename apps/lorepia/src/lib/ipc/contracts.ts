@@ -13,6 +13,7 @@ export type {
     CharacterDisplayTransformDto,
     CharacterRenderAssetDto,
     CharacterRenderProfileDto,
+    CharacterRenderProfileScopeInput,
     CharacterRuntimeKnowledgeDto,
     CharacterRuntimeScriptDto,
     PortableRuntimeCapabilityDto,
@@ -31,7 +32,6 @@ export {
     SUPPORTED_CHAT_EVENT_VERSION,
 } from './contracts/common';
 export type { PlatformKind } from './contracts/platform';
-
 export type { LoadingPhase } from './contracts/common';
 
 export type { ConversationMode, MessageRole, MessageStatus } from './contracts/conversation';

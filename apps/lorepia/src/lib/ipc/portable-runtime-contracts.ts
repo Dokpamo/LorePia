@@ -61,3 +61,8 @@ export interface CharacterRenderProfileDto {
     runtime_knowledge: CharacterRuntimeKnowledgeDto[];
     runtime_script_count: number;
 }
+
+export interface CharacterRenderProfileScopeInput {
+    conversation_id: string;
+    branch_id: string;
+}

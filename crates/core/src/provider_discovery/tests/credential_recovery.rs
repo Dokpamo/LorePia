@@ -97,7 +97,7 @@ fn reverse_schema37_credential_migration(database: &std::path::Path) {
     connection
         .execute_batch("PRAGMA foreign_keys = OFF; BEGIN IMMEDIATE;")
         .expect("begin exact schema-37 inverse");
-    schema_fixture::drop_post_schema_37_additive_migrations(&connection);
+    schema_fixture::drop_post_schema_37_migrations(&connection);
     for trigger_name in [
         "provider_discovery_native_no_effect_attestation_binding",
         "provider_discovery_operation_legal_transition",
@@ -238,7 +238,7 @@ fn schema36_started_cancel_crash_upgrades_without_synthesizing_physical_authorit
     .expect("upgrade genuine schema-36 Started cancellation");
     assert_eq!(
         upgraded.storage().schema_version().expect("schema version"),
-        40
+        41
     );
     upgraded
         .get_provider_discovery_credential_install_context(&committing.session.id)

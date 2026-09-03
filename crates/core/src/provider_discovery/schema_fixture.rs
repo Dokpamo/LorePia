@@ -22,7 +22,7 @@ pub(super) fn drop_additive_migrations(
     }
 }
 
-pub(super) fn drop_post_schema_37_additive_migrations(connection: &rusqlite::Connection) {
+pub(super) fn drop_post_schema_37_migrations(connection: &rusqlite::Connection) {
     const MIGRATION_0038: &str =
         include_str!("../../../storage/migrations/0038_conversation_speakers.sql");
     const MIGRATION_0039: &str =
@@ -39,6 +39,17 @@ pub(super) fn drop_post_schema_37_additive_migrations(connection: &rusqlite::Con
         ("TRIGGER", "portable_runtime_state_scope_guard_update"),
     ];
     assert_additive_migration_objects(MIGRATION_0040, SCHEMA_40_OBJECTS);
+    connection
+        .execute_batch(include_str!(
+            "../../../../testdata/tauri-upgrade/schema-40-package-capability-requests.sql"
+        ))
+        .expect("restore schema-40 package capability table");
+    assert_eq!(
+        connection
+            .execute("DELETE FROM schema_migrations WHERE version = 41", [])
+            .expect("remove schema-41 registry row"),
+        1
+    );
     drop_additive_migrations(
         connection,
         &[

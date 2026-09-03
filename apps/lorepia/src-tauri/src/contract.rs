@@ -30,6 +30,12 @@ use lorepia_shell_api::{
     SetMemoryRecordExclusionInput, TaskProfileDto, TransformSetDto,
 };
 use serde::{Deserialize, Serialize};
+
+mod character;
+
+pub use character::{
+    CharacterConversationsRequest, CharacterRenderProfileRequest, CharacterRequest,
+};
 use tauri_plugin_lorepia_platform::{CredentialStatus, NativeCaptureStatus};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -61,20 +67,8 @@ pub enum DiscardImportRequest {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct CharacterRequest {
-    pub character_id: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct ConversationRequest {
     pub conversation_id: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CharacterConversationsRequest {
-    pub character_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]

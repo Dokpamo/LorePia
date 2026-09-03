@@ -61,6 +61,7 @@ pub(super) fn parse_package_capability(value: &str) -> CoreResult<PackageCapabil
         "variables" => Ok(PackageCapability::Variables),
         "transforms" => Ok(PackageCapability::Transforms),
         "declarative_interactions" => Ok(PackageCapability::DeclarativeInteractions),
+        "portable_runtime" => Ok(PackageCapability::PortableRuntime),
         "image_assets" => Ok(PackageCapability::ImageAssets),
         "audio_assets" => Ok(PackageCapability::AudioAssets),
         "video_assets" => Ok(PackageCapability::VideoAssets),

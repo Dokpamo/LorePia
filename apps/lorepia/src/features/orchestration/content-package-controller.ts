@@ -20,6 +20,7 @@ import type {
 } from '../../lib/ipc/contracts';
 import { t } from '../../lib/i18n';
 import { normalizeClientError } from '../../lib/ipc/errors';
+import { isApprovableContentPackageCapability } from './content-package-capabilities';
 
 export type ContentPackagePhase =
     | 'idle'
@@ -100,11 +101,6 @@ function retainedCompletedExportCatalog(
         completed_exports_error: state.completed_exports_error,
     };
 }
-
-const APPROVABLE_CAPABILITIES = new Set<ContentPackageCapabilityDto>([
-    'transforms',
-    'declarative_interactions',
-]);
 
 const TARGET_DOCUMENT_KINDS = new Set<ContentPackageTargetDocumentKindDto>([
     'prompt_preset',
@@ -398,8 +394,8 @@ function requiredApprovals(
     capabilities: readonly ContentPackageCapabilityDto[],
 ): ApprovableContentPackageCapabilityDto[] {
     return sortedUnique(
-        capabilities.filter((capability) =>
-            APPROVABLE_CAPABILITIES.has(capability),
+        capabilities.filter(
+            isApprovableContentPackageCapability,
         ) as ApprovableContentPackageCapabilityDto[],
     );
 }

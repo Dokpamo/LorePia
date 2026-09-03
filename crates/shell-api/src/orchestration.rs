@@ -37,7 +37,6 @@ use lorepia_core::{
     SummarySchemaId, TaskCredentialBroker, TaskProfile, TaskProfileId, TemplateSlot, TokenBudget,
     TokenPolicy, TransformDiff, TransformFailure, TransformPhase, TransformPreviewRequest,
     TransformRule, TransformRuleId, TransformRuleReport, TransformSet, TransformSetId, VariableMap,
-    VariableValue,
 };
 use serde::{Deserialize, Serialize};
 
@@ -47,6 +46,10 @@ use crate::{
     api::{validate_generation_operation_context, validate_identifier},
     sensitive::GenerationCredentialKind,
 };
+
+mod creator_controls;
+
+use creator_controls::project_creator_controls;
 
 const MAX_DOCUMENT_BYTES: usize = 2 * 1024 * 1024;
 const MAX_DOCUMENT_STRING_CHARS: usize = 1_000_000;
@@ -427,6 +430,8 @@ pub struct CreatorMemoryProfileDocumentDto {
     pub importance_weight: f32,
     pub preserve_invalidated_records: bool,
     pub summary_schema: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary_template: Option<SafeTemplate>,
 }
 
 impl From<CreatorMemoryProfileDocumentDto> for MemoryProfile {
@@ -447,6 +452,7 @@ impl From<CreatorMemoryProfileDocumentDto> for MemoryProfile {
             importance_weight: value.importance_weight,
             preserve_invalidated_records: value.preserve_invalidated_records,
             summary_schema: SummarySchemaId::from(value.summary_schema),
+            summary_template: value.summary_template,
             provenance: user_created_provenance(),
         }
     }
@@ -472,6 +478,7 @@ impl TryFrom<MemoryProfile> for CreatorMemoryProfileDocumentDto {
             importance_weight: value.importance_weight,
             preserve_invalidated_records: value.preserve_invalidated_records,
             summary_schema: value.summary_schema.0,
+            summary_template: value.summary_template,
         })
     }
 }
@@ -872,6 +879,7 @@ impl From<CreatorContentModuleDocumentDto> for ContentModule {
                 .map(InteractionRuleSetId::from)
                 .collect(),
             asset_ids: value.asset_ids.into_iter().map(AssetId::from).collect(),
+            portable_runtime: None,
             imported_components_enabled: false,
             required_capabilities: value.required_capabilities,
             metadata: PackageMetadata {
@@ -892,6 +900,12 @@ impl TryFrom<ContentModule> for CreatorContentModuleDocumentDto {
 
     fn try_from(value: ContentModule) -> Result<Self, Self::Error> {
         require_user_created_provenance(&value.metadata.provenance, "content module")?;
+        if value.portable_runtime.is_some() {
+            return Err(CoreError::invalid(
+                "creator content modules cannot directly author portable runtime code",
+            )
+            .into());
+        }
         Ok(Self {
             id: value.id.0,
             name: value.name,
@@ -1382,6 +1396,10 @@ pub struct CreatorControlProjectionDto {
     pub kind: ControlKind,
     pub value: CoreCreatorControlValue,
     pub choices: Vec<String>,
+    /// Human-readable labels parallel to `choices`. Kept separate so existing
+    /// creator-value DTOs remain stable while imported enumerations can retain
+    /// their original labels and canonical machine values.
+    pub choice_labels: Vec<String>,
     pub minimum: Option<f64>,
     pub maximum: Option<f64>,
     pub step: Option<f64>,
@@ -4773,77 +4791,6 @@ fn project_room_orchestration_config(room: RoomOrchestrationConfig) -> RoomOrche
             group_context: RoomOrchestrationFieldSupportDto::SUPPORTED,
             template_slots: RoomOrchestrationFieldSupportDto::SUPPORTED,
         },
-    }
-}
-
-fn project_creator_controls(
-    controls: &[ControlSpec],
-    values: &BTreeMap<String, CoreCreatorControlValue>,
-) -> ShellResult<Vec<CreatorControlProjectionDto>> {
-    if controls.len() > MAX_SELECTION_ITEMS {
-        return Err(shell_invalid(
-            "prompt preset exceeds the creator control projection limit",
-        ));
-    }
-    controls
-        .iter()
-        .filter(|control| {
-            !control.sensitive
-                && !matches!(
-                    control.kind,
-                    ControlKind::Section | ControlKind::Caption | ControlKind::Divider
-                )
-        })
-        .map(|control| {
-            let value = values
-                .get(control.id.as_str())
-                .cloned()
-                .or_else(|| {
-                    control
-                        .default_value
-                        .as_ref()
-                        .and_then(variable_to_creator_control_value)
-                })
-                .ok_or_else(|| shell_invalid("interactive creator control has no safe value"))?;
-            let choices = control
-                .options
-                .iter()
-                .map(|option| match &option.value {
-                    VariableValue::Text(value) | VariableValue::Enum(value) => Ok(value.clone()),
-                    _ => Err(shell_invalid(
-                        "select creator control has a non-text option value",
-                    )),
-                })
-                .collect::<ShellResult<Vec<_>>>()?;
-            Ok(CreatorControlProjectionDto {
-                id: control.id.as_str().to_owned(),
-                label: control.label.clone(),
-                description: (!control.description.is_empty()).then(|| control.description.clone()),
-                kind: control.kind,
-                value,
-                choices,
-                minimum: control.minimum,
-                maximum: control.maximum,
-                step: control.step,
-            })
-        })
-        .collect()
-}
-
-fn variable_to_creator_control_value(value: &VariableValue) -> Option<CoreCreatorControlValue> {
-    match value {
-        VariableValue::Bool(value) => Some(CoreCreatorControlValue::Bool(*value)),
-        VariableValue::Integer(value) => Some(CoreCreatorControlValue::Integer(*value)),
-        VariableValue::Decimal(value) if value.is_finite() => {
-            Some(CoreCreatorControlValue::Decimal(*value))
-        }
-        VariableValue::Text(value) | VariableValue::Enum(value) => {
-            Some(CoreCreatorControlValue::Text(value.clone()))
-        }
-        VariableValue::StringList(values) => {
-            Some(CoreCreatorControlValue::StringList(values.clone()))
-        }
-        VariableValue::Decimal(_) => None,
     }
 }
 

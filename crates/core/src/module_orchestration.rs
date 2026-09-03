@@ -36,19 +36,19 @@ use self::runtime_plan::content_module_runtime_binding_summary;
 use crate::{Core, Revisioned, revision::project_revision};
 
 const MAXIMUM_CONTENT_MODULE_SCHEMA_VERSION: u32 = 1;
-pub(crate) const SUPPORTED_CONTENT_CAPABILITIES: [ContentCapability; 10] = [
+pub(crate) const CAPABILITIES: [ContentCapability; 11] = [
     ContentCapability::PromptFragments,
     ContentCapability::Knowledge,
     ContentCapability::Variables,
     ContentCapability::Transforms,
     ContentCapability::DeclarativeInteractions,
+    ContentCapability::PortableRuntime,
     ContentCapability::ImageAssets,
     ContentCapability::AudioAssets,
     ContentCapability::VideoAssets,
     ContentCapability::AttachmentAssets,
     ContentCapability::HighRiskAssets,
 ];
-
 /// Caller-authored portion of a module binding.
 ///
 /// Activation state, immutable revision identity, and timestamps are
@@ -1265,7 +1265,7 @@ impl Core {
             character_id: Some(conversation.character_id),
             conversation_id: Some(runtime_target.conversation_id.0.clone()),
             branch_id: Some(runtime_target.branch_id.0.clone()),
-            supported_capabilities: SUPPORTED_CONTENT_CAPABILITIES.to_vec(),
+            supported_capabilities: CAPABILITIES.to_vec(),
         };
         let applies = match draft.scope {
             ModuleScope::App | ModuleScope::User
@@ -1348,7 +1348,7 @@ impl Core {
                 maximum_module_schema_version: MAXIMUM_CONTENT_MODULE_SCHEMA_VERSION,
                 scope_target_exists: true,
                 available_asset_ids: target_assets,
-                supported_capabilities: SUPPORTED_CONTENT_CAPABILITIES.to_vec(),
+                supported_capabilities: CAPABILITIES.to_vec(),
                 quarantined_revision_ids: Vec::new(),
                 unresolved_components: Vec::new(),
             },

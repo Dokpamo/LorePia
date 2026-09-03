@@ -25,6 +25,10 @@ use crate::{
     validated_source_metadata,
 };
 
+mod json_hazards;
+
+use json_hazards::{HazardKind, inspect_json_component};
+
 const PACKAGE_FORMAT: &str = "lorepia_content_package";
 const PACKAGE_FORMAT_VERSION: u32 = 1;
 const MANIFEST_PATH: &str = "manifest.json";
@@ -35,7 +39,6 @@ const MAX_PATH_CHARS: usize = 512;
 const MAX_LABEL_BYTES: usize = 4_096;
 const MAX_LABEL_CHARS: usize = 2_048;
 const MAX_MANIFEST_LIST_ITEMS: usize = 8_192;
-const MAX_JSON_SCAN_NODES: usize = 100_000;
 const ENTRY_HEADER_BYTES: usize = 16;
 const READ_BUFFER_BYTES: usize = 64 * 1024;
 const CONTENT_MODULE_SCHEMA_VERSION: u32 = 1;
@@ -57,6 +60,7 @@ impl ContentCapability {
                 | "memory_profiles"
                 | "safe_transforms"
                 | "declarative_interactions"
+                | "portable_runtime"
                 | "media_assets"
                 | "content_modules"
                 | "variables"
@@ -381,21 +385,6 @@ struct SelectedJsonComponentExpectation<'a> {
     path: &'a str,
     sha256: &'a str,
     size_bytes: u64,
-}
-
-#[derive(Debug, Default)]
-struct HazardScan {
-    kinds: BTreeSet<HazardKind>,
-    node_count: usize,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum HazardKind {
-    Code,
-    Script,
-    Html,
-    ExternalUrl,
-    UnsafeAction,
 }
 
 #[derive(Serialize)]
@@ -1577,6 +1566,9 @@ fn validate_content_module_capability_contract(module: &ContentModule) -> CoreRe
     if !module.interaction_rule_set_ids.is_empty() {
         required.insert(lorepia_domain::ContentCapability::DeclarativeInteractions);
     }
+    if module.portable_runtime.is_some() {
+        required.insert(lorepia_domain::ContentCapability::PortableRuntime);
+    }
     if !module.asset_ids.is_empty()
         && !declared.iter().any(|capability| {
             matches!(
@@ -1614,6 +1606,7 @@ const fn content_module_capability_name(
         lorepia_domain::ContentCapability::Variables => "variables",
         lorepia_domain::ContentCapability::Transforms => "transforms",
         lorepia_domain::ContentCapability::DeclarativeInteractions => "declarative_interactions",
+        lorepia_domain::ContentCapability::PortableRuntime => "portable_runtime",
         lorepia_domain::ContentCapability::ImageAssets => "image_assets",
         lorepia_domain::ContentCapability::AudioAssets => "audio_assets",
         lorepia_domain::ContentCapability::VideoAssets => "video_assets",
@@ -1629,6 +1622,7 @@ fn content_module_capability(capability: lorepia_domain::ContentCapability) -> C
         lorepia_domain::ContentCapability::Variables => "variables",
         lorepia_domain::ContentCapability::Transforms => "safe_transforms",
         lorepia_domain::ContentCapability::DeclarativeInteractions => "declarative_interactions",
+        lorepia_domain::ContentCapability::PortableRuntime => "portable_runtime",
         lorepia_domain::ContentCapability::ImageAssets => "image_assets",
         lorepia_domain::ContentCapability::AudioAssets => "audio_assets",
         lorepia_domain::ContentCapability::VideoAssets => "video_assets",
@@ -1851,7 +1845,12 @@ fn read_package_entry<R: Read>(
         let retained = json_bytes
             .as_deref()
             .ok_or_else(|| unsupported("JSON component was not retained for validation"));
-        match retained.and_then(inspect_json_component) {
+        match retained.and_then(|bytes| {
+            inspect_json_component(
+                bytes,
+                infer_component_kind(&path) == ContentPackageComponentKind::ContentModule,
+            )
+        }) {
             Ok(scan)
                 if infer_component_kind(&path) == ContentPackageComponentKind::ContentModule =>
             {
@@ -2805,102 +2804,6 @@ fn media_signature_matches(media_type: &str, header: &[u8]) -> bool {
     }
 }
 
-fn inspect_json_component(bytes: &[u8]) -> CoreResult<HazardScan> {
-    let value: Value = serde_json::from_slice(bytes)
-        .map_err(|error| unsupported(format!("invalid component JSON: {error}")))?;
-    if !value.is_object() && !value.is_array() {
-        return Err(unsupported(
-            "component JSON must contain an object or array",
-        ));
-    }
-    let mut scan = HazardScan::default();
-    scan_json_hazards(&value, None, &mut scan)?;
-    Ok(scan)
-}
-
-fn scan_json_hazards(value: &Value, key: Option<&str>, scan: &mut HazardScan) -> CoreResult<()> {
-    scan.node_count = scan
-        .node_count
-        .checked_add(1)
-        .ok_or_else(|| unsupported("component JSON node count overflow"))?;
-    if scan.node_count > MAX_JSON_SCAN_NODES {
-        return Err(unsupported(
-            "component JSON exceeds the structural node limit",
-        ));
-    }
-    match value {
-        Value::Object(object) => {
-            for (child_key, child) in object {
-                let lower = child_key.to_ascii_lowercase();
-                if matches!(lower.as_str(), "script" | "scripts" | "javascript")
-                    || lower.starts_with("script_")
-                    || lower.ends_with("_script")
-                    || lower.ends_with("_scripts")
-                {
-                    scan.kinds.insert(HazardKind::Script);
-                }
-                if lower == "html" || lower.ends_with("_html") {
-                    scan.kinds.insert(HazardKind::Html);
-                }
-                if lower == "code" || lower.ends_with("_code") {
-                    scan.kinds.insert(HazardKind::Code);
-                }
-                if matches!(
-                    lower.as_str(),
-                    "shell" | "command" | "exec" | "network_request" | "filesystem"
-                ) {
-                    scan.kinds.insert(HazardKind::UnsafeAction);
-                }
-                scan_json_hazards(child, Some(&lower), scan)?;
-            }
-        }
-        Value::Array(array) => {
-            for child in array {
-                scan_json_hazards(child, key, scan)?;
-            }
-        }
-        Value::String(text) => {
-            let lower = text.to_ascii_lowercase();
-            if lower.starts_with("http://")
-                || lower.starts_with("https://")
-                || lower.starts_with("//")
-            {
-                scan.kinds.insert(HazardKind::ExternalUrl);
-            }
-            if lower.contains("<script")
-                || lower.contains("<iframe")
-                || lower.contains("javascript:")
-                || lower.contains("data:text/html")
-            {
-                scan.kinds.insert(HazardKind::Html);
-            }
-            if key.is_some_and(|key| {
-                matches!(
-                    key,
-                    "action" | "action_type" | "kind" | "type" | "operation"
-                )
-            }) && matches!(
-                lower.as_str(),
-                "execute"
-                    | "exec"
-                    | "shell"
-                    | "run_script"
-                    | "network_request"
-                    | "fetch"
-                    | "open_url"
-                    | "read_file"
-                    | "write_file"
-                    | "javascript"
-                    | "html"
-            ) {
-                scan.kinds.insert(HazardKind::UnsafeAction);
-            }
-        }
-        Value::Null | Value::Bool(_) | Value::Number(_) => {}
-    }
-    Ok(())
-}
-
 fn hazard_reason(kind: HazardKind) -> &'static str {
     match kind {
         HazardKind::Code => "component contains code-bearing fields and is quarantined",
@@ -3052,32 +2955,6 @@ mod tests {
         for invalid in ["", "image", "image/png; charset=x", "image/\njson"] {
             assert!(normalize_media_type(invalid).is_err(), "{invalid}");
         }
-    }
-
-    #[test]
-    fn hazard_scanner_finds_active_content_and_external_urls() {
-        let value = serde_json::json!({
-            "safe": "text",
-            "script": "alert(1)",
-            "asset_url": "https://invalid.example/image.png",
-            "rules": [{"action": "network_request"}],
-        });
-        let mut scan = HazardScan::default();
-        scan_json_hazards(&value, None, &mut scan).expect("scan");
-        assert!(scan.kinds.contains(&HazardKind::Script));
-        assert!(scan.kinds.contains(&HazardKind::ExternalUrl));
-        assert!(scan.kinds.contains(&HazardKind::UnsafeAction));
-    }
-
-    #[test]
-    fn hazard_scanner_does_not_treat_description_as_a_script_field() {
-        let value = serde_json::json!({
-            "description": "A normal inert content description.",
-            "transcript": "A normal inert conversation transcript.",
-        });
-        let mut scan = HazardScan::default();
-        scan_json_hazards(&value, None, &mut scan).expect("scan");
-        assert!(!scan.kinds.contains(&HazardKind::Script));
     }
 
     #[test]

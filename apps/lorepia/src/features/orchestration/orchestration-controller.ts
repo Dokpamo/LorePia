@@ -129,6 +129,17 @@ export class OrchestrationController {
         return this.promptTasks.saveEditablePromptPreset();
     }
 
+    stageEditablePromptPreset(
+        patch: Partial<
+            Pick<
+                CreatorPromptPresetDocumentDto,
+                'default_generation_preset_id' | 'memory_profile_id'
+            >
+        >,
+    ): boolean {
+        return this.promptTasks.stageEditablePromptPreset(patch);
+    }
+
     addTaskProfileDraft(taskProfileId: string): boolean {
         return this.promptTasks.addTaskProfileDraft(taskProfileId);
     }

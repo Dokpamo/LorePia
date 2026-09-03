@@ -449,6 +449,7 @@ export function memoryProfileDraft(id: string): CreatorMemoryProfileDocumentDto 
         importance_weight: 1,
         preserve_invalidated_records: false,
         summary_schema: '',
+        summary_template: null,
     };
 }
 

@@ -1,12 +1,7 @@
-/**
- * Korean message catalog.
- *
- * Keys are `feature.area.detail`. Keep them sorted so additions are easy to
- * find in review, and keep placeholders named (`{count}`) so a translation may
- * reorder them.
- */
+/** Korean catalog with sorted keys and named placeholders. */
 
 import { koImport } from './ko-import';
+import { koRisu } from './ko-risu';
 
 export const ko = {
     'app.bootstrap.failed': '앱을 시작하지 못했습니다.',
@@ -687,6 +682,7 @@ export const ko = {
         '{name} 작업 프로필을 저장했지만 저장 중 추가 변경은 아직 저장되지 않았습니다.',
     'orchestration.notice.unsaved_changes':
         '저장 중 추가로 바꾼 값이 있습니다. 새 변경 사항은 아직 저장되지 않았습니다.',
+    ...koRisu,
     'persona.description.empty': '설명 없음',
     'persona.actions.label': '페르소나 작업',
     'persona.editor.create_button': '페르소나 추가하기',

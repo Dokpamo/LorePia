@@ -1,19 +1,25 @@
 use std::collections::BTreeSet;
 
 use lorepia_domain::{
-    BlockSource, CacheBoundary, CacheBoundaryId, CacheMode, CacheRoleFilter, CharacterContentV1,
-    ContentCapability, ContentKind, ContentModule, ContentModuleId, CoreError, CoreErrorCode,
-    CoreResult, HistorySelector, ImportDynamicContentReview, ImportWarning, InstructionAuthority,
-    KnowledgeBook, MergePolicy, OverflowPolicy, PackageMetadata, PlacementZone, PresetMetadata,
-    PromptBlock, PromptBlockId, PromptBlockKind, PromptPreset, PromptPresetId, Provenance,
-    RoleHint, SafeTemplate, SourceKind, TemplatePart, TokenPolicy, TransformSet, TransformSetId,
-    ValidateOrchestration, VariableMap,
+    CacheBoundary, CharacterContentV1, ContentCapability, ContentKind, ContentModule,
+    ContentModuleId, ControlSpec, CoreError, CoreErrorCode, CoreResult, ImportDynamicContentReview,
+    ImportWarning, KnowledgeBook, PackageMetadata, PresetMetadata, PromptBlock, PromptPreset,
+    PromptPresetId, Provenance, RoleHint, SafeTemplate, SourceKind, TemplatePart, TransformSet,
+    TransformSetId, ValidateOrchestration, VariableMap, VariableValue,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
 
 use super::container::{RisuAssetRecord, RisuModuleSource};
 use crate::{adapters, dynamic_content_review, runtime};
+
+mod prompts;
+mod variables;
+
+use prompts::{append_latest_user_block, prompt_blocks, static_prompt_block};
+use variables::{
+    import_hint_value, insert_import_hint, preserve_generation_hints, prompt_controls,
+};
 
 const DOCUMENT_SCHEMA_VERSION: u32 = 1;
 const MAX_NAME_CHARS: usize = 512;
@@ -22,10 +28,10 @@ const MAX_TEMPLATE_CHARS: usize = 262_144;
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub(super) enum NormalizedDocument {
-    PromptPreset(PromptPreset),
+    PromptPreset(Box<PromptPreset>),
     KnowledgeBook(KnowledgeBook),
     TransformSet(TransformSet),
-    ContentModule(ContentModule),
+    ContentModule(Box<ContentModule>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -84,6 +90,8 @@ pub(super) fn convert_module(
     let knowledge_book = runtime_knowledge
         .and_then(|reference| reference.embedded)
         .map(|book| book.materialize(provenance.clone()));
+    let portable_runtime =
+        runtime_profile_present(&source.metadata.profile).then(|| source.metadata.profile.clone());
     let warnings = module_warnings(
         source.metadata.warnings,
         original_script_count,
@@ -93,15 +101,16 @@ pub(super) fn convert_module(
         !source.metadata.profile.toggle_schema.trim().is_empty(),
         &source.assets,
     );
-    let documents = module_documents(
-        &name,
-        &description,
+    let documents = module_documents(ModuleDocumentsInput {
+        name: &name,
+        description: &description,
         prefix,
         provenance,
         knowledge_book,
         transform_set,
-        &source.assets,
-    )?;
+        portable_runtime,
+        assets: &source.assets,
+    })?;
     let package_capabilities = module_package_capabilities(&documents, !source.assets.is_empty());
     Ok(NormalizedExternalContent {
         kind: ContentKind::RisuModule,
@@ -112,22 +121,40 @@ pub(super) fn convert_module(
         package_capabilities,
         dynamic_content,
         warnings,
-        unsupported_optional_fields: vec![
-            "trigger scripts (quarantined)".to_owned(),
-            "custom Risu toggle/background runtime".to_owned(),
-        ],
+        unsupported_optional_fields: Vec::new(),
     })
 }
 
-fn module_documents(
-    name: &str,
-    description: &str,
-    prefix: &str,
+fn runtime_profile_present(profile: &lorepia_domain::CharacterRuntimeProfile) -> bool {
+    !profile.transforms.is_empty()
+        || !profile.scripts.is_empty()
+        || !profile.background_markup.trim().is_empty()
+        || !profile.toggle_schema.trim().is_empty()
+        || !profile.initial_variables.is_empty()
+}
+
+struct ModuleDocumentsInput<'a> {
+    name: &'a str,
+    description: &'a str,
+    prefix: &'a str,
     provenance: Provenance,
     knowledge_book: Option<KnowledgeBook>,
     transform_set: Option<TransformSet>,
-    assets: &[RisuAssetRecord],
-) -> CoreResult<Vec<NormalizedDocumentEntry>> {
+    portable_runtime: Option<lorepia_domain::CharacterRuntimeProfile>,
+    assets: &'a [RisuAssetRecord],
+}
+
+fn module_documents(input: ModuleDocumentsInput<'_>) -> CoreResult<Vec<NormalizedDocumentEntry>> {
+    let ModuleDocumentsInput {
+        name,
+        description,
+        prefix,
+        provenance,
+        knowledge_book,
+        transform_set,
+        portable_runtime,
+        assets,
+    } = input;
     let mut documents = Vec::new();
     let mut dependency_ids = Vec::new();
     let mut knowledge_book_ids = Vec::new();
@@ -168,6 +195,9 @@ fn module_documents(
     if !asset_ids.is_empty() {
         required_capabilities.push(ContentCapability::ImageAssets);
     }
+    if portable_runtime.is_some() {
+        required_capabilities.push(ContentCapability::PortableRuntime);
+    }
     let module = ContentModule {
         id: ContentModuleId::from(format!("risu-module-{prefix}")),
         name: name.to_owned(),
@@ -179,7 +209,8 @@ fn module_documents(
         transform_set_ids,
         interaction_rule_set_ids: Vec::new(),
         asset_ids,
-        imported_components_enabled: false,
+        portable_runtime,
+        imported_components_enabled: true,
         required_capabilities,
         metadata: PackageMetadata {
             author: None,
@@ -200,7 +231,7 @@ fn module_documents(
         kind: "content_module",
         required_capabilities: vec!["content_modules"],
         depends_on: dependency_ids,
-        document: NormalizedDocument::ContentModule(module),
+        document: NormalizedDocument::ContentModule(Box::new(module)),
     });
     Ok(documents)
 }
@@ -240,6 +271,14 @@ fn module_package_capabilities(
     {
         package_capabilities.push("safe_transforms");
     }
+    if documents.iter().any(|document| {
+        matches!(
+            &document.document,
+            NormalizedDocument::ContentModule(module) if module.portable_runtime.is_some()
+        )
+    }) {
+        package_capabilities.push("portable_runtime");
+    }
     if has_assets {
         package_capabilities.push("image_assets");
     }
@@ -257,9 +296,9 @@ fn module_warnings(
 ) -> Vec<ImportWarning> {
     if original_script_count > 0 {
         warnings.push(ImportWarning {
-            code: "risu_scripts_quarantined".to_owned(),
+            code: "risu_scripts_sandboxed".to_owned(),
             message: format!(
-                "Quarantined {original_script_count} Risu trigger script(s). LorePia imports only declarative module behavior."
+                "Preserved {original_script_count} Risu Lua trigger script(s) for isolated, permission-gated Worker execution."
             ),
         });
     }
@@ -274,15 +313,15 @@ fn module_warnings(
     }
     if has_background_markup {
         warnings.push(ImportWarning {
-            code: "risu_markup_quarantined".to_owned(),
-            message: "Custom Risu HTML/CSS background markup was quarantined and will not run."
+            code: "risu_markup_sandboxed".to_owned(),
+            message: "Risu background markup will render only through LorePia's sanitized opaque-origin frame."
                 .to_owned(),
         });
     }
     if has_toggle_schema {
         warnings.push(ImportWarning {
-            code: "risu_toggle_schema_preserved_inactive".to_owned(),
-            message: "Risu's custom toggle schema is not executed; compatible declarative content was imported inactive."
+            code: "risu_toggle_schema_preserved".to_owned(),
+            message: "Risu's compatible toggle controls were preserved for the bound conversation runtime."
                 .to_owned(),
         });
     }
@@ -324,6 +363,10 @@ pub(super) fn convert_preset(
     }
     append_latest_user_block(&mut blocks, prefix, &provenance);
     blocks.sort_by_key(|block| block.placement_zone);
+    let (controls, mut default_values, skipped_toggle_lines) =
+        prompt_controls(object.get("customPromptTemplateToggle"));
+    let retained_toggle_count = controls.len();
+    preserve_generation_hints(object, &mut default_values);
 
     let runtime_root = json!({
         "type": "risuModule",
@@ -359,18 +402,22 @@ pub(super) fn convert_preset(
     let metadata_description = format!(
         "Imported Risu prompt preset. Original API type: {api_type}; model hint: {model}. Provider parameters remain unbound until a LorePia model route is selected."
     );
-    let documents = preset_documents(
-        &name,
+    let documents = preset_documents(PresetDocumentsInput {
+        name: &name,
         prefix,
         blocks,
+        controls,
+        default_values,
         cache_boundaries,
         transform_set,
         provenance,
         metadata_description,
-    )?;
+    })?;
     let warnings = preset_warnings(
         runtime.warnings,
         skipped_prompt_items,
+        skipped_toggle_lines,
+        retained_toggle_count,
         original_transform_count,
         retained_transform_count,
     );
@@ -387,24 +434,39 @@ pub(super) fn convert_preset(
         package_capabilities,
         dynamic_content,
         warnings,
-        unsupported_optional_fields: vec![
-            "provider credentials and endpoint overrides".to_owned(),
-            "provider-specific sampling values (unbound)".to_owned(),
-        ],
+        unsupported_optional_fields: vec!["provider credentials and endpoint overrides".to_owned()],
     })
 }
 
 fn preset_warnings(
     mut warnings: Vec<ImportWarning>,
     skipped_prompt_items: usize,
+    skipped_toggle_lines: usize,
+    retained_toggle_count: usize,
     original_transform_count: usize,
     retained_transform_count: usize,
 ) -> Vec<ImportWarning> {
     warnings.push(ImportWarning {
         code: "risu_provider_parameters_unbound".to_owned(),
-        message: "Prompt blocks are imported, but provider/model sampling values remain unbound until you choose a LorePia model route."
+        message: "Prompt blocks and portable provider hints are imported. Choose a LorePia model route in the compatibility panel to materialize supported sampling values."
             .to_owned(),
     });
+    if retained_toggle_count > 0 {
+        warnings.push(ImportWarning {
+            code: "risu_prompt_toggles_preserved".to_owned(),
+            message: format!(
+                "Preserved {retained_toggle_count} Risu prompt toggle(s) as room-scoped creator controls."
+            ),
+        });
+    }
+    if skipped_toggle_lines > 0 {
+        warnings.push(ImportWarning {
+            code: "risu_prompt_toggle_lines_skipped".to_owned(),
+            message: format!(
+                "Ignored {skipped_toggle_lines} Risu toggle layout or unsupported control line(s); interactive values remain preserved for supported controls."
+            ),
+        });
+    }
     if skipped_prompt_items > 0 {
         warnings.push(ImportWarning {
             code: "risu_prompt_items_quarantined".to_owned(),
@@ -425,15 +487,30 @@ fn preset_warnings(
     warnings
 }
 
-fn preset_documents(
-    name: &str,
-    prefix: &str,
+struct PresetDocumentsInput<'a> {
+    name: &'a str,
+    prefix: &'a str,
     blocks: Vec<PromptBlock>,
+    controls: Vec<ControlSpec>,
+    default_values: VariableMap,
     cache_boundaries: Vec<CacheBoundary>,
     transform_set: Option<TransformSet>,
     provenance: Provenance,
     metadata_description: String,
-) -> CoreResult<Vec<NormalizedDocumentEntry>> {
+}
+
+fn preset_documents(input: PresetDocumentsInput<'_>) -> CoreResult<Vec<NormalizedDocumentEntry>> {
+    let PresetDocumentsInput {
+        name,
+        prefix,
+        blocks,
+        controls,
+        default_values,
+        cache_boundaries,
+        transform_set,
+        provenance,
+        metadata_description,
+    } = input;
     let mut documents = Vec::new();
     let mut transform_set_ids = Vec::new();
     let mut prompt_dependencies = Vec::new();
@@ -454,8 +531,8 @@ fn preset_documents(
         name: name.to_owned(),
         schema_version: DOCUMENT_SCHEMA_VERSION,
         blocks,
-        controls: Vec::new(),
-        default_values: VariableMap::default(),
+        controls,
+        default_values,
         default_generation_preset_id: None,
         memory_profile_id: None,
         knowledge_book_ids: Vec::new(),
@@ -477,7 +554,7 @@ fn preset_documents(
         kind: "prompt",
         required_capabilities: vec!["prompt_presets"],
         depends_on: prompt_dependencies,
-        document: NormalizedDocument::PromptPreset(preset),
+        document: NormalizedDocument::PromptPreset(Box::new(preset)),
     });
     Ok(documents)
 }
@@ -516,6 +593,54 @@ pub(super) fn convert_memory_preset(
         &format!("risu-memory-preset:{source_sha256}"),
         source_sha256,
     );
+    risu_memory_summary_template(summary_prompt)?;
+    let preset = memory_prompt_preset(MemoryPromptPresetInput {
+        name: &name,
+        prefix,
+        summary_prompt,
+        settings,
+        provenance,
+    })?;
+    Ok(NormalizedExternalContent {
+        kind: ContentKind::RisuMemoryPreset,
+        name,
+        description: "Risu Hypa memory summarization template".to_owned(),
+        documents: vec![NormalizedDocumentEntry {
+            id: "prompt".to_owned(),
+            path: "prompt/risu-memory-prompt.json".to_owned(),
+            kind: "prompt",
+            required_capabilities: vec!["prompt_presets"],
+            depends_on: Vec::new(),
+            document: NormalizedDocument::PromptPreset(Box::new(preset)),
+        }],
+        assets: Vec::new(),
+        package_capabilities: vec!["prompt_presets"],
+        dynamic_content: ImportDynamicContentReview::default(),
+        warnings: vec![ImportWarning {
+            code: "risu_memory_task_binding_required".to_owned(),
+            message: "The summary template, schedule, retrieval weights, and preservation policy were imported as setup data. Choose a LorePia model route in the compatibility panel to create the linked task and memory profile before activation."
+                .to_owned(),
+        }],
+        unsupported_optional_fields: unsupported_memory_settings(settings),
+    })
+}
+
+struct MemoryPromptPresetInput<'a> {
+    name: &'a str,
+    prefix: &'a str,
+    summary_prompt: &'a str,
+    settings: &'a serde_json::Map<String, Value>,
+    provenance: Provenance,
+}
+
+fn memory_prompt_preset(input: MemoryPromptPresetInput<'_>) -> CoreResult<PromptPreset> {
+    let MemoryPromptPresetInput {
+        name,
+        prefix,
+        summary_prompt,
+        settings,
+        provenance,
+    } = input;
     let block = static_prompt_block(
         format!("risu-memory-summary-{prefix}"),
         "Memory summarization instruction".to_owned(),
@@ -527,13 +652,40 @@ pub(super) fn convert_memory_preset(
     let mut blocks = vec![block];
     append_latest_user_block(&mut blocks, prefix, &provenance);
     blocks.sort_by_key(|block| block.placement_zone);
+    let mut default_values = VariableMap::default();
+    insert_import_hint(
+        &mut default_values,
+        "lorepia_risu_import_kind",
+        VariableValue::Enum("memory".to_owned()),
+    );
+    for (id, value) in [
+        (
+            "lorepia_risu_memory_profile_id",
+            VariableValue::Text(format!("risu-memory-profile-{prefix}")),
+        ),
+        (
+            "lorepia_risu_summary_task_id",
+            VariableValue::Text(format!("risu-memory-summary-task-{prefix}")),
+        ),
+        (
+            "lorepia_risu_requested_similarity_weight",
+            VariableValue::Decimal(f64::from(bounded_setting_f32(
+                settings,
+                "similarMemoryRatio",
+                0.4,
+            ))),
+        ),
+    ] {
+        insert_import_hint(&mut default_values, id, value);
+    }
+    preserve_memory_hints(settings, &mut default_values);
     let preset = PromptPreset {
         id: PromptPresetId::from(format!("risu-memory-prompt-{prefix}")),
         name: format!("{name} · 요약 프롬프트"),
         schema_version: DOCUMENT_SCHEMA_VERSION,
         blocks,
         controls: Vec::new(),
-        default_values: VariableMap::default(),
+        default_values,
         default_generation_preset_id: None,
         memory_profile_id: None,
         knowledge_book_ids: Vec::new(),
@@ -550,282 +702,115 @@ pub(super) fn convert_memory_preset(
     preset.validate().map_err(|error| {
         unsupported(format!("Risu memory preset cannot be normalized: {error}"))
     })?;
-    Ok(NormalizedExternalContent {
-        kind: ContentKind::RisuMemoryPreset,
-        name,
-        description: "Risu Hypa memory summarization template".to_owned(),
-        documents: vec![NormalizedDocumentEntry {
-            id: "prompt".to_owned(),
-            path: "prompt/risu-memory-prompt.json".to_owned(),
-            kind: "prompt",
-            required_capabilities: vec!["prompt_presets"],
-            depends_on: Vec::new(),
-            document: NormalizedDocument::PromptPreset(preset),
-        }],
-        assets: Vec::new(),
-        package_capabilities: vec!["prompt_presets"],
-        dynamic_content: ImportDynamicContentReview::default(),
-        warnings: vec![ImportWarning {
-            code: "risu_memory_task_binding_required".to_owned(),
-            message: "The summarization prompt is imported safely; Risu scheduling/model fields need a configured LorePia memory task before activation."
-                .to_owned(),
-        }],
-        unsupported_optional_fields: settings
-            .keys()
-            .filter(|key| key.as_str() != "summarizationPrompt")
-            .take(128)
-            .cloned()
-            .collect(),
-    })
+    Ok(preset)
 }
 
-fn prompt_blocks(
-    value: Option<&Value>,
-    prefix: &str,
-    provenance: &Provenance,
-) -> CoreResult<(Vec<PromptBlock>, Vec<CacheBoundary>, usize)> {
-    let items = value
-        .and_then(Value::as_array)
-        .ok_or_else(|| unsupported("Risu preset promptTemplate must be an array"))?;
-    let mut blocks: Vec<PromptBlock> = Vec::new();
-    let mut boundaries = Vec::new();
-    let mut skipped = 0_usize;
-    for (index, item) in items.iter().enumerate() {
-        let Some(object) = item.as_object() else {
-            skipped += 1;
-            continue;
-        };
-        let kind = object
-            .get("type")
-            .and_then(Value::as_str)
-            .unwrap_or("plain");
-        if kind == "cache" {
-            if let Some(previous) = blocks.last() {
-                boundaries.push(CacheBoundary {
-                    id: CacheBoundaryId::from(format!("risu-cache-{prefix}-{index}")),
-                    after_block_id: previous.id.clone(),
-                    role_filter: CacheRoleFilter::All,
-                    ttl: lorepia_domain::CacheTtl::ProviderDefault,
-                    mode: CacheMode::Explicit,
-                });
-            } else {
-                skipped += 1;
-            }
-            continue;
-        }
-        if let Some(block) = prompt_block(object, index, prefix, provenance)? {
-            blocks.push(block);
-        } else {
-            skipped += 1;
-        }
+fn unsupported_memory_settings(settings: &serde_json::Map<String, Value>) -> Vec<String> {
+    settings
+        .keys()
+        .filter(|key| {
+            matches!(
+                key.as_str(),
+                "reSummarizationPrompt" | "processRegexScript" | "doNotSummarizeUserMessage"
+            ) && settings.get(*key).is_some_and(setting_is_enabled)
+        })
+        .take(128)
+        .cloned()
+        .collect()
+}
+
+fn risu_memory_summary_template(source: &str) -> CoreResult<SafeTemplate> {
+    if source.chars().count() > MAX_TEMPLATE_CHARS {
+        return Err(unsupported(
+            "Risu memory summarization prompt exceeds the safe template limit",
+        ));
     }
-    Ok((blocks, boundaries, skipped))
-}
-
-fn prompt_block(
-    object: &serde_json::Map<String, Value>,
-    index: usize,
-    prefix: &str,
-    provenance: &Provenance,
-) -> CoreResult<Option<PromptBlock>> {
-    let kind = object
-        .get("type")
-        .and_then(Value::as_str)
-        .unwrap_or("plain");
-    let name = bounded_name(
-        object
-            .get("name")
-            .and_then(Value::as_str)
-            .unwrap_or_default(),
-        &format!("Risu prompt item {}", index + 1),
-    );
-    let text = object
-        .get("text")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    let role = role_hint(object.get("role").and_then(Value::as_str));
-    let id = format!("risu-block-{prefix}-{index}");
-    let block = match kind {
-        "persona" => dynamic_prompt_block(
-            id,
-            name,
-            PromptBlockKind::UserPersona,
-            BlockSource::UserPersona,
-            RoleHint::User,
-            PlacementZone::CharacterContext,
-            None,
-            provenance,
-        ),
-        "description" => dynamic_prompt_block(
-            id,
-            name,
-            PromptBlockKind::CharacterDescription,
-            BlockSource::CharacterField {
-                field: lorepia_domain::CharacterField::Description,
+    let occurrences = source.matches("{{slot}}").count();
+    if occurrences != 1 {
+        return Err(unsupported(
+            "Risu memory summarization prompt must contain exactly one {{slot}} marker",
+        ));
+    }
+    let (before, after) = source
+        .split_once("{{slot}}")
+        .ok_or_else(|| unsupported("Risu memory summarization slot is missing"))?;
+    Ok(SafeTemplate {
+        parts: vec![
+            TemplatePart::Text {
+                value: before.to_owned(),
             },
-            role,
-            PlacementZone::CharacterContext,
-            None,
-            provenance,
-        ),
-        "lorebook" => dynamic_prompt_block(
-            id,
-            name,
-            PromptBlockKind::WorldKnowledge,
-            BlockSource::SelectedKnowledge,
-            role,
-            PlacementZone::RetrievedContext,
-            None,
-            provenance,
-        ),
-        "memory" => dynamic_prompt_block(
-            id,
-            name,
-            PromptBlockKind::RetrievedMemory,
-            BlockSource::SelectedMemory,
-            role,
-            PlacementZone::RetrievedContext,
-            None,
-            provenance,
-        ),
-        "authornote" => dynamic_prompt_block(
-            id,
-            name,
-            PromptBlockKind::AuthorNote,
-            BlockSource::AuthorNote,
-            role,
-            PlacementZone::RecentEnhancement,
-            None,
-            provenance,
-        ),
-        "chat" | "chatML" => dynamic_prompt_block(
-            id,
-            name,
-            PromptBlockKind::HistorySlice,
-            BlockSource::History,
-            role,
-            PlacementZone::RecentHistory,
-            Some(HistorySelector::All),
-            provenance,
-        ),
-        "plain" | "postEverything" if !text.trim().is_empty() => {
-            static_prompt_block(id, name, text, role, index, provenance)?
-        }
-        _ => return Ok(None),
-    };
-    Ok(Some(block))
-}
-
-fn static_prompt_block(
-    id: String,
-    name: String,
-    text: &str,
-    role_hint: RoleHint,
-    order: usize,
-    provenance: &Provenance,
-) -> CoreResult<PromptBlock> {
-    if text.chars().count() > MAX_TEMPLATE_CHARS {
-        return Err(unsupported(format!(
-            "Risu prompt block exceeds {MAX_TEMPLATE_CHARS} characters: {name}"
-        )));
-    }
-    Ok(PromptBlock {
-        id: PromptBlockId::from(id),
-        name,
-        kind: PromptBlockKind::StaticInstruction,
-        enabled: true,
-        role_hint,
-        authority: InstructionAuthority::ImportedContent,
-        template: Some(SafeTemplate {
-            parts: vec![TemplatePart::Text {
-                value: text.to_owned(),
-            }],
-            max_output_chars: u32::try_from(text.chars().count().max(1))
-                .unwrap_or(262_144)
-                .min(262_144),
-        }),
-        condition: None,
-        source: BlockSource::Template,
-        placement_zone: PlacementZone::PresetInstruction,
-        history_selector: None,
-        token_policy: TokenPolicy {
-            priority: u16::try_from(1_000_usize.saturating_sub(order)).unwrap_or(0),
-            min_tokens: None,
-            max_tokens: None,
-            reserve_tokens: None,
-        },
-        overflow_policy: OverflowPolicy::TrimTail,
-        merge_policy: MergePolicy::SeparateMessage,
-        provenance: provenance.clone(),
+            TemplatePart::Slot {
+                name: "memory_source".to_owned(),
+            },
+            TemplatePart::Text {
+                value: after.to_owned(),
+            },
+        ],
+        max_output_chars: lorepia_domain::MAX_TEMPLATE_OUTPUT_CHARS,
     })
 }
 
-#[allow(clippy::too_many_arguments)]
-fn dynamic_prompt_block(
-    id: String,
-    name: String,
-    kind: PromptBlockKind,
-    source: BlockSource,
-    role_hint: RoleHint,
-    placement_zone: PlacementZone,
-    history_selector: Option<HistorySelector>,
-    provenance: &Provenance,
-) -> PromptBlock {
-    PromptBlock {
-        id: PromptBlockId::from(id),
-        name,
-        kind,
-        enabled: true,
-        role_hint,
-        authority: InstructionAuthority::ImportedContent,
-        template: None,
-        condition: None,
-        source,
-        placement_zone,
-        history_selector,
-        token_policy: TokenPolicy {
-            priority: 500,
-            min_tokens: None,
-            max_tokens: None,
-            reserve_tokens: None,
-        },
-        overflow_policy: OverflowPolicy::TrimHead,
-        merge_policy: MergePolicy::SeparateMessage,
-        provenance: provenance.clone(),
+fn bounded_setting_f32(settings: &serde_json::Map<String, Value>, key: &str, fallback: f32) -> f32 {
+    settings
+        .get(key)
+        .and_then(Value::as_f64)
+        .filter(|value| value.is_finite() && *value >= 0.0)
+        .and_then(|value| value.to_string().parse::<f32>().ok())
+        .filter(|value| value.is_finite())
+        .unwrap_or(fallback)
+}
+
+fn preserve_memory_hints(settings: &serde_json::Map<String, Value>, values: &mut VariableMap) {
+    for key in [
+        "summarizationModel",
+        "memoryTokensRatio",
+        "extraSummarizationRatio",
+        "maxChatsPerSummary",
+        "recentMemoryRatio",
+        "similarMemoryRatio",
+        "enableSimilarityCorrection",
+        "preserveOrphanedMemory",
+        "processRegexScript",
+        "doNotSummarizeUserMessage",
+        "useExperimentalImpl",
+        "summarizationRequestsPerMinute",
+        "summarizationMaxConcurrent",
+        "embeddingRequestsPerMinute",
+        "embeddingMaxConcurrent",
+        "alwaysToggleOn",
+        "queryChatCount",
+    ] {
+        if let Some(value) = settings.get(key).and_then(import_hint_value) {
+            insert_import_hint(
+                values,
+                &format!("lorepia_risu_memory_{}", camel_to_snake(key)),
+                value,
+            );
+        }
     }
 }
 
-fn append_latest_user_block(blocks: &mut Vec<PromptBlock>, prefix: &str, provenance: &Provenance) {
-    blocks.push(PromptBlock {
-        id: PromptBlockId::from(format!("risu-latest-user-{prefix}")),
-        name: "Latest user message".to_owned(),
-        kind: PromptBlockKind::LatestUserTurn,
-        enabled: true,
-        role_hint: RoleHint::User,
-        authority: InstructionAuthority::ImportedContent,
-        template: None,
-        condition: None,
-        source: BlockSource::LatestUser,
-        placement_zone: PlacementZone::LatestUser,
-        history_selector: None,
-        token_policy: TokenPolicy {
-            priority: u16::MAX,
-            min_tokens: None,
-            max_tokens: None,
-            reserve_tokens: None,
-        },
-        overflow_policy: OverflowPolicy::Reject,
-        merge_policy: MergePolicy::SeparateMessage,
-        provenance: provenance.clone(),
-    });
+fn camel_to_snake(value: &str) -> String {
+    let mut output = String::with_capacity(value.len());
+    for character in value.chars() {
+        if character.is_ascii_uppercase() {
+            output.push('_');
+            output.push(character.to_ascii_lowercase());
+        } else {
+            output.push(character);
+        }
+    }
+    output
 }
 
-fn role_hint(value: Option<&str>) -> RoleHint {
+fn setting_is_enabled(value: &Value) -> bool {
     match value {
-        Some("system") => RoleHint::System,
-        Some("user") => RoleHint::User,
-        Some("bot" | "assistant") => RoleHint::Assistant,
-        _ => RoleHint::ProviderDefault,
+        Value::Bool(value) => *value,
+        Value::String(value) => !value.trim().is_empty(),
+        Value::Number(value) => value.as_f64().is_some_and(|value| value != 0.0),
+        Value::Array(value) => !value.is_empty(),
+        Value::Object(value) => !value.is_empty(),
+        Value::Null => false,
     }
 }
 
@@ -873,3 +858,7 @@ pub(super) fn looks_like_memory_preset(value: &Value) -> bool {
 fn unsupported(message: impl Into<String>) -> CoreError {
     CoreError::new(CoreErrorCode::UnsupportedContent, message, false)
 }
+
+#[cfg(test)]
+#[path = "convert_tests.rs"]
+mod tests;

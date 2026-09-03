@@ -663,6 +663,12 @@ fn validate_content_module_package_binding(
         (!module.interaction_rule_set_ids.is_empty())
             .then_some(ContentCapability::DeclarativeInteractions),
     );
+    required.extend(
+        module
+            .portable_runtime
+            .is_some()
+            .then_some(ContentCapability::PortableRuntime),
+    );
     for asset_id in &module.asset_ids {
         let asset = assets_by_id.get(asset_id).ok_or_else(|| {
             CoreError::invalid(format!(

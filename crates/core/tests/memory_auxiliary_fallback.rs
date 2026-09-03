@@ -494,6 +494,7 @@ fn bind_memory_policy(
             summary_schema: SummarySchemaId::from(format!(
                 "synthetic-memory-{suffix}-summary-schema"
             )),
+            summary_template: None,
             provenance: provenance(&format!("synthetic-memory-{suffix}-profile")),
         },
         None,

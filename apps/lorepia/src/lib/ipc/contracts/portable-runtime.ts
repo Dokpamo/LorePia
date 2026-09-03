@@ -2,6 +2,7 @@ export type {
     CharacterDisplayTransformDto,
     CharacterRenderAssetDto,
     CharacterRenderProfileDto,
+    CharacterRenderProfileScopeInput,
     CharacterRuntimeKnowledgeDto,
     CharacterRuntimeScriptDto,
     PortableRuntimeCapabilityDto,

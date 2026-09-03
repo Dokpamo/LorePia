@@ -15,6 +15,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+mod capabilities;
+
+use capabilities::{capability_rank, supported_capabilities};
+
 pub const LOREPIA_PACKAGE_FORMAT: &str = "lorepia_content_package";
 pub const LOREPIA_PACKAGE_FORMAT_VERSION: u32 = 1;
 pub const MAX_PACKAGE_COMPONENTS: usize = 4_096;
@@ -113,17 +117,7 @@ pub struct PackageValidationPolicy {
 impl Default for PackageValidationPolicy {
     fn default() -> Self {
         Self {
-            supported_capabilities: vec![
-                ContentCapability::PromptFragments,
-                ContentCapability::Knowledge,
-                ContentCapability::Variables,
-                ContentCapability::Transforms,
-                ContentCapability::DeclarativeInteractions,
-                ContentCapability::ImageAssets,
-                ContentCapability::AudioAssets,
-                ContentCapability::VideoAssets,
-                ContentCapability::AttachmentAssets,
-            ],
+            supported_capabilities: supported_capabilities(),
             redistributable_licenses: vec![
                 "Apache-2.0".to_owned(),
                 "BSD-2-Clause".to_owned(),
@@ -1198,21 +1192,6 @@ fn warning(issues: &mut Vec<PackageValidationIssue>, code: &str, target: &str, m
         target: target.to_owned(),
         message: message.to_owned(),
     });
-}
-
-fn capability_rank(capability: ContentCapability) -> u8 {
-    match capability {
-        ContentCapability::PromptFragments => 0,
-        ContentCapability::Knowledge => 1,
-        ContentCapability::Variables => 2,
-        ContentCapability::Transforms => 3,
-        ContentCapability::DeclarativeInteractions => 4,
-        ContentCapability::ImageAssets => 5,
-        ContentCapability::AudioAssets => 6,
-        ContentCapability::VideoAssets => 7,
-        ContentCapability::AttachmentAssets => 8,
-        ContentCapability::HighRiskAssets => 9,
-    }
 }
 
 #[derive(Serialize)]

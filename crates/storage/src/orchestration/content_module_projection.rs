@@ -432,7 +432,8 @@ fn write_content_module_capabilities(
     for capability in &module.required_capabilities {
         let approval_required = matches!(
             capability,
-            lorepia_domain::ContentCapability::HighRiskAssets
+            lorepia_domain::ContentCapability::PortableRuntime
+                | lorepia_domain::ContentCapability::HighRiskAssets
         );
         transaction
             .execute(
@@ -449,7 +450,7 @@ fn write_content_module_capabilities(
                     },
                     !approval_required,
                     if approval_required {
-                        "high-risk assets require explicit local approval"
+                        "executable or high-risk content requires explicit local approval"
                     } else {
                         "supported by the declarative module runtime"
                     },

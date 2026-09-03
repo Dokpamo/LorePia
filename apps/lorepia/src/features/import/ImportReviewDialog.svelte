@@ -8,14 +8,15 @@
         type PortableRegexReviewResult,
     } from '../chat/portable-regex';
     import { t, tr } from '../../lib/i18n';
-    import type { ImportInspectionDto } from '../../lib/ipc/contracts';
+    import type { ImportCommitResultDto, ImportInspectionDto } from '../../lib/ipc/contracts';
 
     interface Props {
         state: LorepiaAppState;
         controller: LorepiaAppController;
+        onCommitted?: (result: ImportCommitResultDto) => void;
     }
 
-    let { state: appState, controller }: Props = $props();
+    let { state: appState, controller, onCommitted }: Props = $props();
     let dialog: HTMLDialogElement;
     let regexReviewPhase = $state<'idle' | 'checking' | 'ready'>('idle');
     let regexReviewResults = $state<PortableRegexReviewResult[]>([]);
@@ -94,6 +95,11 @@
 
     function isRisuContent(kind: ImportInspectionDto['kind']): boolean {
         return kind.startsWith('risu_');
+    }
+
+    async function commitAndContinue(): Promise<void> {
+        const result = await controller.commitImport();
+        if (result !== null) onCommitted?.(result);
     }
 
     function descriptionPreview(value: string): string {
@@ -188,6 +194,7 @@
                         <h3 id="risu-import-title">{$tr('import.risu.title')}</h3>
                         <p>{$tr('import.risu.destination')}</p>
                         <p>{$tr('import.risu.safety')}</p>
+                        <p>{$tr('import.risu.update')}</p>
                     </section>
                 {/if}
 
@@ -299,7 +306,7 @@
                     class="primary"
                     type="button"
                     disabled={!inspection.allowed || regexReviewPhase === 'checking'}
-                    onclick={() => void controller.commitImport()}
+                    onclick={() => void commitAndContinue()}
                 >
                     {#if isRisuContent(inspection.kind)}
                         {$tr('import.commit.content')}

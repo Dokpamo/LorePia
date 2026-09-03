@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { tr } from '../../../lib/i18n';
     import type {
         ApprovableContentPackageCapabilityDto,
         ContentPackageCapabilityDto,
@@ -24,7 +25,22 @@
     function packageCapabilityNeedsApproval(
         capability: ContentPackageCapabilityDto,
     ): capability is ApprovableContentPackageCapabilityDto {
-        return capability === 'transforms' || capability === 'declarative_interactions';
+        return (
+            capability === 'transforms' ||
+            capability === 'declarative_interactions' ||
+            capability === 'portable_runtime'
+        );
+    }
+
+    function packageCapabilityLabel(capability: ContentPackageCapabilityDto): string {
+        if (capability === 'transforms') return $tr('orchestration.package.capability.transforms');
+        if (capability === 'declarative_interactions') {
+            return $tr('orchestration.package.capability.interactions');
+        }
+        if (capability === 'portable_runtime') {
+            return $tr('orchestration.package.capability.portable_runtime');
+        }
+        return capability;
     }
 </script>
 
@@ -337,7 +353,11 @@
                                 onchange={() =>
                                     contentPackageController.toggleApprovedCapability(capability)}
                             />
-                            <span>{capability} 기능 승인</span>
+                            <span>
+                                {$tr('orchestration.package.capability.approve', {
+                                    capability: packageCapabilityLabel(capability),
+                                })}
+                            </span>
                         </label>
                     {/each}
                 </fieldset>

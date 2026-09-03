@@ -24,11 +24,12 @@ use crate::runtime_contract::RuntimeGenerationRequest;
 use crate::{
     channels::forward_chat_stream,
     contract::{
-        BranchMessagesRequest, CharacterConversationsRequest, CharacterRequest, ChatStreamRequest,
-        CredentialStatusDto, CredentialStatusRequest, CredentialTarget, DiscardImportRequest,
-        GenerationPresetsRequest, GenerationRequest, ImportTicketDto, InspectionRequest,
-        MemorySupervisorStatusDto, ModelRoutesRequest, NativeCaptureStatusDto,
-        PreviewProviderRequest, ProviderOverviewDto, SubscribeGenerationRequest, TicketRequest,
+        BranchMessagesRequest, CharacterConversationsRequest, CharacterRenderProfileRequest,
+        CharacterRequest, ChatStreamRequest, CredentialStatusDto, CredentialStatusRequest,
+        CredentialTarget, DiscardImportRequest, GenerationPresetsRequest, GenerationRequest,
+        ImportTicketDto, InspectionRequest, MemorySupervisorStatusDto, ModelRoutesRequest,
+        NativeCaptureStatusDto, PreviewProviderRequest, ProviderOverviewDto,
+        SubscribeGenerationRequest, TicketRequest,
     },
     error::{CommandError, CommandResult},
     state::AppState,
@@ -108,12 +109,9 @@ pub fn get_character_greeting_catalog(
 #[tauri::command]
 pub fn get_character_render_profile(
     state: State<'_, AppState>,
-    request: CharacterRequest,
+    request: CharacterRenderProfileRequest,
 ) -> CommandResult<lorepia_shell_api::CharacterRenderProfileDto> {
-    state
-        .shell()?
-        .get_character_render_profile(&request.character_id)
-        .map_err(Into::into)
+    crate::character_commands::get_character_render_profile(&state.shell()?, request)
 }
 
 #[tauri::command]
@@ -610,9 +608,8 @@ enum StatusOnlyConnectionAccess {
     Unreadable,
 }
 
-/// Resolves non-secret status authority. `InvalidInput` alone cannot call a
-/// slot missing: the durable unresolved list distinguishes pending installs
-/// from fresh or removed connections before native state is observed.
+/// Resolves status authority. Invalid input alone cannot mean a missing slot;
+/// the durable unresolved list separates pending installs from new or removed connections.
 fn status_only_connection_access(
     shell: &lorepia_shell_api::ShellApi,
     connection_id: &str,

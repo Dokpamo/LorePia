@@ -65,16 +65,21 @@ export type PortableRuntimeWorkerOperation =
     | { type: 'edit-input'; text: string; context: PortableRuntimeWorkerContext }
     | {
           type: 'invoke';
-          name: 'onStart' | 'onOutput' | 'onButtonClick';
+          name: 'onStart' | 'onInput' | 'onOutput';
           values: unknown[];
           context: PortableRuntimeWorkerContext;
       }
+    | { type: 'invoke-action'; action: string; context: PortableRuntimeWorkerContext }
     | { type: 'refresh-display'; context: PortableRuntimeWorkerContext };
 
 export type PortableRuntimeWorkerResult =
     | { type: 'initialized' }
     | { type: 'edited-input'; text: string }
-    | { type: 'invoked'; value: PortableRuntimeWorkerValue }
+    | {
+          type: 'invoked';
+          value: PortableRuntimeWorkerValue;
+          submittedUserText: string | null;
+      }
     | { type: 'display'; entries: [string, string][] };
 
 export interface PortableRuntimeWorkerSnapshot {
@@ -242,9 +247,14 @@ function isPortableRuntimeWorkerOperation(value: unknown): value is PortableRunt
     }
     if (value.type === 'invoke') {
         return (
-            ['onStart', 'onOutput', 'onButtonClick'].includes(String(value.name)) &&
+            ['onStart', 'onInput', 'onOutput'].includes(String(value.name)) &&
             Array.isArray(value.values) &&
             isPortableRuntimeWorkerContext(value.context)
+        );
+    }
+    if (value.type === 'invoke-action') {
+        return (
+            isPortableRuntimeAction(value.action) && isPortableRuntimeWorkerContext(value.context)
         );
     }
     return value.type === 'refresh-display' && isPortableRuntimeWorkerContext(value.context);
@@ -279,7 +289,14 @@ function isPortableRuntimeWorkerResult(value: unknown): value is PortableRuntime
     if (!isRecord(value)) return false;
     if (value.type === 'initialized') return true;
     if (value.type === 'edited-input') return typeof value.text === 'string';
-    if (value.type === 'invoked') return isPortableRuntimeWorkerValue(value.value);
+    if (value.type === 'invoked') {
+        return (
+            isPortableRuntimeWorkerValue(value.value) &&
+            (value.submittedUserText === null ||
+                (typeof value.submittedUserText === 'string' &&
+                    value.submittedUserText.length <= 16_384))
+        );
+    }
     return (
         value.type === 'display' &&
         Array.isArray(value.entries) &&
@@ -291,6 +308,10 @@ function isPortableRuntimeWorkerResult(value: unknown): value is PortableRuntime
                 typeof entry[1] === 'string',
         )
     );
+}
+
+function isPortableRuntimeAction(value: unknown): value is string {
+    return typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,511}$/.test(value);
 }
 
 function isPortableRuntimeWorkerSnapshot(value: unknown): value is PortableRuntimeWorkerSnapshot {

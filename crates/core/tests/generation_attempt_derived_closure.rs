@@ -1,9 +1,11 @@
 //! End-to-end invariants for generation-attempt-owned derived interactions.
 
+mod support;
+
 use std::{
     io::{Read, Write},
     net::{TcpListener, TcpStream},
-    path::{Path, PathBuf},
+    path::Path,
     sync::mpsc,
     thread,
     time::{Duration, Instant},
@@ -54,6 +56,8 @@ use rusqlite::{Connection, params};
 use serde_json::json;
 use tempfile::{NamedTempFile, TempDir, tempdir};
 
+use support::active_database_path;
+
 const CONNECTION_ID: &str = "synthetic-derived-closure-connection";
 const KNOWLEDGE_TEXT: &str = "SYNTHETIC_DERIVED_KNOWLEDGE_7C31";
 const SEALED_USER: &str = "SYNTHETIC_SEALED_USER_4D20";
@@ -77,32 +81,6 @@ const SEALED_CONVERSATION_SUMMARY: &str = "SYNTHETIC_SEALED_CONVERSATION_SUMMARY
 const DRIFTED_CONVERSATION_SUMMARY: &str = "SYNTHETIC_DRIFTED_CONVERSATION_SUMMARY_7F24";
 const NO_MODULE_GATE_BINDING_ID: &str = "synthetic.no-module-review.gate.binding";
 const NO_MODULE_GATE_PROPOSAL_ID: &str = "synthetic-no-module-review-gate";
-
-fn active_database_path(root: &Path) -> PathBuf {
-    let cutover = root.join("db/schema-cutover");
-    let (_, relative) = std::fs::read_dir(cutover)
-        .expect("read committed database generations")
-        .filter_map(Result::ok)
-        .filter(|entry| entry.path().join("generation-committed.json").is_file())
-        .map(|entry| {
-            let manifest = serde_json::from_slice::<serde_json::Value>(
-                &std::fs::read(entry.path().join("generation-manifest.json"))
-                    .expect("read generation manifest"),
-            )
-            .expect("parse generation manifest");
-            let sequence = manifest["activation_sequence"]
-                .as_u64()
-                .expect("generation activation sequence");
-            let relative = manifest["active_database_relative_path"]
-                .as_str()
-                .expect("active database relative path")
-                .to_owned();
-            (sequence, relative)
-        })
-        .max_by_key(|(sequence, _)| *sequence)
-        .expect("at least one committed database generation");
-    root.join(relative)
-}
 
 fn open_core_after_drop(data_root: &std::path::Path) -> Core {
     let deadline = Instant::now() + Duration::from_secs(2);
@@ -578,6 +556,7 @@ fn closure_module(
         transform_set_ids: Vec::new(),
         interaction_rule_set_ids: vec![rule_set_id],
         asset_ids: Vec::new(),
+        portable_runtime: None,
         imported_components_enabled: true,
         required_capabilities: vec![
             ContentCapability::PromptFragments,
@@ -755,6 +734,7 @@ fn no_module_review_gate_module(rule_set_id: &InteractionRuleSetId) -> ContentMo
         transform_set_ids: Vec::new(),
         interaction_rule_set_ids: vec![rule_set_id.clone()],
         asset_ids: Vec::new(),
+        portable_runtime: None,
         imported_components_enabled: true,
         required_capabilities: vec![ContentCapability::DeclarativeInteractions],
         metadata: PackageMetadata {
@@ -1755,6 +1735,7 @@ fn install_authority_memory_profile(core: &Core, target: &GenerationTarget) -> M
             summary_schema: SummarySchemaId::from(
                 "synthetic.derived-closure.authority-summary-schema",
             ),
+            summary_template: None,
             provenance: provenance("synthetic.derived-closure.authority-memory-profile"),
         },
         None,

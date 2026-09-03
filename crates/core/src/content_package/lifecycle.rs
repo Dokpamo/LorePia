@@ -277,6 +277,7 @@ pub(super) fn required_capability_approvals(plan: &SelectiveImportPlan) -> Vec<P
             ContentCapability::DeclarativeInteractions => {
                 Some(PackageCapability::DeclarativeInteractions)
             }
+            ContentCapability::PortableRuntime => Some(PackageCapability::PortableRuntime),
             _ => None,
         })
         .collect::<Vec<_>>();

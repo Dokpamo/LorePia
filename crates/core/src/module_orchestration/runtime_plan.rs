@@ -13,10 +13,9 @@ use lorepia_storage::{
 };
 
 use super::{
-    ApprovedContentModuleComponent, ContentModuleRuntimeBindingDisposition,
-    ContentModuleRuntimeBindingSummary, SUPPORTED_CONTENT_CAPABILITIES, insert_revision_snapshot,
-    module_import_approval_evidence, module_merge_error, module_snapshot,
-    validate_module_binding_variables,
+    ApprovedContentModuleComponent, CAPABILITIES, ContentModuleRuntimeBindingDisposition,
+    ContentModuleRuntimeBindingSummary, insert_revision_snapshot, module_import_approval_evidence,
+    module_merge_error, module_snapshot, validate_module_binding_variables,
 };
 use crate::Core;
 
@@ -61,7 +60,7 @@ impl Core {
             character_id: Some(conversation.character_id),
             conversation_id: Some(conversation_id.0.clone()),
             branch_id: Some(branch_id.0.clone()),
-            supported_capabilities: SUPPORTED_CONTENT_CAPABILITIES.to_vec(),
+            supported_capabilities: CAPABILITIES.to_vec(),
         })
     }
 

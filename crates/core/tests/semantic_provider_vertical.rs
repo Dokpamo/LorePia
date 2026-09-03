@@ -483,6 +483,7 @@ fn create_tasks_and_memory_profile(
                 importance_weight: 1.0,
                 preserve_invalidated_records: true,
                 summary_schema: SummarySchemaId::from(format!("semantic.{suffix}.summary-schema")),
+                summary_template: None,
                 provenance: provenance(&format!("semantic.{suffix}.memory-profile")),
             },
             None,

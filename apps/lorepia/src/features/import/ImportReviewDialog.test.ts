@@ -129,11 +129,67 @@ describe('ImportReviewDialog dynamic content review', () => {
         expect(screen.getByText(t('import.kind.risu_module'))).toBeInTheDocument();
         expect(screen.getByText(t('import.risu.title'))).toBeInTheDocument();
         expect(screen.getByText(t('import.risu.safety'))).toBeInTheDocument();
+        expect(screen.getByText(t('import.risu.update'))).toBeInTheDocument();
         expect(screen.getByRole('button', { name: t('import.commit.content') })).toBeEnabled();
         const description = container.querySelector('.review-description');
         expect(description?.textContent.endsWith('…')).toBe(true);
         expect(description?.textContent.length).toBeLessThan(longDescription.length);
         expect(container.querySelector('.modal-body')).toBeInTheDocument();
         expect(container.querySelector('.modal-card > .modal-actions')).toBeInTheDocument();
+    });
+
+    it('reports the committed content so the shell can open its activation destination', async () => {
+        const state = {
+            import_flow: {
+                phase: 'ready',
+                error: null,
+                inspection: {
+                    inspection_id: 'inspection-module',
+                    kind: 'risu_module',
+                    display_name: 'Lifecycle module',
+                    description: 'Navigation fixture',
+                    source_sha256: 'ef'.repeat(32),
+                    source_size: 4_096,
+                    estimated_stored_size: 8_192,
+                    asset_count: 1,
+                    dynamic_content: {
+                        runtime_script_count: 0,
+                        elevated_runtime_script_count: 0,
+                        required_runtime_capabilities: [],
+                        runtime_capabilities_declared: false,
+                        regex_rule_count: 0,
+                        enabled_regex_rule_count: 0,
+                        model_calls_possible: false,
+                        custom_markup_present: false,
+                        regex_rules: [],
+                    },
+                    representative_image: null,
+                    warnings: [],
+                    blocked_reasons: [],
+                    unsupported_optional_fields: [],
+                    allowed: true,
+                },
+            },
+        } as unknown as LorepiaAppState;
+        const result = {
+            kind: 'content' as const,
+            content: {
+                kind: 'risu_module' as const,
+                import_id: 'module-import',
+                display_name: 'Lifecycle module',
+                document_count: 2,
+                asset_count: 1,
+            },
+        };
+        const controller = {
+            commitImport: vi.fn().mockResolvedValue(result),
+            discardImport: vi.fn(),
+        } as unknown as LorepiaAppController;
+        const onCommitted = vi.fn();
+
+        render(ImportReviewDialog, { state, controller, onCommitted });
+        screen.getByRole('button', { name: t('import.commit.content') }).click();
+
+        await waitFor(() => expect(onCommitted).toHaveBeenCalledWith(result));
     });
 });

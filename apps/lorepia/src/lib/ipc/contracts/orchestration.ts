@@ -263,6 +263,7 @@ export interface CreatorControlDto {
     kind: 'toggle' | 'select' | 'multi_select' | 'text' | 'number' | 'slider';
     value: CreatorControlValue;
     choices: string[];
+    choice_labels?: string[];
     minimum: number | null;
     maximum: number | null;
     step: number | null;
@@ -387,6 +388,7 @@ export type CreatorContentModuleCapabilityDto =
     | 'variables'
     | 'transforms'
     | 'declarative_interactions'
+    | 'portable_runtime'
     | 'image_assets'
     | 'audio_assets'
     | 'video_assets'

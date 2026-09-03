@@ -13,7 +13,10 @@ use lorepia_domain::{
     Character, CharacterContentV1, ContentCapability, ContentKind, CoreError, CoreErrorCode,
     CoreResult, ImportInspection, ImportLimits, InspectionId,
 };
-use lorepia_storage::{PackageCapability, PackageDocumentTargetDisposition, StagedAssetImport};
+use lorepia_storage::{
+    PackageCapability, PackageDocumentTargetDisposition, PackageUpdateTargetConfirmation,
+    StagedAssetImport,
+};
 
 use super::staging::{remove_snapshot, snapshot_import_source};
 use crate::{
@@ -352,19 +355,13 @@ impl Core {
                 return Err(error);
             }
         };
-        if selection
-            .target_review
-            .documents
-            .iter()
-            .any(|document| document.disposition == PackageDocumentTargetDisposition::Update)
-        {
-            self.discard_normalized_package_best_effort(&import_id);
-            return Err(CoreError::new(
-                CoreErrorCode::InvalidInput,
-                "this Risu content is already present; automatic import will not overwrite an existing revision",
-                false,
-            ));
-        }
+        let confirmed_update_targets = match compatible_import_update_confirmations(&selection) {
+            Ok(confirmations) => confirmations,
+            Err(error) => {
+                self.discard_normalized_package_best_effort(&import_id);
+                return Err(error);
+            }
+        };
         let approved_capabilities =
             required_package_capability_approvals(&selection.import_plan.required_capabilities);
         let approval = match self.approve_content_package_import(
@@ -383,7 +380,7 @@ impl Core {
                     .normalization_evidence_sha256
                     .clone(),
                 expected_target_review_sha256: selection.target_review.target_review_sha256.clone(),
-                confirmed_update_targets: Vec::new(),
+                confirmed_update_targets,
                 approval_id: format!("compatible-import-{}", inspection_id.0),
                 enable_component_ids: selected_component_ids,
                 approved_capabilities,
@@ -462,6 +459,43 @@ impl Core {
     }
 }
 
+fn compatible_import_update_confirmations(
+    selection: &crate::ContentPackageSelectionReceipt,
+) -> CoreResult<Vec<PackageUpdateTargetConfirmation>> {
+    selection
+        .target_review
+        .documents
+        .iter()
+        .filter(|document| document.disposition == PackageDocumentTargetDisposition::Update)
+        .map(|document| {
+            Ok(PackageUpdateTargetConfirmation {
+                source_component_id: document.source_component_id.clone(),
+                component_document_ordinal: document.component_document_ordinal,
+                target_object_id: document.target_object_id.clone(),
+                expected_target_revision_id: document
+                    .expected_target_revision_id
+                    .clone()
+                    .ok_or_else(|| {
+                        CoreError::new(
+                            CoreErrorCode::StorageCorrupted,
+                            "reviewed compatible-import update has no immutable revision",
+                            false,
+                        )
+                    })?,
+                expected_target_state_revision: document
+                    .expected_target_state_revision
+                    .ok_or_else(|| {
+                        CoreError::new(
+                            CoreErrorCode::StorageCorrupted,
+                            "reviewed compatible-import update has no state revision",
+                            false,
+                        )
+                    })?,
+            })
+        })
+        .collect()
+}
+
 fn required_package_capability_approvals(
     capabilities: &[ContentCapability],
 ) -> Vec<PackageCapability> {
@@ -472,6 +506,7 @@ fn required_package_capability_approvals(
             ContentCapability::DeclarativeInteractions => {
                 Some(PackageCapability::DeclarativeInteractions)
             }
+            ContentCapability::PortableRuntime => Some(PackageCapability::PortableRuntime),
             _ => None,
         })
         .collect::<Vec<_>>();

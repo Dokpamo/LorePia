@@ -219,7 +219,7 @@ mod tests {
             .expect("memory preset source");
         source
             .write_all(
-                br#"{"type":"risu","ver":1,"data":{"name":"Hypa fixture","settings":{"summarizationPrompt":"Summarize the important durable facts.","chunkSize":1200}}}"#,
+                br#"{"type":"risu","ver":1,"data":{"name":"Hypa fixture","settings":{"summarizationPrompt":"Summarize the important durable facts.\n{{slot}}","maxChatsPerSummary":8}}}"#,
             )
             .expect("write memory preset");
         source.flush().expect("flush memory preset");

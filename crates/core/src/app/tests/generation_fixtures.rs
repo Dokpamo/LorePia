@@ -944,6 +944,7 @@ fn install_prompt_attempt_parity_module(
         transform_set_ids: Vec::new(),
         interaction_rule_set_ids: vec![rule_set.id],
         asset_ids: Vec::new(),
+        portable_runtime: None,
         imported_components_enabled: true,
         required_capabilities: vec![
             ContentCapability::PromptFragments,
