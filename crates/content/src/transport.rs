@@ -171,7 +171,7 @@ mod tests {
     use crate::inspect_file;
 
     #[test]
-    fn extracts_and_validates_a_single_character_download_wrapper() {
+    fn extracts_single_character_wrapper_above_the_regular_entry_limit() {
         let root = tempdir().expect("root");
         let source_path = root.path().join("download.zip");
         let output = File::create(&source_path).expect("wrapper");
@@ -179,23 +179,50 @@ mod tests {
         let options = SimpleFileOptions::default()
             .compression_method(CompressionMethod::Deflated)
             .unix_permissions(0o644);
+        let card = br#"{"spec":"chara_card_v3","data":{"name":"Wrapped","description":"Safe"}}"#;
         archive
             .start_file("character.json", options)
             .expect("card entry");
-        archive
-            .write_all(
-                br#"{"spec":"chara_card_v3","data":{"name":"Wrapped","description":"Safe"}}"#,
-            )
-            .expect("card bytes");
+        archive.write_all(card).expect("card bytes");
         archive.finish().expect("finish wrapper");
 
-        let extracted =
-            extract_single_character_transport(&source_path, ImportLimits::default(), root.path())
-                .expect("extract wrapper")
-                .expect("recognized wrapper");
+        let limits = ImportLimits {
+            max_entry_bytes: 16,
+            ..ImportLimits::default()
+        };
+        assert!(card.len() as u64 > limits.max_entry_bytes);
+        let extracted = extract_single_character_transport(&source_path, limits, root.path())
+            .expect("extract wrapper")
+            .expect("recognized wrapper");
         let inspection =
             inspect_file(&extracted, ImportLimits::default()).expect("inspect extracted card");
         assert_eq!(inspection.display_name, "Wrapped");
         assert!(inspection.is_allowed());
+    }
+
+    #[test]
+    fn rejects_single_character_wrapper_above_the_global_source_limit() {
+        let root = tempdir().expect("root");
+        let source_path = root.path().join("download.zip");
+        let output = File::create(&source_path).expect("wrapper");
+        let mut archive = ZipWriter::new(output);
+        let options = SimpleFileOptions::default()
+            .compression_method(CompressionMethod::Stored)
+            .unix_permissions(0o644);
+        let card = br#"{"spec":"chara_card_v3","data":{"name":"Too large"}}"#;
+        archive
+            .start_file("character.json", options)
+            .expect("card entry");
+        archive.write_all(card).expect("card bytes");
+        archive.finish().expect("finish wrapper");
+
+        let limits = ImportLimits {
+            max_entry_bytes: 1,
+            max_source_bytes: card.len() as u64 - 1,
+            ..ImportLimits::default()
+        };
+        let error = extract_single_character_transport(&source_path, limits, root.path())
+            .expect_err("global source limit must still apply");
+        assert_eq!(error.code, CoreErrorCode::UnsafeArchive);
     }
 }
