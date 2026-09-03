@@ -8,6 +8,7 @@
         type PortableRegexReviewResult,
     } from '../chat/portable-regex';
     import { t, tr } from '../../lib/i18n';
+    import { importedText } from '../../lib/import-display';
     import type { ImportCommitResultDto, ImportInspectionDto } from '../../lib/ipc/contracts';
 
     interface Props {
@@ -87,14 +88,14 @@
     function kindLabel(kind: ImportInspectionDto['kind']): string {
         if (kind === 'charx_package') return 'CHARX';
         if (kind === 'character_card_png') return t('import.kind.png');
-        if (kind === 'risu_module') return t('import.kind.risu_module');
-        if (kind === 'risu_preset') return t('import.kind.risu_preset');
-        if (kind === 'risu_memory_preset') return t('import.kind.risu_memory');
+        if (kind === 'imported_module') return t('import.kind.imported_module');
+        if (kind === 'imported_preset') return t('import.kind.imported_preset');
+        if (kind === 'imported_memory_preset') return t('import.kind.imported_memory');
         return 'CCv3 JSON';
     }
 
-    function isRisuContent(kind: ImportInspectionDto['kind']): boolean {
-        return kind.startsWith('risu_');
+    function isImportedContent(kind: ImportInspectionDto['kind']): boolean {
+        return kind.startsWith('imported_');
     }
 
     async function commitAndContinue(): Promise<void> {
@@ -103,7 +104,7 @@
     }
 
     function descriptionPreview(value: string): string {
-        const trimmed = value.trim();
+        const trimmed = importedText(value).trim();
         if (!trimmed) return t('import.description.empty');
         const characters = Array.from(trimmed);
         const preview = characters.slice(0, 360).join('').trimEnd();
@@ -160,7 +161,7 @@
                     >
                     <div>
                         <div class="review-title-row">
-                            <h3>{inspection.display_name}</h3>
+                            <h3>{importedText(inspection.display_name)}</h3>
                             <span class="review-kind-badge">{kindLabel(inspection.kind)}</span>
                         </div>
                         <p class="review-description">
@@ -188,12 +189,12 @@
                     </div>
                 </dl>
 
-                {#if isRisuContent(inspection.kind)}
-                    <section class="issue-box info" aria-labelledby="risu-import-title">
-                        <h3 id="risu-import-title">{$tr('import.risu.title')}</h3>
-                        <p>{$tr('import.risu.destination')}</p>
-                        <p>{$tr('import.risu.safety')}</p>
-                        <p>{$tr('import.risu.update')}</p>
+                {#if isImportedContent(inspection.kind)}
+                    <section class="issue-box info" aria-labelledby="compatibility-import-title">
+                        <h3 id="compatibility-import-title">{$tr('import.compatibility.title')}</h3>
+                        <p>{$tr('import.compatibility.destination')}</p>
+                        <p>{$tr('import.compatibility.safety')}</p>
+                        <p>{$tr('import.compatibility.update')}</p>
                     </section>
                 {/if}
 
@@ -307,7 +308,7 @@
                     disabled={!inspection.allowed || regexReviewPhase === 'checking'}
                     onclick={() => void commitAndContinue()}
                 >
-                    {#if isRisuContent(inspection.kind)}
+                    {#if isImportedContent(inspection.kind)}
                         {$tr('import.commit.content')}
                     {:else if inspection.dynamic_content.runtime_script_count > 0 || inspection.dynamic_content.regex_rule_count > 0 || inspection.dynamic_content.custom_markup_present}
                         {$tr('import.commit.safe')}

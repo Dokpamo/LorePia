@@ -12,7 +12,7 @@ import {
     profile,
 } from './tests/portable-runtime-fixtures';
 
-describe('portable runtime Risu compatibility', () => {
+describe('portable runtime external compatibility', () => {
     it('supports onInput, editRequest, dynamic card buttons, and addChat', async () => {
         const compatibilityProfile = profile();
         const baseScript = compatibilityProfile.runtime_scripts[0];

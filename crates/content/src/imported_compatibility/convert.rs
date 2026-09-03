@@ -10,7 +10,7 @@ use lorepia_domain::{
 use serde::Serialize;
 use serde_json::{Value, json};
 
-use super::container::{RisuAssetRecord, RisuModuleSource};
+use super::container::{ImportedAssetRecord, ImportedModuleSource};
 use crate::{adapters, dynamic_content_review, runtime};
 
 mod prompts;
@@ -49,7 +49,7 @@ pub(super) struct NormalizedExternalContent {
     pub(super) name: String,
     pub(super) description: String,
     pub(super) documents: Vec<NormalizedDocumentEntry>,
-    pub(super) assets: Vec<RisuAssetRecord>,
+    pub(super) assets: Vec<ImportedAssetRecord>,
     pub(super) package_capabilities: Vec<&'static str>,
     pub(super) dynamic_content: ImportDynamicContentReview,
     pub(super) warnings: Vec<ImportWarning>,
@@ -57,12 +57,12 @@ pub(super) struct NormalizedExternalContent {
 }
 
 pub(super) fn convert_module(
-    mut source: RisuModuleSource,
+    mut source: ImportedModuleSource,
     source_sha256: &str,
 ) -> CoreResult<NormalizedExternalContent> {
     let source_id = format!("risu-module:{source_sha256}");
     let provenance = imported_provenance(&source_id, source_sha256);
-    let name = bounded_name(&source.metadata.name, "Risu module");
+    let name = bounded_name(&source.metadata.name, "Imported module");
     let description = source.metadata.description.clone();
     let original_transform_count = source.metadata.profile.transforms.len();
     let original_script_count = source.metadata.profile.scripts.len();
@@ -141,7 +141,7 @@ struct ModuleDocumentsInput<'a> {
     knowledge_book: Option<KnowledgeBook>,
     transform_set: Option<TransformSet>,
     portable_runtime: Option<lorepia_domain::CharacterRuntimeProfile>,
-    assets: &'a [RisuAssetRecord],
+    assets: &'a [ImportedAssetRecord],
 }
 
 fn module_documents(input: ModuleDocumentsInput<'_>) -> CoreResult<Vec<NormalizedDocumentEntry>> {
@@ -214,17 +214,17 @@ fn module_documents(input: ModuleDocumentsInput<'_>) -> CoreResult<Vec<Normalize
         required_capabilities,
         metadata: PackageMetadata {
             author: None,
-            license: "LicenseRef-Risu-User-Content".to_owned(),
+            license: "LicenseRef-Imported-User-Content".to_owned(),
             redistribution_allowed: false,
             homepage: None,
             description: description.to_owned(),
-            tags: vec!["risu".to_owned(), "imported-module".to_owned()],
+            tags: vec!["compatibility".to_owned(), "imported-module".to_owned()],
             provenance,
         },
     };
     module
         .validate()
-        .map_err(|error| unsupported(format!("Risu module cannot be normalized: {error}")))?;
+        .map_err(|error| unsupported(format!("imported module cannot be normalized: {error}")))?;
     documents.push(NormalizedDocumentEntry {
         id: "module".to_owned(),
         path: "modules/risu-module.json".to_owned(),
@@ -237,7 +237,7 @@ fn module_documents(input: ModuleDocumentsInput<'_>) -> CoreResult<Vec<Normalize
 }
 
 fn module_asset_ids(
-    assets: &[RisuAssetRecord],
+    assets: &[ImportedAssetRecord],
     dependency_ids: &mut Vec<String>,
 ) -> Vec<lorepia_domain::AssetId> {
     let mut asset_ids = Vec::new();
@@ -292,19 +292,19 @@ fn module_warnings(
     retained_transform_count: usize,
     has_background_markup: bool,
     has_toggle_schema: bool,
-    assets: &[RisuAssetRecord],
+    assets: &[ImportedAssetRecord],
 ) -> Vec<ImportWarning> {
     if original_script_count > 0 {
         warnings.push(ImportWarning {
-            code: "risu_scripts_sandboxed".to_owned(),
+            code: "imported_scripts_sandboxed".to_owned(),
             message: format!(
-                "Preserved {original_script_count} Risu Lua trigger script(s) for isolated, permission-gated Worker execution."
+                "Preserved {original_script_count} imported Lua trigger script(s) for isolated, permission-gated Worker execution."
             ),
         });
     }
     if retained_transform_count < original_transform_count {
         warnings.push(ImportWarning {
-            code: "risu_regex_rules_quarantined".to_owned(),
+            code: "imported_regex_rules_quarantined".to_owned(),
             message: format!(
                 "Quarantined {} disabled or non-portable regex rule(s); {retained_transform_count} safe rule(s) remain available for explicit activation.",
                 original_transform_count - retained_transform_count
@@ -313,15 +313,15 @@ fn module_warnings(
     }
     if has_background_markup {
         warnings.push(ImportWarning {
-            code: "risu_markup_sandboxed".to_owned(),
-            message: "Risu background markup will render only through LorePia's sanitized opaque-origin frame."
+            code: "imported_markup_sandboxed".to_owned(),
+            message: "Imported background markup will render only through LorePia's sanitized opaque-origin frame."
                 .to_owned(),
         });
     }
     if has_toggle_schema {
         warnings.push(ImportWarning {
-            code: "risu_toggle_schema_preserved".to_owned(),
-            message: "Risu's compatible toggle controls were preserved for the bound conversation runtime."
+            code: "imported_toggle_schema_preserved".to_owned(),
+            message: "Compatible imported toggle controls were preserved for the bound conversation runtime."
                 .to_owned(),
         });
     }
@@ -331,7 +331,7 @@ fn module_warnings(
         .count();
     if corrected_asset_types > 0 {
         warnings.push(ImportWarning {
-            code: "risu_asset_media_type_corrected".to_owned(),
+            code: "imported_asset_media_type_corrected".to_owned(),
             message: format!(
                 "Corrected {corrected_asset_types} asset extension(s) from their verified media signatures."
             ),
@@ -346,20 +346,20 @@ pub(super) fn convert_preset(
 ) -> CoreResult<NormalizedExternalContent> {
     let object = value
         .as_object()
-        .ok_or_else(|| unsupported("Risu preset root must be an object"))?;
+        .ok_or_else(|| unsupported("imported preset root must be an object"))?;
     let name = bounded_name(
         object
             .get("name")
             .and_then(Value::as_str)
             .unwrap_or_default(),
-        "Risu preset",
+        "Imported preset",
     );
     let prefix = &source_sha256[..24];
     let provenance = imported_provenance(&format!("risu-preset:{source_sha256}"), source_sha256);
     let (mut blocks, cache_boundaries, skipped_prompt_items) =
         prompt_blocks(object.get("promptTemplate"), prefix, &provenance)?;
     if blocks.is_empty() {
-        return Err(unsupported("Risu preset has no portable prompt blocks"));
+        return Err(unsupported("imported preset has no portable prompt blocks"));
     }
     append_latest_user_block(&mut blocks, prefix, &provenance);
     blocks.sort_by_key(|block| block.placement_zone);
@@ -400,7 +400,7 @@ pub(super) fn convert_preset(
         .and_then(Value::as_str)
         .unwrap_or("unbound");
     let metadata_description = format!(
-        "Imported Risu prompt preset. Original API type: {api_type}; model hint: {model}. Provider parameters remain unbound until a LorePia model route is selected."
+        "Imported prompt preset. Original API type: {api_type}; model hint: {model}. Provider parameters remain unbound until a LorePia model route is selected."
     );
     let documents = preset_documents(PresetDocumentsInput {
         name: &name,
@@ -428,7 +428,7 @@ pub(super) fn convert_preset(
     Ok(NormalizedExternalContent {
         kind: ContentKind::RisuPreset,
         name,
-        description: format!("Risu prompt preset for {model}"),
+        description: format!("Imported prompt preset for {model}"),
         documents,
         assets: Vec::new(),
         package_capabilities,
@@ -447,37 +447,37 @@ fn preset_warnings(
     retained_transform_count: usize,
 ) -> Vec<ImportWarning> {
     warnings.push(ImportWarning {
-        code: "risu_provider_parameters_unbound".to_owned(),
+        code: "imported_provider_parameters_unbound".to_owned(),
         message: "Prompt blocks and portable provider hints are imported. Choose a LorePia model route in the compatibility panel to materialize supported sampling values."
             .to_owned(),
     });
     if retained_toggle_count > 0 {
         warnings.push(ImportWarning {
-            code: "risu_prompt_toggles_preserved".to_owned(),
+            code: "imported_prompt_toggles_preserved".to_owned(),
             message: format!(
-                "Preserved {retained_toggle_count} Risu prompt toggle(s) as room-scoped creator controls."
+                "Preserved {retained_toggle_count} imported prompt toggle(s) as room-scoped creator controls."
             ),
         });
     }
     if skipped_toggle_lines > 0 {
         warnings.push(ImportWarning {
-            code: "risu_prompt_toggle_lines_skipped".to_owned(),
+            code: "imported_prompt_toggle_lines_skipped".to_owned(),
             message: format!(
-                "Ignored {skipped_toggle_lines} Risu toggle layout or unsupported control line(s); interactive values remain preserved for supported controls."
+                "Ignored {skipped_toggle_lines} imported toggle layout or unsupported control line(s); interactive values remain preserved for supported controls."
             ),
         });
     }
     if skipped_prompt_items > 0 {
         warnings.push(ImportWarning {
-            code: "risu_prompt_items_quarantined".to_owned(),
+            code: "imported_prompt_items_quarantined".to_owned(),
             message: format!(
-                "Quarantined {skipped_prompt_items} empty or unsupported Risu prompt item(s)."
+                "Quarantined {skipped_prompt_items} empty or unsupported imported prompt item(s)."
             ),
         });
     }
     if retained_transform_count < original_transform_count {
         warnings.push(ImportWarning {
-            code: "risu_regex_rules_quarantined".to_owned(),
+            code: "imported_regex_rules_quarantined".to_owned(),
             message: format!(
                 "Quarantined {} disabled or non-portable regex rule(s); {retained_transform_count} safe rule(s) remain available for explicit activation.",
                 original_transform_count - retained_transform_count
@@ -541,13 +541,13 @@ fn preset_documents(input: PresetDocumentsInput<'_>) -> CoreResult<Vec<Normalize
         cache_boundaries,
         metadata: imported_preset_metadata(
             metadata_description,
-            vec!["risu".to_owned(), "imported-preset".to_owned()],
+            vec!["compatibility".to_owned(), "imported-preset".to_owned()],
             provenance,
         )?,
     };
     preset
         .validate()
-        .map_err(|error| unsupported(format!("Risu preset cannot be normalized: {error}")))?;
+        .map_err(|error| unsupported(format!("imported preset cannot be normalized: {error}")))?;
     documents.push(NormalizedDocumentEntry {
         id: "prompt".to_owned(),
         path: "prompt/risu-preset.json".to_owned(),
@@ -565,35 +565,37 @@ pub(super) fn convert_memory_preset(
 ) -> CoreResult<NormalizedExternalContent> {
     let root = value
         .as_object()
-        .ok_or_else(|| unsupported("Risu JSON root must be an object"))?;
+        .ok_or_else(|| unsupported("compatibility JSON root must be an object"))?;
     if root.get("type").and_then(Value::as_str) != Some("risu")
         || root.get("ver").and_then(Value::as_u64) != Some(1)
     {
-        return Err(unsupported("Risu JSON type or version is unsupported"));
+        return Err(unsupported(
+            "compatibility JSON type or version is unsupported",
+        ));
     }
     let data = root
         .get("data")
         .and_then(Value::as_object)
-        .ok_or_else(|| unsupported("Risu JSON has no data object"))?;
+        .ok_or_else(|| unsupported("compatibility JSON has no data object"))?;
     let settings = data
         .get("settings")
         .and_then(Value::as_object)
-        .ok_or_else(|| unsupported("Risu JSON has no settings object"))?;
+        .ok_or_else(|| unsupported("compatibility JSON has no settings object"))?;
     let summary_prompt = settings
         .get("summarizationPrompt")
         .and_then(Value::as_str)
         .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| unsupported("Risu memory preset has no summarization prompt"))?;
+        .ok_or_else(|| unsupported("imported memory preset has no summarization prompt"))?;
     let name = bounded_name(
         data.get("name").and_then(Value::as_str).unwrap_or_default(),
-        "Risu memory preset",
+        "Imported memory preset",
     );
     let prefix = &source_sha256[..24];
     let provenance = imported_provenance(
         &format!("risu-memory-preset:{source_sha256}"),
         source_sha256,
     );
-    risu_memory_summary_template(summary_prompt)?;
+    imported_memory_summary_template(summary_prompt)?;
     let preset = memory_prompt_preset(MemoryPromptPresetInput {
         name: &name,
         prefix,
@@ -604,7 +606,7 @@ pub(super) fn convert_memory_preset(
     Ok(NormalizedExternalContent {
         kind: ContentKind::RisuMemoryPreset,
         name,
-        description: "Risu Hypa memory summarization template".to_owned(),
+        description: "Imported memory summarization template".to_owned(),
         documents: vec![NormalizedDocumentEntry {
             id: "prompt".to_owned(),
             path: "prompt/risu-memory-prompt.json".to_owned(),
@@ -617,7 +619,7 @@ pub(super) fn convert_memory_preset(
         package_capabilities: vec!["prompt_presets"],
         dynamic_content: ImportDynamicContentReview::default(),
         warnings: vec![ImportWarning {
-            code: "risu_memory_task_binding_required".to_owned(),
+            code: "imported_memory_task_binding_required".to_owned(),
             message: "The summary template, schedule, retrieval weights, and preservation policy were imported as setup data. Choose a LorePia model route in the compatibility panel to create the linked task and memory profile before activation."
                 .to_owned(),
         }],
@@ -693,14 +695,16 @@ fn memory_prompt_preset(input: MemoryPromptPresetInput<'_>) -> CoreResult<Prompt
         module_ids: Vec::new(),
         cache_boundaries: Vec::new(),
         metadata: imported_preset_metadata(
-            "Imported from a Risu Hypa memory preset. Bind this summarization prompt to a configured LorePia memory task before activation."
+            "Imported memory preset. Bind this summarization prompt to a configured LorePia memory task before activation."
                 .to_owned(),
-            vec!["risu".to_owned(), "memory-template".to_owned()],
+            vec!["compatibility".to_owned(), "memory-template".to_owned()],
             provenance,
         )?,
     };
     preset.validate().map_err(|error| {
-        unsupported(format!("Risu memory preset cannot be normalized: {error}"))
+        unsupported(format!(
+            "imported memory preset cannot be normalized: {error}"
+        ))
     })?;
     Ok(preset)
 }
@@ -719,21 +723,21 @@ fn unsupported_memory_settings(settings: &serde_json::Map<String, Value>) -> Vec
         .collect()
 }
 
-fn risu_memory_summary_template(source: &str) -> CoreResult<SafeTemplate> {
+fn imported_memory_summary_template(source: &str) -> CoreResult<SafeTemplate> {
     if source.chars().count() > MAX_TEMPLATE_CHARS {
         return Err(unsupported(
-            "Risu memory summarization prompt exceeds the safe template limit",
+            "imported memory summarization prompt exceeds the safe template limit",
         ));
     }
     let occurrences = source.matches("{{slot}}").count();
     if occurrences != 1 {
         return Err(unsupported(
-            "Risu memory summarization prompt must contain exactly one {{slot}} marker",
+            "imported memory summarization prompt must contain exactly one {{slot}} marker",
         ));
     }
     let (before, after) = source
         .split_once("{{slot}}")
-        .ok_or_else(|| unsupported("Risu memory summarization slot is missing"))?;
+        .ok_or_else(|| unsupported("imported memory summarization slot is missing"))?;
     Ok(SafeTemplate {
         parts: vec![
             TemplatePart::Text {
@@ -820,7 +824,7 @@ fn imported_provenance(source_id: &str, source_sha256: &str) -> Provenance {
         source_id: Some(source_id.to_owned()),
         source_hash: Some(source_sha256.to_owned()),
         author: None,
-        license: Some("LicenseRef-Risu-User-Content".to_owned()),
+        license: Some("LicenseRef-Imported-User-Content".to_owned()),
         imported_at: None,
     }
 }
@@ -838,7 +842,7 @@ fn imported_preset_metadata(
         "updated_at": "1970-01-01T00:00:00Z",
         "local_override_of": null
     }))
-    .map_err(|error| unsupported(format!("Risu preset metadata is invalid: {error}")))
+    .map_err(|error| unsupported(format!("imported preset metadata is invalid: {error}")))
 }
 
 fn bounded_name(value: &str, fallback: &str) -> String {

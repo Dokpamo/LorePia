@@ -4,11 +4,11 @@ mod adapters;
 mod archive;
 mod capabilities;
 mod hashing;
+mod imported_compatibility;
 mod knowledge_ids;
 mod package;
 mod path;
 mod png;
-mod risu;
 mod runtime;
 mod transport;
 mod warnings;
@@ -31,6 +31,7 @@ use sha2::{Digest, Sha256};
 use warnings::{extension_mismatch, promoted_card};
 
 pub use hashing::sha256_file;
+pub use imported_compatibility::{PreparedExternalImport, prepare_external_import};
 pub use package::{
     ContentCapability, ContentPackageComponent, ContentPackageComponentKind,
     ContentPackageComponentState, ContentPackageDependency, ContentPackageInspection,
@@ -40,7 +41,6 @@ pub use package::{
     inspect_content_package, prepare_content_package_import, revalidate_content_package_selection,
     select_content_package_components, stage_selected_content_package_assets,
 };
-pub use risu::{PreparedExternalImport, prepare_external_import};
 pub use transport::extract_single_character_transport;
 const ZIP_LOCAL_FILE_MAGIC: &[u8; 4] = b"PK\x03\x04";
 const ZIP_EMPTY_ARCHIVE_MAGIC: &[u8; 4] = b"PK\x05\x06";

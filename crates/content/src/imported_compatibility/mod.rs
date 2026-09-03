@@ -15,7 +15,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use self::{
-    container::{decode_risu_preset, is_risu_module, read_risu_module},
+    container::{decode_external_preset, is_external_module, read_external_module},
     convert::{
         NormalizedExternalContent, convert_memory_preset, convert_module, convert_preset,
         looks_like_memory_preset,
@@ -24,7 +24,7 @@ use self::{
 };
 use crate::{inspect_content_package, sha256_file, validated_source_metadata};
 
-const MAX_RISU_JSON_BYTES: u64 = 4 * 1024 * 1024;
+const MAX_EXTERNAL_JSON_BYTES: u64 = 4 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreparedExternalImport {
@@ -45,22 +45,22 @@ pub fn prepare_external_import(
         .and_then(|value| value.to_str())
         .unwrap_or_default()
         .to_ascii_lowercase();
-    let risu_module = is_risu_module(path)?;
-    if !risu_module && extension != "risup" && extension != "json" {
+    let imported_module = is_external_module(path)?;
+    if !imported_module && extension != "risup" && extension != "json" {
         return Ok(None);
     }
     let source_metadata = validated_source_metadata(path, limits)?;
     let source_sha256 = sha256_file(path)?;
-    let content = if risu_module {
+    let content = if imported_module {
         convert_module(
-            read_risu_module(path, limits, &source_sha256)?,
+            read_external_module(path, limits, &source_sha256)?,
             &source_sha256,
         )?
     } else if extension == "risup" {
-        convert_preset(&decode_risu_preset(path)?, &source_sha256)?
-    } else if extension == "json" && source_metadata.len() <= MAX_RISU_JSON_BYTES {
+        convert_preset(&decode_external_preset(path)?, &source_sha256)?
+    } else if extension == "json" && source_metadata.len() <= MAX_EXTERNAL_JSON_BYTES {
         let value: Value = serde_json::from_slice(&fs::read(path).map_err(storage_error)?)
-            .map_err(|_| unsupported("JSON source is not a supported Risu document"))?;
+            .map_err(|_| unsupported("JSON source is not a supported compatibility document"))?;
         if !looks_like_memory_preset(&value) {
             return Ok(None);
         }
@@ -71,7 +71,7 @@ pub fn prepare_external_import(
     fs::create_dir_all(staging_directory).map_err(storage_error)?;
     let inspection_id = InspectionId::new();
     let normalized_package_path = staging_directory.join(format!(
-        "inspection-{}-risu-package.partial",
+        "inspection-{}-imported-package.partial",
         inspection_id.0
     ));
     let prepared = prepare_package(
@@ -115,7 +115,7 @@ fn prepare_package(
             return Err(CoreError::new(
                 error.code,
                 format!(
-                    "normalized Risu package failed self-inspection: {}",
+                    "normalized imported package failed self-inspection: {}",
                     error.message
                 ),
                 error.recoverable,
@@ -197,7 +197,7 @@ fn unsupported(message: impl Into<String>) -> CoreError {
 fn storage_error(error: std::io::Error) -> CoreError {
     CoreError::new(
         CoreErrorCode::StorageUnavailable,
-        format!("cannot prepare Risu import: {error}"),
+        format!("cannot prepare compatibility import: {error}"),
         true,
     )
 }
@@ -212,7 +212,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn normalizes_a_risu_memory_json_into_a_self_inspecting_package() {
+    fn normalizes_an_imported_memory_json_into_a_self_inspecting_package() {
         let mut source = Builder::new()
             .suffix(".json")
             .tempfile()
@@ -227,8 +227,8 @@ mod tests {
 
         let prepared =
             prepare_external_import(source.path(), ImportLimits::default(), staging.path())
-                .expect("prepare Risu memory preset")
-                .expect("recognized Risu memory preset");
+                .expect("prepare external memory preset")
+                .expect("recognized external memory preset");
         assert_eq!(prepared.inspection.kind, ContentKind::RisuMemoryPreset);
         assert!(prepared.inspection.is_allowed());
         assert_eq!(prepared.document_count, 1);

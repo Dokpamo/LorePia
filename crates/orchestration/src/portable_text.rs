@@ -619,7 +619,7 @@ mod tests {
     }
 
     #[test]
-    fn renders_risu_comparisons_any_and_if_pure() {
+    fn renders_imported_comparisons_any_and_if_pure() {
         let mut context = context();
         context.variables.insert(
             lorepia_domain::VariableRef {
@@ -636,7 +636,7 @@ mod tests {
     }
 
     #[test]
-    fn renders_bounded_risu_each_arrays_with_dynamic_variable_names() {
+    fn renders_bounded_imported_each_arrays_with_dynamic_variable_names() {
         let mut context = context();
         for (id, value) in [("genre1", 20), ("genre2", 0)] {
             context.variables.insert(

@@ -11,7 +11,7 @@ use super::*;
 #[test]
 fn converted_module_enables_only_its_reviewed_declarative_components() {
     let source_sha256 = "a".repeat(64);
-    let source = RisuModuleSource {
+    let source = ImportedModuleSource {
         metadata: runtime::DecodedRuntimeMetadata {
             profile: CharacterRuntimeProfile {
                 transforms: vec![PortableTextTransform {
@@ -28,14 +28,14 @@ fn converted_module_enables_only_its_reviewed_declarative_components() {
             },
             knowledge_entries: None,
             asset_metadata: Vec::new(),
-            name: "Synthetic Risu module".to_owned(),
+            name: "Synthetic external module".to_owned(),
             description: String::new(),
             warnings: Vec::new(),
         },
         assets: Vec::new(),
     };
 
-    let converted = convert_module(source, &source_sha256).expect("convert Risu module");
+    let converted = convert_module(source, &source_sha256).expect("convert external module");
     let module = converted
         .documents
         .iter()

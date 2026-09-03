@@ -85,15 +85,15 @@ describe('ImportReviewDialog dynamic content review', () => {
         ).toBeInTheDocument();
     });
 
-    it('labels a Risu module destination and quarantine boundary before commit', () => {
-        const longDescription = 'Risu module description '.repeat(80);
+    it('labels a external module destination and quarantine boundary before commit', () => {
+        const longDescription = 'external module description '.repeat(80);
         const state = {
             import_flow: {
                 phase: 'ready',
                 error: null,
                 inspection: {
-                    inspection_id: 'inspection-risu',
-                    kind: 'risu_module',
+                    inspection_id: 'inspection-imported',
+                    kind: 'imported_module',
                     display_name: 'Additional asset module',
                     description: longDescription,
                     source_sha256: 'cd'.repeat(32),
@@ -126,10 +126,10 @@ describe('ImportReviewDialog dynamic content review', () => {
 
         const { container } = render(ImportReviewDialog, { state, controller });
 
-        expect(screen.getByText(t('import.kind.risu_module'))).toBeInTheDocument();
-        expect(screen.getByText(t('import.risu.title'))).toBeInTheDocument();
-        expect(screen.getByText(t('import.risu.safety'))).toBeInTheDocument();
-        expect(screen.getByText(t('import.risu.update'))).toBeInTheDocument();
+        expect(screen.getByText(t('import.kind.imported_module'))).toBeInTheDocument();
+        expect(screen.getByText(t('import.compatibility.title'))).toBeInTheDocument();
+        expect(screen.getByText(t('import.compatibility.safety'))).toBeInTheDocument();
+        expect(screen.getByText(t('import.compatibility.update'))).toBeInTheDocument();
         expect(screen.getByRole('button', { name: t('import.commit.content') })).toBeEnabled();
         const description = container.querySelector('.review-description');
         expect(description?.textContent.endsWith('…')).toBe(true);
@@ -145,7 +145,7 @@ describe('ImportReviewDialog dynamic content review', () => {
                 error: null,
                 inspection: {
                     inspection_id: 'inspection-module',
-                    kind: 'risu_module',
+                    kind: 'imported_module',
                     display_name: 'Lifecycle module',
                     description: 'Navigation fixture',
                     source_sha256: 'ef'.repeat(32),
@@ -174,7 +174,7 @@ describe('ImportReviewDialog dynamic content review', () => {
         const result = {
             kind: 'content' as const,
             content: {
-                kind: 'risu_module' as const,
+                kind: 'imported_module' as const,
                 import_id: 'module-import',
                 display_name: 'Lifecycle module',
                 document_count: 2,

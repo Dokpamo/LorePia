@@ -118,7 +118,7 @@ pub(crate) fn decode_runtime_metadata_value(
         .as_object()
         .ok_or_else(|| unsupported("runtime document root must be an object"))?;
     if object.get("type").and_then(Value::as_str) != Some("risuModule") {
-        return Err(unsupported("runtime document type is not risuModule"));
+        return Err(unsupported("runtime document type is not supported"));
     }
     let module = object
         .get("module")
@@ -172,7 +172,7 @@ pub(crate) fn decode_runtime_metadata_value(
         name: module
             .get("name")
             .and_then(Value::as_str)
-            .unwrap_or("Risu module")
+            .unwrap_or("Imported module")
             .to_owned(),
         description: module
             .get("description")
@@ -314,7 +314,7 @@ fn parse_transforms(
             let phase = match kind {
                 "editprocess" | "editinput" => PortableTransformPhase::RequestContext,
                 "editoutput" => PortableTransformPhase::ProviderOutput,
-                // Risu uses this sentinel for an intentionally inert rule. Its
+                // The source format uses this sentinel for an intentionally inert rule. Its
                 // phase has no runtime effect, but retaining it as disabled
                 // preserves review counts and round-trip metadata.
                 "editdisplay" | "disabled" => PortableTransformPhase::Display,

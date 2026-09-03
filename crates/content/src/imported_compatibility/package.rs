@@ -80,7 +80,7 @@ pub(super) fn write_normalized_package(
         "name": content.name,
         "version": "1.0.0",
         "author": "",
-        "license": "LicenseRef-Risu-User-Content",
+        "license": "LicenseRef-Imported-User-Content",
         "redistribution_allowed": false,
         "required_app_version": null,
         "required_capabilities": content.package_capabilities,
@@ -151,7 +151,7 @@ fn component_json(
 fn package_error(error: zip::result::ZipError) -> CoreError {
     CoreError::new(
         CoreErrorCode::StorageUnavailable,
-        format!("cannot build normalized Risu package: {error}"),
+        format!("cannot build normalized imported package: {error}"),
         true,
     )
 }
@@ -159,7 +159,7 @@ fn package_error(error: zip::result::ZipError) -> CoreError {
 fn json_error(error: serde_json::Error) -> CoreError {
     CoreError::new(
         CoreErrorCode::UnsupportedContent,
-        format!("cannot normalize Risu content: {error}"),
+        format!("cannot normalize imported content: {error}"),
         false,
     )
 }
@@ -167,7 +167,7 @@ fn json_error(error: serde_json::Error) -> CoreError {
 fn storage_error(error: std::io::Error) -> CoreError {
     CoreError::new(
         CoreErrorCode::StorageUnavailable,
-        format!("cannot write normalized Risu package: {error}"),
+        format!("cannot write normalized imported package: {error}"),
         true,
     )
 }

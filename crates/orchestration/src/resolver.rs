@@ -19,12 +19,11 @@ use crate::template::{
     TemplateEnvironment, TemplateError, evaluate_condition, render_safe_template,
 };
 
-mod risu;
+mod compat;
 
 use crate::render_portable_text;
-use risu::{
-    is_risu_imported_block, merge_same_role_messages, render_risu_imported_text,
-    select_relative_message_range,
+use compat::{
+    is_compat_block, merge_same_role_messages, render_compat_text, select_relative_message_range,
 };
 
 const MESSAGE_OVERHEAD_TOKENS: u32 = 4;
@@ -560,7 +559,7 @@ where
             materialized.explanation = "block source produced no content".into();
             return Ok(materialized);
         }
-        if is_risu_imported_block(block) && block.template.is_some() {
+        if is_compat_block(block) && block.template.is_some() {
             merge_same_role_messages(&mut materialized.messages);
         }
         Self::apply_block_template(request, block, &mut materialized.messages)?;
@@ -610,9 +609,7 @@ where
                         })?;
                 let environment = template_environment(context, &context.slots);
                 let rendered = render_safe_template(template, &environment)?;
-                Ok(default(render_risu_imported_text(
-                    block, &rendered, context,
-                )))
+                Ok(default(render_compat_text(block, &rendered, context)))
             }
             BlockSource::CharacterField { field } => Ok(default(render_portable_text(
                 &character_field(context, *field),
@@ -830,7 +827,7 @@ where
             });
             let environment = template_environment(&request.context, &slots);
             let rendered = render_safe_template(template, &environment)?;
-            message.content = render_risu_imported_text(block, &rendered, &request.context);
+            message.content = render_compat_text(block, &rendered, &request.context);
         }
         Ok(())
     }

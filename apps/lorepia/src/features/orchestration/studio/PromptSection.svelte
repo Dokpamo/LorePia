@@ -14,7 +14,7 @@
         type OrchestrationState,
     } from '../orchestration-controller';
     import PromptPresetHistory from '../PromptPresetHistory.svelte';
-    import RisuCompatibilityPanel from '../RisuCompatibilityPanel.svelte';
+    import ImportedCompatibilityPanel from '../ImportedCompatibilityPanel.svelte';
     import TaskProfilesPanel from '../TaskProfilesPanel.svelte';
     import PromptBlocksSection from './PromptBlocksSection.svelte';
 
@@ -281,7 +281,7 @@
 
 {#if detailPage?.startsWith('profiles')}
     {#if detailPage === 'profiles'}
-        <RisuCompatibilityPanel
+        <ImportedCompatibilityPanel
             {client}
             {appController}
             {appState}

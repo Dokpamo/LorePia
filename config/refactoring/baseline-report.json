@@ -1,5 +1,5 @@
 {
-  "baseline_commit": "125414f5044571bbf010d73d4d222cd5db0058ae",
+  "baseline_commit": "229ad72feed80eea20ab6c00065a93f6ff22aec1",
   "completion": {
     "approved_hotspot_exception_count": 0,
     "ledger_sha256": "4953800f2a0584a25d5761b3788dca46bfbe35dd296dde8845c53031d6e1bd03",
@@ -789,14 +789,14 @@
     "apps/lorepia/src/app/App.svelte": {
       "bytes": 53816,
       "declarations": 86,
-      "lines": 1352,
+      "lines": 1351,
       "public_symbols": 0
     },
     "apps/lorepia/src/app/android-back-navigation.ts": {
-      "bytes": 1536,
-      "declarations": 6,
-      "lines": 48,
-      "public_symbols": 4
+      "bytes": 2472,
+      "declarations": 7,
+      "lines": 71,
+      "public_symbols": 5
     },
     "apps/lorepia/src/app/app-controller.ts": {
       "bytes": 21678,
@@ -919,7 +919,7 @@
       "public_symbols": 0
     },
     "apps/lorepia/src/components/ChoicePopover.svelte": {
-      "bytes": 17911,
+      "bytes": 17919,
       "declarations": 24,
       "lines": 568,
       "public_symbols": 0
@@ -1051,9 +1051,9 @@
       "public_symbols": 0
     },
     "apps/lorepia/src/features/chat/PortableRuntimeControls.svelte": {
-      "bytes": 12944,
-      "declarations": 8,
-      "lines": 363,
+      "bytes": 14534,
+      "declarations": 10,
+      "lines": 414,
       "public_symbols": 0
     },
     "apps/lorepia/src/features/chat/chat-scroll.svelte.ts": {
@@ -1255,7 +1255,7 @@
       "public_symbols": 1
     },
     "apps/lorepia/src/features/import/ImportReviewDialog.svelte": {
-      "bytes": 14143,
+      "bytes": 14343,
       "declarations": 12,
       "lines": 322,
       "public_symbols": 0
@@ -1284,16 +1284,28 @@
       "lines": 165,
       "public_symbols": 0
     },
+    "apps/lorepia/src/features/orchestration/ContentModuleCandidateCard.svelte": {
+      "bytes": 4788,
+      "declarations": 6,
+      "lines": 127,
+      "public_symbols": 0
+    },
     "apps/lorepia/src/features/orchestration/ContentModuleLifecyclePanel.svelte": {
-      "bytes": 72768,
-      "declarations": 46,
-      "lines": 1549,
+      "bytes": 66199,
+      "declarations": 45,
+      "lines": 1245,
       "public_symbols": 1
     },
     "apps/lorepia/src/features/orchestration/CreatorDocumentEditors.svelte": {
-      "bytes": 25487,
+      "bytes": 25236,
       "declarations": 40,
       "lines": 684,
+      "public_symbols": 0
+    },
+    "apps/lorepia/src/features/orchestration/ImportedCompatibilityPanel.svelte": {
+      "bytes": 22406,
+      "declarations": 15,
+      "lines": 599,
       "public_symbols": 0
     },
     "apps/lorepia/src/features/orchestration/MemoryQueryRetryPanel.svelte": {
@@ -1303,33 +1315,27 @@
       "public_symbols": 0
     },
     "apps/lorepia/src/features/orchestration/OrchestrationQuickDrawer.svelte": {
-      "bytes": 47362,
-      "declarations": 41,
-      "lines": 1277,
+      "bytes": 47328,
+      "declarations": 40,
+      "lines": 1274,
       "public_symbols": 0
     },
     "apps/lorepia/src/features/orchestration/OrchestrationStudio.svelte": {
-      "bytes": 16671,
+      "bytes": 16728,
       "declarations": 15,
-      "lines": 430,
+      "lines": 431,
       "public_symbols": 0
     },
     "apps/lorepia/src/features/orchestration/PromptPresetHistory.svelte": {
-      "bytes": 16094,
+      "bytes": 16451,
       "declarations": 18,
-      "lines": 470,
-      "public_symbols": 0
-    },
-    "apps/lorepia/src/features/orchestration/RisuCompatibilityPanel.svelte": {
-      "bytes": 18588,
-      "declarations": 11,
-      "lines": 501,
+      "lines": 477,
       "public_symbols": 0
     },
     "apps/lorepia/src/features/orchestration/TaskProfilesPanel.svelte": {
-      "bytes": 18641,
+      "bytes": 18730,
       "declarations": 34,
-      "lines": 508,
+      "lines": 509,
       "public_symbols": 0
     },
     "apps/lorepia/src/features/orchestration/content-package-capabilities.ts": {
@@ -1339,10 +1345,16 @@
       "public_symbols": 1
     },
     "apps/lorepia/src/features/orchestration/content-package-controller.ts": {
-      "bytes": 43476,
-      "declarations": 23,
-      "lines": 1124,
+      "bytes": 43262,
+      "declarations": 22,
+      "lines": 1117,
       "public_symbols": 7
+    },
+    "apps/lorepia/src/features/orchestration/content-package-error.ts": {
+      "bytes": 490,
+      "declarations": 1,
+      "lines": 14,
+      "public_symbols": 1
     },
     "apps/lorepia/src/features/orchestration/controllers/context-room-controller.ts": {
       "bytes": 14827,
@@ -1392,10 +1404,16 @@
       "lines": 10,
       "public_symbols": 1
     },
+    "apps/lorepia/src/features/orchestration/imported-compatibility.ts": {
+      "bytes": 10625,
+      "declarations": 18,
+      "lines": 284,
+      "public_symbols": 10
+    },
     "apps/lorepia/src/features/orchestration/module-lifecycle-contracts.ts": {
-      "bytes": 16468,
+      "bytes": 16493,
       "declarations": 55,
-      "lines": 512,
+      "lines": 513,
       "public_symbols": 55
     },
     "apps/lorepia/src/features/orchestration/module-lifecycle-controller.ts": {
@@ -1416,11 +1434,11 @@
       "lines": 481,
       "public_symbols": 6
     },
-    "apps/lorepia/src/features/orchestration/risu-compatibility.ts": {
-      "bytes": 10166,
-      "declarations": 18,
-      "lines": 276,
-      "public_symbols": 10
+    "apps/lorepia/src/features/orchestration/quick-drawer-gesture.ts": {
+      "bytes": 138,
+      "declarations": 1,
+      "lines": 3,
+      "public_symbols": 1
     },
     "apps/lorepia/src/features/orchestration/studio-contracts.ts": {
       "bytes": 5547,
@@ -1429,15 +1447,15 @@
       "public_symbols": 9
     },
     "apps/lorepia/src/features/orchestration/studio/ContentPackageReview.svelte": {
-      "bytes": 18157,
-      "declarations": 10,
-      "lines": 395,
+      "bytes": 22861,
+      "declarations": 16,
+      "lines": 481,
       "public_symbols": 0
     },
     "apps/lorepia/src/features/orchestration/studio/ContentSection.svelte": {
-      "bytes": 16319,
+      "bytes": 16443,
       "declarations": 19,
-      "lines": 351,
+      "lines": 353,
       "public_symbols": 0
     },
     "apps/lorepia/src/features/orchestration/studio/DiagnosticsSection.svelte": {
@@ -1471,7 +1489,7 @@
       "public_symbols": 0
     },
     "apps/lorepia/src/features/orchestration/studio/PromptSection.svelte": {
-      "bytes": 13523,
+      "bytes": 13535,
       "declarations": 13,
       "lines": 297,
       "public_symbols": 0
@@ -1480,6 +1498,12 @@
       "bytes": 10344,
       "declarations": 15,
       "lines": 256,
+      "public_symbols": 0
+    },
+    "apps/lorepia/src/features/orchestration/studio/styles/compatibility-surfaces.css": {
+      "bytes": 6404,
+      "declarations": 0,
+      "lines": 248,
       "public_symbols": 0
     },
     "apps/lorepia/src/features/orchestration/studio/styles/studio-a.css": {
@@ -1492,6 +1516,12 @@
       "bytes": 11990,
       "declarations": 0,
       "lines": 525,
+      "public_symbols": 0
+    },
+    "apps/lorepia/src/features/orchestration/styles/content-module-lifecycle.css": {
+      "bytes": 9041,
+      "declarations": 0,
+      "lines": 392,
       "public_symbols": 0
     },
     "apps/lorepia/src/features/orchestration/tests/content-package-fixtures.ts": {
@@ -1639,22 +1669,34 @@
       "public_symbols": 7
     },
     "apps/lorepia/src/lib/i18n/ko-import.ts": {
-      "bytes": 3726,
+      "bytes": 3774,
       "declarations": 0,
       "lines": 54,
       "public_symbols": 1
     },
-    "apps/lorepia/src/lib/i18n/ko-risu.ts": {
-      "bytes": 4965,
+    "apps/lorepia/src/lib/i18n/ko-imported-compatibility.ts": {
+      "bytes": 10414,
       "declarations": 0,
-      "lines": 62,
+      "lines": 139,
+      "public_symbols": 1
+    },
+    "apps/lorepia/src/lib/i18n/ko-quick.ts": {
+      "bytes": 2709,
+      "declarations": 0,
+      "lines": 55,
       "public_symbols": 1
     },
     "apps/lorepia/src/lib/i18n/ko.ts": {
-      "bytes": 60594,
+      "bytes": 58062,
       "declarations": 0,
-      "lines": 839,
+      "lines": 789,
       "public_symbols": 1
+    },
+    "apps/lorepia/src/lib/import-display.ts": {
+      "bytes": 491,
+      "declarations": 2,
+      "lines": 12,
+      "public_symbols": 2
     },
     "apps/lorepia/src/lib/ipc/client-payload-guards.ts": {
       "bytes": 8880,
@@ -1807,7 +1849,7 @@
       "public_symbols": 2
     },
     "apps/lorepia/src/lib/ipc/import-contracts.ts": {
-      "bytes": 2139,
+      "bytes": 2163,
       "declarations": 9,
       "lines": 77,
       "public_symbols": 9
@@ -1903,9 +1945,9 @@
       "public_symbols": 0
     },
     "apps/lorepia/src/styles/shared/overlays-interactions.css": {
-      "bytes": 6864,
+      "bytes": 7938,
       "declarations": 0,
-      "lines": 264,
+      "lines": 316,
       "public_symbols": 0
     },
     "apps/lorepia/src/styles/shared/responsive.css": {
@@ -1974,6 +2016,54 @@
       "lines": 31,
       "public_symbols": 1
     },
+    "crates/content/src/imported_compatibility/container.rs": {
+      "bytes": 19698,
+      "declarations": 23,
+      "lines": 519,
+      "public_symbols": 6
+    },
+    "crates/content/src/imported_compatibility/convert.rs": {
+      "bytes": 30681,
+      "declarations": 28,
+      "lines": 868,
+      "public_symbols": 7
+    },
+    "crates/content/src/imported_compatibility/convert/prompts.rs": {
+      "bytes": 11007,
+      "declarations": 10,
+      "lines": 351,
+      "public_symbols": 3
+    },
+    "crates/content/src/imported_compatibility/convert/variables.rs": {
+      "bytes": 6592,
+      "declarations": 6,
+      "lines": 195,
+      "public_symbols": 4
+    },
+    "crates/content/src/imported_compatibility/convert_tests.rs": {
+      "bytes": 5911,
+      "declarations": 3,
+      "lines": 172,
+      "public_symbols": 0
+    },
+    "crates/content/src/imported_compatibility/messagepack.rs": {
+      "bytes": 8817,
+      "declarations": 23,
+      "lines": 277,
+      "public_symbols": 6
+    },
+    "crates/content/src/imported_compatibility/mod.rs": {
+      "bytes": 7982,
+      "declarations": 7,
+      "lines": 243,
+      "public_symbols": 2
+    },
+    "crates/content/src/imported_compatibility/package.rs": {
+      "bytes": 5351,
+      "declarations": 7,
+      "lines": 173,
+      "public_symbols": 2
+    },
     "crates/content/src/knowledge_ids.rs": {
       "bytes": 2152,
       "declarations": 5,
@@ -1981,7 +2071,7 @@
       "public_symbols": 3
     },
     "crates/content/src/lib.rs": {
-      "bytes": 28204,
+      "bytes": 28240,
       "declarations": 26,
       "lines": 772,
       "public_symbols": 13
@@ -2010,56 +2100,8 @@
       "lines": 217,
       "public_symbols": 2
     },
-    "crates/content/src/risu/container.rs": {
-      "bytes": 19275,
-      "declarations": 23,
-      "lines": 505,
-      "public_symbols": 6
-    },
-    "crates/content/src/risu/convert.rs": {
-      "bytes": 30430,
-      "declarations": 28,
-      "lines": 864,
-      "public_symbols": 7
-    },
-    "crates/content/src/risu/convert/prompts.rs": {
-      "bytes": 10944,
-      "declarations": 10,
-      "lines": 349,
-      "public_symbols": 3
-    },
-    "crates/content/src/risu/convert/variables.rs": {
-      "bytes": 6587,
-      "declarations": 6,
-      "lines": 195,
-      "public_symbols": 4
-    },
-    "crates/content/src/risu/convert_tests.rs": {
-      "bytes": 5899,
-      "declarations": 3,
-      "lines": 172,
-      "public_symbols": 0
-    },
-    "crates/content/src/risu/messagepack.rs": {
-      "bytes": 8817,
-      "declarations": 23,
-      "lines": 277,
-      "public_symbols": 6
-    },
-    "crates/content/src/risu/mod.rs": {
-      "bytes": 7899,
-      "declarations": 7,
-      "lines": 243,
-      "public_symbols": 2
-    },
-    "crates/content/src/risu/package.rs": {
-      "bytes": 5335,
-      "declarations": 7,
-      "lines": 173,
-      "public_symbols": 2
-    },
     "crates/content/src/runtime.rs": {
-      "bytes": 29255,
+      "bytes": 29271,
       "declarations": 29,
       "lines": 776,
       "public_symbols": 11
@@ -2299,7 +2341,7 @@
       "public_symbols": 0
     },
     "crates/core/src/app/tests/content_import_validation.rs": {
-      "bytes": 14613,
+      "bytes": 14634,
       "declarations": 10,
       "lines": 397,
       "public_symbols": 0
@@ -3073,21 +3115,21 @@
       "public_symbols": 2
     },
     "crates/orchestration/src/portable_text.rs": {
-      "bytes": 25221,
+      "bytes": 25229,
       "declarations": 29,
       "lines": 706,
       "public_symbols": 1
     },
     "crates/orchestration/src/resolver.rs": {
-      "bytes": 78764,
+      "bytes": 78690,
       "declarations": 67,
-      "lines": 2031,
+      "lines": 2028,
       "public_symbols": 14
     },
-    "crates/orchestration/src/resolver/risu.rs": {
-      "bytes": 2333,
+    "crates/orchestration/src/resolver/compat.rs": {
+      "bytes": 2439,
       "declarations": 4,
-      "lines": 70,
+      "lines": 73,
       "public_symbols": 4
     },
     "crates/orchestration/src/template.rs": {
@@ -3319,9 +3361,9 @@
       "public_symbols": 18
     },
     "crates/shell-api/src/dto/library.rs": {
-      "bytes": 18216,
+      "bytes": 18355,
       "declarations": 35,
-      "lines": 533,
+      "lines": 536,
       "public_symbols": 18
     },
     "crates/shell-api/src/dto/tests.rs": {
@@ -3355,10 +3397,16 @@
       "public_symbols": 17
     },
     "crates/shell-api/src/module_lifecycle.rs": {
-      "bytes": 99704,
+      "bytes": 99653,
       "declarations": 91,
-      "lines": 2415,
+      "lines": 2416,
       "public_symbols": 35
+    },
+    "crates/shell-api/src/module_lifecycle/legacy_import_approvals.rs": {
+      "bytes": 1749,
+      "declarations": 2,
+      "lines": 44,
+      "public_symbols": 1
     },
     "crates/shell-api/src/orchestration.rs": {
       "bytes": 224522,
@@ -4855,9 +4903,9 @@
       "public_symbols": 11
     },
     {
-      "bytes": 99704,
+      "bytes": 99653,
       "declarations": 91,
-      "lines": 2415,
+      "lines": 2416,
       "path": "crates/shell-api/src/module_lifecycle.rs",
       "public_symbols": 35
     },
@@ -4946,9 +4994,9 @@
       "public_symbols": 11
     },
     {
-      "bytes": 78764,
+      "bytes": 78690,
       "declarations": 67,
-      "lines": 2031,
+      "lines": 2028,
       "path": "crates/orchestration/src/resolver.rs",
       "public_symbols": 14
     },
@@ -4965,13 +5013,6 @@
       "lines": 2085,
       "path": "crates/providers/src/capability_probe.rs",
       "public_symbols": 54
-    },
-    {
-      "bytes": 72768,
-      "declarations": 46,
-      "lines": 1549,
-      "path": "apps/lorepia/src/features/orchestration/ContentModuleLifecyclePanel.svelte",
-      "public_symbols": 1
     },
     {
       "bytes": 72514,
@@ -5023,6 +5064,13 @@
       "public_symbols": 23
     },
     {
+      "bytes": 66199,
+      "declarations": 45,
+      "lines": 1245,
+      "path": "apps/lorepia/src/features/orchestration/ContentModuleLifecyclePanel.svelte",
+      "public_symbols": 1
+    },
+    {
       "bytes": 65799,
       "declarations": 60,
       "lines": 1760,
@@ -5058,9 +5106,9 @@
       "public_symbols": 7
     },
     {
-      "bytes": 60594,
+      "bytes": 58062,
       "declarations": 0,
-      "lines": 839,
+      "lines": 789,
       "path": "apps/lorepia/src/lib/i18n/ko.ts",
       "public_symbols": 1
     },
@@ -5088,7 +5136,7 @@
     {
       "bytes": 53816,
       "declarations": 86,
-      "lines": 1352,
+      "lines": 1351,
       "path": "apps/lorepia/src/app/App.svelte",
       "public_symbols": 0
     },
@@ -5142,9 +5190,9 @@
       "public_symbols": 0
     },
     {
-      "bytes": 47362,
-      "declarations": 41,
-      "lines": 1277,
+      "bytes": 47328,
+      "declarations": 40,
+      "lines": 1274,
       "path": "apps/lorepia/src/features/orchestration/OrchestrationQuickDrawer.svelte",
       "public_symbols": 0
     },
@@ -5170,13 +5218,6 @@
       "public_symbols": 0
     },
     {
-      "bytes": 43476,
-      "declarations": 23,
-      "lines": 1124,
-      "path": "apps/lorepia/src/features/orchestration/content-package-controller.ts",
-      "public_symbols": 7
-    },
-    {
       "bytes": 43412,
       "declarations": 19,
       "lines": 1051,
@@ -5189,6 +5230,13 @@
       "lines": 1257,
       "path": "crates/content/src/adapters.rs",
       "public_symbols": 15
+    },
+    {
+      "bytes": 43262,
+      "declarations": 22,
+      "lines": 1117,
+      "path": "apps/lorepia/src/features/orchestration/content-package-controller.ts",
+      "public_symbols": 7
     },
     {
       "bytes": 42542,
@@ -5778,8 +5826,8 @@
         "sha256": "ed2e4dbf3bd84045b7209555c1485ca45fd69b720ade06fb49c9af5338037357"
       },
       "apps/lorepia/src/app/android-back-navigation.ts": {
-        "count": 4,
-        "sha256": "b4519ba962558e04ffb434f885bdf446939dba457a3742f530c809a6686e3d85"
+        "count": 5,
+        "sha256": "4e9220321dace57a3ff0acced2ed71b199e82f663b912a29aa0f763c369e981f"
       },
       "apps/lorepia/src/app/app-controller.ts": {
         "count": 3,
@@ -5997,6 +6045,10 @@
         "count": 7,
         "sha256": "3719f25fb2b74f00b18e706c24ffbb3a21151923be565b930c0607aa58e4d55e"
       },
+      "apps/lorepia/src/features/orchestration/content-package-error.ts": {
+        "count": 1,
+        "sha256": "9dbd3b4b340e1ae196fc37cb02a81340677a8853179162e9b768975631b13b54"
+      },
       "apps/lorepia/src/features/orchestration/controllers/context-room-controller.ts": {
         "count": 1,
         "sha256": "7cf847b02eec1dab3151f5db849b91d38fac35aa0f31ef5495f277ec290456fb"
@@ -6029,6 +6081,10 @@
         "count": 1,
         "sha256": "6c7ee60ddb76c66f91c3f2410c622fcf4559ddf90d82053686858f254090aed8"
       },
+      "apps/lorepia/src/features/orchestration/imported-compatibility.ts": {
+        "count": 10,
+        "sha256": "e601c338ecf18099ed9e30b2d3d5691ef14a46450e3493cdea087c2acc0dd8fb"
+      },
       "apps/lorepia/src/features/orchestration/module-lifecycle-contracts.ts": {
         "count": 55,
         "sha256": "c89d3c444d61558d61a1c4469fc9d1124eed4df92d6b115e893f99fecea2e77e"
@@ -6045,9 +6101,9 @@
         "count": 6,
         "sha256": "1bba3238bf2af5938a37067918dd9aa75512923ead879073d90db6688b268277"
       },
-      "apps/lorepia/src/features/orchestration/risu-compatibility.ts": {
-        "count": 10,
-        "sha256": "ffb23b8f45d312a09631fdcfa6cb268a392f959e3898838a928360cb67c471fc"
+      "apps/lorepia/src/features/orchestration/quick-drawer-gesture.ts": {
+        "count": 1,
+        "sha256": "6e250987e6fe14747f10a836a849d98a26e1f30055d696a4bee6e77c61c7a290"
       },
       "apps/lorepia/src/features/orchestration/studio-contracts.ts": {
         "count": 9,
@@ -6085,13 +6141,21 @@
         "count": 1,
         "sha256": "76cdd360347d962dca53aefbb6d91416d58f9e93d7a8b0d68504a3ab15728080"
       },
-      "apps/lorepia/src/lib/i18n/ko-risu.ts": {
+      "apps/lorepia/src/lib/i18n/ko-imported-compatibility.ts": {
         "count": 1,
-        "sha256": "fd4f8ef50cac0e2998f868e870afacd47be3b577e75f586b5d78b83575bc82c1"
+        "sha256": "ea047e8af288a93509a21ccfefec53a19c39aa6353907a59c91305b0acb75d77"
+      },
+      "apps/lorepia/src/lib/i18n/ko-quick.ts": {
+        "count": 1,
+        "sha256": "e58fda4857debffa58f67435f069ac28201c5f0a9d732afa5a8b25666562dec6"
       },
       "apps/lorepia/src/lib/i18n/ko.ts": {
         "count": 1,
         "sha256": "5d0056a7d27af69c6f5a881b53b6c5d81567be774090fca35c5f35b2f7fbaf16"
+      },
+      "apps/lorepia/src/lib/import-display.ts": {
+        "count": 2,
+        "sha256": "cd8f24a05f6c45d40403039d1bd746502f55c0f554dab68852f60a6787976a33"
       },
       "apps/lorepia/src/lib/ipc/client-payload-guards.ts": {
         "count": 2,
@@ -6253,13 +6317,41 @@
         "count": 1,
         "sha256": "44f025c648790e6f0e407311a54c9cbd2f4b84cee3ede42aebe04e74e77a2e15"
       },
+      "crates/content/src/imported_compatibility/container.rs": {
+        "count": 6,
+        "sha256": "1a21f117c43cc9c3897e9931b5383aaadf6e197a26cd2cbec64892da56d1643b"
+      },
+      "crates/content/src/imported_compatibility/convert.rs": {
+        "count": 7,
+        "sha256": "c1f2c51f74b865f5224ce488371b8a1d9c884fafd96f1e0f07be13376adf14e6"
+      },
+      "crates/content/src/imported_compatibility/convert/prompts.rs": {
+        "count": 3,
+        "sha256": "79a42316db704240970b21675f79b26e6a8cb8965357335520c22d6d29c2d1fe"
+      },
+      "crates/content/src/imported_compatibility/convert/variables.rs": {
+        "count": 4,
+        "sha256": "7ff3cc49bd967db17259e9719ff59a05955a171f371b96a06343d3d7f3e97b5f"
+      },
+      "crates/content/src/imported_compatibility/messagepack.rs": {
+        "count": 6,
+        "sha256": "dd4ce48538500d21d32715d06d38afcc2037ea36ad61d8ea8fa5136e502f2449"
+      },
+      "crates/content/src/imported_compatibility/mod.rs": {
+        "count": 2,
+        "sha256": "8dc14283b301cbd14f07f5704d45236c6baf74a03214460bb45d48a0174fa6a3"
+      },
+      "crates/content/src/imported_compatibility/package.rs": {
+        "count": 2,
+        "sha256": "36af6481bc397ffc174b847c5c4e9fd0747d250211b4db592ff8b2f39656e7d3"
+      },
       "crates/content/src/knowledge_ids.rs": {
         "count": 3,
         "sha256": "3366d9cf98e2e88950b808361523019682522ccc4ea2c46635805a19ff169073"
       },
       "crates/content/src/lib.rs": {
         "count": 13,
-        "sha256": "24fbfc5a4a759dd27835d2c45cf37e266ad365ac245f87f94efff47df51a2fbc"
+        "sha256": "d24d05389d23f1c94ff07c5a60dee433bbbbc22a75b90bc0bc5b3b8e3239d048"
       },
       "crates/content/src/package.rs": {
         "count": 25,
@@ -6276,34 +6368,6 @@
       "crates/content/src/png.rs": {
         "count": 2,
         "sha256": "bfccaaae993c4aa3d99fa530faa66d360000348ccabcd9c73813599e5ac38c7d"
-      },
-      "crates/content/src/risu/container.rs": {
-        "count": 6,
-        "sha256": "42e6e86d17dab7f65ba71211df32640f5a31c3fae7171c55b3043b2a74f981f3"
-      },
-      "crates/content/src/risu/convert.rs": {
-        "count": 7,
-        "sha256": "c1f2c51f74b865f5224ce488371b8a1d9c884fafd96f1e0f07be13376adf14e6"
-      },
-      "crates/content/src/risu/convert/prompts.rs": {
-        "count": 3,
-        "sha256": "79a42316db704240970b21675f79b26e6a8cb8965357335520c22d6d29c2d1fe"
-      },
-      "crates/content/src/risu/convert/variables.rs": {
-        "count": 4,
-        "sha256": "7ff3cc49bd967db17259e9719ff59a05955a171f371b96a06343d3d7f3e97b5f"
-      },
-      "crates/content/src/risu/messagepack.rs": {
-        "count": 6,
-        "sha256": "dd4ce48538500d21d32715d06d38afcc2037ea36ad61d8ea8fa5136e502f2449"
-      },
-      "crates/content/src/risu/mod.rs": {
-        "count": 2,
-        "sha256": "8dc14283b301cbd14f07f5704d45236c6baf74a03214460bb45d48a0174fa6a3"
-      },
-      "crates/content/src/risu/package.rs": {
-        "count": 2,
-        "sha256": "36af6481bc397ffc174b847c5c4e9fd0747d250211b4db592ff8b2f39656e7d3"
       },
       "crates/content/src/runtime.rs": {
         "count": 11,
@@ -6833,9 +6897,9 @@
         "count": 14,
         "sha256": "a7c3ff708750e4a9244cc3ec5b4fc531b6fc83e2db27c028b6a8ffd74f19af0e"
       },
-      "crates/orchestration/src/resolver/risu.rs": {
+      "crates/orchestration/src/resolver/compat.rs": {
         "count": 4,
-        "sha256": "27e96507bd66111bd5fefe214b2e76e6228bd9343c93945a19e82a5bd6a149fc"
+        "sha256": "c9e88ad19cb26a8f7908ae932647ad862421b69c641d29e2c390c7d8d20ef3fa"
       },
       "crates/orchestration/src/template.rs": {
         "count": 4,
@@ -7008,6 +7072,10 @@
       "crates/shell-api/src/module_lifecycle.rs": {
         "count": 35,
         "sha256": "5fd65c7a48a4441ca28ad93f7131f2b4b4adc5b2bd9a0a3403b385b838be1493"
+      },
+      "crates/shell-api/src/module_lifecycle/legacy_import_approvals.rs": {
+        "count": 1,
+        "sha256": "4657c927c2144454b5f17658891989aa69cdb800a0eaa2f384362c662f251b67"
       },
       "crates/shell-api/src/orchestration.rs": {
         "count": 193,
@@ -7700,7 +7768,7 @@
     },
     "core_api_version": 10,
     "policy": "conservative source-level declaration fingerprint, not semantic rustdoc API",
-    "sha256": "2699539dc3520f3b094c09718c48cabc8210cc368ceeac6a1a1f17003696906b",
+    "sha256": "9c5352a388aa4fc2d88f4990f8f80d5b83e1a6a8bd89b2cfc0280a4de1c9b909",
     "shell_api_version": 3
   },
   "ratchets": {
@@ -7939,8 +8007,8 @@
         },
         {
           "authority": "config/source-size-baseline.json#baselines/crates/orchestration/src/resolver.rs",
-          "current_bytes": 78764,
-          "current_lines": 2031,
+          "current_bytes": 78690,
+          "current_lines": 2028,
           "hard_target_bytes": 40960,
           "hard_target_lines": 900,
           "path": "crates/orchestration/src/resolver.rs",
@@ -8104,8 +8172,8 @@
         },
         {
           "authority": "config/source-size-baseline.json#baselines/crates/shell-api/src/module_lifecycle.rs",
-          "current_bytes": 99704,
-          "current_lines": 2415,
+          "current_bytes": 99653,
+          "current_lines": 2416,
           "hard_target_bytes": 40960,
           "hard_target_lines": 900,
           "path": "crates/shell-api/src/module_lifecycle.rs",
@@ -8704,13 +8772,13 @@
         },
         {
           "approved_exception": null,
-          "bytes": 99704,
+          "bytes": 99653,
           "disposition": "unresolved",
           "hard_target_bytes": 40960,
           "hard_target_lines": 900,
           "kind": "production",
           "language": "rust",
-          "lines": 2415,
+          "lines": 2416,
           "path": "crates/shell-api/src/module_lifecycle.rs",
           "ratchet": {
             "authority": "config/source-size-baseline.json#baselines/crates/shell-api/src/module_lifecycle.rs",
@@ -9010,13 +9078,13 @@
         },
         {
           "approved_exception": null,
-          "bytes": 78764,
+          "bytes": 78690,
           "disposition": "unresolved",
           "hard_target_bytes": 40960,
           "hard_target_lines": 900,
           "kind": "production",
           "language": "rust",
-          "lines": 2031,
+          "lines": 2028,
           "path": "crates/orchestration/src/resolver.rs",
           "ratchet": {
             "authority": "config/source-size-baseline.json#baselines/crates/orchestration/src/resolver.rs",
@@ -9074,24 +9142,6 @@
             "bytes": 73467,
             "kind": "configured-baseline",
             "lines": 2085
-          }
-        },
-        {
-          "approved_exception": null,
-          "bytes": 72768,
-          "disposition": "unresolved",
-          "hard_target_bytes": 30720,
-          "hard_target_lines": 600,
-          "kind": "production",
-          "language": "svelte",
-          "lines": 1549,
-          "path": "apps/lorepia/src/features/orchestration/ContentModuleLifecyclePanel.svelte",
-          "ratchet": {
-            "authority": "config/source-size-baseline.json#bootstrap_ref",
-            "bootstrap_bytes": 72768,
-            "bootstrap_lines": 1549,
-            "kind": "bootstrap-legacy",
-            "ref": "ace8105c7bcad425a751490b77c136fa1800df67"
           }
         },
         {
@@ -9254,6 +9304,24 @@
         },
         {
           "approved_exception": null,
+          "bytes": 66199,
+          "disposition": "unresolved",
+          "hard_target_bytes": 30720,
+          "hard_target_lines": 600,
+          "kind": "production",
+          "language": "svelte",
+          "lines": 1245,
+          "path": "apps/lorepia/src/features/orchestration/ContentModuleLifecyclePanel.svelte",
+          "ratchet": {
+            "authority": "config/source-size-baseline.json#bootstrap_ref",
+            "bootstrap_bytes": 72768,
+            "bootstrap_lines": 1549,
+            "kind": "bootstrap-legacy",
+            "ref": "ace8105c7bcad425a751490b77c136fa1800df67"
+          }
+        },
+        {
+          "approved_exception": null,
           "bytes": 65799,
           "disposition": "unresolved",
           "hard_target_bytes": 40960,
@@ -9344,13 +9412,13 @@
         },
         {
           "approved_exception": null,
-          "bytes": 60594,
+          "bytes": 58062,
           "disposition": "unresolved",
           "hard_target_bytes": 40960,
           "hard_target_lines": 900,
           "kind": "production",
           "language": "typescript",
-          "lines": 839,
+          "lines": 789,
           "path": "apps/lorepia/src/lib/i18n/ko.ts",
           "ratchet": {
             "authority": "config/source-size-baseline.json#bootstrap_ref",
@@ -9439,7 +9507,7 @@
           "hard_target_lines": 600,
           "kind": "production",
           "language": "svelte",
-          "lines": 1352,
+          "lines": 1351,
           "path": "apps/lorepia/src/app/App.svelte",
           "ratchet": {
             "authority": "config/source-size-baseline.json#bootstrap_ref",
@@ -9540,13 +9608,13 @@
         },
         {
           "approved_exception": null,
-          "bytes": 47362,
+          "bytes": 47328,
           "disposition": "unresolved",
           "hard_target_bytes": 30720,
           "hard_target_lines": 600,
           "kind": "production",
           "language": "svelte",
-          "lines": 1277,
+          "lines": 1274,
           "path": "apps/lorepia/src/features/orchestration/OrchestrationQuickDrawer.svelte",
           "ratchet": {
             "authority": "config/source-size-baseline.json#bootstrap_ref",
@@ -9576,24 +9644,6 @@
         },
         {
           "approved_exception": null,
-          "bytes": 43476,
-          "disposition": "unresolved",
-          "hard_target_bytes": 40960,
-          "hard_target_lines": 900,
-          "kind": "production",
-          "language": "typescript",
-          "lines": 1124,
-          "path": "apps/lorepia/src/features/orchestration/content-package-controller.ts",
-          "ratchet": {
-            "authority": "config/source-size-baseline.json#bootstrap_ref",
-            "bootstrap_bytes": 43533,
-            "bootstrap_lines": 1128,
-            "kind": "bootstrap-legacy",
-            "ref": "ace8105c7bcad425a751490b77c136fa1800df67"
-          }
-        },
-        {
-          "approved_exception": null,
           "bytes": 43385,
           "disposition": "unresolved",
           "hard_target_bytes": 40960,
@@ -9606,6 +9656,24 @@
             "authority": "config/source-size-baseline.json#bootstrap_ref",
             "bootstrap_bytes": 44288,
             "bootstrap_lines": 1286,
+            "kind": "bootstrap-legacy",
+            "ref": "ace8105c7bcad425a751490b77c136fa1800df67"
+          }
+        },
+        {
+          "approved_exception": null,
+          "bytes": 43262,
+          "disposition": "unresolved",
+          "hard_target_bytes": 40960,
+          "hard_target_lines": 900,
+          "kind": "production",
+          "language": "typescript",
+          "lines": 1117,
+          "path": "apps/lorepia/src/features/orchestration/content-package-controller.ts",
+          "ratchet": {
+            "authority": "config/source-size-baseline.json#bootstrap_ref",
+            "bootstrap_bytes": 43533,
+            "bootstrap_lines": 1128,
             "kind": "bootstrap-legacy",
             "ref": "ace8105c7bcad425a751490b77c136fa1800df67"
           }
@@ -9843,7 +9911,7 @@
         },
         {
           "approved_exception": null,
-          "bytes": 28204,
+          "bytes": 28240,
           "disposition": "unresolved",
           "hard_target_bytes": 40960,
           "hard_target_lines": 500,
@@ -9897,7 +9965,7 @@
         },
         {
           "approved_exception": null,
-          "bytes": 25487,
+          "bytes": 25236,
           "disposition": "unresolved",
           "hard_target_bytes": 30720,
           "hard_target_lines": 600,
@@ -10010,9 +10078,9 @@
         },
         {
           "approved_exception": null,
-          "bytes": 16671,
+          "bytes": 16728,
           "disposition": "target-met",
-          "lines": 430,
+          "lines": 431,
           "path": "apps/lorepia/src/features/orchestration/OrchestrationStudio.svelte",
           "target_bytes": 30720,
           "target_lines": 600
@@ -10087,10 +10155,10 @@
     "policy": "Size baselines and bootstrap history are non-growth ratchets, not design approvals. Schema v2 records zero approved exceptions and rejects non-empty entries until a structured ADR binding is implemented."
   },
   "summary": {
-    "production_bytes": 15593960,
-    "production_declarations": 14404,
-    "production_files": 701,
-    "production_lines": 411739,
-    "public_symbols": 6912
+    "production_bytes": 15630198,
+    "production_declarations": 14426,
+    "production_files": 709,
+    "production_lines": 412700,
+    "public_symbols": 6919
   }
 }

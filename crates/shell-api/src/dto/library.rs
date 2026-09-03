@@ -345,9 +345,12 @@ pub enum ContentKindDto {
     CharacterCardV3,
     CharacterCardPng,
     CharxPackage,
-    RisuModule,
-    RisuPreset,
-    RisuMemoryPreset,
+    #[serde(alias = "risu_module")]
+    ImportedModule,
+    #[serde(alias = "risu_preset")]
+    ImportedPreset,
+    #[serde(alias = "risu_memory_preset")]
+    ImportedMemoryPreset,
 }
 
 impl From<ContentKind> for ContentKindDto {
@@ -356,9 +359,9 @@ impl From<ContentKind> for ContentKindDto {
             ContentKind::CharacterCardV3 => Self::CharacterCardV3,
             ContentKind::CharacterCardPng => Self::CharacterCardPng,
             ContentKind::CharxPackage => Self::CharxPackage,
-            ContentKind::RisuModule => Self::RisuModule,
-            ContentKind::RisuPreset => Self::RisuPreset,
-            ContentKind::RisuMemoryPreset => Self::RisuMemoryPreset,
+            ContentKind::RisuModule => Self::ImportedModule,
+            ContentKind::RisuPreset => Self::ImportedPreset,
+            ContentKind::RisuMemoryPreset => Self::ImportedMemoryPreset,
         }
     }
 }

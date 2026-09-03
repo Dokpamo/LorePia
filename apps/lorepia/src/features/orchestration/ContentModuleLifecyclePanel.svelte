@@ -10,7 +10,9 @@
         OrchestrationVariableRefDto,
         OrchestrationVariableValueDto,
     } from '../../lib/ipc/contracts';
+    import { importedLicenseLabel, importedText } from '../../lib/import-display';
     import { tr } from '../../lib/i18n';
+    import ContentModuleCandidateCard from './ContentModuleCandidateCard.svelte';
     import {
         ContentModuleLifecycleController,
         INITIAL_CONTENT_MODULE_LIFECYCLE_STATE,
@@ -20,11 +22,9 @@
     } from './module-lifecycle-controller';
     import type {
         ContentModuleCandidateSourceDto,
-        ContentModuleCapabilityDto,
         ContentModuleComponentRefDto,
         ContentModuleLifecycleClientApi,
         ContentModuleRollbackBlockerDto,
-        ContentModuleSourceKindDto,
     } from './module-lifecycle-contracts';
     import './styles/content-module-lifecycle.css';
 
@@ -145,7 +145,7 @@
             interaction_rule_set: '상호작용 규칙',
             asset: '에셋',
         };
-        return `${labels[component.kind]} · ${component.id}`;
+        return `${labels[component.kind]} · ${importedText(component.id)}`;
     }
 
     function boundedText(value: string, maximum = MAX_VISIBLE_VARIABLE_VALUE_CHARACTERS): string {
@@ -154,35 +154,20 @@
     }
 
     function sourceLabel(source: ContentModuleCandidateSourceDto): string {
-        return `${source.module_id} / ${source.revision_id} · 소스 ${shortHash(source.revision_source_sha256)} · 바인딩 ${source.binding_id} · ${scopeLabel(source.scope)} · 우선순위 ${String(source.priority)} · 순서 ${String(source.module_ordinal)} · 런타임 의도 ${source.runtime_enabled_intent ? '켬' : '끔'}`;
-    }
-
-    function sourceKindLabel(kind: ContentModuleSourceKindDto): string {
-        const keys = {
-            application_built_in: 'content.source.application_built_in',
-            generated: 'content.source.generated',
-            imported_package: 'content.source.imported_package',
-            imported_standard: 'content.source.imported_standard',
-            user_created: 'content.source.user_created',
-        } as const;
-        return $tr(keys[kind]);
-    }
-
-    function capabilityLabel(capability: ContentModuleCapabilityDto): string {
-        const keys = {
-            attachment_assets: 'content.capability.attachment_assets',
-            audio_assets: 'content.capability.audio_assets',
-            declarative_interactions: 'content.capability.declarative_interactions',
-            high_risk_assets: 'content.capability.high_risk_assets',
-            image_assets: 'content.capability.image_assets',
-            knowledge: 'content.capability.knowledge',
-            portable_runtime: 'content.capability.portable_runtime',
-            prompt_fragments: 'content.capability.prompt_fragments',
-            transforms: 'content.capability.transforms',
-            variables: 'content.capability.variables',
-            video_assets: 'content.capability.video_assets',
-        } as const;
-        return $tr(keys[capability]);
+        return $tr('content.module.source_summary', {
+            module: importedText(source.module_id),
+            revision: source.revision_id,
+            source: shortHash(source.revision_source_sha256),
+            binding: source.binding_id,
+            scope: scopeLabel(source.scope),
+            priority: source.priority,
+            ordinal: source.module_ordinal,
+            runtime: $tr(
+                source.runtime_enabled_intent
+                    ? 'content.module.runtime_on'
+                    : 'content.module.runtime_off',
+            ),
+        });
     }
 
     function variableRefLabel(variable: OrchestrationVariableRefDto): string {
@@ -383,73 +368,7 @@
             </div>
             <div class="candidate-grid">
                 {#each lifecycleState.candidates as candidate (`${candidate.module_id}:${candidate.revision_id}`)}
-                    <article class="candidate-card">
-                        <header>
-                            <div>
-                                <strong>{candidate.name}</strong>
-                                <span>
-                                    v{candidate.version} · {sourceKindLabel(candidate.source_kind)} ·
-                                    {candidate.component_count}개 구성요소
-                                </span>
-                            </div>
-                            <code>{shortHash(candidate.revision_source_sha256)}</code>
-                        </header>
-                        <dl class="gate-grid">
-                            <div>
-                                <dt>로컬 사용</dt>
-                                <dd class:allowed={candidate.local_use_allowed}>
-                                    {candidate.local_use_allowed ? '허용' : '차단'}
-                                </dd>
-                            </div>
-                            <div>
-                                <dt>공유·재배포</dt>
-                                <dd class:allowed={candidate.sharing_allowed}>
-                                    {candidate.sharing_allowed ? '허용' : '차단'}
-                                </dd>
-                            </div>
-                        </dl>
-                        <p>
-                            라이선스: <strong>{candidate.license}</strong>
-                            {#if candidate.author}
-                                · {candidate.author}{/if}
-                        </p>
-                        {#if candidate.share_reasons.length > 0}
-                            <ul aria-label={`${candidate.name} 공유 판단 근거`}>
-                                {#each candidate.share_reasons as reason (reason)}
-                                    <li>{reason}</li>
-                                {/each}
-                            </ul>
-                        {/if}
-                        {#if candidate.required_capabilities.length > 0}
-                            <div
-                                class="capability-list"
-                                aria-label={$tr('content.capability.required')}
-                            >
-                                {#each candidate.required_capabilities as capability (capability)}
-                                    <span>{capabilityLabel(capability)}</span>
-                                {/each}
-                            </div>
-                        {/if}
-                        {#if candidate.source_kind === 'imported_package'}
-                            <p class="lifecycle-note">
-                                완료된 패키지 승인 {candidate.completed_package_approvals
-                                    .length}개가 있습니다. 활성화 초안에서 하나를 직접 선택해야
-                                합니다.
-                            </p>
-                        {/if}
-                        <button
-                            class="primary candidate-action"
-                            type="button"
-                            disabled={busy ||
-                                !candidate.local_use_allowed ||
-                                candidate.source_kind === 'application_built_in'}
-                            onclick={() => openActivation(candidate.module_id)}
-                        >
-                            {candidate.source_kind === 'application_built_in'
-                                ? '앱 정책으로 사용자 활성화 불가'
-                                : '이 불변 리비전 활성화 검토'}
-                        </button>
-                    </article>
+                    <ContentModuleCandidateCard {candidate} {busy} onReview={openActivation} />
                 {/each}
             </div>
         </section>
@@ -462,7 +381,9 @@
             <div class="subheading">
                 <div>
                     <h4 id="module-activation-draft-title">
-                        {activation.candidate.name} 활성화 초안
+                        {$tr('content.module.activation_draft', {
+                            name: importedText(activation.candidate.name),
+                        })}
                     </h4>
                     <p>
                         바인딩 ID <code>{activation.request.binding.id}</code>는 이 검토와 재시도
@@ -517,7 +438,7 @@
                             { value: '', label: '명시적으로 선택하세요' },
                             ...activation.candidate.completed_package_approvals.map((approval) => ({
                                 value: approval.approval_id,
-                                label: `${approval.package_id} · ${approval.approval_id} · ${shortHash(approval.approval_sha256)}`,
+                                label: `${importedText(approval.package_id)} · ${approval.approval_id} · ${shortHash(approval.approval_sha256)}`,
                             })),
                         ]}
                         disabled={busy}
@@ -572,12 +493,16 @@
                                         <code>{approval.evidence.approval_id}</code>
                                     </strong>
                                     <span>
-                                        패키지 <code>{approval.evidence.package_id}</code> · import
+                                        {$tr('content.module.package')}
+                                        <code>{importedText(approval.evidence.package_id)}</code>
+                                        · import
                                         <code>{approval.evidence.import_id}</code> r{approval
                                             .evidence.import_revision}
                                     </span>
                                     <span>
-                                        모듈 <code>{approval.evidence.module_id}</code> / 리비전
+                                        {$tr('content.module.module')}
+                                        <code>{importedText(approval.evidence.module_id)}</code>
+                                        / {$tr('content.module.revision')}
                                         <code>{approval.evidence.module_revision_id}</code>
                                     </span>
                                     <span>
@@ -652,7 +577,7 @@
                                         { value: '', label: '선택하세요' },
                                         ...conflict.candidates.map((candidate) => ({
                                             value: contentModuleCandidateKey(candidate),
-                                            label: `${candidate.module_id} · ${candidate.revision_id} · ${shortHash(candidate.component_hash)}`,
+                                            label: `${importedText(candidate.module_id)} · ${candidate.revision_id} · ${shortHash(candidate.component_hash)}`,
                                         })),
                                         { value: 'omit', label: '모든 후보 명시적 제외' },
                                     ]}
@@ -795,12 +720,16 @@
                                             <code>{approval.evidence.approval_id}</code>
                                         </strong>
                                         <span>
-                                            패키지 <code>{approval.evidence.package_id}</code> ·
-                                            import <code>{approval.evidence.import_id}</code>
+                                            {$tr('content.module.package')}
+                                            <code>{importedText(approval.evidence.package_id)}</code
+                                            >
+                                            · import <code>{approval.evidence.import_id}</code>
                                             r{approval.evidence.import_revision}
                                         </span>
                                         <span>
-                                            모듈 <code>{approval.evidence.module_id}</code> /
+                                            {$tr('content.module.module')}
+                                            <code>{importedText(approval.evidence.module_id)}</code>
+                                            /
                                             <code>{approval.evidence.module_revision_id}</code> ·
                                             권한
                                             {approval.evidence.authorized_capabilities.join(', ') ||
@@ -863,7 +792,7 @@
                         <article class="binding-card">
                             <header>
                                 <div>
-                                    <strong>{item.module_name}</strong>
+                                    <strong>{importedText(item.module_name)}</strong>
                                     <span>
                                         {scopeLabel(item.binding.binding.scope)} ·
                                         {dispositionLabel(item.disposition)} · CAS
@@ -898,7 +827,9 @@
                             <button
                                 type="button"
                                 disabled={busy}
-                                aria-label={`${item.module_name} 바인딩 비활성화 검토`}
+                                aria-label={$tr('content.module.binding_deactivation_review', {
+                                    name: importedText(item.module_name),
+                                })}
                                 onclick={() => openDeactivation(item.binding.binding.id)}
                             >
                                 이 바인딩 비활성화 검토
@@ -916,7 +847,8 @@
                                         revision.source_kind === 'imported_package'}
                                     <li>
                                         <span>
-                                            {revision.name} · v{revision.version} ·
+                                            {importedText(revision.name)} · v{revision.version}
+                                            ·
                                             <code>{revision.revision_id}</code> ·
                                             {shortHash(revision.source_sha256)}
                                         </span>
@@ -942,7 +874,7 @@
                                                         ...revision.completed_package_approvals.map(
                                                             (approval) => ({
                                                                 value: approval.approval_id,
-                                                                label: `${approval.package_id} · ${approval.approval_id} · ${shortHash(approval.approval_sha256)}`,
+                                                                label: `${importedText(approval.package_id)} · ${approval.approval_id} · ${shortHash(approval.approval_sha256)}`,
                                                             }),
                                                         ),
                                                     ]}
@@ -963,7 +895,10 @@
                                                         !rollbackPackageApprovalChoices[
                                                             approvalKey
                                                         ])}
-                                                aria-label={`${item.module_name} ${revision.revision_id} 롤백 검토`}
+                                                aria-label={$tr('content.module.rollback_review', {
+                                                    name: importedText(item.module_name),
+                                                    revision: revision.revision_id,
+                                                })}
                                                 onclick={() =>
                                                     openRollback(
                                                         item.binding.binding.id,
@@ -1080,7 +1015,9 @@
                 </div>
             </dl>
             <p>
-                대상 라이선스: {rollbackReview.target_revision.license} · 로컬 사용
+                {$tr('content.module.target_license')}:
+                {importedLicenseLabel(rollbackReview.target_revision.license)} ·
+                {$tr('content.module.local_use')}
                 {rollbackReview.target_revision.local_use_allowed ? '허용' : '차단'} · 공유
                 {rollbackReview.target_revision.sharing_allowed ? '허용' : '차단'}
             </p>
@@ -1132,7 +1069,7 @@
                                 { value: '', label: '선택하세요' },
                                 ...conflict.candidates.map((candidate) => ({
                                     value: contentModuleCandidateKey(candidate),
-                                    label: `${candidate.module_id} · ${candidate.revision_id} · ${shortHash(candidate.component_hash)}`,
+                                    label: `${importedText(candidate.module_id)} · ${candidate.revision_id} · ${shortHash(candidate.component_hash)}`,
                                 })),
                                 { value: 'omit', label: '모든 후보 명시적 제외' },
                             ]}

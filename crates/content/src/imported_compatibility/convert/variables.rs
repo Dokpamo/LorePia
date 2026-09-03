@@ -67,7 +67,7 @@ fn parse_prompt_control(
         ControlSpec {
             id: ControlId::from(key),
             label: label.chars().take(MAX_NAME_CHARS).collect(),
-            description: "Risu 프롬프트 호환 컨트롤".to_owned(),
+            description: "가져온 프롬프트 호환 컨트롤".to_owned(),
             kind,
             value_type: Some(value_type),
             variable: Some(variable.clone()),

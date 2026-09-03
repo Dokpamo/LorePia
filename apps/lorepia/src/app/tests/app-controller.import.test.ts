@@ -55,13 +55,13 @@ describe('LorepiaAppController imports', () => {
         expect(get(controller.state).import_flow.error).toBe(t('import.error.storage_unavailable'));
     });
 
-    it('commits a Risu preset as content without inserting a fake character', async () => {
+    it('commits a external preset as content without inserting a fake character', async () => {
         const { mockClient } = createAppControllerFixture();
         const inspection = {
-            inspection_id: 'inspection-risu',
-            kind: 'risu_preset' as const,
+            inspection_id: 'inspection-imported',
+            kind: 'imported_preset' as const,
             display_name: 'Wave V1.6',
-            description: 'Risu prompt preset',
+            description: 'external prompt preset',
             source_sha256: 'a'.repeat(64),
             source_size: 71_533,
             estimated_stored_size: 72_000,
@@ -87,7 +87,7 @@ describe('LorepiaAppController imports', () => {
             mockClient({
                 selectImportSource: () =>
                     Promise.resolve({
-                        ticket_id: 'ticket-risu',
+                        ticket_id: 'ticket-imported',
                         display_name: 'wave.risup',
                         size_bytes: inspection.source_size,
                     }),
@@ -96,8 +96,8 @@ describe('LorepiaAppController imports', () => {
                     Promise.resolve({
                         kind: 'content',
                         content: {
-                            kind: 'risu_preset',
-                            import_id: 'package-import-risu',
+                            kind: 'imported_preset',
+                            import_id: 'package-imported',
                             display_name: inspection.display_name,
                             document_count: 2,
                             asset_count: 0,
@@ -119,8 +119,8 @@ describe('LorepiaAppController imports', () => {
         expect(result).toEqual({
             kind: 'content',
             content: {
-                kind: 'risu_preset',
-                import_id: 'package-import-risu',
+                kind: 'imported_preset',
+                import_id: 'package-imported',
                 display_name: inspection.display_name,
                 document_count: 2,
                 asset_count: 0,

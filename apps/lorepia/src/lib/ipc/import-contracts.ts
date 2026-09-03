@@ -5,9 +5,9 @@ export type ImportContentKindDto =
     | 'character_card_v3'
     | 'character_card_png'
     | 'charx_package'
-    | 'risu_module'
-    | 'risu_preset'
-    | 'risu_memory_preset';
+    | 'imported_module'
+    | 'imported_preset'
+    | 'imported_memory_preset';
 
 export interface ImportTicketDto {
     ticket_id: string;
@@ -65,7 +65,7 @@ export interface ImportInspectionDto {
 }
 
 export interface ImportedContentSummaryDto {
-    kind: 'risu_module' | 'risu_preset' | 'risu_memory_preset';
+    kind: 'imported_module' | 'imported_preset' | 'imported_memory_preset';
     import_id: string;
     display_name: string;
     document_count: number;

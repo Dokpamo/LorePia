@@ -11,12 +11,12 @@ afterEach(() => {
 });
 
 describe('OrchestrationStudio', () => {
-    it('shows route-aware compatibility setup for an imported Risu preset', () => {
+    it('shows route-aware compatibility setup for an imported external preset', () => {
         const readyState = orchestrationState();
         readyState.editable_prompt_preset = {
             value: {
-                id: 'risu-prompt',
-                name: 'Risu generation preset',
+                id: 'imported-prompt',
+                name: 'external generation preset',
                 schema_version: 1,
                 blocks: [],
                 controls: [],
@@ -26,7 +26,7 @@ describe('OrchestrationStudio', () => {
                             variable: {
                                 scope: 'app',
                                 namespace: null,
-                                id: 'lorepia_risu_import_kind',
+                                id: 'lorepia_imported_import_kind',
                             },
                             value: { type: 'enum', value: 'generation' },
                         },
@@ -34,7 +34,7 @@ describe('OrchestrationStudio', () => {
                             variable: {
                                 scope: 'app',
                                 namespace: null,
-                                id: 'lorepia_risu_model_hint',
+                                id: 'lorepia_imported_model_hint',
                             },
                             value: { type: 'text', value: 'synthetic-model-1' },
                         },
@@ -47,8 +47,8 @@ describe('OrchestrationStudio', () => {
                 module_ids: [],
                 cache_boundaries: [],
                 metadata: {
-                    description: 'Imported Risu setup',
-                    tags: ['risu'],
+                    description: 'Imported external setup',
+                    tags: ['compatibility'],
                     provenance: {
                         source_kind: 'imported_package',
                         source_id: 'fixture',
@@ -78,18 +78,22 @@ describe('OrchestrationStudio', () => {
         });
 
         expect(
-            screen.getByRole('region', { name: ko['orchestration.risu.label'] }),
+            screen.getByRole('region', { name: ko['orchestration.imported_compatibility.label'] }),
         ).toBeInTheDocument();
         expect(
-            screen.getByRole('heading', { name: ko['orchestration.risu.title.generation'] }),
+            screen.getByRole('heading', {
+                name: ko['orchestration.imported_compatibility.title.generation'],
+            }),
         ).toBeInTheDocument();
         expect(
             screen.getByRole('combobox', {
-                name: new RegExp(ko['orchestration.risu.route.generation']),
+                name: new RegExp(ko['orchestration.imported_compatibility.route.generation']),
             }),
         ).toHaveAttribute('data-value', 'route-1');
         expect(
-            screen.getByRole('button', { name: ko['orchestration.risu.action.generation'] }),
+            screen.getByRole('button', {
+                name: ko['orchestration.imported_compatibility.action.generation'],
+            }),
         ).toBeEnabled();
     });
 

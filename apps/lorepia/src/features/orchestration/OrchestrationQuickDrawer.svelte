@@ -12,6 +12,7 @@
         X,
     } from '@lucide/svelte';
     import { tr } from '../../lib/i18n';
+    import { importedText as label } from '../../lib/import-display';
     import { onDestroy, tick, type Snippet } from 'svelte';
 
     import ChoicePopover from '../../components/ChoicePopover.svelte';
@@ -25,6 +26,7 @@
     } from '../../lib/ipc/contracts';
     import { creatorControlOptions } from './creator-control-options';
     import type { OrchestrationController, OrchestrationState } from './orchestration-controller';
+    import { panelSwipeCommitDistance } from './quick-drawer-gesture';
 
     interface Props {
         appState: LorepiaAppState;
@@ -69,9 +71,6 @@
     let suppressPanelClickUntil = 0;
 
     const PANEL_SWIPE_AXIS_LOCK_PX = 8;
-    const PANEL_SWIPE_COMMIT_MIN_PX = 64;
-    const PANEL_SWIPE_COMMIT_MAX_PX = 120;
-    const PANEL_SWIPE_COMMIT_RATIO = 0.22;
     const PANEL_SWIPE_FLING_MIN_PX = 32;
     const PANEL_SWIPE_FLING_VELOCITY = 0.55;
     const PANEL_SWIPE_SETTLE_MS = 260;
@@ -176,13 +175,6 @@
         view = 'tools';
         await tick();
         drawerElement?.focus();
-    }
-
-    function panelSwipeCommitDistance(viewportWidth: number): number {
-        return Math.min(
-            PANEL_SWIPE_COMMIT_MAX_PX,
-            Math.max(PANEL_SWIPE_COMMIT_MIN_PX, viewportWidth * PANEL_SWIPE_COMMIT_RATIO),
-        );
     }
 
     function handlePanelPointerDown(event: PointerEvent): void {
@@ -504,7 +496,9 @@
 
                     {#if selectedPromptPreset !== null}
                         <p class="utility-active-preset">
-                            프롬프트 프리셋 <strong>{selectedPromptPreset.name}</strong> 사용 중
+                            {$tr('quick.preset')}
+                            <strong>{label(selectedPromptPreset.name)}</strong>
+                            {$tr('quick.active')}
                         </p>
                     {/if}
 
@@ -552,7 +546,10 @@
                                 { value: '', label: $tr('quick.preset.default') },
                                 ...orchestrationState.workspace.prompt_presets
                                     .slice(0, 100)
-                                    .map((preset) => ({ value: preset.id, label: preset.name })),
+                                    .map((preset) => ({
+                                        value: preset.id,
+                                        label: label(preset.name),
+                                    })),
                             ]}
                             onSelect={(value: string) =>
                                 controller.stageRoomConfig({

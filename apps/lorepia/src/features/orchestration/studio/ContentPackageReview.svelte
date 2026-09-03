@@ -1,5 +1,6 @@
 <script lang="ts">
     import { tr } from '../../../lib/i18n';
+    import { importedLicenseLabel, importedText } from '../../../lib/import-display';
     import type {
         ApprovableContentPackageCapabilityDto,
         ContentPackageCapabilityDto,
@@ -87,15 +88,17 @@
         <header>
             <div>
                 <h4>
-                    {packageReview.manifest.name} v{packageReview.manifest.version}
+                    {importedText(packageReview.manifest.name)} v{packageReview.manifest.version}
                 </h4>
                 <p>
-                    {packageReview.manifest.package_id} ·
-                    {packageReview.manifest.author ?? '작성자 정보 없음'}
+                    {importedText(packageReview.manifest.package_id)} ·
+                    {packageReview.manifest.author
+                        ? importedText(packageReview.manifest.author)
+                        : $tr('orchestration.package.author.unknown')}
                 </p>
             </div>
             <span class="license-badge">
-                {packageReview.manifest.license} ·
+                {importedLicenseLabel(packageReview.manifest.license)} ·
                 {packageReview.redistribution_status}
             </span>
         </header>
@@ -167,7 +170,7 @@
                                     ? 'orchestration.package.review.approved'
                                     : 'orchestration.package.review.unapproved',
                             )} ·
-                            {decision.reason.slice(0, 4096)}
+                            {importedText(decision.reason).slice(0, 4096)}
                         </p>
                     </li>
                 {/each}
@@ -186,7 +189,7 @@
                         onchange={() => contentPackageController.toggleComponent(component.id)}
                     />
                     <span>
-                        {component.id} · {component.kind}
+                        {importedText(component.id)} · {importedText(component.kind)}
                         <small>
                             {component.disposition} · 자산 {component.asset_count}개
                         </small>
@@ -207,13 +210,19 @@
                 {#if component.dependency_ids.length > 0}
                     <p>
                         의존:
-                        {component.dependency_ids.slice(0, MAX_INLINE_ITEMS).join(', ')}
+                        {component.dependency_ids
+                            .slice(0, MAX_INLINE_ITEMS)
+                            .map((value) => importedText(value))
+                            .join(', ')}
                     </p>
                 {/if}
                 {#if component.conflict_ids.length > 0}
                     <p>
                         충돌:
-                        {component.conflict_ids.slice(0, MAX_INLINE_ITEMS).join(', ')}
+                        {component.conflict_ids
+                            .slice(0, MAX_INLINE_ITEMS)
+                            .map((value) => importedText(value))
+                            .join(', ')}
                     </p>
                 {/if}
             {/each}
@@ -227,8 +236,8 @@
             <ul class="inspection-issue-list">
                 {#each packageReview.issues.slice(0, MAX_INLINE_ITEMS) as issue, index (`${issue.severity}:${issue.code}:${String(index)}`)}
                     <li data-severity={issue.severity}>
-                        <strong>{issue.code}</strong>
-                        <span>{issue.message.slice(0, 4096)}</span>
+                        <strong>{importedText(issue.code)}</strong>
+                        <span>{importedText(issue.message).slice(0, 4096)}</span>
                     </li>
                 {/each}
             </ul>
@@ -255,12 +264,13 @@
                     <ul class="compact-list">
                         {#each packageSelection.normalization_evidence.slice(0, MAX_INLINE_ITEMS) as evidence (`${evidence.component_id}:${evidence.object_id}:${evidence.field}`)}
                             <li>
-                                {evidence.component_id} / {evidence.object_id}
+                                {importedText(evidence.component_id)} /
+                                {importedText(evidence.object_id)}
                                 ·
-                                {evidence.field}:
+                                {importedText(evidence.field)}:
                                 {evidence.before ? '켜짐' : '꺼짐'} →
                                 {evidence.after ? '켜짐' : '꺼짐'} ·
-                                {evidence.reason.slice(0, 4096)}
+                                {importedText(evidence.reason).slice(0, 4096)}
                             </li>
                         {/each}
                     </ul>
@@ -290,7 +300,8 @@
                         {#each packageSelection.target_review.documents.slice(0, MAX_VISIBLE_CONTENT_PACKAGE_TARGET_DOCUMENTS) as document (`${document.source_component_id}:${String(document.component_document_ordinal)}`)}
                             <li>
                                 <strong>
-                                    {document.source_component_id} · 전체 문서
+                                    {importedText(document.source_component_id)} ·
+                                    {$tr('orchestration.package.document.whole')}
                                     인덱스
                                     {document.document_index} · 구성요소 문서
                                     순서
@@ -302,10 +313,10 @@
                                 </span>
                                 <span>
                                     종류 <code
-                                        >{document.document_kind}</code
+                                        >{importedText(document.document_kind)}</code
                                     >
                                     · 대상
-                                    <code>{document.target_object_id}</code>
+                                    <code>{importedText(document.target_object_id)}</code>
                                     · 처리
                                     {document.disposition}
                                 </span>
@@ -327,7 +338,14 @@
                                     <label class="component-choice">
                                         <input
                                             type="checkbox"
-                                            aria-label={`${document.target_object_id} 기존 대상 업데이트 확인`}
+                                            aria-label={$tr(
+                                                'orchestration.package.update_confirm',
+                                                {
+                                                    id: importedText(
+                                                        document.target_object_id,
+                                                    ),
+                                                },
+                                            )}
                                             checked={updateTargetConfirmed(document)}
                                             disabled={contentPackageState.phase !==
                                                 'selection_ready'}
@@ -391,7 +409,11 @@
                             onchange={() =>
                                 contentPackageController.toggleEnabledComponent(componentId)}
                         />
-                        <span>{componentId} 활성화</span>
+                        <span>
+                            {$tr('orchestration.package.component.enable', {
+                                id: importedText(componentId),
+                            })}
+                        </span>
                     </label>
                 {/each}
             </fieldset>
@@ -438,13 +460,17 @@
                 <p>
                     활성 구성요소:
                     {contentPackageState.approval.enabled_component_ids.length > 0
-                        ? contentPackageState.approval.enabled_component_ids.join(', ')
+                        ? contentPackageState.approval.enabled_component_ids
+                              .map((value) => importedText(value))
+                              .join(', ')
                         : '없음'}
                 </p>
                 <p>
                     승인 기능:
                     {contentPackageState.approval.approved_capabilities.length > 0
-                        ? contentPackageState.approval.approved_capabilities.join(', ')
+                        ? contentPackageState.approval.approved_capabilities
+                              .map((value) => importedText(value))
+                              .join(', ')
                         : '없음'}
                 </p>
             </article>

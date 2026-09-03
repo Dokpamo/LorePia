@@ -9,48 +9,54 @@ import type {
     TaskProfileDocumentDto,
 } from '../../lib/ipc/contracts';
 
-export type RisuCompatibilityKind = 'generation' | 'memory';
+export type ImportedCompatibilityKind = 'generation' | 'memory';
 
 type HintScalar = boolean | number | string;
 
-export interface RisuCompatibilityHints {
-    kind: RisuCompatibilityKind;
+export interface ImportedCompatibilityHints {
+    kind: ImportedCompatibilityKind;
     values: ReadonlyMap<string, HintScalar>;
 }
 
-const HINT_PREFIX = 'lorepia_risu_';
+const HINT_PREFIX = 'lorepia_imported_';
+const LEGACY_HINT_PREFIX = 'lorepia_risu_';
+const MEMORY_SUMMARY_BLOCK_PREFIX = 'imported-memory-summary-';
+const LEGACY_MEMORY_SUMMARY_BLOCK_PREFIX = 'risu-memory-summary-';
 
-export function readRisuCompatibilityHints(
+export function readImportedCompatibilityHints(
     preset: CreatorPromptPresetDocumentDto | null,
-): RisuCompatibilityHints | null {
+): ImportedCompatibilityHints | null {
     if (preset === null) return null;
     const values = new Map<string, HintScalar>();
     for (const binding of preset.default_values.values) {
-        if (!binding.variable.id.startsWith(HINT_PREFIX)) continue;
+        const prefix = [HINT_PREFIX, LEGACY_HINT_PREFIX].find((candidate) =>
+            binding.variable.id.startsWith(candidate),
+        );
+        if (prefix === undefined) continue;
         const value = binding.value;
         if (value.type === 'string_list') continue;
-        values.set(binding.variable.id.slice(HINT_PREFIX.length), value.value);
+        values.set(binding.variable.id.slice(prefix.length), value.value);
     }
     const kind = values.get('import_kind');
     return kind === 'generation' || kind === 'memory' ? { kind, values } : null;
 }
 
-export function hintString(hints: RisuCompatibilityHints, key: string): string | null {
+export function hintString(hints: ImportedCompatibilityHints, key: string): string | null {
     const value = hints.values.get(key);
     return typeof value === 'string' && value.trim() !== '' ? value : null;
 }
 
-export function hintNumber(hints: RisuCompatibilityHints, key: string): number | null {
+export function hintNumber(hints: ImportedCompatibilityHints, key: string): number | null {
     const value = hints.values.get(key);
     return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
-export function hintBoolean(hints: RisuCompatibilityHints, key: string): boolean | null {
+export function hintBoolean(hints: ImportedCompatibilityHints, key: string): boolean | null {
     const value = hints.values.get(key);
     return typeof value === 'boolean' ? value : null;
 }
 
-export function recommendRisuRoute(
+export function recommendImportedRoute(
     workspace: ProviderWorkspaceDto,
     modelHint: string | null,
 ): string {
@@ -74,9 +80,9 @@ export function recommendRisuRoute(
     );
 }
 
-export function buildRisuGenerationPreset(
+export function buildImportedGenerationPreset(
     workspace: ProviderWorkspaceDto,
-    hints: RisuCompatibilityHints,
+    hints: ImportedCompatibilityHints,
     modelRouteId: string,
     id: string,
     displayName: string,
@@ -86,7 +92,7 @@ export function buildRisuGenerationPreset(
         const raw = hintNumber(hints, hint);
         const specification = specifications.find((candidate) => candidate.id === parameter);
         if (raw === null || raw === -1_000 || specification === undefined) return [];
-        const normalized = scale === 'ratio' ? normalizeRisuRatio(raw) : raw;
+        const normalized = scale === 'ratio' ? normalizeImportedRatio(raw) : raw;
         const value = parameterLiteral(specification, normalized);
         return value === null
             ? []
@@ -118,8 +124,8 @@ export function buildRisuGenerationPreset(
     };
 }
 
-export function buildRisuSummaryTask(
-    hints: RisuCompatibilityHints,
+export function buildImportedSummaryTask(
+    hints: ImportedCompatibilityHints,
     routeId: string,
     generationPresetId: string,
 ): TaskProfileDocumentDto | null {
@@ -149,9 +155,9 @@ export function buildRisuSummaryTask(
     };
 }
 
-export function buildRisuMemoryProfile(
+export function buildImportedMemoryProfile(
     preset: CreatorPromptPresetDocumentDto,
-    hints: RisuCompatibilityHints,
+    hints: ImportedCompatibilityHints,
     summaryTaskId: string,
     displayName: string,
 ): CreatorMemoryProfileDocumentDto | null {
@@ -178,8 +184,8 @@ export function buildRisuMemoryProfile(
             10_000,
         ),
         recency_weight: recencyWeight > 0 ? recencyWeight : 1,
-        // Risu does not provide a provider-neutral embedding route and vector
-        // width. Similarity retrieval stays off until those are configured.
+        // The imported format does not provide a provider-neutral embedding
+        // route and vector width. Similarity retrieval stays off until configured.
         similarity_weight: 0,
         importance_weight: boundedNonnegative(
             hintNumber(hints, 'memory_extra_summarization_ratio'),
@@ -194,8 +200,10 @@ export function buildRisuMemoryProfile(
 function importedMemorySummaryTemplate(
     preset: CreatorPromptPresetDocumentDto,
 ): NonNullable<CreatorMemoryProfileDocumentDto['summary_template']> | null {
-    const block = preset.blocks.find((candidate) =>
-        candidate.id.startsWith('risu-memory-summary-'),
+    const block = preset.blocks.find(
+        (candidate) =>
+            candidate.id.startsWith(MEMORY_SUMMARY_BLOCK_PREFIX) ||
+            candidate.id.startsWith(LEGACY_MEMORY_SUMMARY_BLOCK_PREFIX),
     );
     const parts = block?.template?.parts;
     if (!parts?.every((part) => part.kind === 'text')) return null;
@@ -257,7 +265,7 @@ function parameterLiteral(
     return null;
 }
 
-function normalizeRisuRatio(value: number): number {
+function normalizeImportedRatio(value: number): number {
     return Math.abs(value) > 2 ? value / 100 : value;
 }
 

@@ -3,6 +3,7 @@
     import ChoiceField from '../../components/ChoiceField.svelte';
     import type { LorepiaAppState } from '../../app/app-controller';
     import { tr } from '../../lib/i18n';
+    import { importedText } from '../../lib/import-display';
     import {
         taskProfileValidationError,
         type OrchestrationController,
@@ -143,7 +144,7 @@
                         >
                             <span class="setting-content">
                                 <span class="setting-copy profile-copy">
-                                    <strong>{profile.value.id}</strong>
+                                    <strong>{importedText(profile.value.id)}</strong>
                                     <small>
                                         {profile.value.kind}{#if profile.dirty}
                                             · 저장 안 됨{/if}
@@ -217,7 +218,7 @@
         >
             <label>
                 <span>프로필 ID</span>
-                <input type="text" readonly value={profile.value.id} />
+                <input type="text" readonly value={importedText(profile.value.id)} />
             </label>
             <ChoiceField
                 id={`task-profile-kind-${profile.value.id}`}

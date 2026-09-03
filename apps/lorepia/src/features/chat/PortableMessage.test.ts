@@ -302,7 +302,7 @@ describe('PortableMessage', () => {
         expect(view.container.querySelector('strong')).toHaveTextContent('ordinary');
     });
 
-    it('renders safe Risu greeting macros without granting imported UI code', () => {
+    it('renders safe external greeting macros without granting imported UI code', () => {
         const view = render(PortableMessage, {
             text: [
                 '{{#if_pure {{equal::{{getvar::lang}}::0}}}}English{{/if}}',

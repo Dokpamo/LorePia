@@ -2,26 +2,27 @@ import { describe, expect, it } from 'vitest';
 
 import type { CreatorPromptPresetDocumentDto, ProviderWorkspaceDto } from '../../lib/ipc/contracts';
 import {
-    buildRisuGenerationPreset,
-    buildRisuMemoryProfile,
-    buildRisuSummaryTask,
-    readRisuCompatibilityHints,
-    recommendRisuRoute,
-} from './risu-compatibility';
+    buildImportedGenerationPreset,
+    buildImportedMemoryProfile,
+    buildImportedSummaryTask,
+    hintString,
+    readImportedCompatibilityHints,
+    recommendImportedRoute,
+} from './imported-compatibility';
 
 function promptWithHints(
     kind: 'generation' | 'memory',
     hints: Record<string, boolean | number | string>,
 ): CreatorPromptPresetDocumentDto {
     return {
-        id: 'risu-source',
-        name: 'Risu source',
+        id: 'imported-source',
+        name: 'external source',
         schema_version: 1,
         blocks: [],
         controls: [],
         default_values: {
             values: Object.entries({ import_kind: kind, ...hints }).map(([id, value]) => ({
-                variable: { scope: 'app', namespace: null, id: `lorepia_risu_${id}` },
+                variable: { scope: 'app', namespace: null, id: `lorepia_imported_${id}` },
                 value:
                     typeof value === 'boolean'
                         ? { type: 'bool', value }
@@ -38,7 +39,7 @@ function promptWithHints(
         cache_boundaries: [],
         metadata: {
             description: '',
-            tags: ['risu'],
+            tags: ['compatibility'],
             provenance: {
                 source_kind: 'imported_standard',
                 source_id: null,
@@ -182,9 +183,20 @@ function providerWorkspace(): ProviderWorkspaceDto {
     };
 }
 
-describe('Risu compatibility projection', () => {
+describe('external compatibility projection', () => {
+    it('continues to read legacy stored hint prefixes', () => {
+        const prompt = promptWithHints('generation', { model_hint: 'legacy-model' });
+        for (const binding of prompt.default_values.values) {
+            binding.variable.id = binding.variable.id.replace('lorepia_imported_', 'lorepia_risu_');
+        }
+
+        const hints = readImportedCompatibilityHints(prompt);
+        expect(hints?.kind).toBe('generation');
+        expect(hints === null ? null : hintString(hints, 'model_hint')).toBe('legacy-model');
+    });
+
     it('matches a model hint and clamps scaled generation parameters to the route contract', () => {
-        const hints = readRisuCompatibilityHints(
+        const hints = readImportedCompatibilityHints(
             promptWithHints('generation', {
                 model_hint: 'Gemini 3.1 Pro Preview',
                 temperature_raw: 100,
@@ -194,13 +206,13 @@ describe('Risu compatibility projection', () => {
         expect(hints).not.toBeNull();
         if (hints === null) throw new Error('generation hints');
         const workspace = providerWorkspace();
-        expect(recommendRisuRoute(workspace, 'Gemini 3.1 Pro Preview')).toBe('route-gemini');
-        const preset = buildRisuGenerationPreset(
+        expect(recommendImportedRoute(workspace, 'Gemini 3.1 Pro Preview')).toBe('route-gemini');
+        const preset = buildImportedGenerationPreset(
             workspace,
             hints,
             'route-gemini',
-            'risu-provider',
-            'Risu provider',
+            'imported-provider',
+            'external provider',
         );
         expect(preset.values).toEqual([
             {
@@ -216,8 +228,8 @@ describe('Risu compatibility projection', () => {
 
     it('projects Hypa rate and concurrency settings into a bounded summary task', () => {
         const prompt = promptWithHints('memory', {
-            memory_profile_id: 'risu-memory-profile',
-            summary_task_id: 'risu-summary-task',
+            memory_profile_id: 'imported-memory-profile',
+            summary_task_id: 'imported-summary-task',
             memory_max_chats_per_summary: 7,
             memory_query_chat_count: 3,
             memory_recent_memory_ratio: 0.6,
@@ -228,7 +240,7 @@ describe('Risu compatibility projection', () => {
         });
         prompt.blocks = [
             {
-                id: 'risu-memory-summary-fixture',
+                id: 'imported-memory-summary-fixture',
                 name: 'Summary template',
                 kind: 'static_instruction',
                 enabled: true,
@@ -258,11 +270,11 @@ describe('Risu compatibility projection', () => {
                 provenance: prompt.metadata.provenance,
             },
         ];
-        const hints = readRisuCompatibilityHints(prompt);
+        const hints = readImportedCompatibilityHints(prompt);
         if (hints === null) throw new Error('memory hints');
-        const task = buildRisuSummaryTask(hints, 'route-gemini', 'summary-generation');
+        const task = buildImportedSummaryTask(hints, 'route-gemini', 'summary-generation');
         expect(task).toMatchObject({
-            id: 'risu-summary-task',
+            id: 'imported-summary-task',
             kind: 'memory_summary',
             route_id: 'route-gemini',
             generation_preset_id: 'summary-generation',
@@ -270,10 +282,10 @@ describe('Risu compatibility projection', () => {
             concurrency_limit: 2,
         });
         if (task === null) throw new Error('summary task');
-        expect(buildRisuMemoryProfile(prompt, hints, task.id, 'Imported memory')).toEqual({
-            id: 'risu-memory-profile',
+        expect(buildImportedMemoryProfile(prompt, hints, task.id, 'Imported memory')).toEqual({
+            id: 'imported-memory-profile',
             name: 'Imported memory',
-            summary_task: 'risu-summary-task',
+            summary_task: 'imported-summary-task',
             embedding_task: null,
             turns_per_summary: 7,
             recent_raw_budget: { max_tokens: 4_096 },

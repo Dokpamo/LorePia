@@ -120,7 +120,7 @@ fn normalizes_all_public_character_fields_and_indexes_unknown_extensions() {
 }
 
 #[test]
-fn parses_risu_line_based_default_variables() {
+fn parses_imported_line_based_default_variables() {
     let fixture = json_fixture(
         br#"{
             "spec":"chara_card_v3",

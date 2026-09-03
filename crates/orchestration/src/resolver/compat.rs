@@ -3,18 +3,21 @@ use lorepia_domain::{PromptBlock, PromptConversationMessage, PromptResolutionCon
 use super::DraftMessage;
 use crate::render_portable_text;
 
-pub(super) fn is_risu_imported_block(block: &PromptBlock) -> bool {
+pub(super) fn is_compat_block(block: &PromptBlock) -> bool {
     block.provenance.source_id.as_deref().is_some_and(|source| {
-        source.starts_with("risu-preset:") || source.starts_with("risu-memory-preset:")
+        source.starts_with("imported-preset:")
+            || source.starts_with("imported-memory-preset:")
+            || source.starts_with("risu-preset:")
+            || source.starts_with("risu-memory-preset:")
     })
 }
 
-pub(super) fn render_risu_imported_text(
+pub(super) fn render_compat_text(
     block: &PromptBlock,
     source: &str,
     context: &PromptResolutionContext,
 ) -> String {
-    if is_risu_imported_block(block) {
+    if is_compat_block(block) {
         render_portable_text(source, context)
     } else {
         source.to_owned()

@@ -14,7 +14,7 @@ pub(super) fn prompt_blocks(
 ) -> CoreResult<(Vec<PromptBlock>, Vec<CacheBoundary>, usize)> {
     let items = value
         .and_then(Value::as_array)
-        .ok_or_else(|| unsupported("Risu preset promptTemplate must be an array"))?;
+        .ok_or_else(|| unsupported("imported preset promptTemplate must be an array"))?;
     let mut blocks: Vec<PromptBlock> = Vec::new();
     let mut boundaries = Vec::new();
     let mut skipped = 0_usize;
@@ -65,7 +65,7 @@ fn prompt_block(
             .get("name")
             .and_then(Value::as_str)
             .unwrap_or_default(),
-        &format!("Risu prompt item {}", index + 1),
+        &format!("Imported prompt item {}", index + 1),
     );
     let text = object
         .get("text")
@@ -73,7 +73,7 @@ fn prompt_block(
         .unwrap_or_default();
     let role = role_hint(object.get("role").and_then(Value::as_str));
     let id = format!("risu-block-{prefix}-{index}");
-    let inner_template = risu_inner_template(object)?;
+    let inner_template = imported_inner_template(object)?;
     let block = match kind {
         "persona" => dynamic_prompt_block(
             id,
@@ -132,7 +132,9 @@ fn prompt_block(
             inner_template,
             provenance,
         ),
-        "chat" if risu_latest_user_range(object) => latest_user_prompt_block(id, name, provenance),
+        "chat" if imported_latest_user_range(object) => {
+            latest_user_prompt_block(id, name, provenance)
+        }
         "chat" | "chatML" if text.trim().is_empty() => dynamic_prompt_block(
             id,
             name,
@@ -140,7 +142,7 @@ fn prompt_block(
             BlockSource::History,
             role,
             PlacementZone::RecentHistory,
-            Some(risu_history_selector(object)),
+            Some(imported_history_selector(object)),
             inner_template,
             provenance,
         ),
@@ -166,7 +168,7 @@ pub(super) fn static_prompt_block(
 ) -> CoreResult<PromptBlock> {
     if text.chars().count() > MAX_TEMPLATE_CHARS {
         return Err(unsupported(format!(
-            "Risu prompt block exceeds {MAX_TEMPLATE_CHARS} characters: {name}"
+            "imported prompt block exceeds {MAX_TEMPLATE_CHARS} characters: {name}"
         )));
     }
     Ok(PromptBlock {
@@ -279,12 +281,12 @@ fn latest_user_prompt_block(id: String, name: String, provenance: &Provenance) -
     }
 }
 
-fn risu_latest_user_range(object: &serde_json::Map<String, Value>) -> bool {
+fn imported_latest_user_range(object: &serde_json::Map<String, Value>) -> bool {
     object.get("rangeStart").and_then(Value::as_i64) == Some(-1)
         && object.get("rangeEnd").and_then(Value::as_str) == Some("end")
 }
 
-fn risu_history_selector(object: &serde_json::Map<String, Value>) -> HistorySelector {
+fn imported_history_selector(object: &serde_json::Map<String, Value>) -> HistorySelector {
     let Some(start) = object
         .get("rangeStart")
         .and_then(Value::as_i64)
@@ -300,7 +302,7 @@ fn risu_history_selector(object: &serde_json::Map<String, Value>) -> HistorySele
     HistorySelector::RelativeMessageRange { start, end }
 }
 
-fn risu_inner_template(
+fn imported_inner_template(
     object: &serde_json::Map<String, Value>,
 ) -> CoreResult<Option<SafeTemplate>> {
     let Some(source) = object
@@ -312,7 +314,7 @@ fn risu_inner_template(
     };
     if source.chars().count() > MAX_TEMPLATE_CHARS {
         return Err(unsupported(
-            "Risu innerFormat exceeds the safe template limit",
+            "imported innerFormat exceeds the safe template limit",
         ));
     }
     let mut parts = Vec::new();

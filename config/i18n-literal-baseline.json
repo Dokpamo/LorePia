@@ -181,24 +181,24 @@
       "sha256": "426bb4dd6f1d70f41c3577bb38690dd9808700c88af0f6b0d6a000b415368092"
     },
     "src/features/orchestration/ContentModuleLifecyclePanel.svelte": {
-      "hangul_lines": 217,
-      "sha256": "2c451a86f03d659b05a65461d5d39858975660e64dfb05eebf7cf1be753c3c30"
+      "hangul_lines": 196,
+      "sha256": "bc1671448cd230354af6819c12b91cb8719976e134b901eadd7e40c68b7ea02f"
     },
     "src/features/orchestration/ContentModuleLifecyclePanel.test.ts": {
       "hangul_lines": 43,
       "sha256": "7191e55896ba3f67cf8fb02e3ddc3f9762bee2d8afe288ba7ff21f98f4c1ab09"
     },
     "src/features/orchestration/CreatorDocumentEditors.svelte": {
-      "hangul_lines": 47,
-      "sha256": "9c6eeed03d9ff5d9ce2fd74dc48e86e6fcc54c51c2befeba8b02505e9eb6a89a"
+      "hangul_lines": 42,
+      "sha256": "97eb8a8b83b3a3d1855e91f279dde7bb1cdf26b3e509675dfa0d7fe9f5ada626"
     },
     "src/features/orchestration/CreatorDocumentEditors.test.ts": {
       "hangul_lines": 27,
       "sha256": "e6802841d35701a9f59b6bdb4d426b166affc8ce6e1ca1622771f43eb7d8b82a"
     },
     "src/features/orchestration/OrchestrationQuickDrawer.svelte": {
-      "hangul_lines": 3,
-      "sha256": "9674635871c449af08293e509d3385b2fbb15ce16b77cb44bf00d7204c712726"
+      "hangul_lines": 2,
+      "sha256": "76ac09bcb281e47fe013ef7698d97e24cb63365a1310058f5d0b578ab4f6b859"
     },
     "src/features/orchestration/OrchestrationQuickDrawer.test.ts": {
       "hangul_lines": 49,
@@ -237,8 +237,8 @@
       "sha256": "785dc8f4a94ff22f755345b11ba05bf6c7a3ac8a6607e023e459fa13a321e420"
     },
     "src/features/orchestration/PromptPresetHistory.svelte": {
-      "hangul_lines": 39,
-      "sha256": "78aaa91d4091e960520d8a02248824a4900d735060370d802524dafc8f097fac"
+      "hangul_lines": 38,
+      "sha256": "d00411ec9b1f17a025a782b210291fdc8ffbd835c14939196b8aa5068a8db6b9"
     },
     "src/features/orchestration/PromptPresetHistory.test.ts": {
       "hangul_lines": 10,
@@ -269,8 +269,8 @@
       "sha256": "8cb2a3368c353afd806e0ce1d044232ed081f932ebc49a40c55d3007bb62e07f"
     },
     "src/features/orchestration/studio/ContentPackageReview.svelte": {
-      "hangul_lines": 68,
-      "sha256": "dc6422dae5ce9e4f43111be261686636814b4fabdf629e54a7c1a4995240f6c2"
+      "hangul_lines": 64,
+      "sha256": "bab42904843bd037a40c64187e1976bb6ba859e0f8ac1842a9c4d47eca69f302"
     },
     "src/features/orchestration/studio/ContentSection.svelte": {
       "hangul_lines": 43,

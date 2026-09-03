@@ -3,6 +3,8 @@
     import { tick } from 'svelte';
 
     import DetailActionBar from '../../components/detail/DetailActionBar.svelte';
+    import { t } from '../../lib/i18n';
+    import { importedText } from '../../lib/import-display';
     import type {
         CreatorDocumentKind,
         CreatorDocumentValue,
@@ -10,7 +12,6 @@
         OrchestrationController,
         OrchestrationState,
     } from './orchestration-controller';
-
     interface Props {
         orchestrationState: OrchestrationState;
         controller: OrchestrationController;
@@ -23,7 +24,6 @@
         create_label: string;
         guide: string;
     }
-
     type EditableCreatorDocument = EditableCreatorDocumentState<CreatorDocumentValue>;
     type CreatorDocumentRoute =
         | { mode: 'index'; kind: null; id: null }
@@ -36,31 +36,31 @@
             kind: 'memory_profile',
             title: '메모리 프로필',
             create_label: '새 메모리 프로필 ID',
-            guide: 'summary_task, summary_schema, 세 토큰 예산, retrieval/weight 값을 편집합니다.',
+            guide: t('creator.documents.guide.memory'),
         },
         {
             kind: 'knowledge_book',
             title: '지식 책',
             create_label: '새 지식 책 ID',
-            guide: 'entries는 안전한 activation AST, placement, token_policy를 가진 typed 배열입니다.',
+            guide: t('creator.documents.guide.knowledge'),
         },
         {
             kind: 'transform_set',
             title: '변환 세트',
             create_label: '새 변환 세트 ID',
-            guide: 'rules는 제한된 정규식 descriptor와 선언형 condition만 허용하며 스크립트를 허용하지 않습니다.',
+            guide: t('creator.documents.guide.transform'),
         },
         {
             kind: 'interaction_rule_set',
             title: '상호작용 규칙 세트',
             create_label: '새 상호작용 규칙 세트 ID',
-            guide: 'rules는 닫힌 event/action union만 허용하며 임의 코드나 네트워크 작업을 표현할 수 없습니다.',
+            guide: t('creator.documents.guide.interaction'),
         },
         {
             kind: 'content_module',
             title: '콘텐츠 모듈',
             create_label: '새 콘텐츠 모듈 ID',
-            guide: '구성 요소에 맞는 required_capabilities를 선언해야 합니다. 이 경로에서는 asset_ids가 비어 있어야 합니다.',
+            guide: t('creator.documents.guide.module'),
         },
     ];
 
@@ -357,7 +357,7 @@
                 >
                     <span class="setting-content">
                         <span class="setting-copy creator-copy">
-                            <strong>{document.value.id}</strong>
+                            <strong>{importedText(document.value.id)}</strong>
                             <small>
                                 {documentType(document.value)} ·
                                 {document.expected_revision === null
@@ -414,7 +414,7 @@
                 }}
             >
                 <p class="document-meta">
-                    {selectedDocument.value.id} ·
+                    {importedText(selectedDocument.value.id)} ·
                     {selectedDocument.expected_revision === null
                         ? '새 문서'
                         : `revision ${String(selectedDocument.expected_revision)}`}

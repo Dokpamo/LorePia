@@ -550,11 +550,10 @@
 
     function handleImportCommitted(result: ImportCommitResultDto): void {
         if (result.kind !== 'content') return;
-
         view = 'create';
         chatUtilityOpen = false;
         chatUtilityAutoCollapsed = false;
-        if (result.content.kind === 'risu_module') {
+        if (result.content.kind.endsWith('module')) {
             studioSection = 'content';
             studioDetailPage = 'modules:candidates';
         } else {

@@ -7,7 +7,7 @@ fn import_and_restart_restore_library() {
 }
 
 #[test]
-fn compatible_import_commits_a_risu_memory_preset_through_the_package_boundary() {
+fn compatible_import_commits_an_imported_memory_preset_through_the_package_boundary() {
     let root = tempdir().expect("temp root");
     let core = Core::open(CoreConfig::new(root.path())).expect("open core");
     let before = core.list_prompt_presets().expect("prompt presets").len();
@@ -22,7 +22,7 @@ fn compatible_import_commits_a_risu_memory_preset_through_the_package_boundary()
         .expect("write memory preset");
     source.flush().expect("flush memory preset");
 
-    let inspection = core.inspect_import(source.path()).expect("inspect Risu JSON");
+    let inspection = core.inspect_import(source.path()).expect("inspect external JSON");
     assert_eq!(
         inspection.kind,
         lorepia_domain::ContentKind::RisuMemoryPreset
@@ -32,7 +32,7 @@ fn compatible_import_commits_a_risu_memory_preset_through_the_package_boundary()
         .commit_compatible_import(&inspection.id)
         .expect("commit compatible import");
     let crate::ImportCommitResult::Content(summary) = result else {
-        panic!("Risu memory preset must commit as content");
+        panic!("external memory preset must commit as content");
     };
     assert_eq!(summary.document_count, 1);
     assert_eq!(summary.asset_count, 0);
@@ -55,12 +55,12 @@ fn compatible_import_commits_a_risu_memory_preset_through_the_package_boundary()
         .expect("imported prompt preset")
         .revision;
 
-    let reinspection = core.inspect_import(source.path()).expect("reinspect Risu JSON");
+    let reinspection = core.inspect_import(source.path()).expect("reinspect external JSON");
     let reimport = core
         .commit_compatible_import(&reinspection.id)
         .expect("reimport compatible content");
     let crate::ImportCommitResult::Content(reimported) = reimport else {
-        panic!("reimported Risu memory preset must remain content");
+        panic!("reimported external memory preset must remain content");
     };
     assert_eq!(reimported.document_count, 1);
     assert_eq!(

@@ -78,7 +78,7 @@ describe('portable display transforms', () => {
         ).resolves.toBe('yes / good');
     });
 
-    it('renders Risu pure conditionals with line-based legacy variables', async () => {
+    it('renders external pure conditionals with line-based legacy variables', async () => {
         const variables = mergePortableDisplayVariables({
             source: JSON.stringify('lang=1\nstatus_type=0'),
         });

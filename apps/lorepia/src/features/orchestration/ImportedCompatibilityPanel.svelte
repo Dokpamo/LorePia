@@ -12,15 +12,16 @@
         RevisionedDto,
     } from '../../lib/ipc/contracts';
     import { tr } from '../../lib/i18n';
+    import { importedText } from '../../lib/import-display';
     import type { OrchestrationController, OrchestrationState } from './orchestration-controller';
     import {
-        buildRisuGenerationPreset,
-        buildRisuMemoryProfile,
-        buildRisuSummaryTask,
+        buildImportedGenerationPreset,
+        buildImportedMemoryProfile,
+        buildImportedSummaryTask,
         hintString,
-        readRisuCompatibilityHints,
-        recommendRisuRoute,
-    } from './risu-compatibility';
+        readImportedCompatibilityHints,
+        recommendImportedRoute,
+    } from './imported-compatibility';
 
     interface Props {
         client?: LorepiaClient & Partial<OrchestrationDocumentClientApi>;
@@ -46,7 +47,7 @@
     const contextualSourceDocument = $derived(orchestrationState.editable_prompt_preset);
     const sourceDocument = $derived(selectedSourceDocument ?? contextualSourceDocument);
     const sourcePreset = $derived(sourceDocument?.value ?? null);
-    const hints = $derived(readRisuCompatibilityHints(sourcePreset));
+    const hints = $derived(readImportedCompatibilityHints(sourcePreset));
     const availablePromptPresets = $derived(
         presetCatalog.length > 0
             ? presetCatalog.map((preset) => preset.value)
@@ -69,7 +70,7 @@
         if (sourcePresetId === nextSourceId) return;
         sourcePresetId = nextSourceId;
         selectedRouteId =
-            hints === null ? '' : recommendRisuRoute(appState.providers.workspace, modelHint);
+            hints === null ? '' : recommendImportedRoute(appState.providers.workspace, modelHint);
         selectedTargetPromptId = targetPrompts[0]?.id ?? '';
         feedback = '';
     });
@@ -81,7 +82,7 @@
     async function loadSourcePreset(promptPresetId: string): Promise<void> {
         const loader = client?.getEditablePromptPreset;
         if (loader === undefined) {
-            sourceError = $tr('orchestration.risu.error.source_api');
+            sourceError = $tr('orchestration.imported_compatibility.error.source_api');
             return;
         }
         const epoch = ++sourceLoadEpoch;
@@ -92,13 +93,15 @@
             const document = await loader.call(client, { prompt_preset_id: promptPresetId });
             if (epoch !== sourceLoadEpoch) return;
             selectedSourceDocument = document;
-            if (readRisuCompatibilityHints(document.value) === null) {
-                sourceError = $tr('orchestration.risu.error.source_not_compatible');
+            if (readImportedCompatibilityHints(document.value) === null) {
+                sourceError = $tr(
+                    'orchestration.imported_compatibility.error.source_not_compatible',
+                );
             }
         } catch {
             if (epoch !== sourceLoadEpoch) return;
             selectedSourceDocument = null;
-            sourceError = $tr('orchestration.risu.error.source_load');
+            sourceError = $tr('orchestration.imported_compatibility.error.source_load');
         } finally {
             if (epoch === sourceLoadEpoch) sourceLoading = false;
         }
@@ -107,7 +110,7 @@
     async function loadCompatibilityCatalog(): Promise<void> {
         const list = client?.listPromptPresets;
         if (list === undefined) {
-            sourceError = $tr('orchestration.risu.error.source_api');
+            sourceError = $tr('orchestration.imported_compatibility.error.source_api');
             return;
         }
         sourceLoading = true;
@@ -116,16 +119,16 @@
             presetCatalog = await list.call(client);
             const contextual = contextualSourceDocument;
             const preferredId =
-                contextual !== null && readRisuCompatibilityHints(contextual.value) !== null
+                contextual !== null && readImportedCompatibilityHints(contextual.value) !== null
                     ? contextual.value.id
                     : (presetCatalog[0]?.value.id ?? '');
             if (preferredId === '') {
-                sourceError = $tr('orchestration.risu.error.source_empty');
+                sourceError = $tr('orchestration.imported_compatibility.error.source_empty');
                 return;
             }
             await loadSourcePreset(preferredId);
         } catch {
-            sourceError = $tr('orchestration.risu.error.source_load');
+            sourceError = $tr('orchestration.imported_compatibility.error.source_load');
         } finally {
             sourceLoading = false;
         }
@@ -157,8 +160,12 @@
     }
 
     function generatedId(suffix: string): string {
-        const base = (sourcePreset?.id ?? 'risu').replaceAll(/[^A-Za-z0-9._-]+/g, '-');
+        const base = (sourcePreset?.id ?? 'imported').replaceAll(/[^A-Za-z0-9._-]+/g, '-');
         return `${base}-${suffix}`.slice(0, 256);
+    }
+
+    function displayPresetName(value: string): string {
+        return importedText(value, '\uD638\uD658');
     }
 
     async function applyGenerationPreset(): Promise<void> {
@@ -169,7 +176,7 @@
             client === undefined ||
             selectedRouteId === ''
         ) {
-            feedback = $tr('orchestration.risu.error.route_required');
+            feedback = $tr('orchestration.imported_compatibility.error.route_required');
             return;
         }
         busy = true;
@@ -177,19 +184,21 @@
         try {
             const saveSource = client.upsertPromptPreset;
             if (saveSource === undefined || sourceDocument === null) {
-                feedback = $tr('orchestration.risu.error.source_api');
+                feedback = $tr('orchestration.imported_compatibility.error.source_api');
                 return;
             }
             const generationPresetId = generatedId('provider');
-            const candidate = buildRisuGenerationPreset(
+            const candidate = buildImportedGenerationPreset(
                 appState.providers.workspace,
                 hints,
                 selectedRouteId,
                 generationPresetId,
-                $tr('orchestration.risu.generation_name', { name: sourcePreset.name }),
+                $tr('orchestration.imported_compatibility.generation_name', {
+                    name: displayPresetName(sourcePreset.name),
+                }),
             );
             if (!(await appController.upsertProviderGenerationPreset(candidate))) {
-                feedback = $tr('orchestration.risu.error.parameters');
+                feedback = $tr('orchestration.imported_compatibility.error.parameters');
                 return;
             }
             const updatedSource = {
@@ -207,16 +216,20 @@
                     generation_preset_id: generationPresetId,
                 });
                 if (!(await controller.saveRoomConfig())) {
-                    feedback = $tr('orchestration.risu.error.room_binding');
+                    feedback = $tr('orchestration.imported_compatibility.error.room_binding');
                     return;
                 }
-                feedback = $tr('orchestration.risu.success.generation');
+                feedback = $tr('orchestration.imported_compatibility.success.generation');
             } else {
-                feedback = $tr('orchestration.risu.success.generation_standalone');
+                feedback = $tr(
+                    'orchestration.imported_compatibility.success.generation_standalone',
+                );
             }
         } catch (error: unknown) {
             feedback =
-                error instanceof Error ? error.message : $tr('orchestration.risu.error.generation');
+                error instanceof Error
+                    ? error.message
+                    : $tr('orchestration.imported_compatibility.error.generation');
         } finally {
             busy = false;
         }
@@ -231,22 +244,28 @@
             selectedRouteId === '' ||
             selectedTargetPromptId === ''
         ) {
-            feedback = $tr('orchestration.risu.error.memory_selection');
+            feedback = $tr('orchestration.imported_compatibility.error.memory_selection');
             return;
         }
         const memoryProfileId = hintString(hints, 'memory_profile_id');
-        const task = buildRisuSummaryTask(hints, selectedRouteId, generatedId('summary-provider'));
+        const task = buildImportedSummaryTask(
+            hints,
+            selectedRouteId,
+            generatedId('summary-provider'),
+        );
         const memoryProfile =
             task === null
                 ? null
-                : buildRisuMemoryProfile(
+                : buildImportedMemoryProfile(
                       sourcePreset,
                       hints,
                       task.id,
-                      $tr('orchestration.risu.memory_name', { name: sourcePreset.name }),
+                      $tr('orchestration.imported_compatibility.memory_name', {
+                          name: displayPresetName(sourcePreset.name),
+                      }),
                   );
         if (memoryProfileId === null || task === null || memoryProfile === null) {
-            feedback = $tr('orchestration.risu.error.memory_metadata');
+            feedback = $tr('orchestration.imported_compatibility.error.memory_metadata');
             return;
         }
         const listMemory = client.listMemoryProfiles;
@@ -263,21 +282,23 @@
             getTarget === undefined ||
             saveTarget === undefined
         ) {
-            feedback = $tr('orchestration.risu.error.target_api');
+            feedback = $tr('orchestration.imported_compatibility.error.target_api');
             return;
         }
         busy = true;
         feedback = '';
         try {
-            const generationCandidate = buildRisuGenerationPreset(
+            const generationCandidate = buildImportedGenerationPreset(
                 appState.providers.workspace,
                 hints,
                 selectedRouteId,
                 task.generation_preset_id,
-                $tr('orchestration.risu.summary_name', { name: sourcePreset.name }),
+                $tr('orchestration.imported_compatibility.summary_name', {
+                    name: displayPresetName(sourcePreset.name),
+                }),
             );
             if (!(await appController.upsertProviderGenerationPreset(generationCandidate))) {
-                feedback = $tr('orchestration.risu.error.summary_preset');
+                feedback = $tr('orchestration.imported_compatibility.error.summary_preset');
                 return;
             }
             const existingTask = (await listTasks.call(client)).find(
@@ -313,16 +334,18 @@
                     memory_enabled: true,
                 });
                 if (!(await controller.saveRoomConfig())) {
-                    feedback = $tr('orchestration.risu.error.room_binding');
+                    feedback = $tr('orchestration.imported_compatibility.error.room_binding');
                     return;
                 }
-                feedback = $tr('orchestration.risu.success.memory');
+                feedback = $tr('orchestration.imported_compatibility.success.memory');
             } else {
-                feedback = $tr('orchestration.risu.success.memory_standalone');
+                feedback = $tr('orchestration.imported_compatibility.success.memory_standalone');
             }
         } catch (error: unknown) {
             feedback =
-                error instanceof Error ? error.message : $tr('orchestration.risu.error.memory');
+                error instanceof Error
+                    ? error.message
+                    : $tr('orchestration.imported_compatibility.error.memory');
         } finally {
             busy = false;
         }
@@ -332,15 +355,15 @@
 {#if presetCatalog.length > 0}
     <section
         class="compatibility-card compatibility-source"
-        aria-label={$tr('orchestration.risu.source.label')}
+        aria-label={$tr('orchestration.imported_compatibility.source.label')}
     >
         <ChoiceField
-            id="risu-compatibility-source"
-            label={$tr('orchestration.risu.source.label')}
+            id="imported-compatibility-source"
+            label={$tr('orchestration.imported_compatibility.source.label')}
             value={selectedSourcePresetId}
             options={presetCatalog.map((preset) => ({
                 value: preset.value.id,
-                label: preset.value.name,
+                label: displayPresetName(preset.value.name),
             }))}
             disabled={busy || sourceLoading}
             required
@@ -348,26 +371,35 @@
         />
         {#if sourceLoading}
             <p class="compatibility-warning" role="status">
-                {$tr('orchestration.risu.source.loading')}
+                {$tr('orchestration.imported_compatibility.source.loading')}
             </p>
         {:else if sourceError !== ''}
             <p class="compatibility-warning" role="status">{sourceError}</p>
         {/if}
     </section>
 {:else if sourceLoading && hints === null}
-    <section class="compatibility-card" aria-label={$tr('orchestration.risu.label')}>
+    <section
+        class="compatibility-card"
+        aria-label={$tr('orchestration.imported_compatibility.label')}
+    >
         <p class="compatibility-warning" role="status">
-            {$tr('orchestration.risu.source.loading')}
+            {$tr('orchestration.imported_compatibility.source.loading')}
         </p>
     </section>
 {:else if sourceError !== '' && hints === null}
-    <section class="compatibility-card" aria-label={$tr('orchestration.risu.label')}>
+    <section
+        class="compatibility-card"
+        aria-label={$tr('orchestration.imported_compatibility.label')}
+    >
         <p class="compatibility-warning" role="status">{sourceError}</p>
     </section>
 {/if}
 
 {#if hints !== null}
-    <section class="compatibility-card" aria-label={$tr('orchestration.risu.label')}>
+    <section
+        class="compatibility-card"
+        aria-label={$tr('orchestration.imported_compatibility.label')}
+    >
         <div class="compatibility-heading">
             <span class="compatibility-mark" aria-hidden="true">
                 {#if hints.kind === 'memory'}
@@ -377,19 +409,19 @@
                 {/if}
             </span>
             <div class="compatibility-copy">
-                <span class="eyebrow">{$tr('orchestration.risu.eyebrow')}</span>
+                <span class="eyebrow">{$tr('orchestration.imported_compatibility.eyebrow')}</span>
                 <h3>
                     {$tr(
                         hints.kind === 'memory'
-                            ? 'orchestration.risu.title.memory'
-                            : 'orchestration.risu.title.generation',
+                            ? 'orchestration.imported_compatibility.title.memory'
+                            : 'orchestration.imported_compatibility.title.generation',
                     )}
                 </h3>
                 <p>
                     {$tr(
                         hints.kind === 'memory'
-                            ? 'orchestration.risu.description.memory'
-                            : 'orchestration.risu.description.generation',
+                            ? 'orchestration.imported_compatibility.description.memory'
+                            : 'orchestration.imported_compatibility.description.generation',
                     )}
                 </p>
             </div>
@@ -398,15 +430,15 @@
         <div class="compatibility-fields">
             {#if appState.providers.workspace.routes.length === 0}
                 <p class="compatibility-warning" role="status">
-                    {$tr('orchestration.risu.provider_missing')}
+                    {$tr('orchestration.imported_compatibility.provider_missing')}
                 </p>
             {:else}
                 <ChoiceField
-                    id="risu-compatibility-route"
+                    id="imported-compatibility-route"
                     label={$tr(
                         hints.kind === 'memory'
-                            ? 'orchestration.risu.route.memory'
-                            : 'orchestration.risu.route.generation',
+                            ? 'orchestration.imported_compatibility.route.memory'
+                            : 'orchestration.imported_compatibility.route.generation',
                     )}
                     value={selectedRouteId}
                     options={appState.providers.workspace.routes.map((route) => ({
@@ -417,21 +449,23 @@
                     required
                     hint={modelHint === null
                         ? undefined
-                        : $tr('orchestration.risu.model_hint', { model: modelHint })}
+                        : $tr('orchestration.imported_compatibility.model_hint', {
+                              model: modelHint,
+                          })}
                     onSelect={(value: string) => (selectedRouteId = value)}
                 />
             {/if}
 
             {#if hints.kind === 'memory'}
                 <ChoiceField
-                    id="risu-compatibility-target-prompt"
-                    label={$tr('orchestration.risu.target_prompt')}
+                    id="imported-compatibility-target-prompt"
+                    label={$tr('orchestration.imported_compatibility.target_prompt')}
                     value={selectedTargetPromptId}
                     options={[
-                        { value: '', label: $tr('orchestration.risu.select') },
+                        { value: '', label: $tr('orchestration.imported_compatibility.select') },
                         ...targetPrompts.map((preset) => ({
                             value: preset.id,
-                            label: preset.name,
+                            label: displayPresetName(preset.name),
                         })),
                     ]}
                     disabled={busy}
@@ -452,11 +486,11 @@
                     void (hints.kind === 'memory' ? applyMemoryPreset() : applyGenerationPreset())}
             >
                 {busy
-                    ? $tr('orchestration.risu.action.busy')
+                    ? $tr('orchestration.imported_compatibility.action.busy')
                     : $tr(
                           hints.kind === 'memory'
-                              ? 'orchestration.risu.action.memory'
-                              : 'orchestration.risu.action.generation',
+                              ? 'orchestration.imported_compatibility.action.memory'
+                              : 'orchestration.imported_compatibility.action.generation',
                       )}
             </button>
             {#if feedback !== ''}
