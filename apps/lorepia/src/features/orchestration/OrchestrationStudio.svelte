@@ -28,6 +28,7 @@
     import RuntimePlanSection from './studio/RuntimePlanSection.svelte';
     import './studio/styles/studio-a.css';
     import './studio/styles/studio-b.css';
+    import './studio/styles/compatibility-surfaces.css';
 
     interface Props {
         client?: LorepiaClient &

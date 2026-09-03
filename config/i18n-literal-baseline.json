@@ -101,8 +101,8 @@
       "sha256": "7a2a05fb3b83ebf4a50750fa83d60dbf4110ac6c07e2c3ac3e9bf4faf1839d50"
     },
     "src/features/chat/PortableRuntimeControls.svelte": {
-      "hangul_lines": 19,
-      "sha256": "ea0f456482b183555497389f80866333ec96d4d98773ce4e52e8effa3882052d"
+      "hangul_lines": 17,
+      "sha256": "f0f180dcf1bd25f5b3179e142b4c185ca0cd4eeaf41668c257c90611e71ab5a3"
     },
     "src/features/chat/chat-scroll.svelte.ts": {
       "hangul_lines": 4,
@@ -181,12 +181,12 @@
       "sha256": "426bb4dd6f1d70f41c3577bb38690dd9808700c88af0f6b0d6a000b415368092"
     },
     "src/features/orchestration/ContentModuleLifecyclePanel.svelte": {
-      "hangul_lines": 219,
-      "sha256": "51904a2398fc22fb40f8f9c3420ab5f7115b64d3f2a871ceddcff800d3b828c0"
+      "hangul_lines": 217,
+      "sha256": "2c451a86f03d659b05a65461d5d39858975660e64dfb05eebf7cf1be753c3c30"
     },
     "src/features/orchestration/ContentModuleLifecyclePanel.test.ts": {
-      "hangul_lines": 41,
-      "sha256": "988e6ac70cd6d6964cc1f5bfb644963d0d9948a3a74070aa4dcdc6ae6fc6b9a7"
+      "hangul_lines": 43,
+      "sha256": "7191e55896ba3f67cf8fb02e3ddc3f9762bee2d8afe288ba7ff21f98f4c1ab09"
     },
     "src/features/orchestration/CreatorDocumentEditors.svelte": {
       "hangul_lines": 47,
@@ -269,8 +269,8 @@
       "sha256": "8cb2a3368c353afd806e0ce1d044232ed081f932ebc49a40c55d3007bb62e07f"
     },
     "src/features/orchestration/studio/ContentPackageReview.svelte": {
-      "hangul_lines": 73,
-      "sha256": "5a9e556ac2e5fe99967019e4c356ed611846cdf85586705151425ffb549dc6b0"
+      "hangul_lines": 68,
+      "sha256": "dc6422dae5ce9e4f43111be261686636814b4fabdf629e54a7c1a4995240f6c2"
     },
     "src/features/orchestration/studio/ContentSection.svelte": {
       "hangul_lines": 43,

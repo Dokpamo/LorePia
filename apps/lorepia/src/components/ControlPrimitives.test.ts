@@ -1,10 +1,42 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import ChoicePopover from './ChoicePopover.svelte';
 import SegmentedControl from './SegmentedControl.svelte';
 import ToggleSwitch from './ToggleSwitch.svelte';
 
 afterEach(() => cleanup());
+
+describe('ChoicePopover', () => {
+    it('can close an open menu after the owning action disables the trigger', async () => {
+        const onSelect = vi.fn();
+        const options = [
+            { value: 'off', label: 'Off' },
+            { value: 'light', label: 'Light' },
+        ];
+        const rendered = render(ChoicePopover, {
+            id: 'runtime-mode',
+            label: 'Runtime mode',
+            value: 'off',
+            options,
+            onSelect,
+        });
+
+        await fireEvent.click(screen.getByRole('combobox', { name: 'Runtime mode: Off' }));
+        await rendered.rerender({
+            id: 'runtime-mode',
+            label: 'Runtime mode',
+            value: 'off',
+            options,
+            onSelect,
+            disabled: true,
+        });
+        await fireEvent.click(screen.getByRole('option', { name: 'Light' }));
+
+        expect(onSelect).toHaveBeenCalledWith('light');
+        await waitFor(() => expect(screen.queryByRole('listbox')).not.toBeInTheDocument());
+    });
+});
 
 describe('SegmentedControl', () => {
     const options = [

@@ -33,14 +33,49 @@
     }
 
     function packageCapabilityLabel(capability: ContentPackageCapabilityDto): string {
-        if (capability === 'transforms') return $tr('orchestration.package.capability.transforms');
-        if (capability === 'declarative_interactions') {
-            return $tr('orchestration.package.capability.interactions');
-        }
-        if (capability === 'portable_runtime') {
-            return $tr('orchestration.package.capability.portable_runtime');
-        }
-        return capability;
+        const keys = {
+            attachment_assets: 'content.capability.attachment_assets',
+            audio_assets: 'content.capability.audio_assets',
+            credentials: 'content.capability.credentials',
+            declarative_interactions: 'content.capability.declarative_interactions',
+            external_urls: 'content.capability.external_urls',
+            filesystem: 'content.capability.filesystem',
+            high_risk_assets: 'content.capability.high_risk_assets',
+            html: 'content.capability.html',
+            image_assets: 'content.capability.image_assets',
+            knowledge: 'content.capability.knowledge',
+            native_code: 'content.capability.native_code',
+            network: 'content.capability.network',
+            portable_runtime: 'content.capability.portable_runtime',
+            prompt_fragments: 'content.capability.prompt_fragments',
+            script: 'content.capability.script',
+            shell: 'content.capability.shell',
+            transforms: 'content.capability.transforms',
+            variables: 'content.capability.variables',
+            video_assets: 'content.capability.video_assets',
+        } as const;
+        return $tr(keys[capability]);
+    }
+
+    function supportLabel(support: 'supported' | 'unsupported' | 'approval_required'): string {
+        const keys = {
+            approval_required: 'orchestration.package.support.approval_required',
+            supported: 'orchestration.package.support.supported',
+            unsupported: 'orchestration.package.support.unsupported',
+        } as const;
+        return $tr(keys[support]);
+    }
+
+    function formatBytes(value: number): string {
+        return new Intl.NumberFormat('ko-KR', {
+            style: 'unit',
+            unit: value >= 1_048_576 ? 'megabyte' : 'kilobyte',
+            maximumFractionDigits: 1,
+        }).format(value >= 1_048_576 ? value / 1_048_576 : value / 1_024);
+    }
+
+    function shortHash(value: string): string {
+        return value.length <= 24 ? value : `${value.slice(0, 12)}…${value.slice(-8)}`;
     }
 </script>
 
@@ -73,11 +108,11 @@
             </div>
             <div>
                 <dt>원본 크기</dt>
-                <dd>{packageReview.source_size_bytes} bytes</dd>
+                <dd>{formatBytes(packageReview.source_size_bytes)}</dd>
             </div>
             <div>
                 <dt>압축 해제 크기</dt>
-                <dd>{packageReview.total_uncompressed_size_bytes} bytes</dd>
+                <dd>{formatBytes(packageReview.total_uncompressed_size_bytes)}</dd>
             </div>
             <div>
                 <dt>자산</dt>
@@ -85,12 +120,12 @@
             </div>
             <div>
                 <dt>검토 해시</dt>
-                <dd><code>{packageReview.review_sha256}</code></dd>
+                <dd><code title={packageReview.review_sha256}>{shortHash(packageReview.review_sha256)}</code></dd>
             </div>
             <div>
                 <dt>기능 검토 해시</dt>
                 <dd>
-                    <code>{packageReview.capability_review_sha256}</code>
+                    <code title={packageReview.capability_review_sha256}>{shortHash(packageReview.capability_review_sha256)}</code>
                 </dd>
             </div>
         </dl>
@@ -107,20 +142,33 @@
             </p>
         {/if}
         {#if packageReview.manifest.required_capabilities.length > 0}
-            <p>
-                manifest 요구 기능:
-                {packageReview.manifest.required_capabilities.slice(0, MAX_INLINE_ITEMS).join(', ')}
-            </p>
+            <div
+                class="package-capability-list"
+                aria-label={$tr('orchestration.package.capabilities.manifest')}
+            >
+                {#each packageReview.manifest.required_capabilities.slice(0, MAX_INLINE_ITEMS) as capability (capability)}
+                    <span>{packageCapabilityLabel(capability)}</span>
+                {/each}
+            </div>
         {/if}
 
         {#if packageReview.capability_decisions.length > 0}
             <h4>기능 지원 검토</h4>
-            <ul class="conflict-list">
+            <ul class="capability-review-list">
                 {#each packageReview.capability_decisions.slice(0, MAX_INLINE_ITEMS) as decision (decision.capability)}
-                    <li>
-                        {decision.capability} · {decision.support} ·
-                        {decision.approved ? '검토 통과' : '미승인'} ·
-                        {decision.reason.slice(0, 4096)}
+                    <li data-support={decision.support}>
+                        <div>
+                            <strong>{packageCapabilityLabel(decision.capability)}</strong>
+                            <span class="status-badge">{supportLabel(decision.support)}</span>
+                        </div>
+                        <p>
+                            {$tr(
+                                decision.approved
+                                    ? 'orchestration.package.review.approved'
+                                    : 'orchestration.package.review.unapproved',
+                            )} ·
+                            {decision.reason.slice(0, 4096)}
+                        </p>
                     </li>
                 {/each}
             </ul>
@@ -145,10 +193,16 @@
                     </span>
                 </label>
                 {#if component.required_capabilities.length > 0}
-                    <p>
-                        요구 기능:
-                        {component.required_capabilities.slice(0, MAX_INLINE_ITEMS).join(', ')}
-                    </p>
+                    <div
+                        class="package-capability-list"
+                        aria-label={$tr('orchestration.package.capabilities.required', {
+                            id: component.id,
+                        })}
+                    >
+                        {#each component.required_capabilities.slice(0, MAX_INLINE_ITEMS) as capability (capability)}
+                            <span>{packageCapabilityLabel(capability)}</span>
+                        {/each}
+                    </div>
                 {/if}
                 {#if component.dependency_ids.length > 0}
                     <p>
@@ -170,10 +224,10 @@
 
         {#if packageReview.issues.length > 0}
             <h4>검사 결과</h4>
-            <ul class="conflict-list">
+            <ul class="inspection-issue-list">
                 {#each packageReview.issues.slice(0, MAX_INLINE_ITEMS) as issue, index (`${issue.severity}:${issue.code}:${String(index)}`)}
-                    <li>
-                        {issue.severity} · {issue.code} ·
+                    <li data-severity={issue.severity}>
+                        <strong>{issue.code}</strong>
                         <span>{issue.message.slice(0, 4096)}</span>
                     </li>
                 {/each}
@@ -307,12 +361,18 @@
                 {/if}
             </article>
 
-            <p>
-                선택에서 요구된 기능:
-                {contentPackageState.required_capabilities.length > 0
-                    ? contentPackageState.required_capabilities.join(', ')
-                    : '없음'}
-            </p>
+            {#if contentPackageState.required_capabilities.length > 0}
+                <div
+                    class="package-capability-list"
+                    aria-label={$tr('orchestration.package.capabilities.selected')}
+                >
+                    {#each contentPackageState.required_capabilities as capability (capability)}
+                        <span>{packageCapabilityLabel(capability)}</span>
+                    {/each}
+                </div>
+            {:else}
+                <p>{$tr('orchestration.package.capabilities.selected.none')}</p>
+            {/if}
 
             <fieldset>
                 <legend>가져온 뒤 활성화할 구성요소</legend>

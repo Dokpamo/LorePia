@@ -25,6 +25,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{ShellApi, ShellError, ShellResult, api::validate_identifier};
 
+mod legacy_import_approvals;
+
+use legacy_import_approvals::project_revision_import_approvals;
+
 const MAX_LIFECYCLE_DOCUMENT_BYTES: usize = 2 * 1024 * 1024;
 const MAX_LIFECYCLE_BINDINGS: usize = 256;
 const MAX_LIFECYCLE_COMPONENTS: usize = 512;
@@ -689,17 +693,14 @@ impl ShellApi {
         rollback_ancestors: &BTreeSet<ModuleRevisionId>,
     ) -> ShellResult<ContentModuleLifecycleRevisionDto> {
         let completed_package_approvals = if revision.source_kind == SourceKind::ImportedPackage {
-            self.core
-                .list_content_module_import_approval_candidates(
+            project_revision_import_approvals(
+                self.core.list_content_module_import_approval_candidates(
                     module_id,
                     ModuleRevisionResolutionMode::Pinned,
                     Some(&revision.revision_id),
                     MAX_LIFECYCLE_IMPORT_APPROVALS,
-                )
-                .map_err(ShellError::from)?
-                .into_iter()
-                .map(ContentModuleImportApprovalCandidateDto::try_from)
-                .collect::<ShellResult<Vec<_>>>()?
+                ),
+            )?
         } else {
             Vec::new()
         };

@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { ChevronRight, Link2, PackageOpen, RefreshCw } from '@lucide/svelte';
     import { onMount, untrack } from 'svelte';
 
     import DetailActionBar from '../../components/detail/DetailActionBar.svelte';
@@ -9,6 +10,7 @@
         OrchestrationVariableRefDto,
         OrchestrationVariableValueDto,
     } from '../../lib/ipc/contracts';
+    import { tr } from '../../lib/i18n';
     import {
         ContentModuleLifecycleController,
         INITIAL_CONTENT_MODULE_LIFECYCLE_STATE,
@@ -18,10 +20,13 @@
     } from './module-lifecycle-controller';
     import type {
         ContentModuleCandidateSourceDto,
+        ContentModuleCapabilityDto,
         ContentModuleComponentRefDto,
         ContentModuleLifecycleClientApi,
         ContentModuleRollbackBlockerDto,
+        ContentModuleSourceKindDto,
     } from './module-lifecycle-contracts';
+    import './styles/content-module-lifecycle.css';
 
     const MAX_VISIBLE_HASH_APPROVAL_ITEMS = 100;
     const MAX_VISIBLE_VARIABLE_VALUE_CHARACTERS = 160;
@@ -150,6 +155,34 @@
 
     function sourceLabel(source: ContentModuleCandidateSourceDto): string {
         return `${source.module_id} / ${source.revision_id} · 소스 ${shortHash(source.revision_source_sha256)} · 바인딩 ${source.binding_id} · ${scopeLabel(source.scope)} · 우선순위 ${String(source.priority)} · 순서 ${String(source.module_ordinal)} · 런타임 의도 ${source.runtime_enabled_intent ? '켬' : '끔'}`;
+    }
+
+    function sourceKindLabel(kind: ContentModuleSourceKindDto): string {
+        const keys = {
+            application_built_in: 'content.source.application_built_in',
+            generated: 'content.source.generated',
+            imported_package: 'content.source.imported_package',
+            imported_standard: 'content.source.imported_standard',
+            user_created: 'content.source.user_created',
+        } as const;
+        return $tr(keys[kind]);
+    }
+
+    function capabilityLabel(capability: ContentModuleCapabilityDto): string {
+        const keys = {
+            attachment_assets: 'content.capability.attachment_assets',
+            audio_assets: 'content.capability.audio_assets',
+            declarative_interactions: 'content.capability.declarative_interactions',
+            high_risk_assets: 'content.capability.high_risk_assets',
+            image_assets: 'content.capability.image_assets',
+            knowledge: 'content.capability.knowledge',
+            portable_runtime: 'content.capability.portable_runtime',
+            prompt_fragments: 'content.capability.prompt_fragments',
+            transforms: 'content.capability.transforms',
+            variables: 'content.capability.variables',
+            video_assets: 'content.capability.video_assets',
+        } as const;
+        return $tr(keys[capability]);
     }
 
     function variableRefLabel(variable: OrchestrationVariableRefDto): string {
@@ -295,6 +328,7 @@
                     type="button"
                     onclick={() => (detailPage = 'modules:candidates')}
                 >
+                    <span class="setting-icon" aria-hidden="true"><PackageOpen /></span>
                     <span class="setting-content">
                         <span class="setting-copy">
                             <strong>활성화 후보</strong>
@@ -302,6 +336,12 @@
                                 불변 리비전 {lifecycleState.candidates.length}개를 검토하고
                                 활성화합니다.
                             </small>
+                        </span>
+                        <span class="setting-trailing">
+                            <span class="setting-value">
+                                {$tr('content.count', { count: lifecycleState.candidates.length })}
+                            </span>
+                            <ChevronRight size={16} aria-hidden="true" />
                         </span>
                     </span>
                 </button>
@@ -312,6 +352,7 @@
                     type="button"
                     onclick={() => (detailPage = 'modules:bindings')}
                 >
+                    <span class="setting-icon" aria-hidden="true"><Link2 /></span>
                     <span class="setting-content">
                         <span class="setting-copy">
                             <strong>모듈 바인딩</strong>
@@ -319,6 +360,12 @@
                                 저장된 바인딩 {lifecycleState.bindings.length}개와 롤백 가능한
                                 리비전을 관리합니다.
                             </small>
+                        </span>
+                        <span class="setting-trailing">
+                            <span class="setting-value">
+                                {$tr('content.count', { count: lifecycleState.bindings.length })}
+                            </span>
+                            <ChevronRight size={16} aria-hidden="true" />
                         </span>
                     </span>
                 </button>
@@ -330,7 +377,9 @@
         <section aria-labelledby="module-candidates-title">
             <div class="subheading">
                 <h4 id="module-candidates-title">활성화 후보</h4>
-                <span>{lifecycleState.candidates.length}개</span>
+                <span class="section-count">
+                    {$tr('content.count', { count: lifecycleState.candidates.length })}
+                </span>
             </div>
             <div class="candidate-grid">
                 {#each lifecycleState.candidates as candidate (`${candidate.module_id}:${candidate.revision_id}`)}
@@ -339,7 +388,7 @@
                             <div>
                                 <strong>{candidate.name}</strong>
                                 <span>
-                                    v{candidate.version} · {candidate.source_kind} ·
+                                    v{candidate.version} · {sourceKindLabel(candidate.source_kind)} ·
                                     {candidate.component_count}개 구성요소
                                 </span>
                             </div>
@@ -372,7 +421,14 @@
                             </ul>
                         {/if}
                         {#if candidate.required_capabilities.length > 0}
-                            <p>요구 권한: {candidate.required_capabilities.join(', ')}</p>
+                            <div
+                                class="capability-list"
+                                aria-label={$tr('content.capability.required')}
+                            >
+                                {#each candidate.required_capabilities as capability (capability)}
+                                    <span>{capabilityLabel(capability)}</span>
+                                {/each}
+                            </div>
                         {/if}
                         {#if candidate.source_kind === 'imported_package'}
                             <p class="lifecycle-note">
@@ -382,6 +438,7 @@
                             </p>
                         {/if}
                         <button
+                            class="primary candidate-action"
                             type="button"
                             disabled={busy ||
                                 !candidate.local_use_allowed ||
@@ -1138,6 +1195,7 @@
                 disabled={busy || conversationId === null || branchId === null}
                 onclick={() => void controller.loadContext(conversationId, branchId)}
             >
+                <RefreshCw size={17} aria-hidden="true" />
                 후보·바인딩 새로고침
             </button>
         </DetailActionBar>
@@ -1248,302 +1306,3 @@
     {@render lifecycleContent()}
     {@render lifecycleActions()}
 </section>
-
-<style>
-    .module-lifecycle {
-        display: grid;
-        width: 100%;
-        min-width: 0;
-        min-height: 0;
-        padding: 0;
-        border: 0;
-        background: transparent;
-        gap: 16px;
-    }
-
-    .lifecycle-index {
-        width: 100%;
-        margin: 0;
-    }
-
-    .lifecycle-index-row {
-        min-height: clamp(62px, 17.849vw, 78px);
-    }
-
-    .lifecycle-index-row .setting-copy {
-        display: grid;
-        min-width: 0;
-        gap: 5px;
-        text-align: left;
-    }
-
-    .lifecycle-index-row :is(strong, small) {
-        overflow: hidden;
-        font-size: var(--detail-support-type);
-        line-height: 1.35;
-        text-overflow: ellipsis;
-    }
-
-    .lifecycle-index-row strong {
-        color: var(--ink);
-        font-weight: 550;
-        white-space: nowrap;
-    }
-
-    .lifecycle-index-row small {
-        display: -webkit-box;
-        color: var(--ink-muted);
-        font-weight: 550;
-        overflow-wrap: anywhere;
-        white-space: normal;
-        line-clamp: 3;
-        -webkit-box-orient: vertical;
-        -webkit-line-clamp: 3;
-    }
-
-    .subheading,
-    .candidate-card header,
-    .binding-card header {
-        display: flex;
-        align-items: flex-start;
-        justify-content: space-between;
-        gap: 1rem;
-    }
-
-    .subheading h4,
-    .hash-review h5,
-    .diff h5,
-    .receipt h5 {
-        margin: 0;
-    }
-
-    .hash-review h6 {
-        margin: 0.2rem 0 0;
-    }
-
-    .subheading p {
-        margin: 0.35rem 0 0;
-    }
-
-    .candidate-grid,
-    .binding-list {
-        display: grid;
-        gap: 0;
-        margin-top: 8px;
-    }
-
-    .candidate-card,
-    .binding-card {
-        display: grid;
-        gap: 12px;
-        padding: 16px 0;
-        border: 0;
-        border-bottom: 1px solid var(--line);
-        border-radius: 0;
-        background: transparent;
-    }
-
-    .review-surface,
-    .hash-review,
-    .diff,
-    .receipt {
-        display: grid;
-        min-width: 0;
-        gap: 14px;
-        padding: 0;
-        border: 0;
-        border-radius: 0;
-        background: transparent;
-    }
-
-    .hash-review,
-    .diff,
-    .receipt {
-        padding-top: 16px;
-        border-top: 1px solid var(--line);
-    }
-
-    .candidate-card header div,
-    .binding-card header div {
-        display: grid;
-        gap: 0.2rem;
-    }
-
-    .candidate-card p,
-    .binding-card p,
-    .review-surface p,
-    .hash-review p,
-    .diff p,
-    .receipt p {
-        margin: 0;
-    }
-
-    .gate-grid,
-    .hash-grid,
-    .hash-review dl {
-        display: grid;
-        grid-template-columns: 1fr;
-        gap: 0;
-        margin: 0;
-    }
-
-    .gate-grid div,
-    .hash-grid div,
-    .hash-review dl div {
-        display: flex;
-        min-width: 0;
-        align-items: baseline;
-        justify-content: space-between;
-        padding: 10px 0;
-        border-bottom: 1px solid var(--line);
-        gap: 16px;
-    }
-
-    dt {
-        color: var(--ink-muted);
-        font-size: var(--detail-support-type);
-        font-weight: 700;
-    }
-
-    dd {
-        margin: 0;
-        color: var(--ink);
-        font-size: var(--detail-support-type);
-        text-align: right;
-        overflow-wrap: anywhere;
-    }
-
-    dd.allowed {
-        color: var(--success);
-    }
-
-    .draft-grid,
-    .conflict-list {
-        display: grid;
-        grid-template-columns: 1fr;
-        gap: 14px;
-    }
-
-    .draft-grid label,
-    .conflict-list label {
-        display: grid;
-        gap: 7px;
-        color: var(--ink-muted);
-        font-size: var(--detail-support-type);
-        font-weight: 700;
-    }
-
-    input {
-        width: 100%;
-        min-width: 0;
-        min-height: clamp(48px, 13.73vw, 60px);
-        box-sizing: border-box;
-        padding: clamp(12px, 3.432vw, 15px);
-        border: 1.5px solid var(--line);
-        border-radius: var(--radius-md);
-        -webkit-appearance: none;
-        appearance: none;
-        background: color-mix(in srgb, var(--surface-sunken) 26%, var(--surface-raised));
-        box-shadow: var(--control-inset-shadow);
-        caret-color: var(--accent);
-        color: var(--ink);
-        font-size: var(--detail-support-type);
-        line-height: 1.5;
-        transition:
-            background-color 140ms ease,
-            box-shadow 140ms ease;
-    }
-
-    input:hover:not(:focus, :disabled) {
-        border-color: var(--line);
-    }
-
-    input:focus {
-        border-color: var(--accent);
-        outline: none;
-    }
-
-    input:disabled {
-        cursor: not-allowed;
-        opacity: var(--disabled-opacity);
-    }
-
-    .revision-list {
-        display: grid;
-        gap: 0.5rem;
-        margin: 0;
-        padding: 0;
-        list-style: none;
-    }
-
-    .plan-detail-list,
-    .authority-list,
-    .compact-list {
-        display: grid;
-        gap: 0.55rem;
-        margin: 0.45rem 0 0;
-        padding-left: 1.25rem;
-    }
-
-    .plan-detail-list > li,
-    .authority-list > li {
-        display: grid;
-        gap: 0.3rem;
-    }
-
-    .plan-detail-list ul,
-    .authority-list ul {
-        margin: 0.2rem 0 0;
-    }
-
-    .revision-list li {
-        display: grid;
-        gap: 10px;
-        padding-block: 12px;
-        border-top: 1px solid var(--line);
-    }
-
-    .current-badge {
-        padding: 0.2rem 0.55rem;
-        border-radius: 999px;
-        background: var(--surface-sunken);
-        font-size: 0.82rem;
-    }
-
-    .lifecycle-note {
-        color: var(--ink-muted);
-    }
-
-    .lifecycle-error,
-    .blocker-list {
-        padding: 10px 12px;
-        border: 1px solid var(--status-error-border);
-        border-radius: var(--radius-sm);
-        color: var(--status-error-fg);
-        background: var(--status-error-bg);
-    }
-
-    .receipt {
-        color: var(--ink);
-    }
-
-    code {
-        overflow-wrap: anywhere;
-    }
-
-    .candidate-card > button,
-    .binding-card > button,
-    .revision-list button {
-        justify-self: stretch;
-        min-height: 44px;
-    }
-
-    @container view (min-width: 700px) {
-        .gate-grid,
-        .hash-grid,
-        .hash-review dl {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            column-gap: 24px;
-        }
-    }
-</style>

@@ -18,6 +18,7 @@ export type ContentModuleCapabilityDto =
     | 'variables'
     | 'transforms'
     | 'declarative_interactions'
+    | 'portable_runtime'
     | 'image_assets'
     | 'audio_assets'
     | 'video_assets'

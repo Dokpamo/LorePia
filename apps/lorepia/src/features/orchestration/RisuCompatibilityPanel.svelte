@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { Database, SlidersHorizontal } from '@lucide/svelte';
     import { onMount } from 'svelte';
 
     import type { LorepiaAppController, LorepiaAppState } from '../../app/app-controller';
@@ -367,100 +368,132 @@
 
 {#if hints !== null}
     <section class="compatibility-card" aria-label={$tr('orchestration.risu.label')}>
-        <div class="compatibility-copy">
-            <span class="eyebrow">{$tr('orchestration.risu.eyebrow')}</span>
-            <h3>
-                {$tr(
-                    hints.kind === 'memory'
-                        ? 'orchestration.risu.title.memory'
-                        : 'orchestration.risu.title.generation',
-                )}
-            </h3>
-            <p>
-                {$tr(
-                    hints.kind === 'memory'
-                        ? 'orchestration.risu.description.memory'
-                        : 'orchestration.risu.description.generation',
-                )}
-            </p>
+        <div class="compatibility-heading">
+            <span class="compatibility-mark" aria-hidden="true">
+                {#if hints.kind === 'memory'}
+                    <Database size={20} />
+                {:else}
+                    <SlidersHorizontal size={20} />
+                {/if}
+            </span>
+            <div class="compatibility-copy">
+                <span class="eyebrow">{$tr('orchestration.risu.eyebrow')}</span>
+                <h3>
+                    {$tr(
+                        hints.kind === 'memory'
+                            ? 'orchestration.risu.title.memory'
+                            : 'orchestration.risu.title.generation',
+                    )}
+                </h3>
+                <p>
+                    {$tr(
+                        hints.kind === 'memory'
+                            ? 'orchestration.risu.description.memory'
+                            : 'orchestration.risu.description.generation',
+                    )}
+                </p>
+            </div>
         </div>
 
-        {#if appState.providers.workspace.routes.length === 0}
-            <p class="compatibility-warning" role="status">
-                {$tr('orchestration.risu.provider_missing')}
-            </p>
-        {:else}
-            <ChoiceField
-                id="risu-compatibility-route"
-                label={$tr(
-                    hints.kind === 'memory'
-                        ? 'orchestration.risu.route.memory'
-                        : 'orchestration.risu.route.generation',
-                )}
-                value={selectedRouteId}
-                options={appState.providers.workspace.routes.map((route) => ({
-                    value: route.id,
-                    label: `${route.display_name ?? route.model_id} · ${route.api_family}`,
-                }))}
-                disabled={busy}
-                required
-                hint={modelHint === null
-                    ? undefined
-                    : $tr('orchestration.risu.model_hint', { model: modelHint })}
-                onSelect={(value: string) => (selectedRouteId = value)}
-            />
-        {/if}
+        <div class="compatibility-fields">
+            {#if appState.providers.workspace.routes.length === 0}
+                <p class="compatibility-warning" role="status">
+                    {$tr('orchestration.risu.provider_missing')}
+                </p>
+            {:else}
+                <ChoiceField
+                    id="risu-compatibility-route"
+                    label={$tr(
+                        hints.kind === 'memory'
+                            ? 'orchestration.risu.route.memory'
+                            : 'orchestration.risu.route.generation',
+                    )}
+                    value={selectedRouteId}
+                    options={appState.providers.workspace.routes.map((route) => ({
+                        value: route.id,
+                        label: `${route.display_name ?? route.model_id} · ${route.api_family}`,
+                    }))}
+                    disabled={busy}
+                    required
+                    hint={modelHint === null
+                        ? undefined
+                        : $tr('orchestration.risu.model_hint', { model: modelHint })}
+                    onSelect={(value: string) => (selectedRouteId = value)}
+                />
+            {/if}
 
-        {#if hints.kind === 'memory'}
-            <ChoiceField
-                id="risu-compatibility-target-prompt"
-                label={$tr('orchestration.risu.target_prompt')}
-                value={selectedTargetPromptId}
-                options={[
-                    { value: '', label: $tr('orchestration.risu.select') },
-                    ...targetPrompts.map((preset) => ({
-                        value: preset.id,
-                        label: preset.name,
-                    })),
-                ]}
-                disabled={busy}
-                required
-                onSelect={(value: string) => (selectedTargetPromptId = value)}
-            />
-        {/if}
+            {#if hints.kind === 'memory'}
+                <ChoiceField
+                    id="risu-compatibility-target-prompt"
+                    label={$tr('orchestration.risu.target_prompt')}
+                    value={selectedTargetPromptId}
+                    options={[
+                        { value: '', label: $tr('orchestration.risu.select') },
+                        ...targetPrompts.map((preset) => ({
+                            value: preset.id,
+                            label: preset.name,
+                        })),
+                    ]}
+                    disabled={busy}
+                    required
+                    onSelect={(value: string) => (selectedTargetPromptId = value)}
+                />
+            {/if}
+        </div>
 
-        <button
-            class="primary compatibility-action"
-            type="button"
-            disabled={busy ||
-                selectedRouteId === '' ||
-                (hints.kind === 'memory' && selectedTargetPromptId === '')}
-            onclick={() =>
-                void (hints.kind === 'memory' ? applyMemoryPreset() : applyGenerationPreset())}
-        >
-            {busy
-                ? $tr('orchestration.risu.action.busy')
-                : $tr(
-                      hints.kind === 'memory'
-                          ? 'orchestration.risu.action.memory'
-                          : 'orchestration.risu.action.generation',
-                  )}
-        </button>
-        {#if feedback !== ''}
-            <p class="compatibility-feedback" role="status">{feedback}</p>
-        {/if}
+        <footer class="compatibility-footer">
+            <button
+                class="primary compatibility-action"
+                type="button"
+                disabled={busy ||
+                    selectedRouteId === '' ||
+                    (hints.kind === 'memory' && selectedTargetPromptId === '')}
+                onclick={() =>
+                    void (hints.kind === 'memory' ? applyMemoryPreset() : applyGenerationPreset())}
+            >
+                {busy
+                    ? $tr('orchestration.risu.action.busy')
+                    : $tr(
+                          hints.kind === 'memory'
+                              ? 'orchestration.risu.action.memory'
+                              : 'orchestration.risu.action.generation',
+                      )}
+            </button>
+            {#if feedback !== ''}
+                <p class="compatibility-feedback" role="status">{feedback}</p>
+            {/if}
+        </footer>
     </section>
 {/if}
 
 <style>
     .compatibility-card {
         display: grid;
-        gap: 14px;
-        padding: 18px;
+        gap: 18px;
+        padding: clamp(16px, 4.5vw, 20px);
         border: 1px solid var(--line);
         border-radius: var(--radius-lg);
         background: var(--surface-raised);
+        box-shadow: var(--shadow-1);
         color: var(--ink);
+    }
+
+    .compatibility-heading {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        align-items: start;
+        gap: 12px;
+    }
+
+    .compatibility-mark {
+        display: grid;
+        width: 38px;
+        height: 38px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-md);
+        background: var(--surface-sunken);
+        color: var(--ink);
+        place-items: center;
     }
 
     .compatibility-copy {
@@ -470,13 +503,15 @@
 
     .compatibility-source {
         margin-bottom: 12px;
+        background: color-mix(in srgb, var(--surface-sunken) 58%, var(--surface-raised));
+        box-shadow: none;
     }
 
     .eyebrow {
-        color: var(--accent);
+        color: var(--ink-subtle);
         font-size: 0.7rem;
-        font-weight: 800;
-        letter-spacing: 0.12em;
+        font-weight: 700;
+        letter-spacing: 0.08em;
     }
 
     h3,
@@ -489,13 +524,42 @@
         line-height: 1.5;
     }
 
+    .compatibility-fields,
+    .compatibility-footer {
+        display: grid;
+        gap: 14px;
+    }
+
+    .compatibility-fields {
+        padding-top: 16px;
+        border-top: 1px solid var(--line);
+    }
+
     .compatibility-action {
-        min-height: 44px;
+        min-height: 48px;
+        border-radius: var(--radius-pill);
     }
 
     .compatibility-warning,
     .compatibility-feedback {
-        color: var(--ink-muted);
+        padding: 10px 12px;
+        border: 1px solid var(--status-warning-border);
+        border-radius: var(--radius-md);
+        margin: 0;
+        background: var(--status-warning-bg);
+        color: var(--status-warning-fg);
         line-height: 1.5;
+    }
+
+    .compatibility-feedback {
+        border-color: var(--status-info-border);
+        background: var(--status-info-bg);
+        color: var(--status-info-fg);
+    }
+
+    @container view (min-width: 720px) {
+        .compatibility-fields {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
     }
 </style>

@@ -31,14 +31,21 @@ class MainActivity : TauriActivity() {
 
   override fun onResume() {
     super.onResume()
-    if (::appBackCallback.isInitialized) {
-      appBackCallback.remove()
-      onBackPressedDispatcher.addCallback(this, appBackCallback)
-    }
+    promoteBackCallback()
   }
 
   override fun onWebViewCreate(webView: WebView) {
     appWebView = webView
+    // Tauri's app plugin registers its own callback after this hook returns.
+    // Promote LorePia once that registration finishes so app routes win over
+    // the WebView's internal navigation history.
+    webView.post { promoteBackCallback() }
+  }
+
+  private fun promoteBackCallback() {
+    if (!::appBackCallback.isInitialized) return
+    appBackCallback.remove()
+    onBackPressedDispatcher.addCallback(this, appBackCallback)
   }
 
   companion object {

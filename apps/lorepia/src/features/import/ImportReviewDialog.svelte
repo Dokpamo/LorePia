@@ -159,7 +159,10 @@
                         >{inspection.display_name.slice(0, 1)}</span
                     >
                     <div>
-                        <h3>{inspection.display_name}</h3>
+                        <div class="review-title-row">
+                            <h3>{inspection.display_name}</h3>
+                            <span class="review-kind-badge">{kindLabel(inspection.kind)}</span>
+                        </div>
                         <p class="review-description">
                             {descriptionPreview(inspection.description)}
                         </p>
@@ -167,10 +170,6 @@
                 </div>
 
                 <dl class="metadata-grid">
-                    <div>
-                        <dt>{$tr('import.kind')}</dt>
-                        <dd>{kindLabel(inspection.kind)}</dd>
-                    </div>
                     <div>
                         <dt>{$tr('import.source_size')}</dt>
                         <dd>{formatBytes(inspection.source_size)}</dd>

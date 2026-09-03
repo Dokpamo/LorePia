@@ -161,7 +161,7 @@
     }
 
     async function setOpen(next: boolean, restoreFocus = false): Promise<void> {
-        if (disabled) return;
+        if (disabled && next) return;
         if (next) positionMenu();
         open = next;
         if (next) {

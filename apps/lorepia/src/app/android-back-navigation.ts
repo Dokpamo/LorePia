@@ -10,6 +10,28 @@ export function resolveMobileBackAction(route: MobileBackRoute): MobileBackActio
     return route.view === 'home' ? 'exit' : 'home';
 }
 
+/** Ask the focused top-layer control to consume Back as Escape before routing. */
+export function dismissMobileBackLayer(): boolean {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return false;
+
+    const escapeEvent = new KeyboardEvent('keydown', {
+        key: 'Escape',
+        code: 'Escape',
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+    });
+    const target = document.activeElement instanceof HTMLElement ? document.activeElement : window;
+    target.dispatchEvent(escapeEvent);
+    if (escapeEvent.defaultPrevented) return true;
+
+    const dialog = document.querySelector<HTMLDialogElement>('dialog[open][aria-modal="true"]');
+    if (dialog === null) return false;
+    const cancelEvent = new Event('cancel', { cancelable: true });
+    dialog.dispatchEvent(cancelEvent);
+    return cancelEvent.defaultPrevented;
+}
+
 interface AndroidBackWindow extends Window {
     isTauri?: boolean;
     __LOREPIA_ANDROID_BACK__?: () => MobileBackAction;
@@ -33,6 +55,7 @@ export function installAndroidBack(
     const target = androidWindow();
     if (target === null) return () => undefined;
     const handler = (): MobileBackAction => {
+        if (dismissMobileBackLayer()) return 'pop';
         const action = resolveMobileBackAction(readRoute());
         if (action === 'pop') popRoute();
         else if (action === 'home') goHome();
