@@ -66,14 +66,17 @@ pub fn extract_single_character_transport(
     }
     let size = entry.size();
     let compressed = entry.compressed_size();
-    if size == 0
-        || size > limits.max_source_bytes
-        || size > limits.max_total_uncompressed_bytes
-        || compressed == 0
-        || size > compressed.saturating_mul(limits.max_compression_ratio)
-    {
+    if size == 0 {
+        return Err(unsafe_archive("transport ZIP entry is empty"));
+    }
+    if size > limits.max_source_bytes || size > limits.max_total_uncompressed_bytes {
+        return Err(resource_limit(
+            "transport ZIP entry exceeds the configured byte envelope",
+        ));
+    }
+    if compressed == 0 || size > compressed.saturating_mul(limits.max_compression_ratio) {
         return Err(unsafe_archive(
-            "transport ZIP entry exceeds source or compression limits",
+            "transport ZIP entry exceeds the compression-ratio limit",
         ));
     }
     std::fs::create_dir_all(staging_directory).map_err(storage_error)?;
@@ -152,6 +155,10 @@ fn unsafe_archive(message: impl Into<String>) -> CoreError {
     CoreError::new(CoreErrorCode::UnsafeArchive, message, false)
 }
 
+fn resource_limit(message: impl Into<String>) -> CoreError {
+    CoreError::new(CoreErrorCode::UnsupportedContent, message, true)
+}
+
 fn storage_error(error: std::io::Error) -> CoreError {
     CoreError::new(
         CoreErrorCode::StorageUnavailable,
@@ -223,6 +230,7 @@ mod tests {
         };
         let error = extract_single_character_transport(&source_path, limits, root.path())
             .expect_err("global source limit must still apply");
-        assert_eq!(error.code, CoreErrorCode::UnsafeArchive);
+        assert_eq!(error.code, CoreErrorCode::UnsupportedContent);
+        assert!(error.recoverable);
     }
 }

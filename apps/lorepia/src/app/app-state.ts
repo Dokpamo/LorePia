@@ -22,6 +22,8 @@ export interface SectionState {
 
 export interface ImportFlowState extends SectionState {
     inspection: ImportInspectionDto | null;
+    resource_override_active: boolean;
+    resource_override_available: boolean;
 }
 
 export interface ChatState extends SectionState {
@@ -110,7 +112,13 @@ export const INITIAL_APP_STATE: LorepiaAppState = {
     bootstrap: { phase: 'idle', error: null, value: null },
     memory_supervisor: { phase: 'idle', error: null, status: null },
     library: { phase: 'idle', error: null, characters: [] },
-    import_flow: { phase: 'idle', error: null, inspection: null },
+    import_flow: {
+        phase: 'idle',
+        error: null,
+        inspection: null,
+        resource_override_active: false,
+        resource_override_available: false,
+    },
     selected_character: null,
     conversations: { phase: 'idle', error: null, items: [] },
     greeting_catalog: {

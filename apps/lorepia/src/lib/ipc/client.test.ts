@@ -1144,15 +1144,15 @@ describe('LiveLorepiaClient transport boundary', () => {
 
     it('contains only commands registered by the Tauri invoke handler', () => {
         const registered = new Set(
-            [...rustInvokeHandler.matchAll(/commands::([a-z_]+)/g)].map((match) => match[1]),
+            [...rustInvokeHandler.matchAll(/commands(?:::\w+)*::(\w+)/g)].map((m) => m[1]),
         );
 
-        const clientCommands = Object.values(LOREPIA_COMMANDS);
-        for (const commandName of clientCommands) {
-            expect(commandName).not.toContain('plugin:');
-            expect(registered.has(commandName), commandName).toBe(true);
+        const commands = Object.values(LOREPIA_COMMANDS);
+        for (const name of commands) {
+            expect(name).not.toContain('plugin:');
+            expect(registered.has(name), name).toBe(true);
         }
-        expect([...clientCommands].sort()).toEqual([...registered].sort());
+        expect([...commands].sort()).toEqual([...registered].sort());
     });
 
     it('routes the production room workspace and full quick-settings save through bounded commands', async () => {

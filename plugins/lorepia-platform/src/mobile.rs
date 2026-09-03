@@ -54,6 +54,12 @@ struct SensitiveCaptureArgs {
     maximum_bytes: u64,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportLimitArgs {
+    maximum_bytes: u64,
+}
+
 #[cfg(target_os = "android")]
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -126,12 +132,18 @@ impl<R: Runtime> MobilePlatform<R> {
             .ok_or_else(|| PlatformError::new(PlatformErrorCode::PermissionDenied))
     }
 
-    pub(crate) async fn pick_import(&self) -> PlatformResult<Option<StagedImport>> {
+    pub(crate) async fn pick_import(
+        &self,
+        maximum_bytes: u64,
+    ) -> PlatformResult<Option<StagedImport>> {
         let response = self
             .handle
-            .run_mobile_plugin_async::<MobilePickResponse>("pickImport", ())
+            .run_mobile_plugin_async::<MobilePickResponse>(
+                "pickImport",
+                ImportLimitArgs { maximum_bytes },
+            )
             .await
-            .map_err(|_| PlatformError::new(PlatformErrorCode::SelectionFailed))?;
+            .map_err(map_import_invoke_error)?;
         if !response.selected {
             return Ok(None);
         }
@@ -148,7 +160,12 @@ impl<R: Runtime> MobilePlatform<R> {
         let size_bytes = response
             .size_bytes
             .ok_or_else(|| PlatformError::new(PlatformErrorCode::SelectionFailed))?;
-        Ok(Some(StagedImport::new(path, display_name, size_bytes)))
+        Ok(Some(StagedImport::new(
+            path,
+            display_name,
+            size_bytes,
+            maximum_bytes,
+        )))
     }
 
     pub(crate) async fn discard_staged_import(&self, staged: &StagedImport) -> PlatformResult<()> {
@@ -480,6 +497,21 @@ fn map_sensitive_capture_invoke_error(error: PluginInvokeError) -> PlatformError
                 PlatformErrorCode::InvalidInput
             }
             Some("storage_unavailable") => PlatformErrorCode::StorageUnavailable,
+            _ => PlatformErrorCode::Internal,
+        },
+        _ => PlatformErrorCode::Internal,
+    };
+    PlatformError::new(code)
+}
+
+fn map_import_invoke_error(error: PluginInvokeError) -> PlatformError {
+    let code = match error {
+        PluginInvokeError::InvokeRejected(response) => match response.code.as_deref() {
+            Some("busy") => PlatformErrorCode::Busy,
+            Some("invalid_input") => PlatformErrorCode::InvalidInput,
+            Some("selected_file_too_large") => PlatformErrorCode::SelectedFileTooLarge,
+            Some("storage_unavailable") => PlatformErrorCode::StorageUnavailable,
+            Some("selection_failed") => PlatformErrorCode::SelectionFailed,
             _ => PlatformErrorCode::Internal,
         },
         _ => PlatformErrorCode::Internal,

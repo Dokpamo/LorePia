@@ -24,6 +24,14 @@ use crate::{
     ContentPackageSelectionRequest, app::Core,
 };
 
+const USER_APPROVED_LARGE_IMPORT_LIMITS: ImportLimits = ImportLimits {
+    max_source_bytes: 16 * 1024 * 1024 * 1024,
+    max_entries: 8_192,
+    max_entry_bytes: 16 * 1024 * 1024 * 1024,
+    max_total_uncompressed_bytes: 32 * 1024 * 1024 * 1024,
+    max_compression_ratio: 100,
+};
+
 pub(in crate::app) type PendingImportRegistry = RwLock<HashMap<InspectionId, PendingImport>>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,6 +52,7 @@ pub struct ImportedContentSummary {
 #[derive(Clone)]
 pub(in crate::app) struct PendingImport {
     path: PathBuf,
+    limits: ImportLimits,
     inspection: ImportInspection,
     plan_hash: String,
     payload: PendingImportPayload,
@@ -64,9 +73,25 @@ enum PendingImportPayload {
 
 impl Core {
     pub fn inspect_import(&self, staged_path: impl AsRef<Path>) -> CoreResult<ImportInspection> {
-        let limits = ImportLimits::default();
+        self.inspect_import_with_limits(staged_path.as_ref(), ImportLimits::default())
+    }
+
+    /// Repeats import inspection with the fixed, larger byte envelope selected
+    /// by a foreground user. Non-resource archive checks are unchanged.
+    pub fn inspect_import_user_approved_large(
+        &self,
+        staged_path: impl AsRef<Path>,
+    ) -> CoreResult<ImportInspection> {
+        self.inspect_import_with_limits(staged_path.as_ref(), USER_APPROVED_LARGE_IMPORT_LIMITS)
+    }
+
+    fn inspect_import_with_limits(
+        &self,
+        staged_path: &Path,
+        limits: ImportLimits,
+    ) -> CoreResult<ImportInspection> {
         let original_snapshot = snapshot_import_source(
-            staged_path.as_ref(),
+            staged_path,
             &self.inner.storage.staging_dir(),
             limits.max_source_bytes,
         )?;
@@ -90,6 +115,7 @@ impl Core {
             match prepare_external_import(&snapshot, limits, &self.inner.storage.staging_dir()) {
                 Ok(Some(prepared)) => PendingImport {
                     path: snapshot,
+                    limits,
                     inspection: prepared.inspection,
                     plan_hash: prepared.plan_hash,
                     payload: PendingImportPayload::External {
@@ -112,6 +138,7 @@ impl Core {
                     };
                     PendingImport {
                         path: snapshot,
+                        limits,
                         inspection: prepared.inspection,
                         plan_hash: prepared.plan_hash,
                         payload: PendingImportPayload::Character {
@@ -200,7 +227,7 @@ impl Core {
         };
         let Ok(verified) = prepare_import(
             &pending.path,
-            ImportLimits::default(),
+            pending.limits,
             &self.inner.storage.staging_dir(),
         ) else {
             self.restore_pending_import(inspection_id.clone(), pending)?;
@@ -316,6 +343,7 @@ impl Core {
             inspection_id,
             &pending.inspection,
             *document_count,
+            pending.limits,
         );
         match result {
             Ok(summary) => {
@@ -335,8 +363,10 @@ impl Core {
         inspection_id: &InspectionId,
         source_inspection: &ImportInspection,
         document_count: u32,
+        limits: ImportLimits,
     ) -> CoreResult<ImportedContentSummary> {
-        let inspection = self.inspect_content_package_import(normalized_package_path)?;
+        let inspection =
+            self.inspect_content_package_import_with_limits(normalized_package_path, limits)?;
         let import_id = inspection.import_id.clone();
         let selected_component_ids = inspection.inspection.selectable_component_ids();
         let selection = match self.select_content_package_import(
@@ -559,4 +589,100 @@ fn cleanup_pending_import(pending: &PendingImport, staging_dir: &Path) -> CoreRe
         }
     }
     first_error.map_or(Ok(()), Err)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{fs::File, io::Write as _};
+
+    use tempfile::tempdir;
+    use zip::{CompressionMethod, ZipWriter, write::SimpleFileOptions};
+
+    use super::*;
+    use crate::CoreConfig;
+
+    #[test]
+    fn reviewed_resource_limits_are_reused_for_commit_revalidation() {
+        let default_limits = ImportLimits::default();
+        assert!(
+            std::hint::black_box(USER_APPROVED_LARGE_IMPORT_LIMITS.max_source_bytes)
+                >= 10 * 1024 * 1024 * 1024
+        );
+        assert_eq!(
+            USER_APPROVED_LARGE_IMPORT_LIMITS.max_entries,
+            default_limits.max_entries
+        );
+        assert_eq!(
+            USER_APPROVED_LARGE_IMPORT_LIMITS.max_compression_ratio,
+            default_limits.max_compression_ratio
+        );
+        let root = tempdir().expect("data root");
+        let source = root.path().join("resource-review.charx");
+        let card = br#"{"spec":"chara_card_v3","data":{"name":"Resource review"}}"#;
+        let mut asset = b"\x89PNG\r\n\x1a\n".to_vec();
+        asset.resize(card.len() + 1, 0);
+        let mut archive = ZipWriter::new(File::create(&source).expect("source"));
+        let options = SimpleFileOptions::default()
+            .compression_method(CompressionMethod::Stored)
+            .unix_permissions(0o644);
+        archive.start_file("card.json", options).expect("card");
+        archive.write_all(card).expect("card bytes");
+        archive
+            .start_file("assets/large.png", options)
+            .expect("asset");
+        archive.write_all(&asset).expect("asset bytes");
+        archive.finish().expect("finish archive");
+
+        let core = Core::open(CoreConfig::new(root.path().join("library"))).expect("core");
+        let standard = ImportLimits {
+            max_entry_bytes: card.len() as u64,
+            ..ImportLimits::default()
+        };
+        let error = core
+            .inspect_import_with_limits(&source, standard)
+            .expect_err("asset exceeds the simulated standard limit");
+        assert_eq!(error.code, CoreErrorCode::UnsupportedContent);
+        assert!(error.recoverable);
+
+        let approved = ImportLimits {
+            max_entry_bytes: asset.len() as u64,
+            ..standard
+        };
+        let inspection = core
+            .inspect_import_with_limits(&source, approved)
+            .expect("approved resource inspection");
+        let character = core
+            .commit_import(&inspection.id)
+            .expect("commit must reuse approved limits");
+        let content = core.get_character_content(&character.id).expect("content");
+        assert_eq!(content.value.assets.len(), 1);
+        assert_eq!(content.value.assets[0].size_bytes, asset.len() as u64);
+    }
+
+    #[test]
+    fn large_resource_envelope_does_not_allow_archive_path_escape() {
+        let root = tempdir().expect("data root");
+        let source = root.path().join("traversal.charx");
+        let mut archive = ZipWriter::new(File::create(&source).expect("source"));
+        let options = SimpleFileOptions::default()
+            .compression_method(CompressionMethod::Stored)
+            .unix_permissions(0o644);
+        archive.start_file("card.json", options).expect("card");
+        archive
+            .write_all(br#"{"spec":"chara_card_v3","data":{"name":"Traversal"}}"#)
+            .expect("card bytes");
+        archive
+            .start_file("../escape.png", options)
+            .expect("escape entry");
+        archive
+            .write_all(b"\x89PNG\r\n\x1a\n")
+            .expect("escape bytes");
+        archive.finish().expect("finish archive");
+
+        let core = Core::open(CoreConfig::new(root.path().join("library"))).expect("core");
+        let error = core
+            .inspect_import_user_approved_large(&source)
+            .expect_err("path escape remains blocked");
+        assert_eq!(error.code, CoreErrorCode::UnsafeArchive);
+    }
 }

@@ -143,7 +143,7 @@
     }
   },
   "baselines": {
-    "apps/lorepia/src-tauri/src/contract.rs": {"bytes": 84557, "lines": 2174},
+    "apps/lorepia/src-tauri/src/contract.rs": {"bytes": 83713, "lines": 2139},
     "apps/lorepia/src-tauri/src/state.rs": {"bytes": 78974, "lines": 2112},
     "apps/lorepia/src/app/app-controller.ts": {"bytes": 21693, "lines": 566},
     "apps/lorepia/src/features/chat/ChatPane.svelte": {"bytes": 24126, "lines": 600},
@@ -185,7 +185,7 @@
     "crates/storage/src/model_sync.rs": {"bytes": 129970, "lines": 3358},
     "crates/storage/src/orchestration.rs": {"bytes": 29269, "lines": 777},
     "crates/storage/src/provider_credential_repository.rs": {"bytes": 154521, "lines": 3949},
-    "plugins/lorepia-platform/src/desktop.rs": {"bytes": 204435, "lines": 5325},
+    "plugins/lorepia-platform/src/desktop.rs": {"bytes": 204178, "lines": 5320},
     "plugins/lorepia-platform/src/desktop/macos.rs": {"bytes": 81746, "lines": 2310}
   }
 }

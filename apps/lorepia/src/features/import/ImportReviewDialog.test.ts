@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { LorepiaAppController, LorepiaAppState } from '../../app/app-controller';
@@ -12,6 +12,29 @@ afterEach(() => {
 });
 
 describe('ImportReviewDialog dynamic content review', () => {
+    it('offers an explicit large-resource retry without describing structural checks as bypassed', async () => {
+        const state = {
+            import_flow: {
+                phase: 'error',
+                error: t('import.error.resource_limit'),
+                inspection: null,
+                resource_override_active: false,
+                resource_override_available: true,
+            },
+        } as unknown as LorepiaAppState;
+        const beginImport = vi.fn();
+        const controller = {
+            beginImport,
+            discardImport: vi.fn(),
+        } as unknown as LorepiaAppController;
+
+        render(ImportReviewDialog, { state, controller });
+        await fireEvent.click(screen.getByRole('button', { name: t('import.resource.retry') }));
+
+        expect(beginImport).toHaveBeenCalledOnce();
+        expect(screen.getByText(t('import.resource.retry_description'))).toBeInTheDocument();
+    });
+
     it('compiles regex rules before commit and reports only the failed rule as disabled', async () => {
         const state = {
             import_flow: {
@@ -136,6 +159,53 @@ describe('ImportReviewDialog dynamic content review', () => {
         expect(description?.textContent.length).toBeLessThan(longDescription.length);
         expect(container.querySelector('.modal-body')).toBeInTheDocument();
         expect(container.querySelector('.modal-card > .modal-actions')).toBeInTheDocument();
+    });
+
+    it('shows the exact resource envelope and the checks that remain enforced', () => {
+        const state = {
+            import_flow: {
+                phase: 'ready',
+                error: null,
+                resource_override_active: true,
+                resource_override_available: false,
+                inspection: {
+                    inspection_id: 'inspection-large',
+                    kind: 'character_card_v3',
+                    display_name: 'Large card',
+                    description: 'Approved resource fixture',
+                    source_sha256: '12'.repeat(32),
+                    source_size: 10 * 1024 * 1024 * 1024,
+                    estimated_stored_size: 11 * 1024 * 1024 * 1024,
+                    asset_count: 1,
+                    dynamic_content: {
+                        runtime_script_count: 0,
+                        elevated_runtime_script_count: 0,
+                        required_runtime_capabilities: [],
+                        runtime_capabilities_declared: false,
+                        regex_rule_count: 0,
+                        enabled_regex_rule_count: 0,
+                        model_calls_possible: false,
+                        custom_markup_present: false,
+                        regex_rules: [],
+                    },
+                    representative_image: null,
+                    warnings: [],
+                    blocked_reasons: [],
+                    unsupported_optional_fields: [],
+                    allowed: true,
+                },
+            },
+        } as unknown as LorepiaAppState;
+        const controller = {
+            commitImport: vi.fn(),
+            discardImport: vi.fn(),
+        } as unknown as LorepiaAppController;
+
+        render(ImportReviewDialog, { state, controller });
+
+        expect(screen.getByText(t('import.resource.approved_limits'))).toBeInTheDocument();
+        expect(screen.getByText(t('import.resource.storage_warning'))).toBeInTheDocument();
+        expect(screen.getByText(t('import.resource.security_boundary'))).toBeInTheDocument();
     });
 
     it('reports the committed content so the shell can open its activation destination', async () => {

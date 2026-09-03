@@ -106,12 +106,17 @@ fn scan_asset_records(
         total = total
             .checked_add(size_bytes)
             .ok_or_else(|| unsafe_archive("imported asset size overflow"))?;
-        if size_bytes == 0
-            || size_bytes > limits.max_entry_bytes
-            || total > limits.max_total_uncompressed_bytes
-        {
-            return Err(unsafe_archive(
-                "imported assets exceed configured size limits",
+        if size_bytes == 0 {
+            return Err(unsafe_archive("imported asset is empty"));
+        }
+        if size_bytes > limits.max_entry_bytes {
+            return Err(resource_limit(
+                "imported asset exceeds the configured entry size limit",
+            ));
+        }
+        if total > limits.max_total_uncompressed_bytes {
+            return Err(resource_limit(
+                "imported assets exceed the configured total size limit",
             ));
         }
         let offset = reader.stream_position().map_err(storage_error)?;
@@ -336,6 +341,10 @@ fn unsupported(message: impl Into<String>) -> CoreError {
 
 fn unsafe_archive(message: impl Into<String>) -> CoreError {
     CoreError::new(CoreErrorCode::UnsafeArchive, message, false)
+}
+
+fn resource_limit(message: impl Into<String>) -> CoreError {
+    CoreError::new(CoreErrorCode::UnsupportedContent, message, true)
 }
 
 fn storage_error(error: std::io::Error) -> CoreError {

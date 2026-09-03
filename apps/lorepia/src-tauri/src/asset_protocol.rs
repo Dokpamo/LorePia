@@ -410,6 +410,7 @@ const fn status_for_shell_error(code: ShellErrorCode) -> StatusCode {
         ShellErrorCode::UnsupportedContent | ShellErrorCode::UnsafeArchive => {
             StatusCode::UNSUPPORTED_MEDIA_TYPE
         }
+        ShellErrorCode::ResourceLimitExceeded => StatusCode::PAYLOAD_TOO_LARGE,
         ShellErrorCode::NotFound => StatusCode::NOT_FOUND,
         ShellErrorCode::PermissionDenied => StatusCode::FORBIDDEN,
         ShellErrorCode::StorageUnavailable => StatusCode::SERVICE_UNAVAILABLE,

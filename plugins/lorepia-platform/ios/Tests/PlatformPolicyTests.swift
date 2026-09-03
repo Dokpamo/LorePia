@@ -105,6 +105,24 @@ private final class RecordingKeychainCredentialBackend:
 }
 
 final class PlatformPolicyTests: XCTestCase {
+  func testImportMaximumRequiresAReviewedResourceEnvelope() throws {
+    try PlatformPolicy.validateImportMaximum(
+      PlatformPolicy.maximumImportBytes
+    )
+    try PlatformPolicy.validateImportMaximum(
+      PlatformPolicy.maximumUserApprovedImportBytes
+    )
+    XCTAssertGreaterThanOrEqual(
+      PlatformPolicy.maximumUserApprovedImportBytes,
+      10 * 1_024 * 1_024 * 1_024
+    )
+    XCTAssertThrowsError(
+      try PlatformPolicy.validateImportMaximum(
+        PlatformPolicy.maximumImportBytes + 1
+      )
+    )
+  }
+
   private let requiredAccessibility =
     kSecAttrAccessibleWhenUnlockedThisDeviceOnly as String
   private let boundPhysicalReference =

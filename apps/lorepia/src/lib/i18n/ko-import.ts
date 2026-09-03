@@ -25,6 +25,8 @@ export const koImport = {
     'import.estimated_size': '예상 저장 크기',
     'import.error.storage_unavailable':
         '저장 공간이 부족하거나 사용할 수 없습니다. 대용량 파일은 가져오는 동안 원본 크기의 약 3배 이상 여유 공간이 필요할 수 있습니다.',
+    'import.error.resource_limit':
+        '표준 가져오기 자원 한도를 넘었습니다. 파일을 실행하지 않았으며 아직 서재에 추가하지 않았습니다.',
     'import.inspecting': '로컬 파일을 안전하게 검사하는 중입니다.',
     'import.kind': '형식',
     'import.kind.png': 'PNG 카드',
@@ -40,6 +42,18 @@ export const koImport = {
     'import.regex.unavailable':
         '검사를 완료하지 못한 규칙 {count}개는 실행 시 안전하게 건너뜁니다.',
     'import.regex.valid': '실행 가능한 정규식 규칙의 컴파일 검사를 통과했습니다.',
+    'import.resource.approved_limits':
+        '사용자 승인으로 원본·단일 항목은 최대 16 GiB, 총 압축 해제량은 최대 32 GiB까지 검사합니다.',
+    'import.resource.inspecting':
+        '대용량 모드로 복사하고 검사하는 중입니다. 파일 크기에 따라 오래 걸릴 수 있습니다.',
+    'import.resource.retry': '대용량 모드로 다시 선택',
+    'import.resource.retry_description':
+        '필요한 파일이 맞다면 대용량 모드로 다시 선택할 수 있습니다. 저장공간이 원본 크기의 약 3배 이상 필요할 수 있습니다.',
+    'import.resource.security_boundary':
+        '경로 조작·심볼릭 링크·손상된 구조·파일 서명 검사는 완화하지 않습니다.',
+    'import.resource.storage_warning':
+        '검사 중 앱 전용 임시 복사본이 생기며, 공간이 부족하면 아무것도 가져오지 않고 중단합니다.',
+    'import.resource.title': '대용량 자원 승인',
     'import.compatibility.destination':
         '모듈·프리셋·지식·에셋은 콘텐츠 저장소에 보관되며 캐릭터 서재 항목으로 만들지 않습니다.',
     'import.compatibility.safety':

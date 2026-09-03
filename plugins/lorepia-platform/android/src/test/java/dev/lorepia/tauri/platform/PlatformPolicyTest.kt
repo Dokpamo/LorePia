@@ -11,6 +11,16 @@ import org.junit.Test
 
 class PlatformPolicyTest {
     @Test
+    fun importMaximumRequiresOneOfTheTwoReviewedResourceEnvelopes() {
+        PlatformPolicy.validateImportMaximum(PlatformPolicy.MAXIMUM_IMPORT_BYTES)
+        PlatformPolicy.validateImportMaximum(PlatformPolicy.MAXIMUM_USER_APPROVED_IMPORT_BYTES)
+        assertTrue(PlatformPolicy.MAXIMUM_USER_APPROVED_IMPORT_BYTES >= 10L * 1024L * 1024L * 1024L)
+        assertThrows(IllegalArgumentException::class.java) {
+            PlatformPolicy.validateImportMaximum(PlatformPolicy.MAXIMUM_IMPORT_BYTES + 1L)
+        }
+    }
+
+    @Test
     fun credentialConfirmationTextRejectsPromptSpoofingControls() {
         for (
             invalid in listOf(

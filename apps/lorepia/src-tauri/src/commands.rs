@@ -4,11 +4,10 @@ use lorepia_shell_api::{
     AssetDeliveryDto, BootstrapDto, CharacterDto, CharacterGreetingCatalogDto, ChatStreamItem,
     ConversationBranchDto, ConversationDto, ConversationStateDto, CreateConversationBranchInput,
     CreateConversationInput, EditUserMessageInput, GenerateRuntimeTextInput, GenerationCredential,
-    GenerationPresetDto, GenerationSelectionInput, GenerationStartedDto, ImportCommitResultDto,
-    ImportInspectionDto, MessageActionGenerationDto, MessageDto, ModelRouteDto,
-    RegenerateAssistantMessageInput, RemoveMessageInput, RequestPreviewDto,
-    ResolveAssetDeliveryInput, RuntimeTextGenerationDto, SecretCredential,
-    SelectConversationBranchInput, SendMessageInput, SetConversationModeInput, StagedImportFile,
+    GenerationPresetDto, GenerationSelectionInput, GenerationStartedDto,
+    MessageActionGenerationDto, MessageDto, ModelRouteDto, RegenerateAssistantMessageInput,
+    RemoveMessageInput, RequestPreviewDto, ResolveAssetDeliveryInput, RuntimeTextGenerationDto,
+    SecretCredential, SelectConversationBranchInput, SendMessageInput, SetConversationModeInput,
 };
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, State, ipc::Channel};
@@ -18,7 +17,6 @@ use tauri_plugin_lorepia_platform::{
     NativeCredentialEffectConfirmation, NativeCredentialEffectContext, PlatformErrorCode,
     PlatformResult,
 };
-use uuid::Uuid;
 
 use crate::runtime_contract::RuntimeGenerationRequest;
 use crate::{
@@ -26,14 +24,15 @@ use crate::{
     contract::{
         BranchMessagesRequest, CharacterConversationsRequest, CharacterRenderProfileRequest,
         CharacterRequest, ChatStreamRequest, CredentialStatusDto, CredentialStatusRequest,
-        CredentialTarget, DiscardImportRequest, GenerationPresetsRequest, GenerationRequest,
-        ImportTicketDto, InspectionRequest, MemorySupervisorStatusDto, ModelRoutesRequest,
-        NativeCaptureStatusDto, PreviewProviderRequest, ProviderOverviewDto,
-        SubscribeGenerationRequest, TicketRequest,
+        CredentialTarget, GenerationPresetsRequest, GenerationRequest, MemorySupervisorStatusDto,
+        ModelRoutesRequest, NativeCaptureStatusDto, PreviewProviderRequest, ProviderOverviewDto,
+        SubscribeGenerationRequest,
     },
     error::{CommandError, CommandResult},
     state::AppState,
 };
+
+pub(crate) mod imports;
 
 type LegacyGenerationCredentialReadFuture<'a> =
     Pin<Box<dyn Future<Output = CommandResult<Option<NativeCredential>>> + Send + 'a>>;
@@ -129,88 +128,6 @@ pub(crate) fn execute_resolve_asset_delivery(
     shell_api
         .resolve_asset_delivery(request)
         .map_err(Into::into)
-}
-
-#[tauri::command]
-pub async fn pick_import(
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> CommandResult<Option<ImportTicketDto>> {
-    state.ensure_ready()?;
-    let Some(staged) = app.lorepia_platform().pick_import().await? else {
-        return Ok(None);
-    };
-    let ticket_id = Uuid::new_v4().to_string();
-    let response = ImportTicketDto {
-        ticket_id: ticket_id.clone(),
-        display_name: staged.display_name().to_owned(),
-        size_bytes: staged.size_bytes(),
-    };
-    state.insert_import_ticket(ticket_id, staged)?;
-    Ok(Some(response))
-}
-
-#[tauri::command]
-pub async fn inspect_import(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    request: TicketRequest,
-) -> CommandResult<ImportInspectionDto> {
-    let staged = state.take_import_ticket(&request.ticket_id)?;
-    let shell = state.shell()?;
-    let inspection = shell
-        .inspect_import(&StagedImportFile::new(staged.path()))
-        .map_err(CommandError::from);
-    let cleanup = app
-        .lorepia_platform()
-        .discard_staged_import(&staged)
-        .await
-        .map_err(CommandError::from);
-
-    match (inspection, cleanup) {
-        (Ok(inspection), Ok(())) => Ok(inspection),
-        (Ok(inspection), Err(cleanup_error)) => {
-            let _ = shell.discard_import(&inspection.inspection_id);
-            Err(cleanup_error)
-        }
-        (Err(error), _) => Err(error),
-    }
-}
-
-#[tauri::command]
-pub fn commit_import(
-    state: State<'_, AppState>,
-    request: InspectionRequest,
-) -> CommandResult<ImportCommitResultDto> {
-    state
-        .shell()?
-        .commit_compatible_import(&request.inspection_id)
-        .map_err(Into::into)
-}
-
-#[tauri::command]
-pub async fn discard_import(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    request: DiscardImportRequest,
-) -> CommandResult<()> {
-    match request {
-        DiscardImportRequest::Inspection { inspection_id } => state
-            .shell()?
-            .discard_import(&inspection_id)
-            .map_err(Into::into),
-        DiscardImportRequest::Ticket { ticket_id } => {
-            let reservation = state.reserve_import_ticket(&ticket_id)?;
-            match app
-                .lorepia_platform()
-                .discard_staged_import(reservation.value())
-                .await
-            {
-                Ok(()) => reservation.complete(),
-                Err(error) => Err(error.into()),
-            }
-        }
-    }
 }
 
 #[tauri::command]

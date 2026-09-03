@@ -59,13 +59,31 @@ pub(crate) fn stage_file(
     let result = copy_bounded(source_path, &partial, maximum_bytes).and_then(|copied| {
         std::fs::rename(&partial, &destination)
             .map_err(|_| PlatformError::new(PlatformErrorCode::StorageUnavailable))?;
-        Ok(StagedImport::new(destination.clone(), display_name, copied))
+        Ok(StagedImport::new(
+            destination.clone(),
+            display_name,
+            copied,
+            maximum_bytes,
+        ))
     });
     if result.is_err() {
         let _ = std::fs::remove_file(&partial);
         let _ = std::fs::remove_file(&destination);
     }
     result
+}
+
+#[cfg(any(target_os = "macos", windows))]
+pub(crate) async fn stage_selected_file(
+    selection: PathBuf,
+    staging_root: PathBuf,
+    maximum_bytes: u64,
+) -> PlatformResult<Option<StagedImport>> {
+    tokio::task::spawn_blocking(move || {
+        stage_file(&selection, &staging_root, maximum_bytes).map(Some)
+    })
+    .await
+    .map_err(|_| PlatformError::new(PlatformErrorCode::Internal))?
 }
 
 pub(crate) fn read_staged_file(

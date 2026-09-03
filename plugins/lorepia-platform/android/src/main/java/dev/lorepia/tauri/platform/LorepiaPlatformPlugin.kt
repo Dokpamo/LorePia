@@ -46,6 +46,11 @@ internal class SensitiveCaptureArgs {
 }
 
 @InvokeArg
+internal class ImportLimitArgs {
+    var maximumBytes: Long = 0
+}
+
+@InvokeArg
 internal class SystemBarStyleArgs {
     var dark: Boolean = false
 }
@@ -415,8 +420,13 @@ class LorepiaPlatformPlugin(private val activity: Activity) : Plugin(activity) {
             return
         }
         try {
+            val args = invoke.parseArgs(ImportLimitArgs::class.java)
+            PlatformPolicy.validateImportMaximum(args.maximumBytes)
             val intent = createImportPickerIntent()
             startActivityForResult(invoke, intent, "onImportPicked")
+        } catch (_: IllegalArgumentException) {
+            pickerInFlight.set(false)
+            invoke.reject("invalid import limit", "invalid_input")
         } catch (_: Exception) {
             pickerInFlight.set(false)
             invoke.reject("file selection failed", "selection_failed")
@@ -480,7 +490,9 @@ class LorepiaPlatformPlugin(private val activity: Activity) : Plugin(activity) {
 
         workQueues.executeStaging {
             try {
-                val staged = stager.stage(uri)
+                val args = invoke.parseArgs(ImportLimitArgs::class.java)
+                PlatformPolicy.validateImportMaximum(args.maximumBytes)
+                val staged = stager.stage(uri, args.maximumBytes)
                 invoke.resolve(
                     JSObject()
                         .put("selected", true)
@@ -490,6 +502,8 @@ class LorepiaPlatformPlugin(private val activity: Activity) : Plugin(activity) {
                 )
             } catch (_: SelectedImportTooLarge) {
                 invoke.reject("selected file is too large", "selected_file_too_large")
+            } catch (_: IllegalArgumentException) {
+                invoke.reject("invalid import limit", "invalid_input")
             } catch (_: Exception) {
                 invoke.reject("file selection failed", "selection_failed")
             } finally {

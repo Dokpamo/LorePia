@@ -87,6 +87,18 @@ impl ShellApi {
             .map_err(ShellError::from)
     }
 
+    /// Uses the fixed large-import resource envelope after the native shell
+    /// has recorded explicit foreground-user approval.
+    pub fn inspect_import_user_approved_large(
+        &self,
+        staged_file: &StagedImportFile,
+    ) -> ShellResult<ImportInspectionDto> {
+        self.core
+            .inspect_import_user_approved_large(staged_file.as_path())
+            .map(Into::into)
+            .map_err(ShellError::from)
+    }
+
     pub fn commit_import(&self, inspection_id: &str) -> ShellResult<CharacterDto> {
         validate_identifier("inspection_id", inspection_id)?;
         self.core

@@ -46,7 +46,11 @@ final class ImportStager {
         try removeAbandonedFiles()
     }
 
-    func stage(securityScopedURL sourceURL: URL) throws -> NativeStagedImport {
+    func stage(
+        securityScopedURL sourceURL: URL,
+        maximumBytes: UInt64
+    ) throws -> NativeStagedImport {
+        try PlatformPolicy.validateImportMaximum(maximumBytes)
         guard sourceURL.isFileURL else {
             throw ImportStagingError.invalidSelection
         }
@@ -65,7 +69,7 @@ final class ImportStager {
             error: &coordinationError
         ) { coordinatedURL in
             coordinatedResult = Result {
-                try self.copyBounded(from: coordinatedURL)
+                try self.copyBounded(from: coordinatedURL, maximumBytes: maximumBytes)
             }
         }
         if let coordinatedResult {
@@ -94,7 +98,10 @@ final class ImportStager {
         }
     }
 
-    private func copyBounded(from sourceURL: URL) throws -> NativeStagedImport {
+    private func copyBounded(
+        from sourceURL: URL,
+        maximumBytes: UInt64
+    ) throws -> NativeStagedImport {
         let values = try sourceURL.resourceValues(
             forKeys: [.fileSizeKey, .isRegularFileKey]
         )
@@ -102,7 +109,7 @@ final class ImportStager {
             throw ImportStagingError.invalidSelection
         }
         if let fileSize = values.fileSize,
-           UInt64(fileSize) > PlatformPolicy.maximumImportBytes
+           UInt64(fileSize) > maximumBytes
         {
             throw ImportStagingError.selectedFileTooLarge
         }
@@ -151,7 +158,7 @@ final class ImportStager {
                 )
                 guard
                     !overflowed,
-                    nextTotal <= PlatformPolicy.maximumImportBytes
+                    nextTotal <= maximumBytes
                 else {
                     throw ImportStagingError.selectedFileTooLarge
                 }

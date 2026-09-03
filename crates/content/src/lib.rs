@@ -10,6 +10,7 @@ mod package;
 mod path;
 mod png;
 mod runtime;
+mod source;
 mod transport;
 mod warnings;
 
@@ -28,6 +29,7 @@ use lorepia_domain::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use source::validated_source_metadata;
 use warnings::{extension_mismatch, promoted_card};
 
 pub use hashing::sha256_file;
@@ -351,8 +353,8 @@ fn inspect_png_source(
 ) -> CoreResult<InspectedCharacterSource> {
     // The routing check reads four bytes; the extractor validates the full
     // eight-byte PNG signature and bounded metadata chunks.
-    let bytes = std::fs::read(path).map_err(storage_error)?;
-    let card = png::extract_card_metadata(&bytes)?;
+    let mut file = File::open(path).map_err(storage_error)?;
+    let card = png::extract_card_metadata(&mut file)?;
     let metadata = adapters::parse_card_json_with_source(&card, source_sha256)?;
     let mut warnings = extension_mismatch(extension, "PNG");
     warnings.extend(promoted_card(&metadata));
@@ -376,6 +378,16 @@ fn inspect_json_source(
     source_sha256: &str,
     extension: &str,
 ) -> CoreResult<InspectedCharacterSource> {
+    if path.metadata().map_err(storage_error)?.len() > adapters::MAX_METADATA_BYTES as u64 {
+        return Err(CoreError::new(
+            CoreErrorCode::UnsupportedContent,
+            format!(
+                "character metadata exceeds {} bytes",
+                adapters::MAX_METADATA_BYTES
+            ),
+            false,
+        ));
+    }
     let bytes = std::fs::read(path).map_err(storage_error)?;
     let metadata = adapters::parse_card_json_with_source(&bytes, source_sha256)?;
     let estimated_size = metadata.len_bytes;
@@ -390,47 +402,6 @@ fn inspect_json_source(
         warnings,
         blocked_reasons: Vec::new(),
     })
-}
-
-fn validated_source_metadata(path: &Path, limits: ImportLimits) -> CoreResult<std::fs::Metadata> {
-    let source_metadata = path.symlink_metadata().map_err(|error| {
-        CoreError::new(
-            CoreErrorCode::StorageUnavailable,
-            format!("cannot read staging file metadata: {error}"),
-            true,
-        )
-    })?;
-    if source_metadata.file_type().is_symlink() {
-        return Err(CoreError::new(
-            CoreErrorCode::UnsafeArchive,
-            "the import source must not be a symbolic link",
-            false,
-        ));
-    }
-    if !source_metadata.is_file() {
-        return Err(CoreError::invalid(
-            "the import source is not a regular file",
-        ));
-    }
-    if source_metadata.len() == 0 {
-        return Err(CoreError::new(
-            CoreErrorCode::UnsupportedContent,
-            "the import source is empty",
-            false,
-        ));
-    }
-    if source_metadata.len() > limits.max_source_bytes {
-        return Err(CoreError::new(
-            CoreErrorCode::UnsupportedContent,
-            format!(
-                "source is {} bytes; maximum is {} bytes",
-                source_metadata.len(),
-                limits.max_source_bytes
-            ),
-            false,
-        ));
-    }
-    Ok(source_metadata)
 }
 
 /// Inspect a source and stage validated CHARX assets for an approved commit.
@@ -723,6 +694,29 @@ mod tests {
 
         let error = inspect_file(file.path(), limits).expect_err("must reject");
         assert_eq!(error.code, CoreErrorCode::UnsupportedContent);
+        assert!(error.recoverable);
+    }
+
+    #[test]
+    fn large_resource_mode_does_not_expand_the_json_metadata_ceiling() {
+        let mut file = NamedTempFile::new().expect("temp file");
+        file.write_all(b"{}").expect("write fixture");
+        file.as_file()
+            .set_len(adapters::MAX_METADATA_BYTES as u64 + 1)
+            .expect("extend fixture");
+
+        let error = inspect_file(
+            file.path(),
+            ImportLimits {
+                max_source_bytes: 16 * 1024 * 1024 * 1024,
+                max_entry_bytes: 16 * 1024 * 1024 * 1024,
+                max_total_uncompressed_bytes: 32 * 1024 * 1024 * 1024,
+                ..ImportLimits::default()
+            },
+        )
+        .expect_err("metadata ceiling remains fixed");
+        assert_eq!(error.code, CoreErrorCode::UnsupportedContent);
+        assert!(error.message.contains("character metadata exceeds"));
     }
 
     #[test]

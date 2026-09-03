@@ -1,5 +1,5 @@
 {
-  "baseline_commit": "229ad72feed80eea20ab6c00065a93f6ff22aec1",
+  "baseline_commit": "8b90a42783f95114a22cd17c487ae3dd96c5c9d7",
   "completion": {
     "approved_hotspot_exception_count": 0,
     "ledger_sha256": "4953800f2a0584a25d5761b3788dca46bfbe35dd296dde8845c53031d6e1bd03",
@@ -511,9 +511,9 @@
       "public_symbols": 2
     },
     "apps/lorepia/src-tauri/src/asset_protocol.rs": {
-      "bytes": 24798,
+      "bytes": 24878,
       "declarations": 38,
-      "lines": 718,
+      "lines": 719,
       "public_symbols": 7
     },
     "apps/lorepia/src-tauri/src/channels.rs": {
@@ -535,22 +535,34 @@
       "public_symbols": 7
     },
     "apps/lorepia/src-tauri/src/commands.rs": {
-      "bytes": 70053,
-      "declarations": 78,
-      "lines": 1931,
-      "public_symbols": 44
+      "bytes": 67476,
+      "declarations": 74,
+      "lines": 1848,
+      "public_symbols": 41
+    },
+    "apps/lorepia/src-tauri/src/commands/imports.rs": {
+      "bytes": 3538,
+      "declarations": 4,
+      "lines": 112,
+      "public_symbols": 4
     },
     "apps/lorepia/src-tauri/src/contract.rs": {
-      "bytes": 84269,
-      "declarations": 88,
-      "lines": 2161,
-      "public_symbols": 22
+      "bytes": 83713,
+      "declarations": 84,
+      "lines": 2139,
+      "public_symbols": 19
     },
     "apps/lorepia/src-tauri/src/contract/character.rs": {
       "bytes": 605,
       "declarations": 3,
       "lines": 23,
       "public_symbols": 3
+    },
+    "apps/lorepia/src-tauri/src/contract/import.rs": {
+      "bytes": 1962,
+      "declarations": 7,
+      "lines": 71,
+      "public_symbols": 6
     },
     "apps/lorepia/src-tauri/src/credential_operations.rs": {
       "bytes": 2196,
@@ -631,7 +643,7 @@
       "public_symbols": 8
     },
     "apps/lorepia/src-tauri/src/lib.rs": {
-      "bytes": 17040,
+      "bytes": 17076,
       "declarations": 2,
       "lines": 333,
       "public_symbols": 2
@@ -805,9 +817,9 @@
       "public_symbols": 3
     },
     "apps/lorepia/src/app/app-state.ts": {
-      "bytes": 4529,
+      "bytes": 4724,
       "declarations": 6,
-      "lines": 150,
+      "lines": 158,
       "public_symbols": 7
     },
     "apps/lorepia/src/app/controllers/chat-stream-controller.ts": {
@@ -841,9 +853,9 @@
       "public_symbols": 1
     },
     "apps/lorepia/src/app/controllers/import-controller.ts": {
-      "bytes": 4595,
-      "declarations": 2,
-      "lines": 116,
+      "bytes": 6600,
+      "declarations": 3,
+      "lines": 170,
       "public_symbols": 1
     },
     "apps/lorepia/src/app/controllers/library-controller.ts": {
@@ -1255,9 +1267,9 @@
       "public_symbols": 1
     },
     "apps/lorepia/src/features/import/ImportReviewDialog.svelte": {
-      "bytes": 14343,
-      "declarations": 12,
-      "lines": 322,
+      "bytes": 15678,
+      "declarations": 14,
+      "lines": 348,
       "public_symbols": 0
     },
     "apps/lorepia/src/features/library/LibraryPane.svelte": {
@@ -1669,9 +1681,9 @@
       "public_symbols": 7
     },
     "apps/lorepia/src/lib/i18n/ko-import.ts": {
-      "bytes": 3774,
+      "bytes": 4958,
       "declarations": 0,
-      "lines": 54,
+      "lines": 68,
       "public_symbols": 1
     },
     "apps/lorepia/src/lib/i18n/ko-imported-compatibility.ts": {
@@ -1711,9 +1723,9 @@
       "public_symbols": 5
     },
     "apps/lorepia/src/lib/ipc/clients/content-import.ts": {
-      "bytes": 3707,
+      "bytes": 3913,
       "declarations": 0,
-      "lines": 104,
+      "lines": 109,
       "public_symbols": 1
     },
     "apps/lorepia/src/lib/ipc/clients/conversation.ts": {
@@ -1807,9 +1819,9 @@
       "public_symbols": 84
     },
     "apps/lorepia/src/lib/ipc/contracts/import.ts": {
-      "bytes": 13211,
+      "bytes": 13240,
       "declarations": 52,
-      "lines": 455,
+      "lines": 456,
       "public_symbols": 52
     },
     "apps/lorepia/src/lib/ipc/contracts/memory.ts": {
@@ -1825,9 +1837,9 @@
       "public_symbols": 58
     },
     "apps/lorepia/src/lib/ipc/contracts/platform.ts": {
-      "bytes": 18627,
+      "bytes": 18709,
       "declarations": 6,
-      "lines": 439,
+      "lines": 444,
       "public_symbols": 6
     },
     "apps/lorepia/src/lib/ipc/contracts/portable-runtime.ts": {
@@ -1849,10 +1861,10 @@
       "public_symbols": 2
     },
     "apps/lorepia/src/lib/ipc/import-contracts.ts": {
-      "bytes": 2163,
-      "declarations": 9,
-      "lines": 77,
-      "public_symbols": 9
+      "bytes": 2238,
+      "declarations": 10,
+      "lines": 79,
+      "public_symbols": 10
     },
     "apps/lorepia/src/lib/ipc/portable-runtime-contracts.ts": {
       "bytes": 1736,
@@ -1999,10 +2011,16 @@
       "public_symbols": 1
     },
     "crates/content/src/archive.rs": {
-      "bytes": 52208,
-      "declarations": 54,
-      "lines": 1446,
+      "bytes": 51597,
+      "declarations": 52,
+      "lines": 1428,
       "public_symbols": 5
+    },
+    "crates/content/src/archive/limits.rs": {
+      "bytes": 1253,
+      "declarations": 4,
+      "lines": 42,
+      "public_symbols": 3
     },
     "crates/content/src/capabilities.rs": {
       "bytes": 13852,
@@ -2017,9 +2035,9 @@
       "public_symbols": 1
     },
     "crates/content/src/imported_compatibility/container.rs": {
-      "bytes": 19698,
-      "declarations": 23,
-      "lines": 519,
+      "bytes": 20044,
+      "declarations": 24,
+      "lines": 528,
       "public_symbols": 6
     },
     "crates/content/src/imported_compatibility/convert.rs": {
@@ -2071,15 +2089,15 @@
       "public_symbols": 3
     },
     "crates/content/src/lib.rs": {
-      "bytes": 28240,
+      "bytes": 28260,
       "declarations": 26,
-      "lines": 772,
+      "lines": 766,
       "public_symbols": 13
     },
     "crates/content/src/package.rs": {
-      "bytes": 111849,
-      "declarations": 108,
-      "lines": 3056,
+      "bytes": 112281,
+      "declarations": 109,
+      "lines": 3068,
       "public_symbols": 25
     },
     "crates/content/src/package/json_hazards.rs": {
@@ -2095,9 +2113,9 @@
       "public_symbols": 1
     },
     "crates/content/src/png.rs": {
-      "bytes": 8120,
+      "bytes": 8584,
       "declarations": 7,
-      "lines": 217,
+      "lines": 228,
       "public_symbols": 2
     },
     "crates/content/src/runtime.rs": {
@@ -2112,10 +2130,16 @@
       "lines": 175,
       "public_symbols": 3
     },
+    "crates/content/src/source.rs": {
+      "bytes": 1406,
+      "declarations": 1,
+      "lines": 47,
+      "public_symbols": 1
+    },
     "crates/content/src/transport.rs": {
-      "bytes": 7063,
-      "declarations": 6,
-      "lines": 201,
+      "bytes": 8663,
+      "declarations": 8,
+      "lines": 236,
       "public_symbols": 1
     },
     "crates/content/src/warnings.rs": {
@@ -2263,13 +2287,13 @@
       "public_symbols": 2
     },
     "crates/core/src/app/imports/pending.rs": {
-      "bytes": 22138,
-      "declarations": 19,
-      "lines": 562,
-      "public_symbols": 8
+      "bytes": 27077,
+      "declarations": 23,
+      "lines": 688,
+      "public_symbols": 9
     },
     "crates/core/src/app/imports/staging.rs": {
-      "bytes": 4044,
+      "bytes": 4042,
       "declarations": 3,
       "lines": 117,
       "public_symbols": 2
@@ -2461,10 +2485,10 @@
       "public_symbols": 7
     },
     "crates/core/src/content_package/inspect.rs": {
-      "bytes": 30765,
+      "bytes": 30775,
       "declarations": 33,
       "lines": 824,
-      "public_symbols": 18
+      "public_symbols": 19
     },
     "crates/core/src/content_package/lifecycle.rs": {
       "bytes": 11459,
@@ -3307,10 +3331,10 @@
       "public_symbols": 3
     },
     "crates/shell-api/src/api/library.rs": {
-      "bytes": 3842,
-      "declarations": 9,
-      "lines": 115,
-      "public_symbols": 9
+      "bytes": 4285,
+      "declarations": 10,
+      "lines": 127,
+      "public_symbols": 10
     },
     "crates/shell-api/src/api/tests.rs": {
       "bytes": 22441,
@@ -3373,9 +3397,9 @@
       "public_symbols": 0
     },
     "crates/shell-api/src/error.rs": {
-      "bytes": 5528,
-      "declarations": 7,
-      "lines": 147,
+      "bytes": 6330,
+      "declarations": 8,
+      "lines": 167,
       "public_symbols": 4
     },
     "crates/shell-api/src/interaction.rs": {
@@ -4621,9 +4645,9 @@
       "public_symbols": 0
     },
     "plugins/lorepia-platform/android/src/main/java/dev/lorepia/tauri/platform/AndroidImportStager.kt": {
-      "bytes": 5298,
+      "bytes": 5331,
       "declarations": 0,
-      "lines": 146,
+      "lines": 147,
       "public_symbols": 0
     },
     "plugins/lorepia-platform/android/src/main/java/dev/lorepia/tauri/platform/AndroidPickerIntents.kt": {
@@ -4633,15 +4657,15 @@
       "public_symbols": 0
     },
     "plugins/lorepia-platform/android/src/main/java/dev/lorepia/tauri/platform/LorepiaPlatformPlugin.kt": {
-      "bytes": 28968,
+      "bytes": 29623,
       "declarations": 2,
-      "lines": 746,
+      "lines": 760,
       "public_symbols": 0
     },
     "plugins/lorepia-platform/android/src/main/java/dev/lorepia/tauri/platform/PlatformPolicy.kt": {
-      "bytes": 12271,
+      "bytes": 12583,
       "declarations": 0,
-      "lines": 339,
+      "lines": 347,
       "public_symbols": 0
     },
     "plugins/lorepia-platform/android/src/main/java/dev/lorepia/tauri/platform/PlatformWorkQueues.kt": {
@@ -4663,9 +4687,9 @@
       "public_symbols": 0
     },
     "plugins/lorepia-platform/ios/Sources/ImportStager.swift": {
-      "bytes": 7049,
+      "bytes": 7186,
       "declarations": 2,
-      "lines": 207,
+      "lines": 214,
       "public_symbols": 0
     },
     "plugins/lorepia-platform/ios/Sources/KeychainCredentialStore.swift": {
@@ -4675,15 +4699,15 @@
       "public_symbols": 0
     },
     "plugins/lorepia-platform/ios/Sources/LorepiaPlatformPlugin.swift": {
-      "bytes": 25051,
+      "bytes": 25613,
       "declarations": 2,
-      "lines": 883,
+      "lines": 900,
       "public_symbols": 0
     },
     "plugins/lorepia-platform/ios/Sources/PlatformPolicy.swift": {
-      "bytes": 6882,
+      "bytes": 7209,
       "declarations": 2,
-      "lines": 233,
+      "lines": 243,
       "public_symbols": 0
     },
     "plugins/lorepia-platform/src/credential_envelope.rs": {
@@ -4693,9 +4717,9 @@
       "public_symbols": 8
     },
     "plugins/lorepia-platform/src/desktop.rs": {
-      "bytes": 204435,
-      "declarations": 179,
-      "lines": 5325,
+      "bytes": 204178,
+      "declarations": 178,
+      "lines": 5320,
       "public_symbols": 25
     },
     "plugins/lorepia-platform/src/desktop/macos.rs": {
@@ -4722,29 +4746,35 @@
       "lines": 54,
       "public_symbols": 5
     },
+    "plugins/lorepia-platform/src/import_policy.rs": {
+      "bytes": 1021,
+      "declarations": 2,
+      "lines": 28,
+      "public_symbols": 4
+    },
     "plugins/lorepia-platform/src/lib.rs": {
-      "bytes": 28779,
-      "declarations": 49,
-      "lines": 777,
+      "bytes": 28771,
+      "declarations": 48,
+      "lines": 775,
       "public_symbols": 30
     },
     "plugins/lorepia-platform/src/mobile.rs": {
-      "bytes": 17420,
-      "declarations": 31,
-      "lines": 502,
+      "bytes": 18384,
+      "declarations": 33,
+      "lines": 534,
       "public_symbols": 21
     },
     "plugins/lorepia-platform/src/model.rs": {
-      "bytes": 15557,
+      "bytes": 15805,
       "declarations": 54,
-      "lines": 551,
-      "public_symbols": 55
+      "lines": 563,
+      "public_symbols": 56
     },
     "plugins/lorepia-platform/src/staging.rs": {
-      "bytes": 23685,
-      "declarations": 20,
-      "lines": 619,
-      "public_symbols": 8
+      "bytes": 24162,
+      "declarations": 21,
+      "lines": 637,
+      "public_symbols": 9
     },
     "plugins/lorepia-platform/src/validation.rs": {
       "bytes": 19915,
@@ -4784,9 +4814,9 @@
       "public_symbols": 49
     },
     {
-      "bytes": 204435,
-      "declarations": 179,
-      "lines": 5325,
+      "bytes": 204178,
+      "declarations": 178,
+      "lines": 5320,
       "path": "plugins/lorepia-platform/src/desktop.rs",
       "public_symbols": 25
     },
@@ -4882,9 +4912,9 @@
       "public_symbols": 93
     },
     {
-      "bytes": 111849,
-      "declarations": 108,
-      "lines": 3056,
+      "bytes": 112281,
+      "declarations": 109,
+      "lines": 3068,
       "path": "crates/content/src/package.rs",
       "public_symbols": 25
     },
@@ -4924,18 +4954,18 @@
       "public_symbols": 34
     },
     {
-      "bytes": 84269,
-      "declarations": 88,
-      "lines": 2161,
-      "path": "apps/lorepia/src-tauri/src/contract.rs",
-      "public_symbols": 22
-    },
-    {
       "bytes": 83792,
       "declarations": 79,
       "lines": 2120,
       "path": "crates/core/src/catalog.rs",
       "public_symbols": 31
+    },
+    {
+      "bytes": 83713,
+      "declarations": 84,
+      "lines": 2139,
+      "path": "apps/lorepia/src-tauri/src/contract.rs",
+      "public_symbols": 19
     },
     {
       "bytes": 83155,
@@ -5022,13 +5052,6 @@
       "public_symbols": 28
     },
     {
-      "bytes": 70053,
-      "declarations": 78,
-      "lines": 1931,
-      "path": "apps/lorepia/src-tauri/src/commands.rs",
-      "public_symbols": 44
-    },
-    {
       "bytes": 70013,
       "declarations": 91,
       "lines": 2043,
@@ -5055,6 +5078,13 @@
       "lines": 1725,
       "path": "crates/shell-api/src/interaction.rs",
       "public_symbols": 48
+    },
+    {
+      "bytes": 67476,
+      "declarations": 74,
+      "lines": 1848,
+      "path": "apps/lorepia/src-tauri/src/commands.rs",
+      "public_symbols": 41
     },
     {
       "bytes": 67275,
@@ -5141,9 +5171,9 @@
       "public_symbols": 0
     },
     {
-      "bytes": 52208,
-      "declarations": 54,
-      "lines": 1446,
+      "bytes": 51597,
+      "declarations": 52,
+      "lines": 1428,
       "path": "crates/content/src/archive.rs",
       "public_symbols": 5
     },
@@ -5698,16 +5728,24 @@
         "sha256": "2d98d2fb8a140855a92bf9150b688482e7d9165b97d5960c7f6cc5cfcae05694"
       },
       "apps/lorepia/src-tauri/src/commands.rs": {
-        "count": 44,
-        "sha256": "4165bf4b7cdcea35f39cd38124a60c3214eefcc8d93570bdd60afc68215ea79c"
+        "count": 41,
+        "sha256": "6a260c389bfb56f33bf8509c2909e81452a97383fb81f98a5fddb75540bb94e9"
+      },
+      "apps/lorepia/src-tauri/src/commands/imports.rs": {
+        "count": 4,
+        "sha256": "1b9acc8599bb7e794976543f6d6fd4db57ff9e770ea740d1e834dd3dd31176e2"
       },
       "apps/lorepia/src-tauri/src/contract.rs": {
-        "count": 22,
-        "sha256": "ed0bb8c520e7b91faa4bfe4a276b8070c47696e4e3f49a30d84dd8ff9510bef4"
+        "count": 19,
+        "sha256": "88462e5740a4ae11d3786317b1fc33ad0e2c54846b66cf515577a179f40fbb3c"
       },
       "apps/lorepia/src-tauri/src/contract/character.rs": {
         "count": 3,
         "sha256": "fde5972451098191178ca122e0dc1013dd81ef24484a7ce8b952b1bf4ff04619"
+      },
+      "apps/lorepia/src-tauri/src/contract/import.rs": {
+        "count": 6,
+        "sha256": "b57a2e685194fec4953fba2f4c6120184d4ba750283022c06ab2f5d50cb3eca8"
       },
       "apps/lorepia/src-tauri/src/credential_operations.rs": {
         "count": 4,
@@ -6258,8 +6296,8 @@
         "sha256": "bb02a9b9437528a671c959d845436afdd787a5e307ee5884013c9fc21686e9b7"
       },
       "apps/lorepia/src/lib/ipc/import-contracts.ts": {
-        "count": 9,
-        "sha256": "f8c713e2f633d413f6c45fcc4c515124378a96b78f97a80787e7af65a5d70f14"
+        "count": 10,
+        "sha256": "f6f876f4791e1cd8376aec58aa5f86e6a634aacd6d3f14e54b2c25d6c5af3144"
       },
       "apps/lorepia/src/lib/ipc/portable-runtime-contracts.ts": {
         "count": 7,
@@ -6308,6 +6346,10 @@
       "crates/content/src/archive.rs": {
         "count": 5,
         "sha256": "6cff11f38f9e9dc4c026f45068ae353ef3a40d7578e48d5b3150b813b8b8701a"
+      },
+      "crates/content/src/archive/limits.rs": {
+        "count": 3,
+        "sha256": "c2bcc88fb4f518e2adaeaff65ef844e8852d56eb98733a156828a05d5c2223bf"
       },
       "crates/content/src/capabilities.rs": {
         "count": 5,
@@ -6367,7 +6409,7 @@
       },
       "crates/content/src/png.rs": {
         "count": 2,
-        "sha256": "bfccaaae993c4aa3d99fa530faa66d360000348ccabcd9c73813599e5ac38c7d"
+        "sha256": "762d7abe33c4ea3bf30c1ead6048fdc06a071acbf409157533e1d02b87bcb8b3"
       },
       "crates/content/src/runtime.rs": {
         "count": 11,
@@ -6376,6 +6418,10 @@
       "crates/content/src/runtime/compatibility.rs": {
         "count": 3,
         "sha256": "6fcac64fb03f46ef7a4af7b62a2f53f70128eac7e1380eac84d7febfa3eaf10a"
+      },
+      "crates/content/src/source.rs": {
+        "count": 1,
+        "sha256": "c954aae16a12f148156464b36bdd2ef2401dbc22011a53f9e39cd9e72f25a3ae"
       },
       "crates/content/src/transport.rs": {
         "count": 1,
@@ -6478,8 +6524,8 @@
         "sha256": "424cb2e95e878d3cd795f5357fad6ba241cd4037284bc27a3709f52c693457c0"
       },
       "crates/core/src/app/imports/pending.rs": {
-        "count": 8,
-        "sha256": "98d981bc8cd41dbc6ebb1a667de3f0524274be09ee20d972b801ed01cacd2901"
+        "count": 9,
+        "sha256": "64f84b0483b7a57543300b79d4847dee58bad386c7b299ea9deee6296f5ba2a9"
       },
       "crates/core/src/app/imports/staging.rs": {
         "count": 2,
@@ -6550,8 +6596,8 @@
         "sha256": "742f4aa83d11ad5a9ac64cce1bb373439540a8bbe050badd5194d6d3b8222562"
       },
       "crates/core/src/content_package/inspect.rs": {
-        "count": 18,
-        "sha256": "118c2d543b34efc5f49f2f8ee73037cfdf0cf3a672bd651a638e35aa0e64d4be"
+        "count": 19,
+        "sha256": "2592a84f71783026b5c55631f033fbe2984aad4d6ce676d4a51ba03636f1045f"
       },
       "crates/core/src/content_package/lifecycle.rs": {
         "count": 14,
@@ -7018,8 +7064,8 @@
         "sha256": "c446f62720009798245185f20f81586f37fa4df877000baae3f30e6aaa58ecff"
       },
       "crates/shell-api/src/api/library.rs": {
-        "count": 9,
-        "sha256": "9f66c7552e60639cc67962a2757079c3f6c21bcf11ab62d5b4d47ae219056c42"
+        "count": 10,
+        "sha256": "298f6318d3bfe73aba1d1988b0afcc2763e12efbee5ed69e94951e851de68185"
       },
       "crates/shell-api/src/asset.rs": {
         "count": 8,
@@ -7727,7 +7773,7 @@
       },
       "plugins/lorepia-platform/src/desktop.rs": {
         "count": 25,
-        "sha256": "68ff6d99e8c1335de22f96e6d2ff96495a2459b58880f05605141b9bffe25dd9"
+        "sha256": "8f9d3a21dbfb3821ce1ef86c637c1891ac4d5f5a59cee07662e47a12b6a97fa7"
       },
       "plugins/lorepia-platform/src/desktop/macos.rs": {
         "count": 13,
@@ -7745,21 +7791,25 @@
         "count": 5,
         "sha256": "75c39df5c606a6c188d1353a717deb35dc2efdc72fe5f8d9c2cd6b581860ffca"
       },
+      "plugins/lorepia-platform/src/import_policy.rs": {
+        "count": 4,
+        "sha256": "4d0bd7ff250da94f927f6f2fcf49252bf609053039fcbbc90fa2d3db6462f812"
+      },
       "plugins/lorepia-platform/src/lib.rs": {
         "count": 30,
-        "sha256": "8603a5cff1675e5bfc9948b8ee7de4c99b05099978b6e6bb64109fc1faa18b9d"
+        "sha256": "eb06f675dd71ed8c52b7078889887ad2e9774c28713a0c8e692940fac0147add"
       },
       "plugins/lorepia-platform/src/mobile.rs": {
         "count": 21,
-        "sha256": "15ad02b746b9f138050c6f5cf4c0d8ccc6989236371c4737036062caddb76805"
+        "sha256": "d3ae8182a75627cab88bb2fbe6cc3f30b80907973cc0f339de4a818b9ab01ab2"
       },
       "plugins/lorepia-platform/src/model.rs": {
-        "count": 55,
-        "sha256": "6204d1147f94863987b0334e948ffbbe3b9e7f1cff9e984785f1e9fc88a7ccbb"
+        "count": 56,
+        "sha256": "e48cce328a146a8e6bda0d87641ca97646b761398764c01b651213652cea9291"
       },
       "plugins/lorepia-platform/src/staging.rs": {
-        "count": 8,
-        "sha256": "60b83fab42c4fd3b74bb885a970bb22c909fef9be4511d8749ffec2872461c78"
+        "count": 9,
+        "sha256": "21ec22f79d8510b6fbf0280658d47262367b073d72dccbbd1f3681b7c9cb6d1a"
       },
       "plugins/lorepia-platform/src/validation.rs": {
         "count": 21,
@@ -7768,7 +7818,7 @@
     },
     "core_api_version": 10,
     "policy": "conservative source-level declaration fingerprint, not semantic rustdoc API",
-    "sha256": "9c5352a388aa4fc2d88f4990f8f80d5b83e1a6a8bd89b2cfc0280a4de1c9b909",
+    "sha256": "b65d827ed271223a1b3eedfc6a6e74fcd5125f14c94a095f6b07dfa112a95209",
     "shell_api_version": 3
   },
   "ratchets": {
@@ -7776,7 +7826,7 @@
     "config/core-storage-public-api-baseline.json": "c86c10d701180070ec6742d3424deb2784cb0c5e5628b6b809093befa5c3c46b",
     "config/refactoring/completion-status.json": "4953800f2a0584a25d5761b3788dca46bfbe35dd296dde8845c53031d6e1bd03",
     "config/refactoring/task-manifest.yaml": "90a2365b949430d97d588d44818afe3d348329284c48631c900de5d1de47fd58",
-    "config/source-size-baseline.json": "ae256c2584456303ac0e0e270b14082eee4b7fc3eb187f4986d450aae79f68c5",
+    "config/source-size-baseline.json": "7eebdd5574f8b5249074265aa02bd0bc81f22e5a4cb72261120b8d58c1eea1ad",
     "config/test-source-size-baseline.json": "7df20cb344d52000b8581a25ae04afd808b46bc32fe5cfd4c3e0d26ba5f8f861"
   },
   "remaining_hotspots": {
@@ -7787,13 +7837,13 @@
       "entries": [
         {
           "authority": "config/source-size-baseline.json#baselines/apps/lorepia/src-tauri/src/contract.rs",
-          "current_bytes": 84269,
-          "current_lines": 2161,
+          "current_bytes": 83713,
+          "current_lines": 2139,
           "hard_target_bytes": 40960,
           "hard_target_lines": 900,
           "path": "apps/lorepia/src-tauri/src/contract.rs",
-          "ratchet_bytes": 84557,
-          "ratchet_lines": 2174,
+          "ratchet_bytes": 83713,
+          "ratchet_lines": 2139,
           "status": "active-over-hard-target"
         },
         {
@@ -7853,7 +7903,7 @@
         },
         {
           "authority": "config/test-source-size-baseline.json#baselines/apps/lorepia/src/lib/ipc/client.test.ts",
-          "current_bytes": 69408,
+          "current_bytes": 69360,
           "current_lines": 1828,
           "hard_target_bytes": 61440,
           "hard_target_lines": 1200,
@@ -7886,8 +7936,8 @@
         },
         {
           "authority": "config/source-size-baseline.json#baselines/crates/content/src/package.rs",
-          "current_bytes": 111849,
-          "current_lines": 3056,
+          "current_bytes": 112281,
+          "current_lines": 3068,
           "hard_target_bytes": 40960,
           "hard_target_lines": 900,
           "path": "crates/content/src/package.rs",
@@ -8370,13 +8420,13 @@
         },
         {
           "authority": "config/source-size-baseline.json#baselines/plugins/lorepia-platform/src/desktop.rs",
-          "current_bytes": 204435,
-          "current_lines": 5325,
+          "current_bytes": 204178,
+          "current_lines": 5320,
           "hard_target_bytes": 40960,
           "hard_target_lines": 900,
           "path": "plugins/lorepia-platform/src/desktop.rs",
-          "ratchet_bytes": 204435,
-          "ratchet_lines": 5325,
+          "ratchet_bytes": 204178,
+          "ratchet_lines": 5320,
           "status": "active-over-hard-target"
         },
         {
@@ -8466,19 +8516,19 @@
         },
         {
           "approved_exception": null,
-          "bytes": 204435,
+          "bytes": 204178,
           "disposition": "unresolved",
           "hard_target_bytes": 40960,
           "hard_target_lines": 900,
           "kind": "production",
           "language": "rust",
-          "lines": 5325,
+          "lines": 5320,
           "path": "plugins/lorepia-platform/src/desktop.rs",
           "ratchet": {
             "authority": "config/source-size-baseline.json#baselines/plugins/lorepia-platform/src/desktop.rs",
-            "bytes": 204435,
+            "bytes": 204178,
             "kind": "configured-baseline",
-            "lines": 5325
+            "lines": 5320
           }
         },
         {
@@ -8721,13 +8771,13 @@
         },
         {
           "approved_exception": null,
-          "bytes": 111849,
+          "bytes": 112281,
           "disposition": "unresolved",
           "hard_target_bytes": 40960,
           "hard_target_lines": 900,
           "kind": "production",
           "language": "rust",
-          "lines": 3056,
+          "lines": 3068,
           "path": "crates/content/src/package.rs",
           "ratchet": {
             "authority": "config/source-size-baseline.json#baselines/crates/content/src/package.rs",
@@ -8874,23 +8924,6 @@
         },
         {
           "approved_exception": null,
-          "bytes": 84269,
-          "disposition": "unresolved",
-          "hard_target_bytes": 40960,
-          "hard_target_lines": 900,
-          "kind": "production",
-          "language": "rust",
-          "lines": 2161,
-          "path": "apps/lorepia/src-tauri/src/contract.rs",
-          "ratchet": {
-            "authority": "config/source-size-baseline.json#baselines/apps/lorepia/src-tauri/src/contract.rs",
-            "bytes": 84557,
-            "kind": "configured-baseline",
-            "lines": 2174
-          }
-        },
-        {
-          "approved_exception": null,
           "bytes": 83792,
           "disposition": "unresolved",
           "hard_target_bytes": 40960,
@@ -8904,6 +8937,23 @@
             "bytes": 83792,
             "kind": "configured-baseline",
             "lines": 2120
+          }
+        },
+        {
+          "approved_exception": null,
+          "bytes": 83713,
+          "disposition": "unresolved",
+          "hard_target_bytes": 40960,
+          "hard_target_lines": 900,
+          "kind": "production",
+          "language": "rust",
+          "lines": 2139,
+          "path": "apps/lorepia/src-tauri/src/contract.rs",
+          "ratchet": {
+            "authority": "config/source-size-baseline.json#baselines/apps/lorepia/src-tauri/src/contract.rs",
+            "bytes": 83713,
+            "kind": "configured-baseline",
+            "lines": 2139
           }
         },
         {
@@ -9164,24 +9214,6 @@
         },
         {
           "approved_exception": null,
-          "bytes": 70053,
-          "disposition": "unresolved",
-          "hard_target_bytes": 40960,
-          "hard_target_lines": 900,
-          "kind": "production",
-          "language": "rust",
-          "lines": 1931,
-          "path": "apps/lorepia/src-tauri/src/commands.rs",
-          "ratchet": {
-            "authority": "config/source-size-baseline.json#bootstrap_ref",
-            "bootstrap_bytes": 70216,
-            "bootstrap_lines": 1938,
-            "kind": "bootstrap-legacy",
-            "ref": "ace8105c7bcad425a751490b77c136fa1800df67"
-          }
-        },
-        {
-          "approved_exception": null,
           "bytes": 70013,
           "disposition": "unresolved",
           "hard_target_bytes": 40960,
@@ -9199,7 +9231,7 @@
         },
         {
           "approved_exception": null,
-          "bytes": 69408,
+          "bytes": 69360,
           "disposition": "unresolved",
           "hard_target_bytes": 61440,
           "hard_target_lines": 1200,
@@ -9263,6 +9295,24 @@
             "authority": "config/source-size-baseline.json#bootstrap_ref",
             "bootstrap_bytes": 67722,
             "bootstrap_lines": 1725,
+            "kind": "bootstrap-legacy",
+            "ref": "ace8105c7bcad425a751490b77c136fa1800df67"
+          }
+        },
+        {
+          "approved_exception": null,
+          "bytes": 67476,
+          "disposition": "unresolved",
+          "hard_target_bytes": 40960,
+          "hard_target_lines": 900,
+          "kind": "production",
+          "language": "rust",
+          "lines": 1848,
+          "path": "apps/lorepia/src-tauri/src/commands.rs",
+          "ratchet": {
+            "authority": "config/source-size-baseline.json#bootstrap_ref",
+            "bootstrap_bytes": 70216,
+            "bootstrap_lines": 1938,
             "kind": "bootstrap-legacy",
             "ref": "ace8105c7bcad425a751490b77c136fa1800df67"
           }
@@ -9536,13 +9586,13 @@
         },
         {
           "approved_exception": null,
-          "bytes": 52208,
+          "bytes": 51597,
           "disposition": "unresolved",
           "hard_target_bytes": 40960,
           "hard_target_lines": 900,
           "kind": "production",
           "language": "rust",
-          "lines": 1446,
+          "lines": 1428,
           "path": "crates/content/src/archive.rs",
           "ratchet": {
             "authority": "config/source-size-baseline.json#bootstrap_ref",
@@ -9893,13 +9943,13 @@
         },
         {
           "approved_exception": null,
-          "bytes": 28779,
+          "bytes": 28771,
           "disposition": "unresolved",
           "hard_target_bytes": 40960,
           "hard_target_lines": 500,
           "kind": "facade",
           "language": "rust",
-          "lines": 777,
+          "lines": 775,
           "path": "plugins/lorepia-platform/src/lib.rs",
           "ratchet": {
             "authority": "config/source-size-baseline.json#bootstrap_ref",
@@ -9911,13 +9961,13 @@
         },
         {
           "approved_exception": null,
-          "bytes": 28240,
+          "bytes": 28260,
           "disposition": "unresolved",
           "hard_target_bytes": 40960,
           "hard_target_lines": 500,
           "kind": "facade",
           "language": "rust",
-          "lines": 772,
+          "lines": 766,
           "path": "crates/content/src/lib.rs",
           "ratchet": {
             "authority": "config/source-size-baseline.json#bootstrap_ref",
@@ -10155,10 +10205,10 @@
     "policy": "Size baselines and bootstrap history are non-growth ratchets, not design approvals. Schema v2 records zero approved exceptions and rejects non-empty entries until a structured ADR binding is implemented."
   },
   "summary": {
-    "production_bytes": 15630198,
-    "production_declarations": 14426,
-    "production_files": 709,
-    "production_lines": 412700,
-    "public_symbols": 6919
+    "production_bytes": 15653365,
+    "production_declarations": 14449,
+    "production_files": 714,
+    "production_lines": 413324,
+    "public_symbols": 6937
   }
 }

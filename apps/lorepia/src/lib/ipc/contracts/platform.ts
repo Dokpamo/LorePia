@@ -39,7 +39,12 @@ import type {
     SendMessageInput,
 } from './generation';
 
-import type { ImportCommitResultDto, ImportInspectionDto, ImportTicketDto } from './import';
+import type {
+    ImportCommitResultDto,
+    ImportInspectionDto,
+    ImportResourcePolicyDto,
+    ImportTicketDto,
+} from './import';
 
 import type {
     InterruptedMemoryJobDto,
@@ -222,7 +227,7 @@ export interface LorepiaClient {
     subscribeInteractionEffects(
         onEffect: (effect: InteractionEffectEventDto) => void,
     ): Promise<() => void>;
-    selectImportSource(): Promise<ImportTicketDto | null>;
+    selectImportSource(resourcePolicy?: ImportResourcePolicyDto): Promise<ImportTicketDto | null>;
     inspectImport(ticketId: string): Promise<ImportInspectionDto>;
     commitImport(inspectionId: string): Promise<ImportCommitResultDto>;
     discardImport(inspectionId: string): Promise<void>;

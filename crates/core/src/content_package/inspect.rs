@@ -90,7 +90,7 @@ impl Core {
     ) -> CoreResult<ContentPackageImportInspection> {
         self.inspect_content_package_import_with_limits(source_path, ImportLimits::default())
     }
-    fn inspect_content_package_import_with_limits(
+    pub(crate) fn inspect_content_package_import_with_limits(
         &self,
         source_path: &Path,
         limits: ImportLimits,
@@ -812,7 +812,7 @@ fn package_too_large(maximum_bytes: u64) -> CoreError {
     CoreError::new(
         CoreErrorCode::UnsupportedContent,
         format!("content package exceeds the {maximum_bytes}-byte source limit"),
-        false,
+        true,
     )
 }
 fn package_io_error(error: std::io::Error) -> CoreError {

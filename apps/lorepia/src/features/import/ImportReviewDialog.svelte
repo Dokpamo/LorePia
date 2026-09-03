@@ -78,11 +78,15 @@
     });
 
     function formatBytes(value: number): string {
+        const gibibyte = 1_073_741_824;
+        const mebibyte = 1_048_576;
+        const unit = value >= gibibyte ? 'gigabyte' : value >= mebibyte ? 'megabyte' : 'kilobyte';
+        const divisor = value >= gibibyte ? gibibyte : value >= mebibyte ? mebibyte : 1_024;
         return new Intl.NumberFormat('ko-KR', {
             style: 'unit',
-            unit: value >= 1_048_576 ? 'megabyte' : 'kilobyte',
+            unit,
             maximumFractionDigits: 1,
-        }).format(value >= 1_048_576 ? value / 1_048_576 : value / 1_024);
+        }).format(value / divisor);
     }
 
     function kindLabel(kind: ImportInspectionDto['kind']): string {
@@ -141,15 +145,28 @@
 
         {#if appState.import_flow.phase === 'loading'}
             <div class="modal-body">
-                <div class="state-panel" role="status">{$tr('import.inspecting')}</div>
+                <div class="state-panel" role="status">
+                    {appState.import_flow.resource_override_active
+                        ? $tr('import.resource.inspecting')
+                        : $tr('import.inspecting')}
+                </div>
             </div>
         {:else if appState.import_flow.phase === 'error'}
             <div class="modal-body">
                 <div class="state-panel error" role="alert">
                     <p>{appState.import_flow.error}</p>
-                    <button type="button" onclick={() => void controller.discardImport()}
-                        >{$tr('import.close')}</button
-                    >
+                    {#if appState.import_flow.resource_override_available}
+                        <p>{$tr('import.resource.retry_description')}</p>
+                        <button
+                            class="primary"
+                            type="button"
+                            onclick={() => void controller.beginImport()}
+                            >{$tr('import.resource.retry')}</button
+                        >
+                    {/if}
+                    <button type="button" onclick={() => void controller.discardImport()}>
+                        {$tr('import.close')}
+                    </button>
                 </div>
             </div>
         {:else if appState.import_flow.inspection}
@@ -188,6 +205,15 @@
                         </dd>
                     </div>
                 </dl>
+
+                {#if appState.import_flow.resource_override_active}
+                    <section class="issue-box warning" aria-labelledby="large-import-title">
+                        <h3 id="large-import-title">{$tr('import.resource.title')}</h3>
+                        <p>{$tr('import.resource.approved_limits')}</p>
+                        <p>{$tr('import.resource.storage_warning')}</p>
+                        <p>{$tr('import.resource.security_boundary')}</p>
+                    </section>
+                {/if}
 
                 {#if isImportedContent(inspection.kind)}
                     <section class="issue-box info" aria-labelledby="compatibility-import-title">

@@ -758,7 +758,7 @@ pub fn stage_selected_content_package_assets(
                 .checked_add(entry.size())
                 .ok_or_else(|| unsafe_package("selected asset size overflow"))?;
             if staged_total > limits.max_total_uncompressed_bytes {
-                return Err(unsafe_package(
+                return Err(resource_limit(
                     "selected assets exceed the total uncompressed size limit",
                 ));
             }
@@ -1014,7 +1014,7 @@ fn read_selected_json_entries(
             .checked_add(entry.size())
             .ok_or_else(|| unsafe_package("selected JSON size overflow"))?;
         if retained_total > limits.max_total_uncompressed_bytes {
-            return Err(unsafe_package(
+            return Err(resource_limit(
                 "selected JSON components exceed the total size limit",
             ));
         }
@@ -1088,9 +1088,14 @@ fn read_selected_json_entry<R: Read>(
             "selected JSON bytes differ from the reviewed component: {normalized}"
         )));
     }
-    if entry.size() > limits.max_entry_bytes || entry.size() > MAX_COMPONENT_JSON_BYTES {
+    if entry.size() > MAX_COMPONENT_JSON_BYTES {
         return Err(unsafe_package(format!(
             "selected JSON component exceeds preparation limits: {normalized}"
+        )));
+    }
+    if entry.size() > limits.max_entry_bytes {
+        return Err(resource_limit(format!(
+            "selected JSON component exceeds the configured entry size limit: {normalized}"
         )));
     }
     let capacity = usize::try_from(entry.size())
@@ -1756,7 +1761,7 @@ fn validate_package_entry<R: Read>(
         )));
     }
     if entry.size() > limits.max_entry_bytes {
-        return Err(unsafe_package(format!(
+        return Err(resource_limit(format!(
             "archive entry exceeds size limit: {original}"
         )));
     }
@@ -1769,7 +1774,7 @@ fn validate_package_entry<R: Read>(
         .checked_add(entry.size())
         .ok_or_else(|| unsafe_package("archive size overflow"))?;
     if *declared_total > limits.max_total_uncompressed_bytes {
-        return Err(unsafe_package(
+        return Err(resource_limit(
             "archive exceeds total uncompressed size limit",
         ));
     }
@@ -1817,11 +1822,14 @@ fn read_package_entry<R: Read>(
         *actual_total = actual_total
             .checked_add(read as u64)
             .ok_or_else(|| unsafe_package("archive total size overflow"))?;
-        if entry_size > limits.max_entry_bytes
-            || *actual_total > limits.max_total_uncompressed_bytes
-        {
-            return Err(unsafe_package(
-                "archive decoded data exceeds configured size limits",
+        if entry_size > limits.max_entry_bytes {
+            return Err(resource_limit(
+                "archive decoded entry exceeds the configured size limit",
+            ));
+        }
+        if *actual_total > limits.max_total_uncompressed_bytes {
+            return Err(resource_limit(
+                "archive decoded data exceeds the total configured size limit",
             ));
         }
         digest.update(&buffer[..read]);
@@ -2936,6 +2944,10 @@ fn unsupported(message: impl Into<String>) -> CoreError {
 
 fn unsafe_package(message: impl Into<String>) -> CoreError {
     CoreError::new(CoreErrorCode::UnsafeArchive, message, false)
+}
+
+fn resource_limit(message: impl Into<String>) -> CoreError {
+    CoreError::new(CoreErrorCode::UnsupportedContent, message, true)
 }
 
 fn invalid(message: impl Into<String>) -> CoreError {

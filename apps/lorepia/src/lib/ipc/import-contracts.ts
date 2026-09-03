@@ -15,6 +15,8 @@ export interface ImportTicketDto {
     size_bytes: number;
 }
 
+export type ImportResourcePolicyDto = 'standard' | 'user_approved_large';
+
 export interface ImportIssueDto {
     code: string;
     message: string;

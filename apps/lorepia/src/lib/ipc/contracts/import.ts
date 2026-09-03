@@ -7,6 +7,7 @@ export type {
     ImportImagePreviewDto,
     ImportInspectionDto,
     ImportIssueDto,
+    ImportResourcePolicyDto,
     ImportRegexRuleReviewDto,
     ImportTicketDto,
     ImportedContentSummaryDto,

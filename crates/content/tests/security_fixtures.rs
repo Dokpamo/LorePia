@@ -334,6 +334,7 @@ fn rejects_one_byte_beyond_each_size_boundary() {
     };
     let error = inspect_file(json.path(), source_limits).expect_err("source is too large");
     assert_eq!(error.code, CoreErrorCode::UnsupportedContent);
+    assert!(error.recoverable);
 
     let archive = synthetic_archive(vec![card_entry()]);
     let entry_limits = ImportLimits {
@@ -341,14 +342,16 @@ fn rejects_one_byte_beyond_each_size_boundary() {
         ..ImportLimits::default()
     };
     let error = inspect_file(archive.path(), entry_limits).expect_err("entry is too large");
-    assert_eq!(error.code, CoreErrorCode::UnsafeArchive);
+    assert_eq!(error.code, CoreErrorCode::UnsupportedContent);
+    assert!(error.recoverable);
 
     let total_limits = ImportLimits {
         max_total_uncompressed_bytes: VALID_CARD.len() as u64 - 1,
         ..ImportLimits::default()
     };
     let error = inspect_file(archive.path(), total_limits).expect_err("total is too large");
-    assert_eq!(error.code, CoreErrorCode::UnsafeArchive);
+    assert_eq!(error.code, CoreErrorCode::UnsupportedContent);
+    assert!(error.recoverable);
 }
 
 #[test]

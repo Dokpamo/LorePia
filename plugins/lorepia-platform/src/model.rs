@@ -431,6 +431,7 @@ pub struct StagedImport {
     path: PathBuf,
     display_name: String,
     size_bytes: u64,
+    maximum_bytes: u64,
 }
 
 impl StagedImport {
@@ -441,11 +442,17 @@ impl StagedImport {
         windows,
         test
     ))]
-    pub(crate) fn new(path: PathBuf, display_name: String, size_bytes: u64) -> Self {
+    pub(crate) fn new(
+        path: PathBuf,
+        display_name: String,
+        size_bytes: u64,
+        maximum_bytes: u64,
+    ) -> Self {
         Self {
             path,
             display_name,
             size_bytes,
+            maximum_bytes,
         }
     }
 
@@ -460,6 +467,10 @@ impl StagedImport {
     pub const fn size_bytes(&self) -> u64 {
         self.size_bytes
     }
+
+    pub const fn maximum_bytes(&self) -> u64 {
+        self.maximum_bytes
+    }
 }
 
 impl fmt::Debug for StagedImport {
@@ -469,6 +480,7 @@ impl fmt::Debug for StagedImport {
             .field("path", &"[REDACTED]")
             .field("display_name", &"[REDACTED]")
             .field("size_bytes", &self.size_bytes)
+            .field("maximum_bytes", &self.maximum_bytes)
             .finish()
     }
 }
