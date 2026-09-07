@@ -1,0 +1,180 @@
+.ui-preview .ui-compose {
+    position: absolute;
+    z-index: 2;
+    inset: auto 0 0;
+    padding: 8px max(12px, calc((var(--ui-chat-width) - 760px) / 2))
+        max(12px, env(safe-area-inset-bottom));
+    background: transparent;
+    pointer-events: none;
+}
+.ui-preview .ui-chat > .ui-compose {
+    padding-inline: max(12px, calc((var(--ui-chat-width) - 760px) / 2));
+}
+.ui-preview .ui-compose-field {
+    --ui-compose-text-size: 34px;
+    --ui-compose-limit: 336px;
+    position: relative;
+    height: 64px;
+    min-height: 64px;
+    max-height: var(--ui-compose-limit);
+    border-radius: 20px;
+    background: var(--ui-soft);
+    pointer-events: auto;
+    overflow: hidden;
+    transition:
+        height 360ms cubic-bezier(0.22, 1, 0.36, 1),
+        border-radius 360ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.ui-preview .ui-compose-field.ui-compose-expanded {
+    height: max(104px, calc(var(--ui-compose-text-size) + 72px));
+}
+.ui-preview .ui-compose-text-region {
+    position: absolute;
+    inset: 8px 8px 8px 64px;
+    overflow: hidden;
+    transition:
+        left 360ms cubic-bezier(0.22, 1, 0.36, 1),
+        right 360ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.ui-preview .ui-compose-text-region textarea {
+    display: block;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    padding: 11px 8px 0;
+    border: 0;
+    border-radius: 0;
+    resize: none;
+    outline: none;
+    color: var(--ui-ink);
+    background: transparent;
+    font-size: calc(16px * var(--ui-text-scale));
+    line-height: 1.6;
+    white-space: nowrap;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    overscroll-behavior: contain;
+    touch-action: pan-y pinch-zoom;
+}
+.ui-preview .ui-compose-text-region textarea::placeholder {
+    color: var(--ui-muted);
+}
+.ui-preview
+    .ui-compose-field:is(.ui-compose-expanded, .ui-compose-measuring)
+    .ui-compose-text-region {
+    left: 8px;
+    right: 8px;
+    bottom: 64px;
+}
+.ui-preview .ui-compose-field:is(.ui-compose-expanded, .ui-compose-measuring) textarea {
+    padding: 8px 8px 0;
+    white-space: pre-wrap;
+}
+.ui-preview .ui-compose-measuring .ui-compose-text-region {
+    transition: none;
+}
+.ui-preview .ui-compose-overflows textarea {
+    overflow-y: auto;
+}
+.ui-preview .ui-compose-actions {
+    position: absolute;
+    inset: auto 8px 8px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 48px;
+    pointer-events: none;
+}
+.ui-preview .ui-compose-actions > div {
+    pointer-events: auto;
+}
+.ui-preview .ui-compose-spacer {
+    flex: 1;
+}
+.ui-preview .ui-compose-actions .ui-icon-button {
+    --ui-icon-size: 24px;
+}
+.ui-preview .ui-compose-expand {
+    width: 0;
+    overflow: hidden;
+    opacity: 0;
+    transform: scale(0.82);
+    transform-origin: right center;
+    transition:
+        width 360ms cubic-bezier(0.22, 1, 0.36, 1),
+        opacity 260ms ease,
+        transform 360ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.ui-preview .ui-compose-can-fullscreen .ui-compose-expand {
+    width: var(--ui-control);
+    opacity: 1;
+    transform: scale(1);
+}
+.ui-preview .ui-compose-send {
+    visibility: hidden;
+}
+.ui-preview :is(.ui-compose-has-draft, .ui-compose-busy) .ui-compose-send {
+    visibility: visible;
+}
+.ui-preview .ui-compose-send .ui-press-visual {
+    width: 40px;
+    height: 40px;
+    margin: auto;
+    border-radius: 50%;
+    background: var(--ui-accent);
+    color: var(--ui-paper);
+}
+.ui-preview .ui-compose-field[data-ui-editor-origin='true'] {
+    opacity: 0;
+    transition: none;
+}
+.ui-preview .ui-editor-morph .ui-text-editor {
+    background: color-mix(
+        in srgb,
+        var(--ui-soft) calc((1 - var(--ui-editor-progress, 1)) * 100%),
+        var(--ui-paper)
+    );
+}
+.ui-preview .ui-editor-morph :is([data-editor-back], [data-editor-send], textarea) {
+    transform: translate3d(
+        calc((1 - var(--ui-editor-progress, 1)) * var(--ui-origin-x, 0px)),
+        calc((1 - var(--ui-editor-progress, 1)) * var(--ui-origin-y, 0px)),
+        0
+    );
+}
+.ui-preview .ui-editor-morph textarea {
+    font-size: calc(
+        var(--ui-origin-font, 16px) + (16px * var(--ui-text-scale) - var(--ui-origin-font, 16px)) *
+            var(--ui-editor-progress, 1)
+    );
+    line-height: calc(
+        var(--ui-origin-line, 25.6px) +
+            (25.6px * var(--ui-text-scale) - var(--ui-origin-line, 25.6px)) *
+            var(--ui-editor-progress, 1)
+    );
+}
+.ui-preview .ui-editor-morph :is(.ui-title-group, .ui-editor-footer) {
+    opacity: var(--ui-editor-progress, 1);
+}
+.ui-preview:not([data-layout='mobile']) .ui-compose-field {
+    height: max(104px, calc(var(--ui-compose-text-size) + 72px));
+    border-radius: 16px;
+}
+.ui-preview:not([data-layout='mobile']) .ui-compose-text-region {
+    inset: 8px 8px 64px;
+}
+.ui-preview:not([data-layout='mobile']) .ui-compose-text-region textarea {
+    padding: 8px 8px 0;
+    white-space: pre-wrap;
+}
+.ui-preview:not([data-layout='mobile']) .ui-compose-send {
+    visibility: visible;
+}
+.ui-preview .ui-compose-send .ui-icon-button:disabled .ui-press-visual {
+    background: var(--ui-muted);
+}
+@media (prefers-reduced-motion: reduce) {
+    .ui-preview :is(.ui-compose-field, .ui-compose-text-region, .ui-compose-expand) {
+        transition: none;
+    }
+}

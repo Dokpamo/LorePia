@@ -12,7 +12,10 @@
 
 import { derived, get, writable, type Readable } from 'svelte/store';
 
-import { ko } from './ko';
+import { ko as koBase } from './ko';
+import { koUiPreview } from './ko-ui-preview';
+
+const ko = { ...koUiPreview, ...koBase };
 
 export type MessageKey = keyof typeof ko;
 export type MessageParams = Readonly<Record<string, string | number>>;

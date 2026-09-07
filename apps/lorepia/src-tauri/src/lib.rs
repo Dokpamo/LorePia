@@ -16,6 +16,8 @@ mod provider_commands;
 mod runtime_contract;
 mod runtime_generation_registry;
 mod state;
+#[cfg(target_os = "macos")]
+mod ui_preview_window;
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -48,6 +50,18 @@ static APPLIED_MIN_WIDTH: AtomicU32 = AtomicU32::new(0);
 /// Called on every resize, so dragging the window taller also raises the width
 /// it may be squeezed to.
 fn hold_phone_aspect(window: &tauri::Window) {
+    let configured_window = window
+        .app_handle()
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|config| config.label == window.label());
+    if configured_window.is_some_and(uses_fixed_preview_minimum) {
+        #[cfg(target_os = "macos")]
+        ui_preview_window::update(window);
+        return;
+    }
     let Ok(scale) = window.scale_factor() else {
         return;
     };
@@ -66,6 +80,13 @@ fn hold_phone_aspect(window: &tauri::Window) {
         return;
     }
     let _ = window.set_min_size(Some(LogicalSize::new(target, MIN_WINDOW_HEIGHT)));
+}
+
+fn uses_fixed_preview_minimum(config: &tauri::utils::config::WindowConfig) -> bool {
+    matches!(
+        &config.url,
+        tauri::utils::config::WebviewUrl::App(path) if path == std::path::Path::new("ui-preview.html")
+    )
 }
 
 /// Starts the native `LorePia` shell and owns the process event loop.
@@ -105,6 +126,10 @@ pub fn run() {
         .on_window_event(|window, event| {
             if matches!(event, WindowEvent::Resized(_)) {
                 hold_phone_aspect(window);
+            }
+            #[cfg(target_os = "macos")]
+            if matches!(event, WindowEvent::Destroyed) {
+                ui_preview_window::forget(window.label());
             }
         })
         .setup(|app| {
@@ -330,4 +355,25 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("failed to run LorePia");
+}
+
+#[cfg(test)]
+mod window_size_tests {
+    use super::uses_fixed_preview_minimum;
+    use tauri::utils::config::{WebviewUrl, WindowConfig};
+
+    #[test]
+    fn only_ui_preview_keeps_its_configured_fixed_minimum() {
+        for (entry, expected) in [
+            ("ui-preview.html", true),
+            ("preview.html", false),
+            ("index.html", false),
+        ] {
+            let config = WindowConfig {
+                url: WebviewUrl::App(entry.into()),
+                ..WindowConfig::default()
+            };
+            assert_eq!(uses_fixed_preview_minimum(&config), expected);
+        }
+    }
 }
