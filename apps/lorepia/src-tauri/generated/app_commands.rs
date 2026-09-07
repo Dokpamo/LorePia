@@ -5,6 +5,7 @@ const APP_COMMANDS: &[&str] = &[
     "bootstrap",
     "set_system_bar_style",
     "get_memory_supervisor_status",
+    "get_storage_overview",
     "list_characters",
     "get_character",
     "get_character_greeting_catalog",

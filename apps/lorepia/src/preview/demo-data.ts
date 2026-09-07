@@ -944,7 +944,7 @@ export function createDemoOrchestrationWorkspace(
             prompt_preset_id: 'prompt-story-demo',
             generation_preset_id: 'preset-balanced-demo',
             response_length: 'balanced',
-            creativity: 0.65,
+            creativity: 65,
             reasoning_effort: 'medium',
             memory_enabled: true,
             knowledge_enabled: true,

@@ -24,6 +24,17 @@ function setup() {
     };
 }
 describe('preview chat branches and response lifecycle', () => {
+    it('does not create a branch for blank edits or apply an editor from another source branch', () => {
+        const { first, session } = setup();
+        const change = session.edit('a1-m2');
+        change(' \n ');
+        expect(first.branches).toBeUndefined();
+        session.fork('a1-m3');
+        const before = structuredClone(first.messages);
+        change('stale edit from the original branch');
+        expect(first.messages).toEqual(before);
+        expect(first.branches).toHaveLength(2);
+    });
     it('edits into one branch while preserving the original message and its continuation', () => {
         const { first, session } = setup();
         const before = structuredClone(first.messages);

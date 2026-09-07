@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import appSource from '../app/App.svelte?raw';
+import appHeaderSource from '../app/AppDetailHeader.svelte?raw';
+import mobileAllSource from '../components/mobile/MobileAll.svelte?raw';
+import mobileHeaderSource from '../components/mobile/MobileDetailHeader.svelte?raw';
+import mobileMenuSource from '../components/mobile/MobileMenuRow.svelte?raw';
+import mobileNavSource from '../components/mobile/MobileNavigation.svelte?raw';
+import mobileStudioSource from '../features/orchestration/studio/MobileStudioIndex.svelte?raw';
 import choiceFieldSource from '../components/ChoiceField.svelte?raw';
 import popoverSource from '../components/ChoicePopover.svelte?raw';
 import segmentedControlSource from '../components/SegmentedControl.svelte?raw';
@@ -138,7 +144,7 @@ describe('pointer interaction styling', () => {
             /\.field-menu\.desktop-field-menu :global\(\.choice-check\)\s*\{[^}]*display:\s*none;/s,
         );
     });
-    it('uses one inverse Paper and Ink palette across light and dark modes', () => {
+    it('preserves the desktop Paper and Ink palette across light and dark modes', () => {
         const palette = {
             paper: '#f2f0ea',
             'paper-bright': '#fbfcfa',
@@ -183,8 +189,7 @@ describe('pointer interaction styling', () => {
         expect(css).not.toContain('--brand-yellow');
         expect(css).not.toContain('--brand-tangerine-orange');
         expect(css).not.toContain('#0e9384');
-        expect(settingsSource).toContain('lorepia-logo-mark.png');
-        expect(settingsSource).toContain('class="settings-avatar brand-logo-mark"');
+        expect(mobileAllSource).not.toContain('mobile-profile-avatar');
         expect(appSource).not.toContain('lorepia-logo-mark.png');
         expect(appSource).not.toContain('class="sidebar-logo"');
         expect(appSource).not.toContain('lorepia-logo-light.png');
@@ -265,77 +270,21 @@ describe('pointer interaction styling', () => {
             /\.app-shell\[data-layout='desktop'\]\[data-view='settings'\] \.setting-list\s*\{[^}]*background:\s*var\(--desktop-workspace-bg\);/s,
         );
     });
-    it('puts every pushed-screen action in the same measured toolbar slot', () => {
-        expect(appSource).toMatch(/class="mobile-top-frame mobile-root-header"/);
+    it('shares the new mobile detail header while preserving desktop headers and scroll owners', () => {
+        expect(appSource.match(/<AppDetailHeader/g)).toHaveLength(2);
         expect(
-            appSource.match(/class="mobile-top-frame mobile-top-frame-leading sub-header"/g),
-        ).toHaveLength(2);
-        expect(appSource).toContain('class:studio-detail-scroll={studioSection !== null}');
+            appHeaderSource.match(/class="mobile-top-frame mobile-top-frame-leading sub-header"/g),
+        ).toHaveLength(1);
+        expect(mobileHeaderSource).toContain('bind:this={titleElement}');
+        expect(mobileHeaderSource).toContain('tabindex="-1"');
         expect(appSource).toContain('onscroll={handleStudioDetailScroll}');
-        expect(appSource).toContain('onDetailScroll={handlePushedDetailScroll}');
-        expect(
-            appSource.match(/mobile-top-action mobile-top-action-left back-button/g),
-        ).toHaveLength(2);
-        expect(convoSource).toMatch(
-            /class="mobile-top-frame mobile-root-header conversation-root-header"/,
-        );
-        expect(settingsSource).toMatch(/class="mobile-top-frame settings-toolbar"/);
-        expect(settingsSource).toMatch(/mobile-top-action settings-tool-button/);
-        expect(settingsSource).toMatch(
-            /\.provider-pane \.settings-toolbar\s*\{[^}]*position:\s*absolute;[^}]*inset:\s*0 0 auto;[^}]*background:\s*transparent;[^}]*pointer-events:\s*none;/s,
-        );
-        expect(settingsSource).toMatch(
-            /\.provider-pane \.settings-tool-button\s*\{[^}]*pointer-events:\s*auto;/s,
-        );
-        expect(settingsSource).toMatch(
-            /\.provider-pane \.provider-scroll\.settings-home-scroll\s*\{[^}]*padding-top:\s*clamp\(36px,\s*10\.297vw,\s*45px\);[^}]*padding-inline:\s*var\(--settings-gutter\);/s,
-        );
-        expect(appSource).not.toContain('mobile-detail-title');
-        expect(settingsSource).not.toContain('mobile-detail-title');
-        expect(settingsSource).not.toContain('showDetailTitle');
         expect(settingsSource).toContain('onscroll={handleSettingsDetailScroll}');
-        expect(settingsSource).not.toMatch(/class="settings-dialog"/);
-        expect(chatPaneSource).toMatch(
-            /class="mobile-top-frame mobile-top-frame-leading chat-header"/,
-        );
-        expect(chatPaneSource).toMatch(/mobile-top-action mobile-top-action-left back-button/);
+        expect(chatPaneSource).toContain('mobile-chat-header');
         expect(css).toMatch(
-            /\.mobile-top-frame\s*\{[^}]*height:\s*calc\(var\(--mobile-root-header\) \+ env\(safe-area-inset-top\)\);[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) auto;[^}]*padding-top:\s*env\(safe-area-inset-top\);[^}]*padding-inline-start:\s*max\(var\(--mobile-top-inset\),\s*env\(safe-area-inset-left\)\);[^}]*padding-inline-end:\s*max\(var\(--mobile-top-inset\),\s*env\(safe-area-inset-right\)\);/s,
-        );
-        expect(css).toMatch(
-            /\.mobile-top-frame-leading\s*\{[^}]*grid-template-columns:\s*auto minmax\(0,\s*1fr\) auto;/s,
-        );
-        expect(css).toMatch(
-            /\.mobile-top-action\s*\{[^}]*width:\s*var\(--mobile-top-action\);[^}]*height:\s*var\(--mobile-top-action\);[^}]*border-radius:\s*50%;[^}]*background:\s*var\(--surface-raised\);[^}]*box-shadow:\s*var\(--shadow-1\);/s,
-        );
-        expect(css).toMatch(
-            /\.app-shell\[data-layout='mobile'\] \.sub-header\s*\{[^}]*position:\s*absolute;[^}]*z-index:\s*10;[^}]*grid-template-columns:\s*var\(--mobile-top-action\) minmax\(0,\s*1fr\) var\(--mobile-top-action\);[^}]*border:\s*0;[^}]*background:\s*transparent;[^}]*inset:\s*0 0 auto;[^}]*pointer-events:\s*none;/s,
-        );
-        expect(css).toMatch(
-            /\.app-shell\[data-layout='mobile'\] \.sub-header > \.mobile-top-action\s*\{[^}]*pointer-events:\s*auto;/s,
-        );
-        expect(css).toMatch(
-            /\.app-shell\[data-layout='mobile'\] \.sub-header::after\s*\{[^}]*position:\s*absolute;[^}]*z-index:\s*-1;[^}]*height:\s*var\(--mobile-top-fade\);[^}]*background:\s*linear-gradient\(to bottom,\s*var\(--bg\) 0,\s*transparent 100%\);[^}]*opacity:\s*var\(--mobile-top-fade-progress,\s*0\);[^}]*pointer-events:\s*none;/s,
-        );
-        expect(css).not.toMatch(
-            /\.app-shell\[data-layout='mobile'\] \.sub-header::after\s*\{[^}]*(?:-webkit-)?mask-(?:image|repeat):/s,
-        );
-        expect(css).toMatch(
-            /\.app-shell\[data-layout='mobile'\] :is\(\.studio-detail-scroll, \.settings-detail-scroll\)\s*\{[^}]*padding-top:\s*calc\(\s*env\(safe-area-inset-top\) \+ var\(--mobile-top-offset\) \+ var\(--mobile-top-action\) \+\s*clamp\(7px,\s*3\.661vw,\s*16px\)\s*\);[^}]*scroll-padding-top:/s,
-        );
-        expect(css).toMatch(
-            /\.sub-header h1\s*\{[^}]*grid-column:\s*2;[^}]*padding-inline:\s*8px;[^}]*text-align:\s*center;/s,
-        );
-        expect(css).toMatch(
-            /\.app-shell\[data-layout='mobile'\] \.sub-header h1\s*\{[^}]*height:\s*var\(--mobile-top-action\);[^}]*display:\s*flex;[^}]*align-self:\s*center;[^}]*justify-content:\s*center;[^}]*padding-inline:\s*0;[^}]*margin:\s*0;[^}]*background:\s*transparent;[^}]*box-shadow:\s*none;/s,
-        );
-        expect(css).toMatch(
-            /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\] \.chat-pane \.chat-identity\s*\{[^}]*border-radius:\s*var\(--radius-pill\);[^}]*background:\s*color-mix\(in srgb,\s*var\(--surface-raised\) 94%,\s*transparent\);[^}]*box-shadow:\s*var\(--shadow-1\);/s,
-        );
-        expect(css).toMatch(
-            /\.app-shell\[data-layout='desktop'\] \.sub-header\s*\{[^}]*position:\s*relative;[^}]*height:\s*112px;[^}]*align-items:\s*flex-end;[^}]*padding:\s*0 var\(--settings-gutter\) 24px;[^}]*border-bottom:\s*0;[^}]*background:\s*var\(--desktop-workspace-bg\);/s,
+            /\.mobile-detail-header\s*\{[^}]*position:\s*absolute;[^}]*height:\s*calc\(136px \+ env\(safe-area-inset-top\)\);/s,
         );
     });
+
     it('keeps the interactive-back dimmer off the desktop workspace', () => {
         expect(css).toMatch(
             /\.app-shell\[data-layout='mobile'\] > \.back-swipe-underlay::after\s*\{[^}]*opacity:\s*var\(--back-swipe-underlay-dim\);/s,
@@ -370,12 +319,14 @@ describe('pointer interaction styling', () => {
             indexes.every((index) => ranges.some(([start, end]) => index > start && index < end)),
         ).toBe(true);
     });
-    it('routes create destinations through the shared settings-row hover treatment', () => {
-        expect(studioSource).toContain('class="setting-row studio-destination-row"');
-        expect(css).toMatch(
-            /\.setting-row:hover:not\(:disabled\)\s*\{[^}]*background:\s*var\(--bg\);/s,
-        );
+    it('uses the same mobile menu component for settings and creation destinations', () => {
+        for (const source of [mobileAllSource, mobileStudioSource, studioSource]) {
+            expect(source).toContain('<MobileMenuRow');
+        }
+        expect(mobileMenuSource).toContain('onclick={onSelect}');
+        expect(mobileMenuSource).toContain('type="button"');
     });
+
     it('keeps message actions icon-only and gives timestamps a legible hierarchy', () => {
         expect(chatMessageActionsSource).toContain('<Copy aria-hidden="true" />');
         expect(chatMessageActionsSource).toContain('<GitBranch aria-hidden="true" />');
@@ -469,26 +420,24 @@ describe('pointer interaction styling', () => {
             /\.app-shell\[data-layout='mobile'\]\[data-view='chat'\][\s\S]*?\.message-item:is\(\.actions-open,\s*:focus-within\)[\s\S]*?\.message-actions\s*\{[^}]*max-height:\s*var\(--message-action-size\);[^}]*padding-top:\s*4px;[^}]*opacity:\s*1;/s,
         );
     });
-    it('omits decorative right arrows from every destination row', () => {
-        for (const source of [settingsSource, personaPanelSource, studioSource]) {
-            expect(source).not.toContain('setting-chevron');
-        }
-        expect(convoSource).not.toContain('<span aria-hidden="true">›</span>');
-        expect(css).not.toContain('.setting-chevron');
+    it('keeps mobile destination chevrons decorative inside the whole-row button', () => {
+        expect(mobileMenuSource).toContain('class="mobile-chevron" aria-hidden="true"');
+        expect(mobileMenuSource.match(/<button/g)).toHaveLength(1);
+        expect(mobileMenuSource).not.toContain('role="button"');
     });
+
     it('pins the mobile tab bar over page content instead of reserving a layout row', () => {
         expect(css).toMatch(
             /\.tab-bar\s*\{[^}]*position:\s*absolute;[^}]*bottom:\s*calc\(clamp\(4px,\s*1\.831vw,\s*8px\) \+ env\(safe-area-inset-bottom\)\);[^}]*left:\s*50%;[^}]*width:\s*min\(calc\(100% - var\(--gutter\) - var\(--gutter\)\),\s*560px\);[^}]*transform:\s*translateX\(-50%\);/s,
         );
         expect(css).toMatch(/\.tab-bar\s*\{[^}]*margin:\s*0;/s);
     });
-    it('hides the mobile tab bar only for the active pushed screen', () => {
+    it('hides mobile navigation only for the active pushed screen', () => {
         expect(appSource).toMatch(
-            /\{#if\s+!isDesktop\s+&&\s+!\(view === 'create' && studioSection !== null\)\s+&&\s+!\(view === 'chat' && chatThreadOpen\)\s+&&\s+!\(view === 'settings' && settingsSection !== null\)\s*\}\s*<nav class="tab-bar"/s,
+            /\{#if\s+!isDesktop\s+&&\s+!\(view === 'create' && studioSection !== null\)\s+&&\s+!\(view === 'chat' && chatThreadOpen\)\s+&&\s+!\(view === 'settings' && settingsSection !== null\)\s*\}\s*<MobileNavigation/s,
         );
-        expect(appSource).not.toMatch(
-            /\{#if[^}]*settingsSection === 'persona'[^}]*\}\s*<nav class="tab-bar"/s,
-        );
+        expect(mobileNavSource).toContain("(view === 'create' ? 'settings' : view) === item.id");
+        expect(appSource).toContain("element.hasAttribute('data-mobile-navigation')");
     });
 
     it('uses one full-height scrolling detail shell with the shared fade contract', () => {
@@ -639,27 +588,12 @@ describe('pointer interaction styling', () => {
         expect(appSource).toContain("const REDUCED_MOTION = '(prefers-reduced-motion: reduce)'");
     });
 
-    it('caps mobile density continuously through Fold and tablet widths', () => {
+    it('keeps mobile text readable and touch targets fixed across phone widths', () => {
         expect(css).toMatch(
-            /@media \(max-width:\s*899px\)\s*\{[\s\S]*?:root\s*\{[^}]*font-size:\s*clamp\(9px,\s*3\.661vw,\s*15px\);[\s\S]*?\.app-shell\[data-layout='mobile'\]\s*\{[^}]*--mobile-root-header:\s*clamp\(40px,\s*16\.476vw,\s*60px\);[^}]*--mobile-top-action:\s*clamp\(30px,\s*12\.18vw,\s*44px\);[^}]*--mobile-pill-control:\s*clamp\(26px,\s*10\.526vw,\s*36px\);[^}]*--mobile-nav:\s*clamp\(37px,\s*15\.103vw,\s*60px\);[^}]*--reading:\s*560px;[^}]*--settings:\s*560px;/s,
+            /\.mobile-menu-row\s*\{[^}]*min-height:\s*56px;[^}]*font-size:\s*17px;/s,
         );
-        expect(css).toMatch(
-            /@media \(max-width:\s*899px\)[\s\S]*?\.mobile-root-header h1\s*\{[^}]*font-size:\s*clamp\(14px,\s*5\.72vw,\s*22px\);/s,
-        );
-        for (const source of [librarySource, convoSource]) {
-            expect(source).toMatch(
-                /@media \(max-width:\s*899px\)[\s\S]*?\.mobile-root-row\s*\{[^}]*min-height:\s*clamp\(46px,\s*19\.222vw,\s*68px\);[^}]*padding:\s*clamp\(4px,\s*1\.831vw,\s*6px\) clamp\(10px,\s*4\.119vw,\s*16px\);/s,
-            );
-            expect(source).toMatch(
-                /@media \(max-width:\s*899px\)[\s\S]*?\.mobile-root-row[\s\S]*?\.avatar\s*\{[^}]*width:\s*clamp\(35px,\s*14\.645vw,\s*52px\);[^}]*height:\s*clamp\(35px,\s*14\.645vw,\s*52px\);/s,
-            );
-        }
-        expect(convoSource).toMatch(
-            /@media \(max-width:\s*899px\)[\s\S]*?\.conversation-filter-strip\s*\{[^}]*min-height:\s*clamp\(37px,\s*15\.561vw,\s*52px\);/s,
-        );
-        expect(settingsSource).toMatch(
-            /@media \(max-width:\s*899px\)[\s\S]*?\.app-shell\[data-layout='mobile'\] \.provider-pane \.settings-avatar-wrap\s*\{[^}]*width:\s*clamp\(59px,\s*24\.714vw,\s*88px\);[^}]*height:\s*clamp\(59px,\s*24\.714vw,\s*88px\);/s,
-        );
+        expect(css).toMatch(/\.mobile-icon-button\s*\{[^}]*width:\s*44px;[^}]*height:\s*44px;/s);
+        expect(css).toMatch(/\.mobile-avatar\s*\{[^}]*width:\s*48px;[^}]*height:\s*48px;/s);
         expect(css).not.toContain('@media (min-width: 600px) and (max-width: 899px)');
     });
 
@@ -844,7 +778,7 @@ describe('pointer interaction styling', () => {
         );
     });
 
-    it('matches the Telegram pushed-header proportions at every mobile width', () => {
+    it('preserves composer motion, scrolling, and navigation controls in mobile views', () => {
         expect(css).toMatch(
             /--mobile-root-header:\s*clamp\(40px,\s*16\.476vw,\s*72px\);[^}]*--mobile-top-action:\s*clamp\(30px,\s*12\.18vw,\s*53px\);[^}]*--mobile-top-inset:\s*clamp\(9px,\s*3\.89vw,\s*17px\);[^}]*--mobile-top-offset:\s*clamp\(10px,\s*4\.06vw,\s*18px\);[^}]*--mobile-root-title-inset:\s*clamp\(14px,\s*6\.095vw,\s*26px\);/s,
         );
@@ -1104,7 +1038,7 @@ describe('pointer interaction styling', () => {
         );
         expect(chatPaneSource).toContain('{#snippet roomControls(');
         expect(chatPaneSource).toMatch(/<ChatUtilityDrawer[\s\S]*\{roomControls\}/);
-        expect(appSource.match(/<ArrowLeft aria-hidden="true" \/>/g)).toHaveLength(2);
+        expect(appHeaderSource.match(/<ArrowLeft aria-hidden="true" \/>/g)).toHaveLength(1);
         expect(chatPaneSource).toContain('<ArrowLeft class="chat-back-icon" aria-hidden="true" />');
         for (const icon of [
             'ArrowLeft',
@@ -1261,71 +1195,12 @@ describe('pointer interaction styling', () => {
         );
     });
 
-    it('scales controls to the 437px logical reference without growing on wider hosts', () => {
-        expect(css).toMatch(/--mobile-search:\s*clamp\(27px,\s*10\.984vw,\s*48px\);/);
-        expect(css).toMatch(/--mobile-nav:\s*clamp\(37px,\s*15\.103vw,\s*66px\);/);
-        expect(css).toMatch(
-            /\.tab-bar\s*\{[^}]*padding:\s*clamp\(2px,\s*0\.686vw,\s*3px\);[^}]*gap:\s*clamp\(1px,\s*0\.458vw,\s*2px\);/s,
-        );
-        expect(css).toMatch(/\.tab\s*\{[^}]*height:\s*100%;[^}]*min-height:\s*0;/s);
-        expect(css).toMatch(/\.tab\s*\{[^}]*margin-inline:\s*clamp\(1px,\s*0\.458vw,\s*2px\);/s);
-        expect(css).toMatch(
-            /\.tab > \.nav-icon,\s*\.tab > \.tab-label\s*\{[^}]*transform:\s*translateY\(-2px\);/s,
-        );
-        expect(css).toMatch(
-            /\.tab::before\s*\{[^}]*background:\s*transparent;[^}]*inset:\s*clamp\(1px,\s*0\.458vw,\s*2px\) clamp\(2px,\s*0\.686vw,\s*3px\);/s,
-        );
-        expect(css).toMatch(/\.tab:first-child::before\s*\{[^}]*left:\s*0;/s);
-        expect(css).toMatch(/\.tab:last-child::before\s*\{[^}]*right:\s*0;/s);
-        expect(css).toMatch(/\.tab\[aria-current='page'\]\s*\{[^}]*color:\s*var\(--accent\);/s);
-        expect(css).toMatch(
-            /\.tab\[aria-current='page'\]::before\s*\{[^}]*background:\s*var\(--accent-soft\);/s,
-        );
-        expect(appSource).toContain('<House class="nav-icon-home-fill-layer" />');
-        expect(appSource).toContain('<House class="nav-icon-home-stroke-layer" />');
-        expect(appSource).toContain('class="nav-icon nav-icon-chat"');
-        expect(appSource).toContain('class="nav-icon nav-icon-create"');
-        expect(appSource).toContain('class="nav-icon nav-icon-settings"');
-        expect(appSource).toContain(
-            '<CirclePlus class="nav-icon nav-icon-create" aria-hidden="true" />',
-        );
-        expect(appSource).not.toContain('<svg');
-        expect(css).toMatch(/\.nav-icon-home-fill-layer\s*\{[^}]*stroke:\s*none;/s);
-        expect(css).toMatch(/\.nav-icon-home-stroke-layer\s*\{[^}]*fill:\s*none;/s);
-        expect(css).toMatch(
-            /\.nav-icon-home-fill-layer > path:last-child\s*\{[^}]*fill:\s*currentcolor;/s,
-        );
-        expect(css).toMatch(
-            /\.nav-icon-home::after\s*\{[^}]*bottom:\s*12\.5%;[^}]*left:\s*37\.5%;[^}]*background:\s*var\(--accent-soft\);/s,
-        );
-        expect(css).toMatch(/\.nav-icon-chat > path:first-child\s*\{[^}]*fill:\s*currentcolor;/s);
-        expect(css).toMatch(
-            /\.nav-icon-chat > path:not\(:first-child\)\s*\{[^}]*stroke:\s*var\(--accent-soft\);/s,
-        );
-        expect(css).toMatch(/\.nav-icon-create > circle\s*\{[^}]*fill:\s*currentcolor;/s);
-        expect(css).toMatch(/\.nav-icon-create > path\s*\{[^}]*stroke:\s*var\(--accent-soft\);/s);
-        expect(css).toMatch(/\.nav-icon-settings > path\s*\{[^}]*fill:\s*currentcolor;/s);
-        expect(css).toMatch(/\.nav-icon-settings > circle\s*\{[^}]*fill:\s*var\(--accent-soft\);/s);
-        expect(css).toMatch(
-            /\.tab:hover:not\(:disabled\)::before\s*\{[^}]*background:\s*var\(--surface-hover\);/s,
-        );
-        expect(css).toMatch(
-            /\.tab\[aria-current='page'\]:hover:not\(:disabled\)::before\s*\{[^}]*background:\s*var\(--accent-soft\);/s,
-        );
-        expect(css).toMatch(
-            /\.setting-row:hover:not\(:disabled\)\s*\{[^}]*background:\s*var\(--bg\);/s,
-        );
-        expect(css).toMatch(
-            /\.tab \.nav-icon\s*\{[^}]*width:\s*clamp\(14px,\s*5\.95vw,\s*26px\);[^}]*height:\s*clamp\(14px,\s*5\.95vw,\s*26px\);/s,
-        );
-        expect(css).toMatch(
-            /\.tab-label\s*\{[^}]*font-size:\s*clamp\(8px,\s*3\.204vw,\s*14px\);[^}]*font-weight:\s*700;/s,
-        );
-        expect(css).toMatch(
-            /\.mobile-root-header h1\s*\{[^}]*grid-column:\s*1;[^}]*align-self:\s*center;[^}]*padding-left:\s*calc\(var\(--mobile-root-title-inset\) - var\(--mobile-top-inset\)\);/s,
-        );
-        expect(css).toMatch(
-            /\.app-shell\[data-layout='mobile'\] \.mobile-root-search input\s*\{[^}]*font-size:\s*clamp\(8px,\s*3\.432vw,\s*15px\);/s,
-        );
+    it('mounts dedicated mobile destinations rather than the desktop list markup', () => {
+        expect(appSource).toContain('<MobileHome');
+        expect(appSource).toContain('<MobileConversations');
+        expect(appSource).toContain('<MobileNavigation');
+        expect(appSource).toContain("data-mobile-design={isDesktop ? undefined : 'reference'}");
+        expect(mobileNavSource).not.toContain('class="tab"');
+        expect(mobileStudioSource).not.toContain('studio-destination-row');
     });
 });

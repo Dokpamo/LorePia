@@ -1,5 +1,6 @@
+import { t } from '../lib/i18n';
 import { get } from 'svelte/store';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import App from '../app/App.svelte';
@@ -42,6 +43,17 @@ describe('preview demo client', () => {
         expect(presets).toHaveLength(2);
         expect(workspace?.prompt_blocks).toHaveLength(4);
         expect(workspace?.memory_records).toHaveLength(2);
+        expect(workspace?.room_config.creativity).toBe(65);
+        expect(Number.isInteger(workspace?.room_config.creativity)).toBe(true);
+        if (!workspace || !client.saveRoomOrchestrationConfig)
+            throw new Error('Preview room config is missing');
+        await expect(
+            client.saveRoomOrchestrationConfig({
+                ...workspace.room_config,
+                expected_revision: null,
+                creativity: 0.65,
+            }),
+        ).rejects.toThrow('integer from 0 to 100');
         expect(personaPage.kind).toBe('page');
         if (personaPage.kind === 'page') expect(personaPage.items).toHaveLength(3);
     });
@@ -73,9 +85,9 @@ describe('preview demo client', () => {
         const character = await screen.findByRole('button', {
             name: /아리아 오래된 항해 기록/,
         });
-        await waitFor(() => expect(character).toHaveAttribute('aria-pressed', 'true'));
+        expect(character).toBeEnabled();
 
-        await fireEvent.click(screen.getByRole('button', { name: '채팅' }));
+        await fireEvent.click(screen.getByRole('button', { name: t('mobile.nav.chat') }));
         const conversation = await screen.findByRole('button', {
             name: /잊혀진 서고/,
         });

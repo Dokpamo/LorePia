@@ -16,7 +16,10 @@ function setup(ondock = vi.fn()) {
     const chat = document.querySelector<HTMLElement>('.ui-chat');
     if (!input || !field || !chat) throw new Error('Missing composer fixture');
     let lines = 1;
-    Object.defineProperty(input, 'scrollHeight', { get: () => Math.ceil(lines * 25.6 + 8) });
+    Object.defineProperty(input, 'scrollHeight', {
+        configurable: true,
+        get: () => Math.ceil(lines * 25.6 + 8),
+    });
     Object.defineProperty(chat, 'clientHeight', { configurable: true, value: 780 });
     const report = vi.fn();
     const action = measureComposer(input, { value: '', onmeasure: report, ondock });
@@ -28,6 +31,64 @@ function setup(ondock = vi.fn()) {
     return { input, field, chat, report, grow };
 }
 describe('inline composer line growth', () => {
+    it('defers observer-driven sizing to a frame and coalesces repeated resize notifications', async () => {
+        vi.useFakeTimers();
+        let notify: ResizeObserverCallback | undefined;
+        const observer: ResizeObserver = {
+            observe: vi.fn(),
+            unobserve: vi.fn(),
+            disconnect: vi.fn(),
+        };
+        vi.stubGlobal(
+            'ResizeObserver',
+            vi.fn(function (callback: ResizeObserverCallback) {
+                notify = callback;
+                return observer;
+            }),
+        );
+        const { input, field } = setup();
+        await Promise.resolve();
+        expect(field.style.getPropertyValue('--ui-compose-text-size')).toBe('34px');
+        Object.defineProperty(input, 'scrollHeight', { get: () => 60 });
+        const dock = field.closest('form');
+        if (!notify || !dock) throw new Error('Missing resize observer');
+        const entry = (width: number): ResizeObserverEntry => ({
+            target: dock,
+            contentRect: new DOMRect(0, 0, width, 100),
+            borderBoxSize: [],
+            contentBoxSize: [],
+            devicePixelContentBoxSize: [],
+        });
+        notify([entry(320), entry(330)], observer);
+        await Promise.resolve();
+        expect(field.style.getPropertyValue('--ui-compose-text-size')).toBe('34px');
+        vi.advanceTimersToNextFrame();
+        expect(field.style.getPropertyValue('--ui-compose-text-size')).toBe('60px');
+        notify([entry(340)], observer);
+        disposals.splice(0).forEach((dispose) => dispose());
+        expect(vi.getTimerCount()).toBe(0);
+    });
+    it('measures at the writing width without moving the text region or leaving overrides behind', () => {
+        const { input, field, grow } = setup();
+        Object.defineProperty(field, 'clientWidth', { value: 370 });
+        input.style.width = '100%';
+        input.style.whiteSpace = 'nowrap';
+        input.style.padding = '11px 8px 0';
+        Object.defineProperty(input, 'scrollHeight', {
+            configurable: true,
+            get: () => {
+                expect(input.style.width).toBe('354px');
+                expect(input.style.whiteSpace).toBe('pre-wrap');
+                expect(field.classList).not.toContain('ui-compose-measuring');
+                return 60;
+            },
+        });
+        grow(2);
+        expect(input.style.width).toBe('100%');
+        expect(input.style.whiteSpace).toBe('nowrap');
+        expect(input.style.padding).toBe('11px 8px 0px');
+        expect(field.style.getPropertyValue('--ui-compose-text-size')).toBe('60px');
+    });
     it('accounts for the full dock inset when its bottom spacing changes at a fixed field height', () => {
         const ondock = vi.fn();
         const { input, field, chat, grow } = setup(ondock);

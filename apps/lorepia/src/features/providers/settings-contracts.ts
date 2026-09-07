@@ -6,6 +6,12 @@
  * titles, and the screen that renders it.
  */
 export const SETTINGS_SECTIONS = [
+    'ai',
+    'prompt',
+    'memory',
+    'plugins',
+    'language',
+    'storage',
     'appearance',
     'persona',
     'target',
@@ -18,6 +24,14 @@ export const SETTINGS_SECTIONS = [
 ] as const;
 
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
+
+export const PRIMARY_SETTINGS_SECTIONS = [
+    'ai', 'persona', 'prompt', 'memory', 'appearance', 'language', 'plugins', 'storage',
+] as const satisfies readonly SettingsSection[];
+
+export function settingsParent(section: SettingsSection): SettingsSection | null {
+    return ['target', 'connections', 'templates', 'discovery', 'catalog', 'advanced'].includes(section) ? 'ai' : null;
+}
 
 /**
  * A pushed screen inside a settings destination.

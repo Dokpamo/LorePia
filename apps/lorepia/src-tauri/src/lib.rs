@@ -4,6 +4,7 @@ mod channels;
 mod character_commands;
 mod chat_stream_registry;
 mod commands;
+mod settings_commands;
 pub mod contract;
 mod credential_operations;
 mod error;
@@ -85,7 +86,7 @@ fn hold_phone_aspect(window: &tauri::Window) {
 fn uses_fixed_preview_minimum(config: &tauri::utils::config::WindowConfig) -> bool {
     matches!(
         &config.url,
-        tauri::utils::config::WebviewUrl::App(path) if path == std::path::Path::new("ui-preview.html")
+        tauri::utils::config::WebviewUrl::App(path) if path == std::path::Path::new("ui-preview.html") || path == std::path::Path::new("workspace.html")
     )
 }
 
@@ -148,6 +149,7 @@ pub fn run() {
             appearance_commands::set_system_bar_style,
             commands::get_memory_supervisor_status,
             commands::list_characters,
+            settings_commands::get_storage_overview,
             commands::get_character,
             commands::get_character_greeting_catalog,
             commands::get_character_render_profile,
@@ -366,6 +368,7 @@ mod window_size_tests {
     fn only_ui_preview_keeps_its_configured_fixed_minimum() {
         for (entry, expected) in [
             ("ui-preview.html", true),
+            ("workspace.html", true),
             ("preview.html", false),
             ("index.html", false),
         ] {

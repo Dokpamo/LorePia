@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { tr } from '../../../lib/i18n';
     import ChoiceField from '../../../components/ChoiceField.svelte';
     import ToggleSwitch from '../../../components/ToggleSwitch.svelte';
     import type { LorepiaAppState } from '../../../app/app-controller';
@@ -13,6 +14,7 @@
         selectableRoutes: ModelRouteDto[];
         selectedRoutePresets: GenerationPresetDto[];
         preview: boolean;
+        desktop?: boolean;
         onChangeRoute: (routeId: string) => void;
         onSelectPreset: (presetId: string) => void;
         onPreservePartialChange: (preserve: boolean) => void;
@@ -28,6 +30,7 @@
         selectableRoutes,
         selectedRoutePresets,
         preview,
+        desktop = false,
         onChangeRoute,
         onSelectPreset,
         onPreservePartialChange,
@@ -81,10 +84,11 @@
             <p class="inline-note warning">저장된 기본 생성 대상이 없습니다.</p>
         {/if}
 
+        {#if !desktop}<p class="mobile-detail-intro">{$tr('mobile.target.hint')}</p>{/if}
         <div class="target-form detail-form">
             <ChoiceField
                 id="default-model-route"
-                label="모델 라우트"
+                label={$tr(desktop ? 'mobile.target.desktop_model' : 'mobile.target.model')}
                 value={selectedRouteId}
                 options={[
                     { value: '', label: '선택 안 함' },
@@ -98,7 +102,7 @@
             />
             <ChoiceField
                 id="default-generation-preset"
-                label="생성 프리셋"
+                label={$tr(desktop ? 'mobile.target.desktop_preset' : 'mobile.target.preset')}
                 value={selectedPresetId}
                 options={[
                     { value: '', label: '선택 안 함' },
@@ -114,11 +118,23 @@
 
         <div class="settings-control-row">
             <span class="settings-control-copy">
-                <strong>부분 응답 보존</strong>
-                <small>취소·오류 시 생성된 일부 응답을 보존</small>
+                <strong
+                    >{$tr(
+                        desktop ? 'mobile.target.desktop_preserve' : 'mobile.target.preserve',
+                    )}</strong
+                >
+                <small
+                    >{$tr(
+                        desktop
+                            ? 'mobile.target.desktop_preserve_hint'
+                            : 'mobile.target.preserve_hint',
+                    )}</small
+                >
             </span>
             <ToggleSwitch
-                label="취소·오류 시 생성된 일부 응답을 보존"
+                label={$tr(
+                    desktop ? 'mobile.target.desktop_preserve_hint' : 'mobile.target.preserve',
+                )}
                 checked={preservePartialGenerations}
                 disabled={settingsBusy}
                 onChange={onPreservePartialChange}

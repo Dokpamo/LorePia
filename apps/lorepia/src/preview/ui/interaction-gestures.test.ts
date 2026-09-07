@@ -67,7 +67,7 @@ function rail() {
     disposals.push(() => action.destroy());
     return { root, node, a, ondrop, action };
 }
-function back(withUnderlay = false) {
+function back(withUnderlay = false, beforeback?: () => boolean) {
     const node = document.createElement('div');
     const underlay = document.createElement('div');
     if (withUnderlay) {
@@ -85,7 +85,7 @@ function back(withUnderlay = false) {
     vi.spyOn(node, 'animate').mockImplementation(
         () => ({ finished: Promise.resolve(), cancel: vi.fn() }) as unknown as Animation,
     );
-    const action = edgeBack(node, { onback });
+    const action = edgeBack(node, { onback, beforeback });
     disposals.push(() => action.destroy());
     return { node, onback, underlay };
 }
@@ -137,6 +137,18 @@ describe('card organization gestures', () => {
 });
 
 describe('edge back on settings and editors', () => {
+    it('returns a completed swipe to the page when unsaved changes block dismissal', async () => {
+        const beforeback = vi.fn(() => false);
+        const { node, onback } = back(false, beforeback);
+        pointer(node, 'pointerdown', 20, 200, 0, 'touch');
+        pointer(window, 'pointermove', 240, 200, 200, 'touch');
+        pointer(window, 'pointerup', 240, 200, 300, 'touch');
+        await Promise.resolve();
+        expect(beforeback).toHaveBeenCalledOnce();
+        expect(onback).not.toHaveBeenCalled();
+        expect(node).not.toHaveAttribute('data-back-dismissed');
+        expect(node.style.getPropertyValue('--ui-back-offset')).toBe('');
+    });
     it('reserves the editor edge before WebKit starts native text tracking', async () => {
         const { node, onback } = back();
         const input = document.createElement('textarea');

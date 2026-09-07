@@ -6,3 +6,10 @@
 @import './provider/settings.css';
 @import './shared/overlays-interactions.css';
 @import './shared/responsive.css';
+@import './shared/mobile-palette.css';
+@import './shared/mobile-system.css';
+@import './shared/mobile-chrome.css';
+@import './shared/mobile-lists.css';
+@import './shared/mobile-settings.css';
+@import './shared/mobile-chat.css';
+@import './shared/mobile-room.css';

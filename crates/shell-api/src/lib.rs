@@ -26,7 +26,10 @@ mod persona;
 mod portable_runtime_state;
 mod provider;
 mod sensitive;
+mod settings;
 mod stream;
+
+pub use settings::StorageOverviewDto;
 
 #[cfg(any(test, feature = "test-support"))]
 #[doc(hidden)]

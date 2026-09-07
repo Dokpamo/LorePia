@@ -1,4 +1,6 @@
 <script lang="ts">
+    import MobileMenuRow from '../../../components/mobile/MobileMenuRow.svelte';
+    import { tr } from '../../../lib/i18n';
     import type { LorepiaAppState } from '../../../app/app-controller';
     import type {
         CredentialTargetDto,
@@ -7,6 +9,7 @@
     } from '../../../lib/ipc/contracts';
 
     interface Props {
+        desktop?: boolean;
         appState: LorepiaAppState;
         connection?: ProviderConnectionDto;
         legacyProfile?: ProviderProfileDto;
@@ -18,6 +21,7 @@
     }
 
     let {
+        desktop = false,
         appState,
         connection,
         legacyProfile,
@@ -164,6 +168,29 @@
     </section>
 {:else if workspace.connections.length === 0 && workspace.legacy_profiles.length === 0}
     <p class="inline-note">저장된 프로바이더 연결이 없습니다.</p>
+{:else if !desktop}
+    <div class="mobile-flat-list" aria-label={$tr('mobile.connection.list')}>
+        {#each workspace.connections as item (item.id)}
+            <MobileMenuRow
+                label={item.display_name}
+                description={workspace.templates.find(
+                    (template) => template.id === item.template_id,
+                )?.display_name}
+                value={$tr(
+                    `mobile.credential.${workspace.credential_statuses[targetKey(connectionTarget(item.id))] ?? 'missing'}`,
+                )}
+                onSelect={() => onOpenDetailPage(`connection:${item.id}`)}
+            />
+        {/each}
+        {#each workspace.legacy_profiles as profile (profile.id)}
+            <MobileMenuRow
+                label={profile.display_name}
+                description={profile.model}
+                value={profileSelected(profile) ? $tr('mobile.connection.default') : undefined}
+                onSelect={() => onOpenDetailPage(`legacy:${profile.id}`)}
+            />
+        {/each}
+    </div>
 {:else}
     <div class="setting-list detail-record-list" aria-label="연결 목록">
         {#each workspace.connections as connectionItem (connectionItem.id)}

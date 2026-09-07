@@ -3,8 +3,13 @@
 import { koImport } from './ko-import';
 import { koImportedCompatibility } from './ko-imported-compatibility';
 import { koQuick } from './ko-quick';
+import { koMobileStyle } from './ko-mobile-style';
+import { koAppSettings } from './ko-app-settings';
+import { koSettingsLive } from './ko-settings-live';
 
 export const ko = {
+    ...koAppSettings,
+    ...koMobileStyle,
     'app.bootstrap.failed': '앱을 시작하지 못했습니다.',
     'app.bootstrap.retry': '다시 시도',
     'app.brand.skip': 'LorePia 본문으로 이동',
@@ -131,24 +136,6 @@ export const ko = {
     'settings.page.discovery.sync_job': '동기화 작업',
     'settings.page.target.preview': '요청 구조 미리보기',
     'settings.page.template.detail': '템플릿 정보',
-    'settings.section.advanced.hint': '수동 라우트와 능력 설정',
-    'settings.section.advanced.title': '고급',
-    'settings.section.appearance.hint': '라이트·다크·시스템',
-    'settings.section.appearance.title': '화면 모드',
-    'settings.section.connections.hint': '제공자 연결과 키 보관',
-    'settings.section.connections.title': '연결과 자격증명',
-    'settings.section.discovery.hint': '제공자 검색과 모델 동기화',
-    'settings.section.discovery.title': '검색과 동기화',
-    'settings.section.catalog.hint': '검증된 제공자 메타데이터',
-    'settings.section.catalog.title': '제공자 카탈로그',
-    'settings.section.persona.hint': '대화에서 나를 어떻게 부를지',
-    'settings.section.persona.title': '페르소나',
-    'settings.section.licenses.hint': 'Lucide 및 Feather 아이콘 고지',
-    'settings.section.licenses.title': '오픈소스 라이선스',
-    'settings.section.target.hint': '모델 라우트와 생성 프리셋',
-    'settings.section.target.title': '기본 생성 대상',
-    'settings.section.templates.hint': '검증된 제공자 목록',
-    'settings.section.templates.title': '사용 가능한 템플릿',
     'settings.value.assigned': '지정됨',
     'settings.value.none': '없음',
     'asset.audio': '오디오',
@@ -786,4 +773,5 @@ export const ko = {
     'provider.notice.target_cleared': '기본 생성 대상을 해제했습니다.',
     'provider.notice.target_saved': '기본 생성 대상을 저장했습니다.',
     ...koQuick,
+    ...koSettingsLive,
 } as const;

@@ -1,4 +1,6 @@
 {
+  "format_version": 1,
+  "policy": "exact ordered fingerprints of non-i18n Hangul-containing source lines",
   "excluded_roots": [
     "src/lib/i18n",
     "src/preview"
@@ -9,8 +11,8 @@
       "sha256": "1a4a648f4867adc7a6048b35a878146884ab68a5c3f04aad4e7adbfcd8306a23"
     },
     "src/app/App.test.ts": {
-      "hangul_lines": 156,
-      "sha256": "ce82c8aa1afc4f97deab4171188de88812515870ec691e5d3e3bad500148c4dd"
+      "hangul_lines": 87,
+      "sha256": "9cb7f3301f345bf1b83b5b0c590700d9ae3533b2b795bf92ae59d3101c428917"
     },
     "src/app/tests/app-controller-provider-test-support.ts": {
       "hangul_lines": 4,
@@ -53,8 +55,8 @@
       "sha256": "cebefc1cbfdcd76e251e5b54bd7a562bc71c6d9a45fde3f790ba1314edc3c60b"
     },
     "src/features/chat/ChatComposer.svelte": {
-      "hangul_lines": 9,
-      "sha256": "dfb896444a7f7f6c06dad1fa93314bada48c1310a534cebad946b55d54abc5e1"
+      "hangul_lines": 8,
+      "sha256": "81fb0f0409e0b8f603c729338e6fc70de66842b925b263f026170888029914c4"
     },
     "src/features/chat/ChatErrorRegion.svelte": {
       "hangul_lines": 7,
@@ -137,8 +139,8 @@
       "sha256": "4ac38f0b2e872dcb473b7c743a1323ea9b8b8ccb18f0ad2aa35ce8c8fba30014"
     },
     "src/features/chat/tests/ChatPane.actions.test.ts": {
-      "hangul_lines": 71,
-      "sha256": "353ad3fd8c285e9bad3ecdc2ee623c6236337005fa8b262867102dd1eb725014"
+      "hangul_lines": 67,
+      "sha256": "13c9b8a472cd8c34f4b3398531d705fc5471a3ebc5567c60d6837d697769d868"
     },
     "src/features/chat/tests/ChatPane.composer.test.ts": {
       "hangul_lines": 60,
@@ -201,8 +203,8 @@
       "sha256": "76ac09bcb281e47fe013ef7698d97e24cb63365a1310058f5d0b578ab4f6b859"
     },
     "src/features/orchestration/OrchestrationQuickDrawer.test.ts": {
-      "hangul_lines": 49,
-      "sha256": "c6a6b48423d9a6b70a1cbe3e65932a2e56b0403e22a56b6d9f34d389c493a550"
+      "hangul_lines": 48,
+      "sha256": "c6175f814752a84ba5fd43fb6098a51e9aafe50870ab3668d6bf06897ce2f3e4"
     },
     "src/features/orchestration/OrchestrationStudio.content-packages.test.ts": {
       "hangul_lines": 25,
@@ -357,20 +359,20 @@
       "sha256": "ec66aa18fc49bb5bc9c03aaf1b17c18763c1dd2b230190b6d5314fb3f74fcccb"
     },
     "src/features/providers/ProviderSettings.svelte": {
-      "hangul_lines": 15,
-      "sha256": "dc203419d186f825d3b97d4da0bf20da19abc89c244322dd28440d516bb48451"
+      "hangul_lines": 10,
+      "sha256": "4fa66918475bfcbd45505090b66da99e07e1e35677e42cb88243162d65d8fb8f"
     },
     "src/features/providers/ProviderSettings.test.ts": {
-      "hangul_lines": 116,
-      "sha256": "b085e370811ca257340ec3dca152b3e123d50c34cc19bae94eb72d5146c0a26f"
+      "hangul_lines": 71,
+      "sha256": "6dd2133de0a4bcceabf16c0678a127b4d18c40234a7d86fa36fff0b9526df1b6"
     },
     "src/features/providers/ProviderWorkflows.test.ts": {
       "hangul_lines": 95,
       "sha256": "5e27215451ad59b61bc6256660f6f26726b163dfb2ae6adea81ba51e6db4f77c"
     },
     "src/features/providers/settings/AppearanceSection.svelte": {
-      "hangul_lines": 10,
-      "sha256": "a43467aa76bf2e954c76dbd2ade6203c671c0720bd1411eab2acf5b55b6ea6cb"
+      "hangul_lines": 9,
+      "sha256": "1fbdd0d7872871ffe416fdd0be82b07181e1c2abca9b2a9054bb3626b0ff721e"
     },
     "src/features/providers/settings/ConnectionSection.svelte": {
       "hangul_lines": 27,
@@ -381,8 +383,8 @@
       "sha256": "e5e5acfc9586648f991d80e9e4aba9c74a95527719c4b0f6821ee7d98ad3dbb1"
     },
     "src/features/providers/settings/ModelRouteSection.svelte": {
-      "hangul_lines": 15,
-      "sha256": "1b75b42814ec7348d26556b2b9ae34d5ef165d4516010e9a4305c0d9e66ae880"
+      "hangul_lines": 10,
+      "sha256": "e3829370d2e2db75844f4cd0a86c058a2fc904eda90ebb8325eab4e187586605"
     },
     "src/features/providers/settings/SettingsOverview.svelte": {
       "hangul_lines": 24,
@@ -400,7 +402,5 @@
       "hangul_lines": 19,
       "sha256": "ad03c2a8de2aeee34e7d81f83c20780f8c019aaa57f13668f5c83504a5e1046a"
     }
-  },
-  "format_version": 1,
-  "policy": "exact ordered fingerprints of non-i18n Hangul-containing source lines"
+  }
 }

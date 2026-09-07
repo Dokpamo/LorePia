@@ -12,7 +12,7 @@
     "windows": [
       {
         "label": "main",
-        "url": "ui-preview.html",
+        "url": "workspace.html",
         "title": "LorePia · UI",
         "width": 393,
         "height": 851.5,

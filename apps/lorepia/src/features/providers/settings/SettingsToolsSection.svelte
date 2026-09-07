@@ -1,4 +1,6 @@
 <script lang="ts">
+    import MobileMenuRow from '../../../components/mobile/MobileMenuRow.svelte';
+    import { tr } from '../../../lib/i18n';
     import {
         Compass,
         GitBranch,
@@ -10,15 +12,30 @@
     import type { ProviderWorkspaceDto } from '../../../lib/ipc/contracts';
 
     interface Props {
+        desktop?: boolean;
         section: 'discovery' | 'advanced';
         workspace: ProviderWorkspaceDto;
         onOpenDetailPage: (page: string) => void;
     }
 
-    let { section, workspace, onOpenDetailPage }: Props = $props();
+    let { desktop = false, section, workspace, onOpenDetailPage }: Props = $props();
+    const mobilePages = $derived(
+        section === 'discovery'
+            ? (['provider-discovery', 'model-sync'] as const)
+            : (['connections', 'routes', 'presets', 'capabilities'] as const),
+    );
 </script>
 
-{#if section === 'discovery'}
+{#if !desktop}
+    <div class="mobile-flat-list">
+        {#each mobilePages as page (page)}
+            <MobileMenuRow
+                label={$tr(`mobile.tool.${page}`)}
+                onSelect={() => onOpenDetailPage(page)}
+            />
+        {/each}
+    </div>
+{:else if section === 'discovery'}
     <div class="setting-list detail-tool-list" aria-label="검색과 동기화 도구">
         <button
             class="setting-row"

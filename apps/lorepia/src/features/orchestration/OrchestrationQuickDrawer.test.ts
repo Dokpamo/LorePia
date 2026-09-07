@@ -1,3 +1,4 @@
+import { t } from '../../lib/i18n';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -53,6 +54,10 @@ describe('OrchestrationQuickDrawer', () => {
         expect(drawer).toHaveAttribute('aria-hidden', 'false');
         expect(drawer).toHaveProperty('inert', false);
 
+        await fireEvent.click(
+            within(drawer).getByRole('button', { name: new RegExp(t('mobile.room.answer')) }),
+        );
+        expect(within(drawer).queryByRole('switch')).not.toBeInTheDocument();
         const promptChoice = within(drawer).getByRole('combobox', {
             name: /^프롬프트 프리셋:/,
         });
@@ -67,7 +72,7 @@ describe('OrchestrationQuickDrawer', () => {
         await fireEvent.keyDown(window, { key: 'Escape' });
         promptRect.mockRestore();
         viewportHeight.mockRestore();
-        expect(screen.getByRole('dialog', { name: '대화 설정' })).toBeInTheDocument();
+        expect(screen.getByRole('dialog', { name: t('mobile.room.answer') })).toBeInTheDocument();
         expect(within(drawer).queryByRole('listbox')).not.toBeInTheDocument();
 
         const modelChoice = within(drawer).getByRole('combobox', { name: /^모델:/ });
@@ -77,11 +82,40 @@ describe('OrchestrationQuickDrawer', () => {
         await fireEvent.click(within(drawer).getByRole('combobox', { name: /^생성 프리셋:/ }));
         await fireEvent.click(within(drawer).getByRole('option', { name: '균형 생성' }));
         await fireEvent.click(within(drawer).getByRole('radio', { name: '길게' }));
+        const slider = within(drawer).getByRole('slider');
+        await fireEvent.pointerDown(slider, {
+            button: 0,
+            isPrimary: true,
+            pointerId: 9,
+            clientX: 80,
+            clientY: 300,
+        });
+        await fireEvent.pointerMove(slider, {
+            buttons: 1,
+            isPrimary: true,
+            pointerId: 9,
+            clientX: 280,
+            clientY: 300,
+        });
+        await fireEvent.pointerUp(slider, {
+            button: 0,
+            isPrimary: true,
+            pointerId: 9,
+            clientX: 280,
+            clientY: 300,
+        });
+        expect(drawer).not.toHaveClass('utility-dragging');
+        expect(drawer).not.toHaveClass('utility-settling');
         await fireEvent.input(within(drawer).getByRole('slider', { name: /창의성/ }), {
             target: { value: '73' },
         });
         await fireEvent.click(within(drawer).getByRole('combobox', { name: /^추론 강도:/ }));
         await fireEvent.click(within(drawer).getByRole('option', { name: '매우 높음' }));
+        await fireEvent.click(within(drawer).getByRole('button', { name: t('app.nav.back') }));
+        await fireEvent.click(
+            within(drawer).getByRole('button', { name: t('mobile.room.memory') }),
+        );
+        expect(within(drawer).queryByRole('combobox')).not.toBeInTheDocument();
         const memoryToggle = within(drawer).getByRole('switch', { name: '장기기억 사용' });
         const knowledgeToggle = within(drawer).getByRole('switch', {
             name: '세계관 지식 사용',
@@ -126,6 +160,13 @@ describe('OrchestrationQuickDrawer', () => {
             pointerId: 1,
         });
         expect(drawer).toHaveClass('utility-settling');
+        await waitFor(() =>
+            expect(
+                within(drawer).getByRole('button', { name: new RegExp(t('mobile.room.answer')) }),
+            ).toBeVisible(),
+        );
+        expect(save).not.toHaveBeenCalled();
+        await fireEvent.keyDown(window, { key: 'Escape' });
         await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
         expect(rendered.container.querySelector('.quick-drawer')).toBe(persistentDrawer);
         expect(persistentDrawer).toHaveAttribute('aria-hidden', 'true');

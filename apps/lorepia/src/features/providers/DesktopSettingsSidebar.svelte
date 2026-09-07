@@ -14,6 +14,7 @@
         UserRound,
     } from '@lucide/svelte';
     import { tr, type MessageKey } from '../../lib/i18n';
+    import SettingsNavigationIcon from './settings/SettingsNavigationIcon.svelte';
     import type { SettingsSection } from './settings-contracts';
 
     type SettingsDestination = 'general' | SettingsSection;
@@ -39,22 +40,8 @@
     let query = $state('');
 
     const groups: SettingsNavigationGroup[] = [
-        {
-            label: 'settings.desktop.group.personal',
-            destinations: ['general', 'appearance', 'persona'],
-        },
-        {
-            label: 'settings.desktop.group.generation',
-            destinations: ['target', 'connections', 'templates'],
-        },
-        {
-            label: 'settings.desktop.group.knowledge',
-            destinations: ['discovery', 'catalog'],
-        },
-        {
-            label: 'settings.desktop.group.advanced',
-            destinations: ['advanced', 'licenses'],
-        },
+        { label: 'settingsUi.play', destinations: ['general', 'ai', 'persona', 'prompt', 'memory'] },
+        { label: 'settingsUi.app', destinations: ['appearance', 'language', 'plugins', 'storage', 'licenses'] },
     ];
 
     function destinationLabel(destination: SettingsDestination): string {
@@ -85,6 +72,8 @@
 {#snippet destinationIcon(destination: SettingsDestination)}
     {#if destination === 'general'}
         <Settings aria-hidden="true" />
+    {:else if ['ai', 'prompt', 'memory', 'language', 'plugins', 'storage'].includes(destination)}
+        <SettingsNavigationIcon section={destination} />
     {:else if destination === 'appearance'}
         <SunMoon aria-hidden="true" />
     {:else if destination === 'persona'}

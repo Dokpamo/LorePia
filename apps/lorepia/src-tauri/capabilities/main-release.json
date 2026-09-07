@@ -75,6 +75,7 @@
     "allow-capture-credential",
     "allow-delete-credential",
     "allow-get-settings",
+    "allow-get-storage-overview",
     "allow-update-settings",
     "allow-select-generation-target",
     "allow-list-provider-templates",

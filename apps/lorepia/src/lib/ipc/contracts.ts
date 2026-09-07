@@ -552,3 +552,4 @@ export type {
 } from './contracts/discovery';
 
 export type { ProviderWorkspaceDto, LorepiaClient } from './contracts/platform';
+export type { StorageOverviewDto } from './contracts/platform';

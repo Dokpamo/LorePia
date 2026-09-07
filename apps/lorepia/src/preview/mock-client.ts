@@ -427,6 +427,13 @@ export function createPreviewClient(): PreviewClient {
         getOrchestrationWorkspace: (conversationId, branchId) =>
             Promise.resolve(clone(createDemoOrchestrationWorkspace(conversationId, branchId))),
         saveRoomOrchestrationConfig: (input) => {
+            if (
+                !Number.isInteger(input.creativity) ||
+                input.creativity < 0 ||
+                input.creativity > 100
+            ) {
+                return Promise.reject(new Error('Creativity must be an integer from 0 to 100.'));
+            }
             const workspace = createDemoOrchestrationWorkspace(
                 input.conversation_id,
                 input.branch_id,

@@ -7,10 +7,13 @@ import demoConfig from '../../src-tauri/tauri.demo.conf.json';
 import devConfig from '../../src-tauri/tauri.dev.conf.json';
 import releaseConfig from '../../src-tauri/tauri.release.conf.json';
 import chatPaneSource from '../features/chat/ChatPane.svelte?raw';
+import mobileHeaderSource from '../components/mobile/MobileDetailHeader.svelte?raw';
 import orchestrationStudioSource from '../features/orchestration/OrchestrationStudio.svelte?raw';
 import providerSettingsSource from '../features/providers/ProviderSettings.svelte?raw';
 import appCss from '../styles/app-css';
 import appSource from './App.svelte?raw';
+import appHeaderSource from './AppDetailHeader.svelte?raw';
+import mobileAllSource from '../components/mobile/MobileAll.svelte?raw';
 
 const windowConfigs = [baseConfig, devConfig, demoConfig, releaseConfig].map(
     (config) => config.app.windows[0],
@@ -54,7 +57,7 @@ describe('macOS title bar integration', () => {
         expect(appSource).toContain('class="sidebar-head"');
         expect(appSource).toContain('titlebarOverlay={nativeMacosTitlebarOverlay}');
         expect(chatPaneSource).toContain('titlebarOverlay?: boolean;');
-        expect(providerSettingsSource).toContain('class:titlebar-overlay={titlebarOverlay}');
+        expect(providerSettingsSource).toContain('titlebarOverlay = false');
         expect(orchestrationStudioSource).toContain('titlebarOverlay?: boolean;');
 
         for (const source of [
@@ -62,6 +65,9 @@ describe('macOS title bar integration', () => {
             chatPaneSource,
             providerSettingsSource,
             orchestrationStudioSource,
+            mobileHeaderSource,
+            appHeaderSource,
+            mobileAllSource,
         ]) {
             expect(source).toContain('data-tauri-drag-region=');
         }

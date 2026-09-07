@@ -191,7 +191,15 @@ export interface ProviderWorkspaceDto {
     catalog_diff: ProviderCatalogDiffDto | null;
 }
 
+export interface StorageOverviewDto {
+    characters: number;
+    conversations: number;
+    messages: number;
+    import_jobs: number;
+}
+
 export interface LorepiaClient {
+    getStorageOverview?(): Promise<StorageOverviewDto>;
     bootstrapSnapshot(): Promise<BootstrapDto>;
     getMemorySupervisorStatus(): Promise<MemorySupervisorStatusDto>;
     subscribeMemorySupervisorStatus(

@@ -9,6 +9,7 @@ import type {
     ProviderTemplateDto,
 } from '../lib/ipc/contracts';
 import App from './App.svelte';
+import { t } from '../lib/i18n';
 
 const BOOTSTRAP: BootstrapDto = {
     shell_api_version: 3,
@@ -229,15 +230,19 @@ describe('App responsive shell', () => {
                 client: appClient(vi.fn().mockResolvedValue(BOOTSTRAP)),
             });
 
-            await screen.findByRole('heading', { name: '캐릭터' });
+            await screen.findByRole('heading', { name: 'LorePia' });
             expect(screen.queryByText('로컬 Core')).not.toBeInTheDocument();
             expect(rendered.container.querySelector('.app-shell')).toHaveAttribute(
                 'data-layout',
                 'mobile',
             );
             expect(rendered.container.querySelector('.sidebar')).not.toBeInTheDocument();
-            expect(screen.getByRole('navigation', { name: '주요 화면' })).toHaveClass('tab-bar');
-            expect(screen.getAllByRole('button', { name: '새 캐릭터 추가' })).toHaveLength(1);
+            expect(screen.getByRole('navigation', { name: t('app.nav.label') })).toHaveClass(
+                'mobile-navigation',
+            );
+            expect(screen.getAllByRole('button', { name: t('library.empty.import') })).toHaveLength(
+                1,
+            );
         },
     );
 
@@ -247,10 +252,10 @@ describe('App responsive shell', () => {
             client: appClient(vi.fn().mockResolvedValue(BOOTSTRAP)),
         });
 
-        await screen.findByRole('heading', { name: '캐릭터' });
-        await fireEvent.click(screen.getByRole('button', { name: '채팅' }));
+        await screen.findByRole('heading', { name: 'LorePia' });
+        await fireEvent.click(screen.getByRole('button', { name: t('mobile.nav.chat') }));
 
-        expect(screen.getByRole('heading', { name: '채팅' })).toBeVisible();
+        expect(screen.getByRole('heading', { name: t('mobile.nav.chat') })).toBeVisible();
         expect(screen.queryByRole('searchbox', { name: '대화 검색' })).not.toBeInTheDocument();
         await fireEvent.click(screen.getByRole('button', { name: '대화 검색' }));
         expect(screen.getByRole('searchbox', { name: '대화 검색' })).toHaveFocus();
@@ -264,13 +269,13 @@ describe('App responsive shell', () => {
             client: appClient(vi.fn().mockResolvedValue(BOOTSTRAP)),
         });
 
-        await screen.findByRole('heading', { name: '캐릭터' });
+        await screen.findByRole('heading', { name: 'LorePia' });
         expect(rendered.container.querySelector('.app-shell')).toHaveAttribute(
             'data-layout',
             'mobile',
         );
 
-        await fireEvent.click(screen.getByRole('button', { name: '채팅' }));
+        await fireEvent.click(screen.getByRole('button', { name: t('mobile.nav.chat') }));
 
         await fireEvent.click(screen.getByRole('button', { name: '대화 검색' }));
         await screen.findByRole('searchbox', { name: '대화 검색' });
@@ -290,7 +295,9 @@ describe('App responsive shell', () => {
             );
         });
         expect(rendered.container.querySelector('.sidebar')).toBeVisible();
-        expect(rendered.container.querySelector('.tab-bar')).not.toBeInTheDocument();
+        expect(
+            rendered.container.querySelector('[data-mobile-navigation]'),
+        ).not.toBeInTheDocument();
         expect(rendered.container.querySelector('.sidebar-logo')).not.toBeInTheDocument();
         expect(screen.getByRole('heading', { name: 'LorePia' })).toBeVisible();
         expect(screen.queryByText('로컬 Core')).not.toBeInTheDocument();
@@ -353,7 +360,7 @@ describe('App responsive shell', () => {
             client: appClient(vi.fn().mockResolvedValue(BOOTSTRAP)),
         });
 
-        await screen.findByRole('heading', { name: '캐릭터' });
+        await screen.findByRole('heading', { name: 'LorePia' });
         resizeTo(1180);
         await waitFor(() => {
             expect(rendered.container.querySelector('.app-shell')).toHaveAttribute(
@@ -362,7 +369,9 @@ describe('App responsive shell', () => {
             );
         });
         expect(rendered.container.querySelector('.sidebar')).toBeVisible();
-        expect(rendered.container.querySelector('.tab-bar')).not.toBeInTheDocument();
+        expect(
+            rendered.container.querySelector('[data-mobile-navigation]'),
+        ).not.toBeInTheDocument();
 
         resizeTo(393);
         await waitFor(() => {
@@ -374,7 +383,7 @@ describe('App responsive shell', () => {
         await waitFor(() => {
             expect(rendered.container.querySelector('.sidebar')).not.toBeInTheDocument();
         });
-        expect(rendered.container.querySelector('.tab-bar')).toBeVisible();
+        expect(rendered.container.querySelector('[data-mobile-navigation]')).toBeVisible();
     });
 
     it('auto-collapses a cramped desktop utility dock and restores it when space returns', async () => {
@@ -508,20 +517,20 @@ describe('App responsive shell', () => {
                 'mobile',
             );
         });
-        expect(rendered.container.querySelector('.tab-bar')).toBeVisible();
+        expect(rendered.container.querySelector('[data-mobile-navigation]')).toBeVisible();
     });
 
-    it('uses the shared mobile root header for the create title', async () => {
+    it('places creation and settings together under the All destination', async () => {
         setViewportWidth(393);
         const rendered = render(App, {
             client: appClient(vi.fn().mockResolvedValue(BOOTSTRAP)),
         });
 
-        await screen.findByRole('heading', { name: '캐릭터' });
-        await fireEvent.click(screen.getByRole('button', { name: '생성' }));
+        await screen.findByRole('heading', { name: 'LorePia' });
+        await fireEvent.click(screen.getByRole('button', { name: t('mobile.nav.all') }));
 
-        const title = await screen.findByRole('heading', { name: '창작 스튜디오' });
-        expect(title.closest('.mobile-top-frame.mobile-root-header')).not.toBeNull();
+        const title = await screen.findByRole('heading', { name: t('mobile.nav.all') });
+        expect(title.closest('.mobile-page-header')).not.toBeNull();
         expect(rendered.container.querySelector('.studio-index-header')).toBeNull();
     });
 
@@ -531,24 +540,32 @@ describe('App responsive shell', () => {
             client: appClient(vi.fn().mockResolvedValue(BOOTSTRAP)),
         });
 
-        await screen.findByRole('heading', { name: '캐릭터' });
-        await fireEvent.click(screen.getByRole('button', { name: '생성' }));
-        await fireEvent.click(await screen.findByRole('button', { name: '프롬프트 설계' }));
+        await screen.findByRole('heading', { name: 'LorePia' });
+        await fireEvent.click(screen.getByRole('button', { name: t('mobile.nav.all') }));
+        await fireEvent.click(
+            await screen.findByRole('button', { name: t('mobile.studio.prompt') }),
+        );
 
         const back = screen.getByRole('button', { name: '뒤로' });
-        const detailHeader = back.closest('.sub-header');
+        const detailHeader = back.closest('.mobile-detail-header');
         expect(detailHeader).not.toBeNull();
         expect(
-            within(detailHeader as HTMLElement).getByRole('heading', { name: '프롬프트' }),
+            within(detailHeader as HTMLElement).getByRole('heading', {
+                name: t('mobile.studio.prompt'),
+            }),
         ).toBeVisible();
         await waitFor(() =>
             expect(
-                within(detailHeader as HTMLElement).getByRole('heading', { name: '프롬프트' }),
+                within(detailHeader as HTMLElement).getByRole('heading', {
+                    name: t('mobile.studio.prompt'),
+                }),
             ).toHaveFocus(),
         );
         expect(screen.getByRole('list', { name: '세부 도구' })).toBeVisible();
         expect(screen.getByRole('button', { name: /프롬프트 블록/ })).toBeVisible();
-        expect(rendered.container.querySelector('.tab-bar')).not.toBeInTheDocument();
+        expect(
+            rendered.container.querySelector('[data-mobile-navigation]'),
+        ).not.toBeInTheDocument();
 
         await fireEvent.click(screen.getByRole('button', { name: /프롬프트 블록/ }));
 
@@ -557,12 +574,11 @@ describe('App responsive shell', () => {
         ).toBeVisible();
         const detailScroll = rendered.container.querySelector('.studio-detail-scroll');
         expect(detailScroll).not.toBeNull();
-        expect(
-            (detailHeader as HTMLElement).style.getPropertyValue('--mobile-top-fade-progress'),
-        ).toBe('0');
         expect((detailScroll as HTMLElement).style.cssText).not.toContain('mask');
         expect(
-            within(detailScroll as HTMLElement).queryByRole('heading', { name: '프롬프트' }),
+            within(detailScroll as HTMLElement).queryByRole('heading', {
+                name: t('mobile.studio.prompt'),
+            }),
         ).not.toBeInTheDocument();
         Object.defineProperty(detailScroll, 'scrollTop', {
             configurable: true,
@@ -570,31 +586,31 @@ describe('App responsive shell', () => {
             writable: true,
         });
         await fireEvent.scroll(detailScroll as HTMLElement);
-        expect(
-            (detailHeader as HTMLElement).style.getPropertyValue('--mobile-top-fade-progress'),
-        ).toBe('0.5');
         (detailScroll as HTMLElement).scrollTop = 0;
         await fireEvent.scroll(detailScroll as HTMLElement);
-        expect(
-            (detailHeader as HTMLElement).style.getPropertyValue('--mobile-top-fade-progress'),
-        ).toBe('0');
         expect(screen.getByRole('region', { name: '프롬프트' })).toBeVisible();
-        expect(rendered.container.querySelector('.tab-bar')).not.toBeInTheDocument();
+        expect(
+            rendered.container.querySelector('[data-mobile-navigation]'),
+        ).not.toBeInTheDocument();
 
         await fireEvent.click(back);
         expect(
-            within(detailHeader as HTMLElement).getByRole('heading', { name: '프롬프트' }),
+            within(detailHeader as HTMLElement).getByRole('heading', {
+                name: t('mobile.studio.prompt'),
+            }),
         ).toBeVisible();
         expect(screen.getByRole('button', { name: /프롬프트 블록/ })).toBeVisible();
-        expect(rendered.container.querySelector('.tab-bar')).not.toBeInTheDocument();
+        expect(
+            rendered.container.querySelector('[data-mobile-navigation]'),
+        ).not.toBeInTheDocument();
 
         await fireEvent.click(back);
-        expect(screen.getByRole('button', { name: '프롬프트 설계' })).toBeVisible();
-        expect(rendered.container.querySelector('.tab-bar')).toBeVisible();
+        expect(screen.getByRole('button', { name: t('mobile.studio.prompt') })).toBeVisible();
+        expect(rendered.container.querySelector('[data-mobile-navigation]')).toBeVisible();
 
-        await fireEvent.click(screen.getByRole('button', { name: '프롬프트 설계' }));
+        await fireEvent.click(screen.getByRole('button', { name: t('mobile.studio.prompt') }));
         await waitFor(() =>
-            expect(screen.getByRole('heading', { name: '프롬프트' })).toHaveFocus(),
+            expect(screen.getByRole('heading', { name: t('mobile.studio.prompt') })).toHaveFocus(),
         );
     });
 
@@ -604,9 +620,11 @@ describe('App responsive shell', () => {
             client: appClient(vi.fn().mockResolvedValue(BOOTSTRAP)),
         });
 
-        await screen.findByRole('heading', { name: '캐릭터' });
-        await fireEvent.click(screen.getByRole('button', { name: '생성' }));
-        await fireEvent.click(await screen.findByRole('button', { name: '프롬프트 설계' }));
+        await screen.findByRole('heading', { name: 'LorePia' });
+        await fireEvent.click(screen.getByRole('button', { name: t('mobile.nav.all') }));
+        await fireEvent.click(
+            await screen.findByRole('button', { name: t('mobile.studio.prompt') }),
+        );
         await fireEvent.click(screen.getByRole('button', { name: /프롬프트 블록/ }));
 
         const shell = rendered.container.querySelector('.app-shell');
@@ -626,6 +644,13 @@ describe('App responsive shell', () => {
             endY: 310,
         });
         expect(screen.getByRole('heading', { name: '프롬프트 블록' })).toBeVisible();
+
+        const slider = document.createElement('input');
+        slider.type = 'range';
+        gestureSurface?.append(slider);
+        await swipePointer(slider, { startX: 70, startY: 220, endX: 270, endY: 225 });
+        expect(shell).toHaveAttribute('data-back-swipe', 'idle');
+        slider.remove();
 
         const modal = document.createElement('div');
         modal.setAttribute('role', 'dialog');
@@ -671,10 +696,12 @@ describe('App responsive shell', () => {
             clientY: 225,
         });
         await waitFor(() => {
-            expect(screen.getByRole('heading', { name: '프롬프트' })).toBeVisible();
+            expect(screen.getByRole('heading', { name: t('mobile.studio.prompt') })).toBeVisible();
         });
         expect(screen.getByRole('button', { name: /프롬프트 블록/ })).toBeVisible();
-        expect(rendered.container.querySelector('.tab-bar')).not.toBeInTheDocument();
+        expect(
+            rendered.container.querySelector('[data-mobile-navigation]'),
+        ).not.toBeInTheDocument();
         expect(underlay?.querySelector('.back-swipe-tab-bar')).toBeInTheDocument();
 
         await swipePointer(gestureSurface as HTMLElement, {
@@ -685,9 +712,9 @@ describe('App responsive shell', () => {
             pointerId: 8,
         });
         await waitFor(() => {
-            expect(screen.getByRole('button', { name: '프롬프트 설계' })).toBeVisible();
+            expect(screen.getByRole('button', { name: t('mobile.studio.prompt') })).toBeVisible();
         });
-        expect(rendered.container.querySelector('.tab-bar')).toBeVisible();
+        expect(rendered.container.querySelector('[data-mobile-navigation]')).toBeVisible();
         expect(shell).toHaveAttribute('data-back-swipe', 'idle');
     });
 
@@ -697,21 +724,29 @@ describe('App responsive shell', () => {
             client: appClient(vi.fn().mockResolvedValue(BOOTSTRAP)),
         });
 
-        await screen.findByRole('heading', { name: '캐릭터' });
-        await fireEvent.click(screen.getByRole('button', { name: '설정' }));
-        await fireEvent.click(await screen.findByRole('button', { name: /화면 모드/ }));
+        await screen.findByRole('heading', { name: 'LorePia' });
+        await fireEvent.click(screen.getByRole('button', { name: t('mobile.nav.all') }));
+        await fireEvent.click(
+            await screen.findByRole('button', {
+                name: new RegExp(t('mobile.settings.appearance')),
+            }),
+        );
 
         expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
         const back = screen.getByRole('button', { name: '뒤로' });
-        const detailHeader = back.closest('.sub-header');
+        const detailHeader = back.closest('.mobile-detail-header');
         expect(detailHeader).not.toBeNull();
         expect(
-            within(detailHeader as HTMLElement).getByRole('heading', { name: '화면 모드' }),
+            within(detailHeader as HTMLElement).getByRole('heading', {
+                name: t('mobile.settings.appearance'),
+            }),
         ).toBeVisible();
         const detailScroll = rendered.container.querySelector('.settings-detail-scroll');
         expect(detailScroll).not.toBeNull();
         expect(
-            within(detailScroll as HTMLElement).queryByRole('heading', { name: '화면 모드' }),
+            within(detailScroll as HTMLElement).queryByRole('heading', {
+                name: t('mobile.settings.appearance'),
+            }),
         ).not.toBeInTheDocument();
         Object.defineProperty(detailScroll, 'scrollTop', {
             configurable: true,
@@ -719,32 +754,30 @@ describe('App responsive shell', () => {
             writable: true,
         });
         await fireEvent.scroll(detailScroll as HTMLElement);
-        expect(
-            (detailHeader as HTMLElement).style.getPropertyValue('--mobile-top-fade-progress'),
-        ).toBe('1');
         (detailScroll as HTMLElement).scrollTop = 0;
         await fireEvent.scroll(detailScroll as HTMLElement);
-        expect(
-            (detailHeader as HTMLElement).style.getPropertyValue('--mobile-top-fade-progress'),
-        ).toBe('0');
         expect(screen.getByRole('region', { name: '화면 모드' })).toBeVisible();
-        expect(rendered.container.querySelector('.tab-bar')).not.toBeInTheDocument();
+        expect(
+            rendered.container.querySelector('[data-mobile-navigation]'),
+        ).not.toBeInTheDocument();
 
         await fireEvent.click(back);
-        expect(screen.getByRole('button', { name: /화면 모드/ })).toBeVisible();
-        expect(rendered.container.querySelector('.tab-bar')).toBeVisible();
+        expect(
+            screen.getByRole('button', { name: new RegExp(t('mobile.settings.appearance')) }),
+        ).toBeVisible();
+        expect(rendered.container.querySelector('[data-mobile-navigation]')).toBeVisible();
     });
 
     it.each([
-        ['화면 모드', /^\ud654\uba74 \ubaa8\ub4dc /],
-        ['페르소나', /^\ud398\ub974\uc18c\ub098 /],
-        ['기본 생성 대상', /^\uae30\ubcf8 \uc0dd\uc131 \ub300\uc0c1 /],
-        ['연결과 자격증명', /^\uc5f0\uacb0과 \uc790\uaca9\uc99d\uba85 /],
-        ['사용 가능한 템플릿', /^\uc0ac\uc6a9 \uac00\ub2a5\ud55c \ud15c\ud50c\ub9bf /],
-        ['검색과 동기화', /^\uac80\uc0c9\uacfc \ub3d9\uae30\ud654 /],
-        ['제공자 카탈로그', /^\uc81c\uacf5\uc790 \uce74\ud0c8\ub85c\uadf8 /],
-        ['고급', /^\uace0\uae09 /],
-        ['오픈소스 라이선스', /^\uc624\ud508\uc18c\uc2a4 \ub77c\uc774\uc120\uc2a4 /],
+        [t('mobile.settings.appearance'), new RegExp(t('mobile.settings.appearance'))],
+        [t('mobile.settings.persona'), new RegExp(t('mobile.settings.persona'))],
+        [t('mobile.settings.target'), new RegExp(t('mobile.settings.target'))],
+        [t('mobile.settings.connections'), new RegExp(t('mobile.settings.connections'))],
+        [t('mobile.settings.templates'), new RegExp(t('mobile.settings.templates'))],
+        [t('mobile.settings.discovery'), new RegExp(t('mobile.settings.discovery'))],
+        [t('mobile.settings.catalog'), new RegExp(t('mobile.settings.catalog'))],
+        [t('mobile.settings.advanced'), new RegExp(t('mobile.settings.advanced'))],
+        [t('mobile.settings.licenses'), new RegExp(t('mobile.settings.licenses'))],
     ] as const)(
         'hides the root tabs for the pushed %s settings destination',
         async (title, rowName) => {
@@ -753,35 +786,37 @@ describe('App responsive shell', () => {
                 client: appClient(vi.fn().mockResolvedValue(BOOTSTRAP)),
             });
 
-            await screen.findByRole('heading', { name: '캐릭터' });
-            await fireEvent.click(screen.getByRole('button', { name: '설정' }));
+            await screen.findByRole('heading', { name: 'LorePia' });
+            await fireEvent.click(screen.getByRole('button', { name: t('mobile.nav.all') }));
             await fireEvent.click(await screen.findByRole('button', { name: rowName }));
 
             expect(screen.getByRole('heading', { name: title, level: 1 })).toBeVisible();
-            expect(rendered.container.querySelector('.tab-bar')).not.toBeInTheDocument();
+            expect(
+                rendered.container.querySelector('[data-mobile-navigation]'),
+            ).not.toBeInTheDocument();
 
             await fireEvent.click(screen.getByRole('button', { name: '뒤로' }));
             expect(await screen.findByRole('button', { name: rowName })).toBeVisible();
-            expect(rendered.container.querySelector('.tab-bar')).toBeVisible();
+            expect(rendered.container.querySelector('[data-mobile-navigation]')).toBeVisible();
         },
     );
 
     it.each([
         {
-            rootRow: /^\uac80\uc0c9\uacfc \ub3d9\uae30\ud654 /,
-            sectionTitle: '검색과 동기화',
+            rootRow: new RegExp(t('mobile.settings.discovery')),
+            sectionTitle: t('mobile.settings.discovery'),
             leafRow: /프로바이더 탐색/,
             leafTitle: '프로바이더 탐색',
         },
         {
-            rootRow: /^\uace0\uae09 /,
-            sectionTitle: '고급',
+            rootRow: new RegExp(t('mobile.settings.advanced')),
+            sectionTitle: t('mobile.settings.advanced'),
             leafRow: /연결 관리/,
             leafTitle: '프로바이더 연결',
         },
         {
-            rootRow: /^\uc81c\uacf5\uc790 \uce74\ud0c8\ub85c\uadf8 /,
-            sectionTitle: '제공자 카탈로그',
+            rootRow: new RegExp(t('mobile.settings.catalog')),
+            sectionTitle: t('mobile.settings.catalog'),
             leafRow: /활성 카탈로그/,
             leafTitle: '활성 카탈로그',
         },
@@ -793,23 +828,27 @@ describe('App responsive shell', () => {
                 client: appClient(vi.fn().mockResolvedValue(BOOTSTRAP)),
             });
 
-            await screen.findByRole('heading', { name: '캐릭터' });
-            await fireEvent.click(screen.getByRole('button', { name: '설정' }));
+            await screen.findByRole('heading', { name: 'LorePia' });
+            await fireEvent.click(screen.getByRole('button', { name: t('mobile.nav.all') }));
             await fireEvent.click(await screen.findByRole('button', { name: rootRow }));
             expect(screen.getByRole('heading', { name: sectionTitle, level: 1 })).toBeVisible();
 
             await fireEvent.click(await screen.findByRole('button', { name: leafRow }));
             expect(screen.getByRole('heading', { name: leafTitle, level: 1 })).toBeVisible();
-            expect(rendered.container.querySelector('.tab-bar')).not.toBeInTheDocument();
+            expect(
+                rendered.container.querySelector('[data-mobile-navigation]'),
+            ).not.toBeInTheDocument();
 
             await fireEvent.click(screen.getByRole('button', { name: '뒤로' }));
             expect(screen.getByRole('heading', { name: sectionTitle, level: 1 })).toBeVisible();
             expect(await screen.findByRole('button', { name: leafRow })).toBeVisible();
-            expect(rendered.container.querySelector('.tab-bar')).not.toBeInTheDocument();
+            expect(
+                rendered.container.querySelector('[data-mobile-navigation]'),
+            ).not.toBeInTheDocument();
 
             await fireEvent.click(screen.getByRole('button', { name: '뒤로' }));
             expect(await screen.findByRole('button', { name: rootRow })).toBeVisible();
-            expect(rendered.container.querySelector('.tab-bar')).toBeVisible();
+            expect(rendered.container.querySelector('[data-mobile-navigation]')).toBeVisible();
         },
     );
 
@@ -829,29 +868,37 @@ describe('App responsive shell', () => {
         });
         const rendered = render(App, { client });
 
-        await screen.findByRole('heading', { name: '캐릭터' });
-        await fireEvent.click(screen.getByRole('button', { name: '설정' }));
-        await fireEvent.click(await screen.findByRole('button', { name: /^사용 가능한 템플릿 / }));
-        expect(screen.getByRole('heading', { name: '사용 가능한 템플릿', level: 1 })).toBeVisible();
-
+        await screen.findByRole('heading', { name: 'LorePia' });
+        await fireEvent.click(screen.getByRole('button', { name: t('mobile.nav.all') }));
         await fireEvent.click(
-            await screen.findByRole('button', { name: /Synthetic API open_ai_responses · v2/ }),
+            await screen.findByRole('button', { name: new RegExp(t('mobile.settings.templates')) }),
         );
+        expect(
+            screen.getByRole('heading', { name: t('mobile.settings.templates'), level: 1 }),
+        ).toBeVisible();
+
+        await fireEvent.click(await screen.findByRole('button', { name: 'Synthetic API' }));
 
         expect(screen.getByRole('heading', { name: 'Synthetic API', level: 1 })).toBeVisible();
         expect(screen.getByRole('region', { name: 'Synthetic API 템플릿 정보' })).toBeVisible();
-        expect(rendered.container.querySelector('.tab-bar')).not.toBeInTheDocument();
-
-        await fireEvent.click(screen.getByRole('button', { name: '뒤로' }));
-        expect(screen.getByRole('heading', { name: '사용 가능한 템플릿', level: 1 })).toBeVisible();
         expect(
-            await screen.findByRole('button', { name: /Synthetic API open_ai_responses · v2/ }),
-        ).toBeVisible();
-        expect(rendered.container.querySelector('.tab-bar')).not.toBeInTheDocument();
+            rendered.container.querySelector('[data-mobile-navigation]'),
+        ).not.toBeInTheDocument();
 
         await fireEvent.click(screen.getByRole('button', { name: '뒤로' }));
-        expect(await screen.findByRole('button', { name: /^사용 가능한 템플릿 / })).toBeVisible();
-        expect(rendered.container.querySelector('.tab-bar')).toBeVisible();
+        expect(
+            screen.getByRole('heading', { name: t('mobile.settings.templates'), level: 1 }),
+        ).toBeVisible();
+        expect(await screen.findByRole('button', { name: 'Synthetic API' })).toBeVisible();
+        expect(
+            rendered.container.querySelector('[data-mobile-navigation]'),
+        ).not.toBeInTheDocument();
+
+        await fireEvent.click(screen.getByRole('button', { name: '뒤로' }));
+        expect(
+            await screen.findByRole('button', { name: new RegExp(t('mobile.settings.templates')) }),
+        ).toBeVisible();
+        expect(rendered.container.querySelector('[data-mobile-navigation]')).toBeVisible();
     });
 
     it('titles a discovery create page and pops back to the discovery list first', async () => {
@@ -860,21 +907,27 @@ describe('App responsive shell', () => {
             client: appClient(vi.fn().mockResolvedValue(BOOTSTRAP)),
         });
 
-        await screen.findByRole('heading', { name: '캐릭터' });
-        await fireEvent.click(screen.getByRole('button', { name: '설정' }));
-        await fireEvent.click(await screen.findByRole('button', { name: /^검색과 동기화 / }));
+        await screen.findByRole('heading', { name: 'LorePia' });
+        await fireEvent.click(screen.getByRole('button', { name: t('mobile.nav.all') }));
+        await fireEvent.click(
+            await screen.findByRole('button', { name: new RegExp(t('mobile.settings.discovery')) }),
+        );
         await fireEvent.click(await screen.findByRole('button', { name: /프로바이더 탐색/ }));
         expect(screen.getByRole('heading', { name: '프로바이더 탐색', level: 1 })).toBeVisible();
 
         await fireEvent.click(screen.getByRole('button', { name: '새 탐색' }));
         expect(screen.getByRole('heading', { name: '새 프로바이더 탐색', level: 1 })).toBeVisible();
         expect(screen.getByRole('form', { name: '프로바이더 탐색 시작' })).toBeVisible();
-        expect(rendered.container.querySelector('.tab-bar')).not.toBeInTheDocument();
+        expect(
+            rendered.container.querySelector('[data-mobile-navigation]'),
+        ).not.toBeInTheDocument();
 
         await fireEvent.click(screen.getByRole('button', { name: '뒤로' }));
         expect(screen.getByRole('heading', { name: '프로바이더 탐색', level: 1 })).toBeVisible();
         expect(screen.getByRole('button', { name: '새 탐색' })).toBeVisible();
-        expect(rendered.container.querySelector('.tab-bar')).not.toBeInTheDocument();
+        expect(
+            rendered.container.querySelector('[data-mobile-navigation]'),
+        ).not.toBeInTheDocument();
     });
 
     it('opens the bundled open-source notices from the last settings row', async () => {
@@ -883,14 +936,14 @@ describe('App responsive shell', () => {
             client: appClient(vi.fn().mockResolvedValue(BOOTSTRAP)),
         });
 
-        await screen.findByRole('heading', { name: '캐릭터' });
-        await fireEvent.click(screen.getByRole('button', { name: '설정' }));
+        await screen.findByRole('heading', { name: 'LorePia' });
+        await fireEvent.click(screen.getByRole('button', { name: t('mobile.nav.all') }));
         await fireEvent.click(
-            await screen.findByRole('button', { name: /오픈소스 라이선스 ISC · MIT/ }),
+            await screen.findByRole('button', { name: t('mobile.settings.licenses') }),
         );
 
         const back = screen.getByRole('button', { name: '뒤로' });
-        const detailHeader = back.closest('.sub-header');
+        const detailHeader = back.closest('.mobile-detail-header');
         expect(detailHeader).not.toBeNull();
         expect(
             within(detailHeader as HTMLElement).getByRole('heading', {
@@ -902,7 +955,7 @@ describe('App responsive shell', () => {
 
         await fireEvent.click(back);
         expect(
-            await screen.findByRole('button', { name: /오픈소스 라이선스 ISC · MIT/ }),
+            await screen.findByRole('button', { name: t('mobile.settings.licenses') }),
         ).toBeVisible();
     });
 
@@ -912,10 +965,12 @@ describe('App responsive shell', () => {
             client: appClient(vi.fn().mockResolvedValue(BOOTSTRAP)),
         });
 
-        await screen.findByRole('heading', { name: '캐릭터' });
-        await fireEvent.click(screen.getByRole('button', { name: '설정' }));
+        await screen.findByRole('heading', { name: 'LorePia' });
+        await fireEvent.click(screen.getByRole('button', { name: t('mobile.nav.all') }));
         expect(screen.getByRole('navigation', { name: '주요 화면' })).toBeVisible();
-        await fireEvent.click(await screen.findByRole('button', { name: /페르소나 1개/ }));
+        await fireEvent.click(
+            await screen.findByRole('button', { name: new RegExp(t('mobile.settings.persona')) }),
+        );
         expect(screen.queryByRole('navigation', { name: '주요 화면' })).not.toBeInTheDocument();
         const addPersona = within(screen.getByRole('toolbar', { name: '페르소나 작업' })).getByRole(
             'button',
@@ -927,7 +982,9 @@ describe('App responsive shell', () => {
         expect(screen.getByRole('heading', { name: '새 페르소나', level: 1 })).toBeVisible();
         expect(screen.getByRole('form', { name: '새 페르소나' })).toBeVisible();
         await fireEvent.click(screen.getByRole('button', { name: '뒤로' }));
-        expect(screen.getByRole('heading', { name: '페르소나', level: 1 })).toBeVisible();
+        expect(
+            screen.getByRole('heading', { name: t('mobile.settings.persona'), level: 1 }),
+        ).toBeVisible();
 
         await fireEvent.click(
             await screen.findByRole('button', { name: /테스트 페르소나 테스트 설명/ }),
@@ -943,7 +1000,9 @@ describe('App responsive shell', () => {
         await fireEvent.click(screen.getByRole('button', { name: '뒤로' }));
 
         expect(screen.queryByRole('heading', { name: '페르소나 편집' })).not.toBeInTheDocument();
-        expect(screen.getByRole('heading', { name: '페르소나', level: 1 })).toBeVisible();
+        expect(
+            screen.getByRole('heading', { name: t('mobile.settings.persona'), level: 1 }),
+        ).toBeVisible();
         expect(
             await screen.findByRole('button', { name: /테스트 페르소나 테스트 설명/ }),
         ).toBeVisible();
@@ -956,7 +1015,9 @@ describe('App responsive shell', () => {
 
         await fireEvent.click(screen.getByRole('button', { name: '뒤로' }));
 
-        expect(await screen.findByRole('button', { name: /페르소나 1개/ })).toBeVisible();
+        expect(
+            await screen.findByRole('button', { name: new RegExp(t('mobile.settings.persona')) }),
+        ).toBeVisible();
         expect(screen.queryByRole('toolbar', { name: '페르소나 작업' })).not.toBeInTheDocument();
         expect(screen.getByRole('navigation', { name: '주요 화면' })).toBeVisible();
     });
@@ -982,7 +1043,7 @@ describe('App bootstrap content-package recovery', () => {
         await waitFor(() => expect(bootstrapSnapshot).toHaveBeenCalledOnce());
         bootstrap.resolve(BOOTSTRAP);
 
-        await screen.findByRole('heading', { name: '캐릭터' });
+        await screen.findByRole('heading', { name: 'LorePia' });
         expect(listCharacters).toHaveBeenCalledOnce();
         await waitFor(() => {
             expect(listPendingContentPackageImports).toHaveBeenCalledOnce();

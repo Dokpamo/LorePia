@@ -1,5 +1,6 @@
 <script lang="ts">
     import { ArrowUp, ChevronDown, Maximize2, Plus } from '@lucide/svelte';
+    import { tr } from '../../lib/i18n';
 
     import type { ChatComposerState } from './composer-state.svelte';
 
@@ -57,7 +58,9 @@
                 use:measureComposer={state.draft}
                 rows="1"
                 maxlength="131072"
-                placeholder={desktop ? '무엇이든 요청하세요' : undefined}
+                placeholder={desktop
+                    ? $tr('mobile.chat.desktop_message')
+                    : $tr('mobile.chat.message')}
                 {disabled}
                 oncompositionstart={() => (state.compositionActive = true)}
                 oncompositionend={() => (state.compositionActive = false)}

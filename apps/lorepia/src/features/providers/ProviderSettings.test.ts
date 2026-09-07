@@ -12,10 +12,10 @@ import type {
     ModelRouteDto,
     ProviderTemplateDto,
 } from '../../lib/ipc/contracts';
+import { t } from '../../lib/i18n';
 import { setThemePreference } from '../../lib/theme';
 import { INITIAL_PERSONA_STATE, PersonaController } from '../personas/persona-controller';
 import '../../styles/app.css';
-import appCss from '../../styles/app-css';
 import ProviderSettings from './ProviderSettings.svelte';
 
 afterEach(() => {
@@ -27,53 +27,46 @@ afterEach(() => {
 });
 
 describe('ProviderSettings mobile settings language', () => {
-    it('shows concise current values without the old explanatory subtitles', () => {
+    it('groups supported settings and creation workflows by user purpose', async () => {
         const appState = structuredClone(INITIAL_APP_STATE);
         appState.providers.phase = 'ready';
         const controller = new LorepiaAppController({} as LorepiaClient);
+        const onOpenSection = vi.fn();
+        const onOpenStudio = vi.fn();
         setThemePreference('light');
-
-        const rendered = render(ProviderSettings, { appState, controller, section: null });
-        const identity = rendered.container.querySelector<HTMLElement>('.settings-identity');
-        const card = rendered.container.querySelector<HTMLElement>('.setting-list');
-        if (identity === null || card === null) throw new Error('settings hierarchy is missing');
-
-        expect(screen.getByRole('region', { name: '설정' })).toBeInTheDocument();
-        expect(screen.queryByRole('heading', { name: '설정' })).not.toBeInTheDocument();
-        expect(within(identity).getByRole('heading', { name: 'LorePia' })).toBeInTheDocument();
-        expect(within(identity).queryByText('로컬 Core')).not.toBeInTheDocument();
-        expect(
-            within(identity).queryByText('설정과 자격증명은 이 기기에 보관됩니다.'),
-        ).not.toBeInTheDocument();
-        expect(screen.queryByRole('button', { name: '새로고침' })).not.toBeInTheDocument();
-        expect(screen.getByRole('button', { name: '설정 더보기' })).toBeInTheDocument();
-        const logo = rendered.container.querySelector<HTMLElement>(
-            '.settings-avatar.brand-logo-mark',
-        );
-        expect(logo).toBeInTheDocument();
-        expect(logo?.style.getPropertyValue('--logo-mask')).toContain('lorepia-logo-mark');
-        expect(rendered.container.querySelector('.settings-avatar-badge')).toBeInTheDocument();
-        expect(within(card).getAllByRole('button')).toHaveLength(9);
-        expect(within(card).getByRole('button', { name: /검색과 동기화/ })).toBeInTheDocument();
-        expect(within(card).getByRole('button', { name: /제공자 카탈로그/ })).toBeInTheDocument();
-        expect(within(card).getByRole('button', { name: /페르소나 0개/ })).toBeInTheDocument();
-        expect(
-            within(card).getByRole('button', { name: /오픈소스 라이선스 ISC · MIT/ }),
-        ).toBeInTheDocument();
-        expect(within(card).queryByText('내 Persona')).not.toBeInTheDocument();
-        expect(card.querySelectorAll('.setting-value')).toHaveLength(9);
-        const settingIcons = [...card.querySelectorAll<HTMLElement>('.setting-icon')];
-        expect(settingIcons).toHaveLength(9);
-        expect(settingIcons.every((icon) => icon.querySelector('svg') !== null)).toBe(true);
-        expect(card.querySelector('[data-tone]')).not.toBeInTheDocument();
-        expect(within(card).getByText('라이트')).toBeInTheDocument();
-        expect(card.querySelector('.setting-copy small')).not.toBeInTheDocument();
-        expect(card.querySelector('.setting-chevron')).not.toBeInTheDocument();
-        expect(within(card).queryByText('라이트·다크·시스템')).not.toBeInTheDocument();
-        expect(within(card).queryByText('대화에서 나를 어떻게 부를지')).not.toBeInTheDocument();
-        expect(
-            identity.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING,
-        ).toBeTruthy();
+        const rendered = render(ProviderSettings, {
+            appState,
+            controller,
+            onOpenSection,
+            onOpenStudio,
+        });
+        expect(screen.getByRole('heading', { name: t('mobile.nav.all') })).toBeVisible();
+        expect(rendered.container.querySelector('.mobile-profile')).toBeNull();
+        for (const section of [
+            'appearance',
+            'persona',
+            'target',
+            'connections',
+            'templates',
+            'discovery',
+            'catalog',
+            'advanced',
+            'licenses',
+        ] as const) {
+            await fireEvent.click(
+                screen.getByRole('button', { name: new RegExp(t(`mobile.settings.${section}`)) }),
+            );
+            expect(onOpenSection).toHaveBeenLastCalledWith(section);
+        }
+        for (const section of ['prompt', 'memory', 'content', 'diagnostics'] as const) {
+            await fireEvent.click(
+                screen.getByRole('button', { name: t(`mobile.studio.${section}`) }),
+            );
+            expect(onOpenStudio).toHaveBeenLastCalledWith(section);
+        }
+        expect(screen.getByText(t('mobile.theme.light'))).toBeVisible();
+        expect(onOpenSection).toHaveBeenCalledTimes(9);
+        expect(onOpenStudio).toHaveBeenCalledTimes(4);
         controller.destroy();
     });
 
@@ -143,7 +136,9 @@ describe('ProviderSettings mobile settings language', () => {
             onOpenSection,
         });
 
-        const appearanceRow = screen.getByRole('button', { name: /화면 모드/ });
+        const appearanceRow = screen.getByRole('button', {
+            name: new RegExp(t('mobile.settings.appearance')),
+        });
         await fireEvent.click(appearanceRow);
         expect(onOpenSection).toHaveBeenCalledWith('appearance');
 
@@ -160,101 +155,39 @@ describe('ProviderSettings mobile settings language', () => {
             rendered.container.querySelector<HTMLElement>('.settings-detail-scroll');
         if (detailScroll === null) throw new Error('settings detail scroll is missing');
         expect(getComputedStyle(detailScroll).alignContent).toBe('start');
-        const choices = within(screenRegion).getByRole('list', { name: '화면 모드 선택' });
+        const choices = within(screenRegion).getByRole('group', { name: t('mobile.theme.label') });
         expect(within(choices).getAllByRole('button')).toHaveLength(3);
-        expect(within(choices).getByRole('button', { name: '시스템' })).toHaveClass(
-            'detail-choice-row',
+        expect(within(choices).getByRole('button', { name: t('mobile.theme.system') })).toHaveClass(
+            'mobile-theme-option',
         );
-        expect(within(choices).getByRole('button', { name: '시스템' })).toHaveAttribute(
-            'aria-pressed',
-            'true',
-        );
-        expect(within(choices).getByRole('button', { name: '라이트 모드' })).toHaveAttribute(
-            'aria-pressed',
-            'false',
-        );
-        expect(within(choices).getByRole('button', { name: '다크 모드' })).toHaveAttribute(
-            'aria-pressed',
-            'false',
-        );
-        expect(screen.queryByRole('button', { name: /화면 모드 라이트/ })).not.toBeInTheDocument();
+        expect(
+            within(choices).getByRole('button', { name: t('mobile.theme.system') }),
+        ).toHaveAttribute('aria-pressed', 'true');
+        expect(
+            within(choices).getByRole('button', { name: t('mobile.theme.light') }),
+        ).toHaveAttribute('aria-pressed', 'false');
+        expect(
+            within(choices).getByRole('button', { name: t('mobile.theme.dark') }),
+        ).toHaveAttribute('aria-pressed', 'false');
+        expect(
+            screen.queryByRole('button', {
+                name: new RegExp(t('mobile.settings.appearance') + ' ' + t('mobile.theme.light')),
+            }),
+        ).not.toBeInTheDocument();
         expect(
             within(screenRegion).queryByText(/시스템을 고르면 운영체제 설정을 따라갑니다/),
         ).not.toBeInTheDocument();
 
-        await fireEvent.click(within(screenRegion).getByRole('button', { name: '다크 모드' }));
+        await fireEvent.click(
+            within(screenRegion).getByRole('button', { name: t('mobile.theme.dark') }),
+        );
         await rendered.rerender({ appState, controller, section: null, onOpenSection });
 
-        expect(screen.getByRole('button', { name: /화면 모드 다크/ })).toBeInTheDocument();
-        controller.destroy();
-    });
-
-    it('keeps the settings root toolbar to the overflow action', () => {
-        const appState = structuredClone(INITIAL_APP_STATE);
-        appState.providers.phase = 'ready';
-        const controller = new LorepiaAppController({} as LorepiaClient);
-
-        const rendered = render(ProviderSettings, { appState, controller, section: null });
-
-        const toolbar = screen.getByRole('toolbar', { name: '설정 도구' });
-        const scrollRegion = rendered.container.querySelector('.settings-home-scroll');
-        if (scrollRegion === null) throw new Error('settings home scroll is missing');
         expect(
-            within(toolbar).queryByRole('button', { name: '설정 검색' }),
-        ).not.toBeInTheDocument();
-        expect(within(toolbar).queryByRole('searchbox')).not.toBeInTheDocument();
-        expect(within(toolbar).getByRole('button', { name: '설정 더보기' })).toBeVisible();
-        expect(toolbar.parentElement).toBe(scrollRegion.parentElement);
-        expect(toolbar.nextElementSibling).toBe(scrollRegion);
-        controller.destroy();
-    });
-
-    it('uses the overflow action for real settings shortcuts', async () => {
-        const appState = structuredClone(INITIAL_APP_STATE);
-        appState.providers.phase = 'ready';
-        const controller = new LorepiaAppController({} as LorepiaClient);
-        const onOpenSection = vi.fn();
-
-        render(ProviderSettings, { appState, controller, section: null, onOpenSection });
-
-        await fireEvent.click(screen.getByRole('button', { name: '설정 더보기' }));
-        const shortcuts = screen.getByRole('group', { name: '설정 바로가기' });
-        await fireEvent.click(within(shortcuts).getByRole('button', { name: '화면 모드' }));
-
-        expect(onOpenSection).toHaveBeenCalledWith('appearance');
-        expect(screen.queryByRole('group', { name: '설정 바로가기' })).not.toBeInTheDocument();
-        controller.destroy();
-    });
-
-    it('groups destination buttons into one rounded settings panel', () => {
-        expect(appCss).toMatch(/\.setting-list\s*\{[^}]*padding:\s*0;/s);
-        expect(appCss).toMatch(
-            /\.setting-list\s*\{[^}]*border-radius:\s*clamp\(20px,\s*6\.59vw,\s*24px\);[^}]*margin:\s*0 clamp\(3px,\s*0\.686vw,\s*3px\);[^}]*background:\s*var\(--bg\);[^}]*box-shadow:\s*var\(--shadow-1\);[^}]*gap:\s*clamp\(2px,\s*0\.686vw,\s*3px\);[^}]*overflow:\s*hidden;/s,
-        );
-        expect(appCss).toMatch(
-            /\.setting-row\s*\{[^}]*min-height:\s*clamp\(54px,\s*15\.561vw,\s*68px\);[^}]*border:\s*0;[^}]*border-radius:\s*clamp\(3px,\s*0\.915vw,\s*4px\);[^}]*background:\s*var\(--surface-raised\);[^}]*box-shadow:\s*none;[^}]*gap:\s*clamp\(19px,\s*5\.492vw,\s*24px\);/s,
-        );
-        expect(appCss).toMatch(/\.setting-copy\s*\{[^}]*flex:\s*1;/s);
-    });
-
-    it('keeps the shared panel and its inset rows visually distinct', () => {
-        const appState = structuredClone(INITIAL_APP_STATE);
-        appState.providers.phase = 'ready';
-        const controller = new LorepiaAppController({} as LorepiaClient);
-
-        const rendered = render(ProviderSettings, { appState, controller, section: null });
-        const pane = rendered.container.querySelector<HTMLElement>('.provider-pane');
-        const list = rendered.container.querySelector<HTMLElement>('.setting-list');
-        const button = rendered.container.querySelector<HTMLElement>('.setting-row');
-        if (pane === null || list === null || button === null) {
-            throw new Error('settings surfaces are missing');
-        }
-
-        expect(pane).toHaveClass('provider-pane');
-        expect(list).toHaveClass('setting-list');
-        expect(appCss).toMatch(/\.provider-pane\s*\{[^}]*background:\s*var\(--bg\)/s);
-        expect(appCss).toMatch(/\.setting-list\s*\{[^}]*background:\s*var\(--bg\)/s);
-        expect(appCss).toMatch(/\.setting-row\s*\{[^}]*background:\s*var\(--surface-raised\)/s);
+            screen.getByRole('button', {
+                name: new RegExp(t('mobile.settings.appearance') + ' ' + t('mobile.theme.dark')),
+            }),
+        ).toBeInTheDocument();
         controller.destroy();
     });
 
@@ -265,7 +198,7 @@ describe('ProviderSettings mobile settings language', () => {
         const rendered = render(ProviderSettings, { appState, controller, section: 'target' });
 
         const toggle = screen.getByRole('switch', {
-            name: '취소·오류 시 생성된 일부 응답을 보존',
+            name: t('mobile.target.preserve'),
         });
         expect(toggle).toBeChecked();
         expect(toggle).toHaveClass('toggle-switch');
@@ -379,7 +312,7 @@ describe('ProviderSettings mobile settings language', () => {
         });
 
         let toggle = screen.getByRole('switch', {
-            name: '취소·오류 시 생성된 일부 응답을 보존',
+            name: t('mobile.target.preserve'),
         });
         await fireEvent.click(toggle);
         expect(toggle).not.toBeChecked();
@@ -389,7 +322,7 @@ describe('ProviderSettings mobile settings language', () => {
         await rendered.rerender({ appState, controller, section: null });
         await rendered.rerender({ appState, controller, section: 'target' });
         toggle = screen.getByRole('switch', {
-            name: '취소·오류 시 생성된 일부 응답을 보존',
+            name: t('mobile.target.preserve'),
         });
         expect(toggle).toBeChecked();
 
@@ -438,7 +371,12 @@ describe('ProviderSettings mobile settings language', () => {
         });
 
         await fireEvent.click(
-            screen.getByRole('button', { name: /테스트 연결 synthetic-template/ }),
+            screen.getByRole('button', {
+                name: new RegExp(
+                    appState.providers.workspace.connections[0]?.display_name ??
+                        'Missing connection fixture',
+                ),
+            }),
         );
 
         const detail = screen.getByRole('region', { name: '테스트 연결' });
@@ -475,10 +413,10 @@ describe('ProviderSettings mobile settings language', () => {
 
         const list = screen.getByRole('list', { name: '템플릿 목록' });
         const row = within(list).getByRole('button', {
-            name: /Synthetic API open_ai_responses · v2 필드 1 · 파라미터 1/,
+            name: 'Synthetic API',
         });
-        expect(row).toHaveClass('detail-record-row');
-        expect(row.querySelector('.setting-chevron')).not.toBeInTheDocument();
+        expect(row).toHaveClass('mobile-menu-row');
+        expect(row.querySelector('.mobile-chevron')).toHaveAttribute('aria-hidden', 'true');
 
         await fireEvent.click(row);
 
@@ -715,7 +653,7 @@ describe('ProviderSettings retained legacy profiles', () => {
         render(ProviderSettings, { appState, controller, section: 'target' });
 
         const targetSection = screen.getByRole('region', { name: '기본 생성 대상 편집' });
-        const routeSelect = within(targetSection).getByLabelText('모델 라우트');
+        const routeSelect = within(targetSection).getByLabelText(t('mobile.target.model'));
         await fireEvent.click(routeSelect);
         expect(
             within(targetSection).queryByRole('option', { name: 'Legacy alias model' }),
@@ -738,7 +676,12 @@ describe('ProviderSettings retained legacy profiles', () => {
         });
 
         await fireEvent.click(
-            screen.getByRole('button', { name: /보존된 레거시 프로필 기존 프로필/ }),
+            screen.getByRole('button', {
+                name: new RegExp(
+                    legacyProviderState().providers.workspace.legacy_profiles[0]?.display_name ??
+                        'Missing profile fixture',
+                ),
+            }),
         );
         const profileDetail = screen.getByRole('region', { name: '보존된 레거시 프로필' });
 
@@ -764,7 +707,12 @@ describe('ProviderSettings retained legacy profiles', () => {
         });
 
         await fireEvent.click(
-            screen.getByRole('button', { name: /보존된 레거시 프로필 기존 프로필/ }),
+            screen.getByRole('button', {
+                name: new RegExp(
+                    legacyProviderState().providers.workspace.legacy_profiles[0]?.display_name ??
+                        'Missing profile fixture',
+                ),
+            }),
         );
         await fireEvent.click(screen.getByRole('button', { name: '기본 대상으로 선택' }));
 
@@ -774,15 +722,15 @@ describe('ProviderSettings retained legacy profiles', () => {
             section: 'target',
             detailPage: null,
         });
-        expect(screen.getByLabelText('취소·오류 시 생성된 일부 응답을 보존')).toBeDisabled();
+        expect(screen.getByLabelText(t('mobile.target.preserve'))).toBeDisabled();
         expect(screen.getByRole('button', { name: '해제' })).toBeDisabled();
         expect(screen.getByRole('button', { name: '저장' })).toBeDisabled();
         const targetSection = screen.getByRole('region', { name: '기본 생성 대상 편집' });
-        expect(within(targetSection).getByLabelText('모델 라우트')).toBeDisabled();
+        expect(within(targetSection).getByLabelText(t('mobile.target.model'))).toBeDisabled();
 
         pendingSelection.resolve(true);
         await waitFor(() =>
-            expect(screen.getByLabelText('취소·오류 시 생성된 일부 응답을 보존')).toBeEnabled(),
+            expect(screen.getByLabelText(t('mobile.target.preserve'))).toBeEnabled(),
         );
         controller.destroy();
     });
@@ -820,14 +768,14 @@ describe('ProviderSettings retained legacy profiles', () => {
         render(ProviderSettings, { appState, controller, section: 'target' });
 
         const targetSection = screen.getByRole('region', { name: '기본 생성 대상 편집' });
-        expect(within(targetSection).getByLabelText('모델 라우트')).toHaveAttribute(
+        expect(within(targetSection).getByLabelText(t('mobile.target.model'))).toHaveAttribute(
             'data-value',
             '',
         );
         expect(screen.getByRole('button', { name: '저장' })).toBeDisabled();
         await fireEvent.click(
             screen.getByRole('switch', {
-                name: '취소·오류 시 생성된 일부 응답을 보존',
+                name: t('mobile.target.preserve'),
             }),
         );
         await fireEvent.click(screen.getByRole('button', { name: '저장' }));
@@ -880,7 +828,12 @@ describe('ProviderSettings retained legacy profiles', () => {
         });
 
         await fireEvent.click(
-            screen.getByRole('button', { name: /정규화된 레거시 연결 legacy-openai-compatible/ }),
+            screen.getByRole('button', {
+                name: new RegExp(
+                    appState.providers.workspace.connections[0]?.display_name ??
+                        'Missing connection fixture',
+                ),
+            }),
         );
         const ordinaryConnectionDetail = screen.getByRole('region', {
             name: '정규화된 레거시 연결',
@@ -895,7 +848,12 @@ describe('ProviderSettings retained legacy profiles', () => {
             detailPage: null,
         });
         await fireEvent.click(
-            screen.getByRole('button', { name: /보존된 레거시 프로필 기존 프로필/ }),
+            screen.getByRole('button', {
+                name: new RegExp(
+                    legacyProviderState().providers.workspace.legacy_profiles[0]?.display_name ??
+                        'Missing profile fixture',
+                ),
+            }),
         );
         const legacyCredentialActions = screen.getByRole('toolbar', {
             name: '자격증명 작업',

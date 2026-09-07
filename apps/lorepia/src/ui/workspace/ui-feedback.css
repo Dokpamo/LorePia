@@ -1,0 +1,250 @@
+.ui-preview .ui-confirm-layer {
+    position: absolute;
+    inset: 0;
+    z-index: 40;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: light-dark(rgb(25 31 40 / 28%), rgb(0 0 0 / 48%));
+    pointer-events: auto;
+}
+.ui-preview .ui-confirm {
+    width: min(100%, 400px);
+    max-height: 100%;
+    overflow-y: auto;
+    padding: 24px;
+    border-radius: 24px;
+    background: var(--ui-paper);
+}
+.ui-preview .ui-confirm h2 {
+    margin: 0 0 12px;
+    color: var(--ui-heading);
+    font-size: var(--ui-type-section);
+}
+.ui-preview .ui-confirm p {
+    margin: 0 0 24px;
+    color: var(--ui-secondary);
+    font-size: var(--ui-type-secondary);
+}
+.ui-preview .ui-confirm .ui-submit {
+    margin: 0;
+    --ui-action: var(--ui-selected);
+    --ui-action-pressed: var(--ui-pressed-surface);
+    --ui-on-action: var(--ui-heading);
+}
+.ui-preview .ui-confirm .ui-submit > .ui-press-visual {
+    background: var(--ui-selected);
+    color: var(--ui-heading);
+}
+.ui-preview .ui-discard,
+.ui-preview .ui-result-action,
+.ui-preview .ui-notice-retry {
+    border: 0;
+    padding: 0;
+    min-height: var(--ui-control);
+    border-radius: 12px;
+    background: transparent;
+    font-size: var(--ui-type-secondary);
+}
+.ui-preview .ui-discard {
+    width: 100%;
+    margin-top: 4px;
+    color: var(--ui-critical);
+}
+.ui-preview :is(.ui-discard, .ui-result-action, .ui-notice-retry) > .ui-press-visual {
+    display: grid;
+    place-items: center;
+    min-height: var(--ui-control);
+    padding: 8px 12px;
+}
+.ui-preview .ui-notice {
+    pointer-events: auto;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0 8px;
+    padding: 8px 8px 8px 16px;
+    border-radius: 16px;
+    background: var(--ui-selected);
+    color: var(--ui-heading);
+    font-size: var(--ui-type-secondary);
+}
+.ui-preview .ui-notice > span {
+    flex: 1 1 140px;
+    overflow-wrap: anywhere;
+}
+.ui-preview .ui-notice-retry {
+    margin-left: auto;
+    font-weight: 600;
+}
+.ui-preview .ui-tooltip {
+    position: absolute;
+    z-index: 60;
+    max-width: min(280px, calc(100% - 16px));
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: var(--ui-heading);
+    color: var(--ui-paper);
+    font-size: var(--ui-type-caption);
+    line-height: 1.5;
+    pointer-events: none;
+    overflow-wrap: anywhere;
+}
+.ui-preview .ui-editor-footer {
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+}
+.ui-preview .ui-editor-hint {
+    color: var(--ui-secondary);
+    flex: 1;
+    text-align: left;
+}
+.ui-preview .ui-search-input {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 4px;
+    min-height: var(--ui-control);
+    margin: 16px max(16px, calc((100% - 760px) / 2));
+    padding-inline: 12px 4px;
+    border-radius: 12px;
+    background: var(--ui-soft);
+}
+.ui-preview .ui-search-input input {
+    width: 100%;
+    min-width: 0;
+    min-height: var(--ui-control);
+    padding: 8px 4px;
+    border: 0;
+    background: transparent;
+    color: var(--ui-ink);
+    font-size: var(--ui-type-body);
+}
+.ui-preview .ui-search-input input::placeholder {
+    color: var(--ui-hint);
+}
+.ui-preview .ui-search-input input::-webkit-search-cancel-button {
+    display: none;
+}
+.ui-preview .ui-search-results {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 0 max(16px, calc((100% - 760px) / 2)) max(24px, env(safe-area-inset-bottom));
+}
+.ui-preview .ui-search-count {
+    margin: 8px;
+    color: var(--ui-muted);
+    font-size: var(--ui-type-secondary);
+}
+.ui-preview .ui-search-results ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+.ui-preview .ui-search-result {
+    width: 100%;
+}
+.ui-preview .ui-result-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding: 40px 12px;
+    text-align: center;
+}
+.ui-preview .ui-result-empty > svg {
+    width: 32px;
+    height: 32px;
+    color: var(--ui-muted);
+}
+.ui-preview .ui-result-empty > strong {
+    color: var(--ui-heading);
+    font-size: var(--ui-type-body);
+}
+.ui-preview .ui-result-empty > p {
+    margin: 0;
+    color: var(--ui-secondary);
+    font-size: var(--ui-type-secondary);
+}
+.ui-preview .ui-tool-caption {
+    display: none;
+}
+.ui-preview .ui-response-wait {
+    margin: 4px 2px 0;
+    color: var(--ui-muted);
+    font-size: var(--ui-type-caption);
+}
+.ui-preview .ui-response-state {
+    flex-wrap: wrap;
+    margin-top: 4px;
+}
+.ui-preview .ui-response-state small {
+    display: block;
+    margin-top: 2px;
+    font: inherit;
+}
+.ui-preview .ui-response-state .ui-result-action {
+    min-height: 48px;
+    padding: 0;
+}
+.ui-preview .ui-critical {
+    color: var(--ui-critical);
+}
+.ui-preview .ui-message-tools:has(.ui-remove-prompt) {
+    flex-wrap: wrap;
+}
+.ui-preview .ui-remove-prompt {
+    flex: 1 1 100%;
+}
+@media (hover: none), (pointer: coarse) {
+    .ui-preview .ui-message-tools {
+        width: min(100%, 320px);
+        gap: 4px;
+    }
+    .ui-preview .ui-tool-button {
+        flex: 1 1 0;
+        min-width: 48px;
+        width: auto;
+        height: auto;
+        min-height: 64px;
+    }
+    .ui-preview .ui-tool-button > .ui-press-visual {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        min-height: 64px;
+        padding: 8px 2px;
+    }
+    .ui-preview .ui-tool-caption {
+        display: block;
+        font-size: var(--ui-type-caption);
+        line-height: 1.4;
+        text-align: center;
+    }
+}
+@media (max-width: 359px) {
+    .ui-preview {
+        --ui-inset: 16px;
+    }
+    .ui-preview .ui-left-layout {
+        --ui-rail-width: 64px;
+    }
+    .ui-preview .ui-character-list {
+        padding-inline: 8px;
+    }
+    .ui-preview .ui-character-summary {
+        padding-left: 12px;
+    }
+    .ui-preview .ui-confirm-layer {
+        padding: 12px;
+    }
+    .ui-preview .ui-confirm {
+        padding: 20px;
+    }
+}

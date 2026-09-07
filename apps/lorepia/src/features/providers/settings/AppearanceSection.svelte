@@ -1,6 +1,9 @@
 <script lang="ts">
-    import { Check } from '@lucide/svelte';
+    import { Check, Sun, Moon, Monitor } from '@lucide/svelte';
+    import { tr } from '../../../lib/i18n';
     import { setThemePreference, themePreference } from '../../../lib/theme';
+    import ChoiceField from '../../../components/ChoiceField.svelte';
+    import { chatTextSize, setChatTextSize } from '../../../lib/display';
 
     interface Props {
         desktop: boolean;
@@ -8,6 +11,7 @@
 
     let { desktop }: Props = $props();
 
+    const themeIcons = { system: Monitor, light: Sun, dark: Moon };
     const themeOptions = [
         { id: 'system' as const, label: '시스템' },
         { id: 'light' as const, label: '라이트 모드' },
@@ -67,23 +71,28 @@
         </div>
     </section>
 {:else}
-    <ul class="setting-list detail-choice-list" aria-label="화면 모드 선택">
+    <p class="mobile-detail-intro">{$tr('mobile.theme.hint')}</p>
+    <div class="mobile-theme-options" role="group" aria-label={$tr('mobile.theme.label')}>
         {#each themeOptions as option (option.id)}
-            <li>
-                <button
-                    type="button"
-                    class="setting-row detail-choice-row"
-                    aria-pressed={$themePreference === option.id}
-                    onclick={() => setThemePreference(option.id)}
-                >
-                    <span class="setting-content">
-                        <span class="setting-copy"><strong>{option.label}</strong></span>
-                        {#if $themePreference === option.id}
-                            <Check class="detail-check" aria-hidden="true" />
-                        {/if}
-                    </span>
-                </button>
-            </li>
+            {@const Icon = themeIcons[option.id]}
+            <button
+                class="mobile-theme-option"
+                type="button"
+                aria-pressed={$themePreference === option.id}
+                onclick={() => setThemePreference(option.id)}
+            >
+                <span class="mobile-theme-icon" aria-hidden="true"><Icon /></span>
+                <span>{$tr(`mobile.theme.${option.id}`)}</span>
+                {#if $themePreference === option.id}<Check
+                        class="mobile-theme-check"
+                        aria-hidden="true"
+                    />{/if}
+            </button>
         {/each}
-    </ul>
+    </div>
 {/if}
+
+<section class="settings-purpose-card settings-form">
+    <ChoiceField id="chat-text-size" label={$tr('settingsLive.textSize')} value={$chatTextSize} options={[{ value: 'normal', label: $tr('settingsLive.textNormal') }, { value: 'large', label: $tr('settingsLive.textLarge') }]} onSelect={(value) => { if (value === 'normal' || value === 'large') setChatTextSize(value); }} />
+    <p class="settings-note">{$tr('settingsLive.textHint')}</p>
+</section>

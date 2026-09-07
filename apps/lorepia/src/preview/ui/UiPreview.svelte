@@ -22,6 +22,9 @@
     import { blendLayout, layoutWeights } from './layout-motion';
     import { setNavigationTiming } from './navigation-motion';
     import { SampleChatSession } from './sample-chat.svelte';
+    import { requestBack } from './edge-back';
+    import { pressFeedback } from './press-feedback';
+    import UiTooltip from './UiTooltip.svelte';
 
     let characters = $state(createSampleCharacters());
     const editor = provideTextEditor();
@@ -32,6 +35,7 @@
     let appearance = $state<Appearance>('system');
     let textScale = $state(1);
     let viewport: HTMLDivElement;
+    let surface = $state<HTMLElement>();
     let track: HTMLDivElement;
     let viewportSize = $state<ViewportSize>({ width: 393, height: 748 });
     let activePage = $state<Page>(0);
@@ -143,6 +147,9 @@
         conversationId = id;
         remembered[characterId] = id;
         navigate(1);
+        void tick().then(() =>
+            viewport.querySelector<HTMLElement>('.ui-messages')?.focus({ preventScroll: true }),
+        );
     }
 
     function openOverlay(kind: Overlay, trigger: HTMLButtonElement) {
@@ -218,9 +225,11 @@
     onkeydown={(event: KeyboardEvent) => {
         if (event.key === 'Tab') keyboardFocus = true;
         if (event.key === 'Escape') {
-            if (editor.present) editor.close();
-            else if (overlay) closeOverlay();
-            else navigate(page === 2 ? 1 : 0);
+            const modal = viewport.querySelector<HTMLElement>(
+                editor.present ? '.ui-text-editor' : '.ui-overlay',
+            );
+            if (modal) requestBack(modal);
+            else if (!editor.present) navigate(page === 2 ? 1 : 0);
         }
     }}
 />
@@ -228,6 +237,8 @@
 <div class="ui-viewport" data-appearance={appearance} bind:this={viewport}>
     <main
         class="ui-preview"
+        bind:this={surface}
+        use:pressFeedback
         data-layout={layout.mode}
         data-reflowing={reflowing}
         data-resizing={resizing}
@@ -271,7 +282,11 @@
                 inert={!layout.visible.includes(0)}
                 aria-hidden={!layout.visible.includes(0)}
             >
-                <div class="ui-management-content" inert={overlay !== null}>
+                <div
+                    class="ui-management-content"
+                    inert={overlay !== null}
+                    aria-hidden={overlay !== null}
+                >
                     <CharacterPage
                         {characters}
                         {character}
@@ -308,8 +323,8 @@
                     activePage = 1;
                 }}
                 aria-label={$tr('uiPreview.chat')}
-                inert={!layout.visible.includes(1)}
-                aria-hidden={!layout.visible.includes(1)}
+                inert={overlay !== null || !layout.visible.includes(1)}
+                aria-hidden={overlay !== null || !layout.visible.includes(1)}
             >
                 <ChatPage
                     {character}
@@ -337,8 +352,8 @@
                         activePage = 2;
                     }}
                     aria-label={$tr('uiPreview.subpage')}
-                    inert={!layout.visible.includes(2)}
-                    aria-hidden={!layout.visible.includes(2)}
+                    inert={overlay !== null || !layout.visible.includes(2)}
+                    aria-hidden={overlay !== null || !layout.visible.includes(2)}
                 >
                     <CreatorPage showBack={layout.mode !== 'wide'} onback={() => navigate(1)} />
                 </section>
@@ -347,9 +362,10 @@
         {#if editor.request}
             <TextEditor
                 request={editor.request}
-                onclose={() => editor.close()}
+                onclose={(afterClose?: () => void) => editor.close(afterClose)}
                 onclosed={() => editor.finish()}
             />
         {/if}
+        {#if surface}<UiTooltip root={surface} />{/if}
     </main>
 </div>

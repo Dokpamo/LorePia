@@ -1,9 +1,14 @@
 <script lang="ts">
     import { pageSlide } from './navigation-motion';
-    import { ArrowLeft, ChevronDown } from '@lucide/svelte';
-    import { onMount, untrack } from 'svelte';
-    import { tr, type MessageKey } from '../../lib/i18n';
+    import { ArrowLeft } from '@lucide/svelte';
+    import { onMount, tick, untrack } from 'svelte';
+    import { t, tr, type MessageKey } from '../../lib/i18n';
     import EditField from './EditField.svelte';
+    import DiscardChanges from './DiscardChanges.svelte';
+    import ChoiceField from './ChoiceField.svelte';
+    import ChoiceSheet from './ChoiceSheet.svelte';
+    import type { ChoiceRequest } from './settings-choice';
+    import { trapFocus } from './focus-trap';
     import { edgeBack, requestBack } from './edge-back';
     import type {
         Appearance,
@@ -47,12 +52,56 @@
         untrack(() => (kind === 'add-character' ? '' : character.description)),
     );
     let title = $state(untrack(() => (kind === 'new-chat' ? '' : conversation.title)));
+    const nameRequired = $derived(
+        kind === 'card-settings' ? t('uiPreview.cardNameRequired') : undefined,
+    );
+    const titleRequired = $derived(
+        kind === 'room-settings' ? t('uiPreview.chatNameRequired') : undefined,
+    );
+    const nameError = $derived(nameRequired && !name.trim() ? nameRequired : undefined);
+    const titleError = $derived(titleRequired && !title.trim() ? titleRequired : undefined);
     let subpage = $state(untrack(() => character.subpage));
     let mode = $state(untrack(() => conversation.mode ?? 'chat'));
     let responsePreview = $state(untrack(() => conversation.responsePreview ?? 'complete'));
+    const original = untrack(() =>
+        JSON.stringify({ name, description, title, subpage, mode, responsePreview }),
+    );
+    const dirty = $derived(
+        JSON.stringify({ name, description, title, subpage, mode, responsePreview }) !== original,
+    );
+    let confirming = $state(false);
+    let choice = $state<ChoiceRequest | null>(null);
+    let choiceOpener: HTMLButtonElement;
     let backButton: HTMLButtonElement;
     let panel: HTMLDivElement;
     onMount(() => backButton.focus({ preventScroll: true }));
+    function beforeBack() {
+        if (confirming) return false;
+        if (!dirty) return true;
+        confirming = true;
+        return false;
+    }
+    function keepEditing() {
+        confirming = false;
+        void tick().then(() => backButton.focus({ preventScroll: true }));
+    }
+    function openChoice(request: ChoiceRequest, opener: HTMLButtonElement) {
+        choiceOpener = opener;
+        choice = request;
+    }
+    function closeChoice() {
+        choice = null;
+        void tick().then(() => choiceOpener.focus({ preventScroll: true }));
+    }
+    function save() {
+        if (nameError || titleError) {
+            void tick().then(() =>
+                panel.querySelector<HTMLElement>('.ui-edit-field[data-invalid="true"]')?.focus(),
+            );
+            return;
+        }
+        onsave({ name, description, title, subpage, mode, responsePreview });
+    }
 </script>
 
 <div class="ui-overlay-layer" transition:pageSlide>
@@ -60,7 +109,14 @@
         class="ui-overlay"
         bind:this={panel}
         data-kind={kind}
-        use:edgeBack={{ onback: onclose }}
+        role="dialog"
+        aria-modal="true"
+        aria-label={$tr(titles[kind])}
+        tabindex="-1"
+        inert={confirming || !!choice}
+        aria-hidden={confirming || !!choice}
+        use:edgeBack={{ onback: onclose, beforeback: beforeBack }}
+        onkeydown={trapFocus}
         data-ui-no-swipe
     >
         <header class="ui-page-header ui-navigation-header">
@@ -78,40 +134,56 @@
             {#if kind === 'app-settings'}
                 <section class="ui-settings-group" aria-label={$tr('uiPreview.appearance')}>
                     <h2>{$tr('uiPreview.appearance')}</h2>
-                    <label class="ui-settings-row" for="ui-theme">
-                        <span>{$tr('uiPreview.theme')}</span>
-                        <span class="ui-select-field">
-                            <select
-                                id="ui-theme"
-                                value={appearance}
-                                onchange={(event) => {
-                                    const value = event.currentTarget.value;
-                                    if (value === 'system' || value === 'light' || value === 'dark')
-                                        onappearance(value);
-                                }}
-                            >
-                                <option value="system">{$tr('uiPreview.system')}</option><option
-                                    value="light">{$tr('uiPreview.light')}</option
-                                ><option value="dark">{$tr('uiPreview.dark')}</option>
-                            </select>
-                            <ChevronDown aria-hidden="true" />
-                        </span>
-                    </label>
-                    <label class="ui-settings-row" for="ui-text-size">
-                        <span>{$tr('uiPreview.textSize')}</span>
-                        <span class="ui-select-field">
-                            <select
-                                id="ui-text-size"
-                                value={textScale}
-                                onchange={(event) => ontextscale(Number(event.currentTarget.value))}
-                            >
-                                <option value={1}>{$tr('uiPreview.textDefault')}</option><option
-                                    value={1.1}>{$tr('uiPreview.textLarge')}</option
-                                >
-                            </select>
-                            <ChevronDown aria-hidden="true" />
-                        </span>
-                    </label>
+                    <ChoiceField
+                        label={$tr('uiPreview.theme')}
+                        value={$tr(
+                            appearance === 'system'
+                                ? 'uiPreview.system'
+                                : appearance === 'light'
+                                  ? 'uiPreview.light'
+                                  : 'uiPreview.dark',
+                        )}
+                        onopen={(opener: HTMLButtonElement) =>
+                            openChoice(
+                                {
+                                    label: t('uiPreview.theme'),
+                                    value: appearance,
+                                    options: [
+                                        { value: 'system', label: t('uiPreview.system') },
+                                        { value: 'light', label: t('uiPreview.light') },
+                                        { value: 'dark', label: t('uiPreview.dark') },
+                                    ],
+                                    onselect: (value) => {
+                                        if (
+                                            value === 'system' ||
+                                            value === 'light' ||
+                                            value === 'dark'
+                                        )
+                                            onappearance(value);
+                                    },
+                                },
+                                opener,
+                            )}
+                    />
+                    <ChoiceField
+                        label={$tr('uiPreview.textSize')}
+                        value={$tr(
+                            textScale === 1 ? 'uiPreview.textDefault' : 'uiPreview.textLarge',
+                        )}
+                        onopen={(opener: HTMLButtonElement) =>
+                            openChoice(
+                                {
+                                    label: t('uiPreview.textSize'),
+                                    value: String(textScale),
+                                    options: [
+                                        { value: '1', label: t('uiPreview.textDefault') },
+                                        { value: '1.1', label: t('uiPreview.textLarge') },
+                                    ],
+                                    onselect: (value) => ontextscale(Number(value)),
+                                },
+                                opener,
+                            )}
+                    />
                 </section>
                 <section class="ui-settings-group" aria-label={$tr('uiPreview.connections')}>
                     <h2>{$tr('uiPreview.connections')}</h2>
@@ -141,7 +213,7 @@
                     class="ui-edit-form"
                     onsubmit={(event) => {
                         event.preventDefault();
-                        onsave({ name, description, title, subpage, mode, responsePreview });
+                        save();
                     }}
                 >
                     {#if kind === 'new-chat' || kind === 'room-settings'}
@@ -175,25 +247,62 @@
                         </fieldset>
                         <EditField
                             label={$tr('uiPreview.chatName')}
+                            hint={$tr('uiPreview.settingsEditorHint')}
+                            requiredMessage={titleRequired}
+                            error={titleError}
                             value={title}
                             onchange={(value: string) => (title = value.replaceAll('\n', ' '))}
                             placeholder={$tr('uiPreview.newChat')}
                             maxlength={60}
                         />
                         {#if kind === 'room-settings'}
-                            <label class="ui-settings-row" for="ui-response-preview">
-                                <span>{$tr('uiPreview.responsePreview')}</span>
-                                <select id="ui-response-preview" bind:value={responsePreview}>
-                                    <option value="complete"
-                                        >{$tr('uiPreview.previewComplete')}</option
-                                    >
-                                    <option value="failed">{$tr('uiPreview.previewFailed')}</option>
-                                </select>
-                            </label>
+                            <ChoiceField
+                                label={$tr('uiPreview.responsePreview')}
+                                value={$tr(
+                                    responsePreview === 'complete'
+                                        ? 'uiPreview.previewComplete'
+                                        : responsePreview === 'failed'
+                                          ? 'uiPreview.previewFailed'
+                                          : 'uiPreview.previewSlow',
+                                )}
+                                onopen={(opener: HTMLButtonElement) =>
+                                    openChoice(
+                                        {
+                                            label: t('uiPreview.responsePreview'),
+                                            value: responsePreview,
+                                            options: [
+                                                {
+                                                    value: 'complete',
+                                                    label: t('uiPreview.previewComplete'),
+                                                },
+                                                {
+                                                    value: 'failed',
+                                                    label: t('uiPreview.previewFailed'),
+                                                },
+                                                {
+                                                    value: 'slow',
+                                                    label: t('uiPreview.previewSlow'),
+                                                },
+                                            ],
+                                            onselect: (value) => {
+                                                if (
+                                                    value === 'complete' ||
+                                                    value === 'failed' ||
+                                                    value === 'slow'
+                                                )
+                                                    responsePreview = value;
+                                            },
+                                        },
+                                        opener,
+                                    )}
+                            />
                         {/if}
                     {:else}
                         <EditField
                             label={$tr('uiPreview.cardName')}
+                            hint={$tr('uiPreview.settingsEditorHint')}
+                            requiredMessage={nameRequired}
+                            error={nameError}
                             value={name}
                             onchange={(value: string) => (name = value.replaceAll('\n', ' '))}
                             placeholder={$tr('uiPreview.newCard')}
@@ -201,6 +310,7 @@
                         />
                         <EditField
                             label={$tr('uiPreview.cardDescription')}
+                            hint={$tr('uiPreview.settingsEditorHint')}
                             value={description}
                             onchange={(value: string) => (description = value)}
                             maxlength={300}
@@ -212,12 +322,7 @@
                             /></label
                         >
                     {/if}
-                    <button
-                        type="button"
-                        class="ui-submit ui-pressable"
-                        onclick={() =>
-                            onsave({ name, description, title, subpage, mode, responsePreview })}
-                    >
+                    <button type="button" class="ui-submit ui-pressable" onclick={save}>
                         <span class="ui-press-visual"
                             >{$tr(
                                 kind === 'new-chat'
@@ -232,4 +337,6 @@
             {/if}
         </div>
     </div>
+    {#if confirming}<DiscardChanges onkeep={keepEditing} ondiscard={onclose} />{/if}
+    {#if choice}<ChoiceSheet request={choice} onclose={closeChoice} />{/if}
 </div>
