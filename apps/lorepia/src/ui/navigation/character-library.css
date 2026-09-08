@@ -1,0 +1,92 @@
+/* Home and Chats share SEED spacing and the user's compact 44px search. */
+.seed-library-frame,
+.seed-library-base {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    height: 100%;
+}
+.seed-library-frame {
+    position: relative;
+    /* A focused input in the entering page must not scroll WebKit horizontally. */
+    overflow: clip;
+}
+.seed-app .seed-library-frame.ui-management {
+    flex: 1 1 0%;
+}
+.seed-app .seed-search-header {
+    width: 100%;
+    max-width: 1040px;
+    margin-inline: auto;
+    padding: 4px var(--seed-root-gutter) 4px
+        calc(var(--seed-nav-edge) - var(--seed-nav-control) / 2);
+    gap: 8px;
+}
+.seed-search-header > .seed-search {
+    min-width: 0;
+    flex: 1;
+}
+.seed-content.seed-search-results {
+    width: 100%;
+    padding-top: 12px;
+}
+.seed-content.seed-library {
+    padding-top: 12px;
+}
+.seed-search {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 0 12px;
+    margin: 0;
+    gap: 8px;
+    background: var(--ui-soft);
+    border-radius: 12px;
+}
+.seed-search:has(.seed-search-clear) {
+    padding-inline-end: 4px;
+}
+.seed-library-search > svg {
+    flex: 0 0 20px;
+    width: 20px;
+    height: 20px;
+    color: var(--ui-muted);
+}
+.seed-library-search input {
+    min-width: 0;
+    flex: 1;
+    height: 44px;
+    padding: 8px 0;
+    border: 0;
+    background: transparent;
+    font: inherit;
+    font-size: var(--ui-body);
+    outline: 0;
+    color: var(--ui-ink);
+}
+.seed-search:focus-within {
+    outline: 2px solid var(--ui-muted);
+    outline-offset: 2px;
+}
+.seed-library-search input::-webkit-search-cancel-button {
+    -webkit-appearance: none;
+}
+.seed-search-clear {
+    width: 44px;
+    height: 44px;
+    flex: 0 0 44px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--ui-muted);
+    border-radius: 12px;
+}
+.seed-search-clear .ui-press-visual {
+    display: grid;
+    place-items: center;
+    height: 44px;
+}
+.seed-library-search .seed-search-clear svg {
+    width: 18px;
+    height: 18px;
+}

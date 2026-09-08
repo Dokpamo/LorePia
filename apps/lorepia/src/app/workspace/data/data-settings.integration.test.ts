@@ -20,7 +20,7 @@ it('keeps a prompt draft editable after Rust rejects the save and does not repor
         .mockRejectedValue(new Error('save rejected'));
     render(WorkspaceApp, { client });
     await screen.findByText(t('workspace.emptyLibrary'));
-    await fireEvent.click(screen.getByRole('button', { name: t('uiPreview.appSettings') }));
+    await fireEvent.click(screen.getByRole('button', { name: t('navigation.settings') }));
     await fireEvent.click(screen.getByRole('button', { name: t('settings.section.prompt.title') }));
     await fireEvent.click(await screen.findByRole('button', { name: t('settingsUi.addPrompt') }));
     await fireEvent.click(screen.getByRole('button', { name: t('settingsUi.promptName') }));

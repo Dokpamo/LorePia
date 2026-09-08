@@ -1,5 +1,16 @@
 <script lang="ts">
     import { onMount, untrack } from 'svelte';
+    import {
+        Monitor,
+        Type,
+        Languages,
+        Bot,
+        Database,
+        UserRound,
+        NotebookPen,
+        Brain,
+        Puzzle,
+    } from '@lucide/svelte';
     import type { LorepiaAppController, LorepiaAppState } from '../app-controller';
     import type { LorepiaClient } from '../../lib/ipc/contracts';
     import type { PersonaClientApi } from '../../features/personas/persona-contracts';
@@ -23,17 +34,34 @@
         controller,
         mode,
         onclose,
+        root = false,
+        initialSection,
+        ondetail,
     }: {
         client: LorepiaClient;
         appState: LorepiaAppState;
         controller: LorepiaAppController;
         mode: 'app-settings' | 'providers' | 'studio';
         onclose: () => void;
+        root?: boolean;
+        initialSection?: Section;
+        ondetail?: (active: boolean) => void;
     } = $props();
     let section = $state<Section | null>(
-        untrack(() => (mode === 'providers' ? 'ai' : mode === 'studio' ? 'prompt' : null)),
+        untrack(
+            () =>
+                initialSection ??
+                (mode === 'providers' ? 'ai' : mode === 'studio' ? 'prompt' : null),
+        ),
     );
     const choices = useChoiceSheet();
+    const chatSections = [
+        { value: 'persona', icon: UserRound },
+        { value: 'prompt', icon: NotebookPen },
+        { value: 'memory', icon: Brain },
+        { value: 'plugins', icon: Puzzle },
+    ] as const;
+    $effect(() => ondetail?.(section !== null));
     const personas = untrack(
         () => new PersonaController(client as LorepiaClient & Partial<PersonaClientApi>),
     );
@@ -82,7 +110,12 @@
 </script>
 
 {#if mode === 'app-settings'}
-    <SettingsPanel title={$tr('uiPreview.appSettings')} {onclose} covered={section !== null}>
+    <SettingsPanel
+        title={$tr(root ? 'navigation.settings' : 'uiPreview.appSettings')}
+        {onclose}
+        {root}
+        covered={section !== null}
+    >
         <section class="ui-settings-group" aria-label={$tr('uiPreview.appearance')}>
             <h2>{$tr('uiPreview.appearance')}</h2>
             <ChoiceField
@@ -111,7 +144,9 @@
                         },
                         opener,
                     )}
-            />
+            >
+                {#snippet prefix()}<Monitor />{/snippet}
+            </ChoiceField>
             <ChoiceField
                 label={$tr('uiPreview.textSize')}
                 value={$tr(
@@ -132,7 +167,9 @@
                         },
                         opener,
                     )}
-            />
+            >
+                {#snippet prefix()}<Type />{/snippet}
+            </ChoiceField>
             <ChoiceField
                 label={$tr('settingsUi.screenLanguage')}
                 value={$tr($locale === 'ko' ? 'settingsUi.korean' : 'settingsUi.english')}
@@ -151,22 +188,28 @@
                         },
                         opener,
                     )}
-            />
+            >
+                {#snippet prefix()}<Languages />{/snippet}
+            </ChoiceField>
         </section>
         <section class="ui-settings-group" aria-label={$tr('uiPreview.connections')}>
             <h2>{$tr('uiPreview.connections')}</h2>
-            <SettingsRow label={$tr('uiPreview.aiConnection')} onclick={() => (section = 'ai')} />
-            <SettingsRow label={$tr('uiPreview.data')} onclick={() => (section = 'storage')} />
+            <SettingsRow label={$tr('uiPreview.aiConnection')} onclick={() => (section = 'ai')}>
+                {#snippet prefix()}<Bot />{/snippet}
+            </SettingsRow>
+            <SettingsRow label={$tr('uiPreview.data')} onclick={() => (section = 'storage')}>
+                {#snippet prefix()}<Database />{/snippet}
+            </SettingsRow>
         </section>
         <section class="ui-settings-group" aria-label={$tr('uiPreview.chat')}>
             <h2>{$tr('uiPreview.chat')}</h2>
-            {#each ['persona', 'prompt', 'memory', 'plugins'] as value (value)}
+            {#each chatSections as item (item.value)}
                 <SettingsRow
-                    label={$tr(
-                        `settings.section.${value as 'persona' | 'prompt' | 'memory' | 'plugins'}.title`,
-                    )}
-                    onclick={() => (section = value as Section)}
-                />
+                    label={$tr(`settings.section.${item.value}.title`)}
+                    onclick={() => (section = item.value)}
+                >
+                    {#snippet prefix()}<item.icon />{/snippet}
+                </SettingsRow>
             {/each}
         </section>
     </SettingsPanel>

@@ -13,6 +13,7 @@
         beforeback,
         disabled = false,
         covered = false,
+        root = false,
         children,
     }: {
         title: string;
@@ -21,55 +22,66 @@
         beforeback?: () => boolean;
         disabled?: boolean;
         covered?: boolean;
+        root?: boolean;
         children: Snippet;
     } = $props();
     let panel: HTMLDivElement;
-    let backButton: HTMLButtonElement;
+    let backButton = $state<HTMLButtonElement>();
     onMount(() => {
-        if (!covered) backButton.focus({ preventScroll: true });
+        if (!covered && !root) backButton?.focus({ preventScroll: true });
     });
     let wasCovered = untrack(() => covered);
     function focusIfActive() {
-        if (!covered && panel.isConnected) backButton.focus({ preventScroll: true });
+        if (!covered && !root && panel.isConnected) backButton?.focus({ preventScroll: true });
     }
     $effect(() => {
         if (wasCovered && !covered) void tick().then(focusIfActive);
         wasCovered = covered;
     });
     export function focusBack() {
-        backButton.focus({ preventScroll: true });
+        backButton?.focus({ preventScroll: true });
+    }
+    function panelMotion(node: HTMLElement) {
+        return root ? { duration: 0 } : pageSlide(node);
     }
 </script>
 
-<div class="ui-overlay-layer" data-navigation-covered={covered} transition:pageSlide>
+<div
+    class="ui-overlay-layer"
+    data-root-panel={root}
+    data-navigation-covered={covered}
+    transition:panelMotion
+>
     <div
         class="ui-overlay"
         bind:this={panel}
         data-kind={kind}
-        role="dialog"
-        aria-modal="true"
+        role={root ? 'region' : 'dialog'}
+        aria-modal={root ? undefined : true}
         aria-label={title}
         aria-busy={disabled}
         inert={covered}
         aria-hidden={covered}
         tabindex="-1"
-        use:edgeBack={{ onback: onclose, beforeback, enabled: !disabled && !covered }}
-        onkeydown={trapFocus}
+        use:edgeBack={{ onback: onclose, beforeback, enabled: !root && !disabled && !covered }}
+        onkeydown={root ? undefined : trapFocus}
         data-ui-no-swipe
     >
-        <header class="ui-page-header ui-navigation-header">
-            <button
-                bind:this={backButton}
-                type="button"
-                class="ui-icon-button ui-pressable"
-                aria-label={$tr('uiPreview.back')}
-                {disabled}
-                onclick={() => requestBack(panel)}
-                ><span class="ui-press-visual"><ArrowLeft aria-hidden="true" /></span></button
-            >
+        <header class="ui-page-header ui-navigation-header" class:seed-header-root={root}>
+            {#if root}<h1 class="seed-root-title">{title}</h1>{:else}
+                <button
+                    bind:this={backButton}
+                    type="button"
+                    class="ui-icon-button ui-pressable"
+                    aria-label={$tr('uiPreview.back')}
+                    {disabled}
+                    onclick={() => requestBack(panel)}
+                    ><span class="ui-press-visual"><ArrowLeft aria-hidden="true" /></span></button
+                >
+            {/if}
         </header>
         <div class="ui-overlay-body">
-            <h1 class="ui-detail-title">{title}</h1>
+            {#if !root}<h1 class="ui-detail-title">{title}</h1>{/if}
             {@render children()}
         </div>
     </div>

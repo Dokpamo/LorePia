@@ -8,8 +8,10 @@ import { koAppSettings } from './ko-app-settings';
 import { koSettingsLive } from './ko-settings-live';
 
 import { koPagination } from './ko-pagination';
+import { koNavigation } from './ko-navigation';
 
 export const ko = {
+    ...koNavigation,
     ...koPagination,
     ...koAppSettings,
     ...koMobileStyle,

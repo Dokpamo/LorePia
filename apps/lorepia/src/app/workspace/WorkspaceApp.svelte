@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount, tick, untrack } from 'svelte';
     import { get } from 'svelte/store';
-    import { ArrowLeft, Image as ImageIcon, Plus } from '@lucide/svelte';
+    import { ArrowLeft } from '@lucide/svelte';
     import {
         LorepiaAppController,
         INITIAL_APP_STATE,
@@ -15,9 +15,14 @@
     import { PortableRuntimeLifecycle } from '../../features/chat/portable-runtime-lifecycle.svelte';
     import PortableMessage from '../../features/chat/PortableMessage.svelte';
     import ImportReviewDialog from './WorkspaceImportReview.svelte';
-    import WorkspaceFrame from '../../ui/workspace/WorkspaceFrame.svelte';
-    import CharacterPage from '../../ui/workspace/CharacterPage.svelte';
-    import CharacterRail from '../../ui/workspace/CharacterRail.svelte';
+    import ApplicationFrame from '../../ui/navigation/ApplicationFrame.svelte';
+    import CharacterLibrary from '../../ui/navigation/CharacterLibrary.svelte';
+    import CharacterOverview from '../../ui/navigation/CharacterOverview.svelte';
+    import ConversationLibrary from '../../ui/navigation/ConversationLibrary.svelte';
+    import CreationHub from '../../ui/navigation/CreationHub.svelte';
+    import type { RootTab } from '../../ui/navigation/navigation-types';
+    import { WorkspaceNavigationController } from './workspace-navigation-controller';
+    import { formatMessageDay } from '../../features/chat/chat-scroll.svelte';
     import ChatPage from '../../ui/workspace/ChatPage.svelte';
     import IconButton from '../../ui/workspace/IconButton.svelte';
     import WorkspaceSettings from './WorkspaceSettings.svelte';
@@ -39,6 +44,23 @@
         onRemoved: () => runtime.resetScope(),
     });
     let page = $state<Page>(0);
+    let rootTab = $state<RootTab>('home');
+    let overview = $state(false);
+    let rootDetails = $state({ home: false, chats: false, create: false, settings: false });
+    let featureSection = $state<'plugins' | undefined>();
+    const navigation = new WorkspaceNavigationController(appClient, controller, () => appState);
+    const catalog = navigation.state;
+    const allConversations = $derived(
+        $catalog.items.map((item) => ({
+            id: item.id,
+            characterId: item.character_id,
+            characterName:
+                characters.find((character) => character.id === item.character_id)?.name ?? '',
+            title: item.title,
+            date: formatMessageDay(item.updated_at),
+            updatedAt: item.updated_at,
+        })),
+    );
     let overlay = $state<Overlay | 'providers' | 'studio' | null>(null);
     let featureOverlay = $state<'providers' | 'studio' | null>(null);
     let returnPage: Page = 0;
@@ -81,6 +103,7 @@
         return () => {
             mounted = false;
             unsubscribe();
+            navigation.destroy();
             controller.destroy();
         };
     });
@@ -119,20 +142,32 @@
     $effect(() => {
         if (!subpage && page === 2) page = 1;
     });
-    function selectCharacter(id: string) {
-        const item = appState.library.characters.find((value) => value.id === id);
-        if (item) {
+    async function selectCharacter(id: string) {
+        if (await navigation.selectCharacter(id)) {
+            overview = true;
             notice = '';
-            void controller.selectCharacter(item, true);
         }
     }
-    function selectConversation(id: string, navigate: (page: Page) => void) {
-        const item = appState.conversations.items.find((value) => value.id === id);
-        if (!item) return;
+    async function selectConversation(id: string) {
         notice = '';
-        void controller.selectConversation(item);
-        navigate(1);
+        if (await navigation.selectConversation(id)) {
+            overview = false;
+            page = 1;
+        }
     }
+    async function newConversation(id: string, trigger: HTMLButtonElement) {
+        if (await navigation.selectCharacter(id)) open('new-chat', trigger);
+    }
+    $effect(() => {
+        void rootTab;
+        untrack(() => navigation.cancelNavigation());
+    });
+    $effect(() => {
+        if (appState.bootstrap.phase === 'ready') {
+            void appState.conversations.items;
+            untrack(() => void navigation.load());
+        }
+    });
     function open(kind: Overlay, trigger: HTMLButtonElement) {
         if (kind === 'add-character') {
             void controller.beginImport();
@@ -140,12 +175,12 @@
         }
         opener = trigger;
         returnPage = trigger.closest('.ui-chat') ? 1 : page;
-        page = 0;
         featureOverlay = null;
         overlay = kind;
     }
     function close() {
         featureOverlay = null;
+        featureSection = undefined;
         overlay = null;
         page = returnPage;
         void tick().then(() => opener?.isConnected && opener.focus({ preventScroll: true }));
@@ -164,77 +199,90 @@
     }
 </script>
 
-<WorkspaceFrame
+<ApplicationFrame
+    bind:rootTab
+    nested={rootDetails[rootTab]}
     bind:page
-    overlay={overlay !== null || appState.import_flow.phase !== 'idle'}
-    {subpage}
+    overlay={overview || overlay !== null || appState.import_flow.phase !== 'idle'}
     appearance={$themePreference}
     textScale={$chatTextSize === 'large' ? 1.1 : 1}
     conversationMode={conversation?.mode ?? 'chat'}
-    onback={close}
 >
-    {#snippet management(navigate: (page: Page) => void)}
-        {#if character}
-            <CharacterPage
-                {characters}
-                {character}
-                client={appClient}
-                conversationId={conversation?.id ?? ''}
-                oncharacter={selectCharacter}
-                onconversation={(id: string) => selectConversation(id, navigate)}
-                onaction={open}
-            />
-            {#if appState.conversations.phase === 'loading'}<p class="ui-live-status" role="status">
-                    {$tr('workspace.loading')}
-                </p>{/if}
-        {:else}
-            <div class="ui-left-layout">
-                <CharacterRail
-                    {characters}
-                    client={appClient}
-                    selected=""
-                    oncharacter={selectCharacter}
-                    onaction={open}
-                    onbusy={() => undefined}
-                />
-                <div class="ui-left-content">
-                    <div
-                        class="ui-character-banner"
-                        role="img"
-                        aria-label={$tr('uiPreview.cardImage')}
-                    >
-                        <ImageIcon aria-hidden="true" />
-                    </div>
-                    <div class="ui-overlay-body">
-                        <p>
-                            {appState.bootstrap.phase === 'loading' ||
-                            appState.library.phase === 'loading'
-                                ? $tr('workspace.loading')
-                                : $tr('workspace.emptyLibrary')}
-                        </p>
-                        <button
-                            class="ui-submit ui-pressable"
-                            disabled={appState.bootstrap.phase !== 'ready'}
-                            onclick={() => void controller.beginImport()}
-                            ><span class="ui-press-visual"
-                                ><Plus />{$tr('workspace.importCard')}</span
-                            ></button
-                        >
-                    </div>
-                </div>
-            </div>
-        {/if}
-        {#if error && page === 0 && !overlay}<div class="ui-live-error" role="alert">
+    {#snippet home()}
+        <CharacterLibrary
+            {characters}
+            client={appClient}
+            ondetail={(active: boolean) => (rootDetails.home = active)}
+            ready={appState.bootstrap.phase === 'ready'}
+            onselect={(id: string) => void selectCharacter(id)}
+            onadd={() => void controller.beginImport()}
+        />
+        {#if error && !overlay}<div class="ui-live-error" role="alert">
                 <p>{workspaceFeedback(error)}</p>
                 <button class="ui-result-action" onclick={() => void start()}
                     >{$tr('workspace.retry')}</button
                 >
             </div>{/if}
     {/snippet}
+    {#snippet chats()}
+        <ConversationLibrary
+            conversations={allConversations}
+            {characters}
+            ondetail={(active: boolean) => (rootDetails.chats = active)}
+            loading={$catalog.loading}
+            error={$catalog.error}
+            onopen={(id: string) => void selectConversation(id)}
+            onnew={(id: string, trigger: HTMLButtonElement) => void newConversation(id, trigger)}
+            onsettings={async (id: string, trigger: HTMLButtonElement) => {
+                if (await navigation.selectConversation(id)) open('room-settings', trigger);
+            }}
+            onretry={() => void navigation.load()}
+        />
+    {/snippet}
+    {#snippet create()}
+        <CreationHub
+            client={appClient}
+            ready={appState.bootstrap.phase === 'ready'}
+            onimport={() => void controller.beginImport()}
+            onprompt={() => (overlay = 'studio')}
+            ondetail={(active: boolean) => (rootDetails.create = active)}
+        />
+    {/snippet}
+    {#snippet settings()}
+        <WorkspaceFeatures
+            root
+            mode="app-settings"
+            client={appClient}
+            {appState}
+            {controller}
+            onclose={() => undefined}
+            ondetail={(active: boolean) => (rootDetails.settings = active)}
+        />
+    {/snippet}
     {#snippet detail()}
+        {#if overview && character}<CharacterOverview
+                {character}
+                client={appClient}
+                covered={overlay !== null}
+                onclose={() => (overview = false)}
+                onaction={open}
+                onchat={() => {
+                    overview = false;
+                    rootTab = 'chats';
+                }}
+                onmaterials={() => {
+                    overview = false;
+                    rootTab = 'create';
+                }}
+                onplugins={() => {
+                    featureSection = 'plugins';
+                    overlay = 'app-settings';
+                }}
+            />{/if}
         {#if overlay === 'app-settings' || overlay === 'providers' || overlay === 'studio'}
             <WorkspaceFeatures
                 mode={overlay}
+                initialSection={featureSection}
                 client={appClient}
                 {appState}
                 {controller}
@@ -250,7 +298,9 @@
                 onclose={close}
                 oncreated={() => {
                     overlay = null;
+                    overview = false;
                     page = 1;
+                    void navigation.load();
                 }}
                 onproviders={() => (featureOverlay = 'providers')}
                 onadvanced={() => (featureOverlay = 'studio')}
@@ -358,7 +408,7 @@
             client={appClient}
             onback={() => navigate(1)}
         />{/snippet}
-</WorkspaceFrame>
+</ApplicationFrame>
 <div class="sr-only" role="status" aria-live="polite">{appState.announcement}</div>
 {#if appState.import_flow.phase !== 'idle'}<ImportReviewDialog
         state={appState}
@@ -366,6 +416,8 @@
         onCommitted={(result: ImportCommitResultDto) => {
             if (result.kind === 'character') {
                 page = 0;
+                rootTab = 'home';
+                overview = false;
                 featureOverlay = null;
                 overlay = null;
                 void controller.selectCharacter(result.character, true);

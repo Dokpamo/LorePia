@@ -9,3 +9,4 @@ import './ui-cards.css';
 import './ui-chat.css';
 import './ui-feedback.css';
 import './ui-choices.css';
+import './ui-icons.css';

@@ -25,7 +25,8 @@ body {
     --ui-critical: light-dark(#b42318, #ffb4ab);
     --ui-pressed-surface: light-dark(#e5e8eb, #313136);
     --ui-heading: light-dark(#191f28, #f4f4f5);
-    --ui-icon-ink: light-dark(#6b7684, #b0b0b6);
+    --ui-icon-ink: light-dark(#000000, #ffffff);
+    --ui-icon-stroke: 2.25px;
     /* Reserve brand color for primary actions; selection stays neutral. */
     --ui-action: #cddea4;
     --ui-action-pressed: #b2c686;

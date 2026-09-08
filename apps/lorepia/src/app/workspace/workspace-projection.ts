@@ -65,6 +65,7 @@ export function characterViews(state: LorepiaAppState, subpage = false): SampleC
         description: item.description,
         thumbnail: item.name.slice(0, 1),
         avatarAssetId: item.avatar_asset_id,
+        createdAt: item.created_at,
         subpage: item.id === state.selected_character?.id && subpage,
         histories:
             item.id === state.selected_character?.id

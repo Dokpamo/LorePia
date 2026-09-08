@@ -28,6 +28,7 @@ describe('workspace settings navigation', () => {
             const [conversation] = await client.listConversations(character.id);
             if (!conversation) throw new Error('Conversation fixture missing');
             render(WorkspaceApp, { client });
+            await fireEvent.click(screen.getByRole('button', { name: t('navigation.chats') }));
             await fireEvent.click(
                 await screen.findByRole('button', {
                     name: new RegExp('^' + conversation.title + ' ·'),
@@ -71,8 +72,8 @@ describe('workspace settings navigation', () => {
         vi.spyOn(client, 'listCharacters').mockResolvedValue([]);
         render(WorkspaceApp, { client });
         await screen.findByText(t('workspace.emptyLibrary'));
-        await fireEvent.click(screen.getByRole('button', { name: t('uiPreview.appSettings') }));
-        const settings = await screen.findByRole('dialog', { name: t('uiPreview.appSettings') });
+        await fireEvent.click(screen.getByRole('button', { name: t('navigation.settings') }));
+        const settings = await screen.findByRole('region', { name: t('navigation.settings') });
         await fireEvent.click(
             within(settings).getByRole('button', { name: t('uiPreview.aiConnection') }),
         );
@@ -95,7 +96,7 @@ describe('workspace settings navigation', () => {
         expect(ai).toHaveProperty('inert', false);
         expect(settings).toHaveProperty('inert', true);
         await fireEvent.click(within(ai).getByRole('button', { name: t('uiPreview.back') }));
-        await waitFor(() => expect(screen.getAllByRole('dialog')).toEqual([settings]));
+        await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
         expect(settings).toHaveProperty('inert', false);
     });
 
@@ -124,15 +125,17 @@ describe('workspace settings navigation', () => {
             client.resolveAssetDelivery = resolveAsset;
             const view = render(WorkspaceApp, { client });
             await waitFor(() =>
-                expect(view.container.querySelector('.ui-character-banner img')).not.toBeNull(),
+                expect(
+                    view.container.querySelector('.seed-character-thumbnail img'),
+                ).not.toBeNull(),
             );
-            const image = view.container.querySelector('.ui-character-banner img');
+            const image = view.container.querySelector('.seed-character-thumbnail img');
             if (!(image instanceof HTMLImageElement)) throw new Error('History image missing');
             await fireEvent.load(image);
             const originalUrl = image.src;
             const originalCalls = resolveAsset.mock.calls.length;
             const assertImageRetained = () => {
-                expect(view.container.querySelector('.ui-character-banner img')).toBe(image);
+                expect(view.container.querySelector('.seed-character-thumbnail img')).toBe(image);
                 expect(image).toHaveAttribute('src', originalUrl);
                 expect(image.closest('.trusted-asset')).toHaveAttribute(
                     'data-asset-phase',
@@ -142,11 +145,9 @@ describe('workspace settings navigation', () => {
             };
 
             if (destination === 'chat') {
-                const railImage = view.container.querySelector('.ui-card-rail img');
-                if (!(railImage instanceof HTMLImageElement)) throw new Error('Rail image missing');
-                await fireEvent.load(railImage);
                 const [conversation] = await client.listConversations(character.id);
                 if (!conversation) throw new Error('Conversation fixture missing');
+                await fireEvent.click(screen.getByRole('button', { name: t('navigation.chats') }));
                 for (let attempt = 0; attempt < 3; attempt += 1) {
                     await fireEvent.click(
                         screen.getByRole('button', {
@@ -155,11 +156,6 @@ describe('workspace settings navigation', () => {
                     );
                     await screen.findByRole('textbox', { name: t('uiPreview.message') });
                     assertImageRetained();
-                    expect(view.container.querySelector('.ui-card-rail img')).toBe(railImage);
-                    expect(railImage.closest('.trusted-asset')).toHaveAttribute(
-                        'data-asset-phase',
-                        'ready',
-                    );
                     await fireEvent.keyDown(window, { key: 'Escape' });
                     await screen.findByRole('region', { name: t('uiPreview.history') });
                     assertImageRetained();
@@ -167,9 +163,9 @@ describe('workspace settings navigation', () => {
                 return;
             }
 
-            await fireEvent.click(screen.getByRole('button', { name: t('uiPreview.appSettings') }));
-            const settings = await screen.findByRole('dialog', {
-                name: t('uiPreview.appSettings'),
+            await fireEvent.click(screen.getByRole('button', { name: t('navigation.settings') }));
+            const settings = await screen.findByRole('region', {
+                name: t('navigation.settings'),
             });
             assertImageRetained();
             await fireEvent.click(
@@ -184,14 +180,16 @@ describe('workspace settings navigation', () => {
             await fireEvent.click(
                 within(plugins).getByRole('button', { name: t('uiPreview.back') }),
             );
-            await waitFor(() => expect(screen.getAllByRole('dialog')).toEqual([settings]));
+            await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
             expect(settings).toHaveProperty('inert', false);
             assertImageRetained();
-            await fireEvent.click(
-                within(settings).getByRole('button', { name: t('uiPreview.back') }),
-            );
+            await fireEvent.click(screen.getByRole('button', { name: t('navigation.home') }));
             await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-            expect(screen.getByRole('region', { name: t('uiPreview.history') })).toBeVisible();
+            expect(
+                screen.getByRole('button', {
+                    name: t('uiPreview.cardSelect', { name: character.name }),
+                }),
+            ).toBeVisible();
             assertImageRetained();
         },
     );

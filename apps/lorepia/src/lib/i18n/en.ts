@@ -1,5 +1,8 @@
 /** English UI coverage is intentionally partial; the catalog supplies Korean fallback. */
+import { enNavigation } from './en-navigation';
+
 export const en = {
+    ...enNavigation,
     'settingsLive.personaForRoom': 'Persona for this conversation',
     'settingsLive.builtIn': 'Built-in',
     'settingsLive.builtInHint':

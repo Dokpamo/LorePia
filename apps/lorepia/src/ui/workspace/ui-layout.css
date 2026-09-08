@@ -439,7 +439,6 @@
     width: var(--ui-icon-size);
     height: var(--ui-icon-size);
     flex: 0 0 var(--ui-icon-size);
-    stroke-width: 1.8;
 }
 .ui-preview :is(button, input, textarea, select):focus {
     outline: none;

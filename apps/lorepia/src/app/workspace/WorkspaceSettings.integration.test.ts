@@ -23,7 +23,7 @@ async function openSettings() {
     vi.spyOn(client, 'listCharacters').mockResolvedValue([]);
     render(WorkspaceApp, { client });
     await screen.findByText(t('workspace.emptyLibrary'));
-    await fireEvent.click(screen.getByRole('button', { name: t('uiPreview.appSettings') }));
+    await fireEvent.click(screen.getByRole('button', { name: t('navigation.settings') }));
     return client;
 }
 describe('live workspace settings entry', () => {
@@ -102,6 +102,7 @@ describe('live workspace settings entry', () => {
         if (!conversation || !persona) throw new Error('Conversation fixture missing');
         const select = vi.spyOn(client, 'selectConversationPersona');
         render(WorkspaceApp, { client });
+        await fireEvent.click(screen.getByRole('button', { name: t('navigation.chats') }));
         await fireEvent.click(
             await screen.findByRole('button', {
                 name: new RegExp('^' + conversation.title + ' ·'),
@@ -112,7 +113,7 @@ describe('live workspace settings entry', () => {
         );
         await fireEvent.click(screen.getByRole('button', { name: t('uiPreview.back') }));
         await fireEvent.click(screen.getByRole('button', { name: t('uiPreview.openManagement') }));
-        await fireEvent.click(screen.getByRole('button', { name: t('uiPreview.appSettings') }));
+        await fireEvent.click(screen.getByRole('button', { name: t('navigation.settings') }));
         await fireEvent.click(
             screen.getByRole('button', { name: t('settings.section.persona.title') }),
         );

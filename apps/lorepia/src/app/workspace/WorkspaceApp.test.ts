@@ -34,6 +34,7 @@ describe('connected workspace', () => {
         });
         expect(listCharacters).toHaveBeenCalled();
         await waitFor(() => expect(listConversations).toHaveBeenCalledWith(character.id));
+        await fireEvent.click(screen.getByRole('button', { name: t('navigation.chats') }));
         const row = await screen.findByRole('button', {
             name: new RegExp('^' + required(histories[0]).title + ' ·'),
         });
@@ -97,19 +98,19 @@ describe('connected workspace', () => {
         const conversation = required((await client.listConversations(character.id))[0]);
         const save = vi.spyOn(client, 'setConversationMode');
         const view = render(WorkspaceApp, { client });
+        await fireEvent.click(screen.getByRole('button', { name: t('navigation.chats') }));
         await fireEvent.click(
             await screen.findByRole('button', {
                 name: new RegExp('^' + conversation.title + ' ·'),
             }),
         );
-        const track = view.container.querySelector<HTMLElement>('.ui-track');
         await waitFor(() =>
-            expect(track?.style.getPropertyValue('--ui-page-offset')).toBe('-393px'),
+            expect(view.container.querySelector('.seed-detail-active')).not.toBeNull(),
         );
         await fireEvent.click(
             await screen.findByRole('button', { name: t('uiPreview.roomSettings') }),
         );
-        await waitFor(() => expect(track?.style.getPropertyValue('--ui-page-offset')).toBe('0px'));
+        expect(screen.queryByRole('textbox', { name: t('uiPreview.message') })).toBeNull();
         await fireEvent.click(
             screen.getByRole('radio', { name: new RegExp(t('uiPreview.storyMode')) }),
         );
@@ -129,6 +130,7 @@ describe('connected workspace', () => {
             field_errors: [],
         });
         render(WorkspaceApp, { client });
+        await fireEvent.click(screen.getByRole('button', { name: t('navigation.chats') }));
         await fireEvent.click(
             await screen.findByRole('button', {
                 name: new RegExp('^' + conversation.title + ' ·'),

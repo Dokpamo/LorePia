@@ -34,6 +34,7 @@ export interface SampleCharacter {
     subpage: boolean;
     histories: SampleConversation[];
     avatarAssetId?: string | null;
+    createdAt?: string;
 }
 
 export type Page = 0 | 1 | 2;
