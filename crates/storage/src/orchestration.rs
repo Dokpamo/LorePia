@@ -45,6 +45,10 @@ mod module_activation;
 mod module_bindings;
 mod module_runtime;
 mod package_commit_bridge;
+mod pagination;
+mod revision;
+pub use pagination::{CreatorDocumentKind, ReadPageCursor, StoredReadPage};
+pub use revision::StoredRevision;
 mod prompt_bindings;
 mod prompt_preset_projection;
 mod prompt_preset_rollback;
@@ -140,22 +144,6 @@ pub const MAX_MEMORY_EMBEDDING_DIMENSIONS: usize = 32_768;
 
 const BUILTIN_CHAT_PRESET_ID: &str = "lorepia.builtin.chat-compatible.v1";
 const BUILTIN_STORY_PRESET_ID: &str = "lorepia.builtin.story-compatible.v1";
-
-/// A typed object together with its compare-and-swap storage revision.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct StoredRevision<T> {
-    pub value: T,
-    pub revision: u64,
-    /// Exact immutable content revision when the value is backed by the
-    /// generic content registry. Mutable binding/job records have no immutable
-    /// content revision and return `None`.
-    #[serde(default)]
-    pub revision_id: Option<String>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-    pub deleted_at: Option<DateTime<Utc>>,
-}
 
 /// One read of the mutable persona catalog, guarded by its exact active-state
 /// digest. A stale continuation never returns a partial page; callers must

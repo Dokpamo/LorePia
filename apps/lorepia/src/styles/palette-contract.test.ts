@@ -1,52 +1,85 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { get } from 'svelte/store';
+import { styleRules } from '../tests/css-rules';
+import foundation from './shared/foundation.css?raw';
 
-import drawerSource from '../features/orchestration/OrchestrationQuickDrawer.svelte?raw';
-import settingsSource from '../features/providers/settings/styles/provider-settings-a.css?raw';
-import themeSource from '../lib/theme.ts?raw';
-import foundationSource from './shared/foundation.css?raw';
+const { syncNative } = vi.hoisted(() => ({ syncNative: vi.fn().mockResolvedValue(undefined) }));
+vi.mock('@tauri-apps/api/core', () => ({ isTauri: () => true }));
+vi.mock('../lib/ipc/client', () => ({ syncNativeSystemBarStyle: syncNative }));
 
-describe('shared palette contract', () => {
-    it('keeps fixed theme specimens centralized and component styles semantic', () => {
-        for (const token of [
-            '--theme-preview-light-canvas: #f5f5f5;',
-            '--theme-preview-light-sidebar: #dedede;',
-            '--theme-preview-light-main: #fafafa;',
-            '--theme-preview-dark-frame: #464646;',
-            '--theme-preview-dark-canvas: #1f1f1f;',
-            '--theme-preview-dark-sidebar: #1b1b1b;',
-        ]) {
-            expect(foundationSource).toContain(token);
-        }
-        expect(settingsSource).not.toMatch(/#[\da-f]{3,8}\b|\brgba?\(/i);
-        expect(settingsSource).toContain('background: var(--theme-preview-light-canvas);');
-        expect(settingsSource).toContain('background: var(--theme-preview-dark-canvas);');
-        expect(settingsSource).toContain('background: var(--theme-preview-system-overlay);');
-    });
-
-    it('aliases equal dark roles and shares floating-panel elevation', () => {
-        const roleAliases = [
-            ['sidebar-bg', 'sidebar-bg'],
-            ['workspace-bg', 'workspace-bg'],
-            ['panel-bg', 'panel-bg'],
-            ['selection-bg', 'selection-bg'],
-            ['hover-bg', 'hover-bg'],
-            ['divider', 'divider'],
-            ['control-line', 'composer-line'],
-            ['ink', 'ink'],
-            ['muted-ink', 'ink-muted'],
-            ['subtle-ink', 'ink-subtle'],
-        ] as const;
-        for (const [settingsRole, sharedRole] of roleAliases) {
-            const alias = `--desktop-settings-${settingsRole}: var(--desktop-${sharedRole});`;
-            expect(foundationSource.split(alias)).toHaveLength(3);
-        }
-        expect(drawerSource).toMatch(
-            /\.quick-drawer\.desktop\s*\{[^}]*box-shadow:\s*var\(--popover-shadow\);/s,
+describe('shared palette', () => {
+    it('provides usable light, dark and system theme specimens without freezing their colors', () => {
+        const declarations = styleRules(foundation).reduce<Record<string, string>>(
+            (tokens, rule) => ({ ...tokens, ...rule.declarations }),
+            {},
         );
+        for (const token of [
+            'light-canvas',
+            'light-sidebar',
+            'light-main',
+            'dark-frame',
+            'dark-canvas',
+            'dark-sidebar',
+            'system-overlay',
+        ]) {
+            expect(declarations[`--theme-preview-${token}`]).toBeTruthy();
+        }
+    });
+});
+
+describe('renderer and native theme behavior', () => {
+    let systemDark = false;
+    let onSystemChange: (() => void) | undefined;
+    beforeEach(() => {
+        vi.resetModules();
+        syncNative.mockClear();
+        localStorage.clear();
+        systemDark = false;
+        onSystemChange = undefined;
+        vi.stubGlobal('matchMedia', () => ({
+            get matches() {
+                return systemDark;
+            },
+            addEventListener: (_event: string, callback: () => void) => {
+                onSystemChange = callback;
+            },
+        }));
+    });
+    afterEach(() => {
+        vi.unstubAllGlobals();
+        document.documentElement.removeAttribute('data-theme');
+        localStorage.clear();
     });
 
-    it('keeps native edge-to-edge chrome in the selected or system palette', () => {
-        expect(themeSource).toContain('syncNativeSystemBarStyle(resolvesToDark(preference))');
-        expect(themeSource).toContain("query.addEventListener('change'");
+    it('applies and persists an explicit palette to the renderer, store and native chrome', async () => {
+        const theme = await import('../lib/theme');
+        theme.initTheme();
+        theme.setThemePreference('dark');
+        expect(document.documentElement).toHaveAttribute('data-theme', 'dark');
+        expect(get(theme.themePreference)).toBe('dark');
+        expect(localStorage.getItem('lorepia.theme')).toBe('dark');
+        expect(syncNative).toHaveBeenLastCalledWith(true);
+        systemDark = true;
+        onSystemChange?.();
+        theme.setThemePreference('light');
+        expect(document.documentElement).toHaveAttribute('data-theme', 'light');
+        expect(syncNative).toHaveBeenLastCalledWith(false);
+    });
+
+    it('follows OS changes only while system mode is selected', async () => {
+        const theme = await import('../lib/theme');
+        theme.initTheme();
+        theme.setThemePreference('system');
+        expect(document.documentElement).not.toHaveAttribute('data-theme');
+        expect(syncNative).toHaveBeenLastCalledWith(false);
+        systemDark = true;
+        onSystemChange?.();
+        expect(syncNative).toHaveBeenLastCalledWith(true);
+        theme.setThemePreference('light');
+        syncNative.mockClear();
+        systemDark = false;
+        onSystemChange?.();
+        expect(syncNative).not.toHaveBeenCalled();
+        expect(document.documentElement).toHaveAttribute('data-theme', 'light');
     });
 });

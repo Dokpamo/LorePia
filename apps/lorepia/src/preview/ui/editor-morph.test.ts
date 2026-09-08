@@ -28,6 +28,7 @@ describe('composer-to-editor geometry', () => {
         editorMorph(layer, () => origin)({ direction: 'in' });
         expect(input.style.getPropertyValue('--ui-origin-x')).toBe('4px');
         expect(input.style.getPropertyValue('--ui-origin-y')).toBe('518px');
+        expect(input.style.getPropertyValue('--ui-origin-text-width')).toBe('304px');
     });
     it('maps the actual composer rectangle into the uniformly scaled window', () => {
         for (const scale of [1, 320 / 360]) {

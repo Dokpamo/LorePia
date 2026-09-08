@@ -1,31 +1,38 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
+import AppDetailHeader from './AppDetailHeader.svelte';
+afterEach(cleanup);
 
 import baseConfig from '../../src-tauri/tauri.conf.json';
+import uiConfig from '../../src-tauri/tauri.ui.conf.json';
 import developmentCapability from '../../src-tauri/capabilities/main-development.json';
 import releaseCapability from '../../src-tauri/capabilities/main-release.json';
 import demoConfig from '../../src-tauri/tauri.demo.conf.json';
 import devConfig from '../../src-tauri/tauri.dev.conf.json';
 import releaseConfig from '../../src-tauri/tauri.release.conf.json';
-import chatPaneSource from '../features/chat/ChatPane.svelte?raw';
-import orchestrationStudioSource from '../features/orchestration/OrchestrationStudio.svelte?raw';
-import providerSettingsSource from '../features/providers/ProviderSettings.svelte?raw';
-import appCss from '../styles/app-css';
-import appSource from './App.svelte?raw';
 
-const windowConfigs = [baseConfig, devConfig, demoConfig, releaseConfig].map(
+const windowConfigs = [baseConfig, devConfig, releaseConfig, uiConfig].map(
     (config) => config.app.windows[0],
 );
 
 describe('macOS title bar integration', () => {
-    it('uses the overlay title bar in every Tauri launch profile', () => {
+    it('keeps native window controls above the shared workspace in every live profile', () => {
         for (const windowConfig of windowConfigs) {
             expect(windowConfig).toMatchObject({
                 decorations: true,
-                titleBarStyle: 'Overlay',
-                hiddenTitle: true,
-                trafficLightPosition: { x: 15, y: 25 },
+                titleBarStyle: 'Visible',
+                hiddenTitle: false,
+                minWidth: 320,
+                minHeight: 552,
             });
         }
+    });
+
+    it('keeps the earlier demo shell on its own overlay title bar', () => {
+        expect(demoConfig.app.windows[0]).toMatchObject({
+            titleBarStyle: 'Overlay',
+            hiddenTitle: true,
+        });
     });
 
     it('retains the native drag commands in development and release builds', () => {
@@ -39,44 +46,24 @@ describe('macOS title bar integration', () => {
         }
     });
 
-    it('only enables native title bar geometry inside a macOS Tauri window', () => {
-        expect(appSource).toContain("import { isTauri } from '@tauri-apps/api/core';");
-        expect(appSource).toContain("if (!isTauri() || typeof window === 'undefined')");
-        expect(appSource).toContain(
-            "window.navigator.platform.startsWith('Mac') && window.navigator.maxTouchPoints === 0",
-        );
-        expect(appSource).toContain(
-            "data-titlebar-overlay={nativeMacosTitlebarOverlay ? 'true' : 'false'}",
-        );
-    });
-
-    it('turns each visible first-row surface into native draggable chrome', () => {
-        expect(appSource).toContain('class="sidebar-head"');
-        expect(appSource).toContain('titlebarOverlay={nativeMacosTitlebarOverlay}');
-        expect(chatPaneSource).toContain('titlebarOverlay?: boolean;');
-        expect(providerSettingsSource).toContain('class:titlebar-overlay={titlebarOverlay}');
-        expect(orchestrationStudioSource).toContain('titlebarOverlay?: boolean;');
-
-        for (const source of [
-            appSource,
-            chatPaneSource,
-            providerSettingsSource,
-            orchestrationStudioSource,
-        ]) {
-            expect(source).toContain('data-tauri-drag-region=');
-        }
-    });
-
-    it('clears the traffic lights without changing browser preview geometry', () => {
-        expect(appCss).toMatch(
-            /\.app-shell\[data-titlebar-overlay='true'\]\s*\{[^}]*--native-traffic-light-clearance:\s*82px;/s,
-        );
-        expect(appCss).toMatch(
-            /\.app-shell\[data-layout='desktop'\]\[data-titlebar-overlay='true'\] \.sidebar-head\s*\{[^}]*padding-left:\s*var\(--native-traffic-light-clearance\);/s,
-        );
-        expect(appCss).toMatch(
-            /\.app-shell\[data-layout='mobile'\]\[data-titlebar-overlay='true'\]\s*\{[^}]*padding-top:\s*var\(--native-mobile-titlebar-inset\);/s,
-        );
-        expect(appCss).not.toContain(".app-shell[data-titlebar-overlay='false']");
-    });
+    it.each([false, true])(
+        'keeps the back action accessible with native overlay %s',
+        async (titlebarOverlay) => {
+            const onBack = vi.fn();
+            render(AppDetailHeader, {
+                title: 'Settings',
+                desktop: true,
+                titlebarOverlay,
+                fadeProgress: 0,
+                onBack,
+            });
+            const heading = screen.getByRole('heading', { name: 'Settings' });
+            expect(heading.hasAttribute('data-tauri-drag-region')).toBe(titlebarOverlay);
+            const button = screen.getByRole('button');
+            expect(button).toHaveAccessibleName();
+            expect(button).not.toHaveAttribute('data-tauri-drag-region');
+            await fireEvent.click(button);
+            expect(onBack).toHaveBeenCalledOnce();
+        },
+    );
 });

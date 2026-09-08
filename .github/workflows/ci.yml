@@ -243,7 +243,8 @@ jobs:
           python3 -m unittest \
             scripts/test_check_ai_context_map.py \
             scripts/test_check_source_architecture.py \
-            scripts/test_report_refactoring_baseline.py
+            scripts/test_report_refactoring_baseline.py \
+            scripts/test_refactoring_archive.py
           python3 scripts/report_refactoring_baseline.py --check
           python3 scripts/check_ai_context_map.py --strict-budget --base-ref "$SOURCE_RATCHET_BASE"
           python3 scripts/check_source_architecture.py --base-ref "$SOURCE_RATCHET_BASE"

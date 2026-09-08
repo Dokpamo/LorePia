@@ -1,0 +1,99 @@
+html {
+    color-scheme: light dark;
+    font-size: 100%;
+}
+html,
+body,
+#app {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+}
+body {
+    background: light-dark(#ffffff, #17171a);
+}
+.ui-preview {
+    --ui-paper: light-dark(#ffffff, #17171a);
+    --ui-canvas: light-dark(#f2f4f6, #101012);
+    --ui-soft: light-dark(#f2f4f6, #252528);
+    --ui-rail: light-dark(#f2f4f6, #101012);
+    --ui-ink: light-dark(#333d4b, #e4e4e7);
+    --ui-muted: light-dark(#596574, #c4c4ca);
+    --ui-secondary: light-dark(#465262, #d4d4d8);
+    --ui-hint: light-dark(#596574, #9e9ea4);
+    --ui-critical: light-dark(#b42318, #ffb4ab);
+    --ui-pressed-surface: light-dark(#e5e8eb, #313136);
+    --ui-heading: light-dark(#191f28, #f4f4f5);
+    --ui-icon-ink: light-dark(#6b7684, #b0b0b6);
+    /* Reserve brand color for primary actions; selection stays neutral. */
+    --ui-action: #cddea4;
+    --ui-action-pressed: #b2c686;
+    --ui-on-action: #30401c;
+    --ui-accent: var(--ui-heading);
+    --ui-selected: light-dark(#e9ecef, #303034);
+    --ui-image: light-dark(#e5e8ed, #343840);
+    --ui-density: 1;
+    --ui-space-1: calc(4px * var(--ui-density));
+    --ui-space-2: calc(8px * var(--ui-density));
+    --ui-space-3: calc(12px * var(--ui-density));
+    --ui-space-4: calc(16px * var(--ui-density));
+    --ui-space-5: calc(20px * var(--ui-density));
+    --ui-space-6: calc(24px * var(--ui-density));
+    --ui-space-8: calc(32px * var(--ui-density));
+    --ui-inset: var(--ui-space-5);
+    --ui-control: max(44px, calc(48px * var(--ui-density)));
+    --ui-icon-size: var(--ui-space-6);
+    --ui-action-icon-size: calc(28px * var(--ui-density));
+    --ui-header: calc(60px * var(--ui-density));
+    --ui-rail-width: calc(72px * var(--ui-density));
+    --ui-nav-inset: calc((var(--ui-rail-width) - var(--ui-control)) / 2);
+    --ui-row: calc(80px * var(--ui-density));
+    --ui-row-compact: calc(64px * var(--ui-density));
+    --ui-card-button-width: var(--ui-control);
+    --ui-card-button-height: var(--ui-control);
+    --ui-card-thumb-width: var(--ui-control);
+    --ui-card-cover-width: calc(60px * var(--ui-density));
+    --ui-radius: var(--ui-space-4);
+    --ui-radius-small: var(--ui-space-3);
+    --ui-radius-frame: var(--ui-space-6);
+    --ui-page-height: 640px;
+    --ui-type-caption: calc(max(0.75rem, 0.8125rem * var(--ui-density)) * var(--ui-text-scale));
+    --ui-type-secondary: calc(0.9375rem * var(--ui-density) * var(--ui-text-scale));
+    --ui-type-body: calc(1.0625rem * var(--ui-density) * var(--ui-text-scale));
+    --ui-type-title: calc(1.25rem * var(--ui-density) * var(--ui-text-scale));
+    --ui-type-page: calc(1.375rem * var(--ui-density) * var(--ui-text-scale));
+    --ui-type-section: calc(1.25rem * var(--ui-density) * var(--ui-text-scale));
+    --ui-type-group: var(--ui-type-body);
+    --ui-type-nav: calc(1.125rem * var(--ui-density) * var(--ui-text-scale));
+    /* Keep editable text at 16px or above to avoid focus zoom on mobile WebKit. */
+    --ui-type-input: calc(max(1rem, 1.0625rem * var(--ui-density)) * var(--ui-text-scale));
+    --ui-line-caption: 1.5;
+    --ui-line-secondary: 1.5;
+    --ui-line-body: 1.5;
+    --ui-line-title: 1.4;
+    --ui-line-page: 1.4091;
+    width: 100%;
+    color: var(--ui-ink);
+    background: var(--ui-paper);
+    font-family:
+        -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
+    font-size: var(--ui-type-body);
+    line-height: var(--ui-line-body);
+    word-break: keep-all;
+}
+.ui-preview {
+    height: 100dvh;
+    /* Focus may scroll a panel's content, but must never shift the page track. */
+    overflow: clip;
+    --ui-text-scale: 1;
+}
+.ui-preview[data-appearance='light'] {
+    color-scheme: light;
+}
+.ui-preview[data-appearance='dark'] {
+    color-scheme: dark;
+}
+.ui-preview[data-appearance='system'] {
+    color-scheme: light dark;
+}

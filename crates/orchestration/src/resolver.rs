@@ -20,6 +20,9 @@ use crate::template::{
 };
 
 mod compat;
+mod history_budget;
+
+use history_budget::keep_latest_items;
 
 use crate::render_portable_text;
 use compat::{
@@ -1486,26 +1489,6 @@ fn trim_messages<E: TokenEstimator>(
         retained.reverse();
     }
     *messages = retained;
-}
-
-fn keep_latest_items<E: TokenEstimator>(
-    messages: &mut Vec<DraftMessage>,
-    target_tokens: u32,
-    estimator: &E,
-) {
-    while !messages.is_empty()
-        && messages
-            .iter()
-            .map(|message| {
-                estimator
-                    .estimate_text(&message.content)
-                    .saturating_add(MESSAGE_OVERHEAD_TOKENS)
-            })
-            .sum::<u32>()
-            > target_tokens
-    {
-        messages.remove(0);
-    }
 }
 
 fn canonical_plan_hash(plan: &ResolvedPromptPlan) -> Result<String, OrchestrationError> {

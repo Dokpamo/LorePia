@@ -25,7 +25,7 @@ describe('responsive composition motion', () => {
                             expect(frame.offset).toBeLessThanOrEqual(0);
                             expect(
                                 frame.offset + frame.left + frame.chat + frame.right,
-                            ).toBeGreaterThanOrEqual(Math.max(360, width) - 0.001);
+                            ).toBeGreaterThanOrEqual(width - 0.001);
                         }
         },
     );

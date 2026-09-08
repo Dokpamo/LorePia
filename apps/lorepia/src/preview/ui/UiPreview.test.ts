@@ -19,10 +19,12 @@ afterEach(cleanup);
 
 async function edit(key: MessageKey) {
     await fireEvent.click(screen.getByRole('button', { name: t(key) }));
-    return screen.getByRole('textbox', { name: t(key) });
+    return screen.getByRole(key === 'uiPreview.findChat' ? 'searchbox' : 'textbox', {
+        name: t(key),
+    });
 }
 async function closeEditor() {
-    const name = screen.getByRole('textbox').getAttribute('aria-label') ?? '';
+    const name = screen.getByRole('dialog').getAttribute('aria-label') ?? '';
     await fireEvent.click(screen.getByRole('button', { name: t('uiPreview.closeEditor') }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name })).toBeNull());
 }
@@ -64,9 +66,18 @@ describe('native UI preview', () => {
         const expand = screen.getByRole('button', { name: t('uiPreview.expandComposer') });
         await fireEvent.click(expand);
         expect(screen.getByRole('dialog')).toBeVisible();
+        expect(
+            screen
+                .getByRole('button', { name: t('uiPreview.collapseComposer') })
+                .querySelector('.lucide-minimize-2'),
+        ).not.toBeNull();
+        expect(screen.queryByRole('button', { name: t('uiPreview.closeEditor') })).toBeNull();
         expect(messageInput()).toHaveValue('첫 번째 줄\n두 번째 줄');
         await fireEvent.input(messageInput(), { target: { value: '두 줄을\n편집했어요' } });
-        await closeEditor();
+        await fireEvent.click(
+            screen.getByRole('button', { name: t('uiPreview.collapseComposer') }),
+        );
+        await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
         expect(messageInput()).toBe(input);
         expect(input).toHaveFocus();
         expect(input).toHaveValue('두 줄을\n편집했어요');
@@ -194,16 +205,16 @@ describe('native UI preview', () => {
         await fireEvent.input(await edit('uiPreview.editMessage'), {
             target: { value: '메시지 고치기' },
         });
-        await closeEditor();
+        await fireEvent.click(screen.getByRole('button', { name: t('uiPreview.editDone') }));
+        await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
         expect(within(screen.getByRole('log')).getByText('메시지 고치기')).toBeVisible();
     });
 
     it('changes only local appearance and starts with fresh samples in a new window session', async () => {
         const first = render(UiPreview);
         await fireEvent.click(screen.getByRole('button', { name: t('uiPreview.appSettings') }));
-        await fireEvent.change(screen.getByRole('combobox', { name: t('uiPreview.theme') }), {
-            target: { value: 'light' },
-        });
+        await fireEvent.click(screen.getByRole('button', { name: t('uiPreview.theme') }));
+        await fireEvent.click(screen.getByRole('radio', { name: t('uiPreview.light') }));
         expect(screen.getByRole('main')).toHaveAttribute('data-appearance', 'light');
         first.unmount();
         render(UiPreview);

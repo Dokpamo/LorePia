@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-generation-messages"
+description = "Enables the list_generation_messages command without any pre-configured scope."
+commands.allow = ["list_generation_messages"]
+
+[[permission]]
+identifier = "deny-list-generation-messages"
+description = "Denies the list_generation_messages command without any pre-configured scope."
+commands.deny = ["list_generation_messages"]

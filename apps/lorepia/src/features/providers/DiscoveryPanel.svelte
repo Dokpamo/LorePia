@@ -1,4 +1,6 @@
 <script lang="ts">
+    import ProviderDiagnostics from './ProviderDiagnostics.svelte';
+    import { discoveryConnectionOptions as options } from './discovery-connection-options';
     import { tick } from 'svelte';
     import ChoiceField from '../../components/ChoiceField.svelte';
     import ToggleSwitch from '../../components/ToggleSwitch.svelte';
@@ -17,7 +19,6 @@
         DiscoveryAssistantFailureKindInput,
         DiscoveryAssistantHostActionDto,
         DiscoveryCandidateSummaryDto,
-        ProviderDiscoveryConnectionOptionsInput,
     } from '../../lib/ipc/contracts';
 
     interface Props {
@@ -85,16 +86,6 @@
                     (selectedSession.recovery_operation === 'list_models' ||
                         selectedSession.recovery_operation === 'probe_capabilities'))),
     );
-
-    function options(): ProviderDiscoveryConnectionOptionsInput {
-        return {
-            values: [],
-            api_base_path: null,
-            timeout_seconds: 30,
-            network_mode: 'public',
-            local_network_approval: null,
-        };
-    }
 
     async function run(action: () => Promise<unknown>): Promise<void> {
         if (busy) return;
@@ -952,6 +943,12 @@
         </DetailActionBar>
     {/if}
 {/snippet}
+
+<ProviderDiagnostics
+    {controller}
+    kind="discovery"
+    label={$tr('settings.page.discovery.provider')}
+/>
 
 <DetailPage
     ariaLabel="프로바이더 탐색"

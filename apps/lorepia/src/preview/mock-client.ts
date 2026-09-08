@@ -34,12 +34,10 @@ import {
     DEMO_CHARACTERS,
     DEMO_CONTENT_MODULE_DOCUMENTS,
     DEMO_CONVERSATIONS,
-    DEMO_EDITABLE_PROMPT_PRESET,
     DEMO_GENERATION_PRESETS,
     DEMO_GREETINGS,
     DEMO_INTERACTION_RULE_DOCUMENTS,
     DEMO_KNOWLEDGE_BOOK_DOCUMENTS,
-    DEMO_MEMORY_PROFILE_DOCUMENTS,
     DEMO_MEMORY_SUPERVISOR,
     DEMO_MESSAGES,
     DEMO_MODEL_ROUTES,
@@ -47,11 +45,12 @@ import {
     DEMO_PROVIDER_CONNECTIONS,
     DEMO_PROVIDER_TEMPLATES,
     DEMO_SETTINGS,
-    DEMO_TASK_PROFILE_DOCUMENTS,
     DEMO_TRANSFORM_SET_DOCUMENTS,
     createDemoOrchestrationWorkspace,
     demoConversationState,
 } from './demo-data';
+
+import { createDemoSettingsDocuments } from './settings-documents';
 
 export type PreviewClient = LorepiaClient &
     PersonaClientApi &
@@ -176,6 +175,8 @@ export function createPreviewClient(): PreviewClient {
             templates: clone(DEMO_PROVIDER_TEMPLATES),
             connections: clone(connections),
             legacy_profiles: [],
+            routes: clone(routes),
+            presets: clone(presets),
         };
     }
 
@@ -427,6 +428,13 @@ export function createPreviewClient(): PreviewClient {
         getOrchestrationWorkspace: (conversationId, branchId) =>
             Promise.resolve(clone(createDemoOrchestrationWorkspace(conversationId, branchId))),
         saveRoomOrchestrationConfig: (input) => {
+            if (
+                !Number.isInteger(input.creativity) ||
+                input.creativity < 0 ||
+                input.creativity > 100
+            ) {
+                return Promise.reject(new Error('Creativity must be an integer from 0 to 100.'));
+            }
             const workspace = createDemoOrchestrationWorkspace(
                 input.conversation_id,
                 input.branch_id,
@@ -440,30 +448,18 @@ export function createPreviewClient(): PreviewClient {
                 generation_target: workspace.generation_target,
             });
         },
-        getEditablePromptPreset: () => Promise.resolve(clone(DEMO_EDITABLE_PROMPT_PRESET)),
-        listTaskProfiles: () => Promise.resolve(clone(DEMO_TASK_PROFILE_DOCUMENTS)),
-        listMemoryProfiles: () => Promise.resolve(clone(DEMO_MEMORY_PROFILE_DOCUMENTS)),
+        ...createDemoSettingsDocuments(),
+        getStorageOverview: () =>
+            Promise.resolve({
+                characters: characters.length,
+                conversations: conversations.length,
+                messages: messages.length,
+                import_jobs: 0,
+            }),
         listKnowledgeBooks: () => Promise.resolve(clone(DEMO_KNOWLEDGE_BOOK_DOCUMENTS)),
         listTransformSets: () => Promise.resolve(clone(DEMO_TRANSFORM_SET_DOCUMENTS)),
         listInteractionRuleSets: () => Promise.resolve(clone(DEMO_INTERACTION_RULE_DOCUMENTS)),
         listContentModules: () => Promise.resolve(clone(DEMO_CONTENT_MODULE_DOCUMENTS)),
-        upsertPromptPreset: (input) =>
-            Promise.resolve(
-                revisioned(
-                    {
-                        id: input.value.id,
-                        name: input.value.name,
-                        schema_version: input.value.schema_version,
-                        block_count: input.value.blocks.length,
-                        default_generation_preset_id: input.value.default_generation_preset_id,
-                    },
-                    (input.expected_revision ?? 0) + 1,
-                ),
-            ),
-        upsertTaskProfile: (input) =>
-            Promise.resolve(revisioned(input.value, (input.expected_revision ?? 0) + 1)),
-        upsertMemoryProfile: (input) =>
-            Promise.resolve(revisioned(input.value, (input.expected_revision ?? 0) + 1)),
         upsertKnowledgeBook: (input) =>
             Promise.resolve(revisioned(input.value, (input.expected_revision ?? 0) + 1)),
         upsertTransformSet: (input) =>

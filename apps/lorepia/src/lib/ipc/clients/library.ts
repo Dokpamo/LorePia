@@ -19,6 +19,7 @@ import type {
     ResolveAssetDeliveryInput,
     MemorySupervisorStatusDto,
     BootstrapDto,
+    StorageOverviewDto,
     CharacterDto,
     CharacterGreetingCatalogDto,
     CharacterRenderProfileDto,
@@ -32,6 +33,9 @@ import { LOREPIA_COMMANDS, LOREPIA_EVENTS } from '../commands';
 import { ClientTransportBase } from './transport';
 
 export abstract class LibraryClient extends ClientTransportBase {
+    getStorageOverview(): Promise<StorageOverviewDto> {
+        return this.call(LOREPIA_COMMANDS.getStorageOverview);
+    }
     bootstrapSnapshot(): Promise<BootstrapDto> {
         return this.call(LOREPIA_COMMANDS.bootstrap);
     }

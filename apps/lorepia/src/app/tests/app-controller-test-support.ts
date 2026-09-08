@@ -86,6 +86,8 @@ export function createAppControllerFixture() {
                     templates: [],
                     connections: [],
                     legacy_profiles: [],
+                    routes: [],
+                    presets: [],
                     settings: {
                         preserve_partial_generations: true,
                         selected_provider_profile_id: null,

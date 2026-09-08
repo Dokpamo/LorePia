@@ -1,0 +1,21 @@
+@media (max-width: 899px) {
+    .app-shell[data-mobile-design='reference'] .provider-pane[data-mobile-overview] {
+        height: 100%;
+        min-height: 0;
+        padding: 0;
+        background: var(--m-page);
+    }
+    .mobile-all .mobile-page-header {
+        min-height: calc(88px + env(safe-area-inset-top));
+    }
+    .mobile-all .mobile-page-scroll {
+        padding-top: 0;
+    }
+    .mobile-version {
+        padding: 4px;
+        margin: 4px 0 0;
+        color: var(--m-secondary);
+        font-size: 13px;
+        line-height: 1.5;
+    }
+}

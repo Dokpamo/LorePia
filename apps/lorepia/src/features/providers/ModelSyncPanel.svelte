@@ -1,4 +1,5 @@
 <script lang="ts">
+    import ProviderDiagnostics from './ProviderDiagnostics.svelte';
     import { ListPlus } from '@lucide/svelte';
     import { tick } from 'svelte';
     import ChoiceField from '../../components/ChoiceField.svelte';
@@ -338,6 +339,8 @@
         </DetailActionBar>
     {/if}
 {/snippet}
+
+<ProviderDiagnostics {controller} kind="sync" label={$tr('model_sync.title')} />
 
 <DetailPage
     className="model-sync-panel"

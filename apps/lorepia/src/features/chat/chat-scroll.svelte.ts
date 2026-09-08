@@ -169,6 +169,7 @@ export class ChatScrollLifecycle {
         const firstRenderedDay = this.options.messageDayKey(firstRenderedMessage.created_at);
         let dayStart = window.start;
         while (dayStart > 0) {
+            if (window.end - dayStart >= VIRTUAL_MESSAGE_DOM_LIMIT) return window;
             const previous = messageCollection.items[dayStart - 1];
             if (
                 previous === undefined ||

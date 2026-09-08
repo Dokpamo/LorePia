@@ -1,0 +1,35 @@
+.ui-live-error,
+.ui-live-status {
+    position: absolute;
+    z-index: 8;
+    top: calc(var(--ui-header) + 8px);
+    left: var(--ui-inset);
+    right: var(--ui-inset);
+    padding: var(--ui-space-3) var(--ui-space-4);
+    border-radius: var(--ui-radius-small);
+    background: var(--ui-soft);
+    color: var(--ui-critical);
+    font-size: var(--ui-type-secondary);
+}
+.ui-live-status {
+    color: var(--ui-muted);
+}
+.ui-live-hint {
+    color: var(--ui-muted);
+    font-size: var(--ui-type-secondary);
+    margin: var(--ui-space-4) 0;
+}
+.ui-card-cover {
+    position: relative;
+    overflow: hidden;
+}
+.ui-live-subpage {
+    overflow-y: auto;
+}
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+}

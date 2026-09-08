@@ -1,0 +1,106 @@
+/* Mobile owns its palette. Existing workflow controls consume the same tokens. */
+@media (max-width: 899px) {
+    :root {
+        --m-page: #f2f4f6;
+        --m-card: #ffffff;
+        --m-fill: #f2f4f6;
+        --m-pressed: #e5e9ee;
+        --m-text: #191f28;
+        --m-secondary: #6b7684;
+        --m-tertiary: #8b95a1;
+        --m-line: #e5e8eb;
+        --m-blue: #2272eb;
+        --m-blue-soft: #e8f1ff;
+        --m-primary: #3182f6;
+        --m-primary-hover: #2272eb;
+        --m-primary-text: #ffffff;
+        --m-avatar-blue: #e6efff;
+        --m-avatar-blue-text: #4877ba;
+        --m-avatar-green: #e2f3ed;
+        --m-avatar-green-text: #448574;
+        --m-avatar-peach: #fff0e5;
+        --m-avatar-peach-text: #ac7350;
+        --m-avatar-violet: #eee9fb;
+        --m-avatar-violet-text: #8070ab;
+        font-size: 16px;
+    }
+
+    .app-shell[data-layout='mobile'] {
+        --bg: var(--m-page);
+        --surface: var(--m-card);
+        --surface-sunken: var(--m-fill);
+        --surface-raised: var(--m-card);
+        --surface-hover: var(--m-fill);
+        --surface-active: var(--m-pressed);
+        --ink: var(--m-text);
+        --ink-muted: var(--m-secondary);
+        --ink-subtle: var(--m-secondary);
+        --ink-inverse: var(--m-card);
+        --line: var(--m-line);
+        --line-strong: var(--m-tertiary);
+        --accent: var(--m-blue);
+        --accent-hover: var(--m-blue);
+        --accent-soft: var(--m-blue-soft);
+        --accent-line: var(--m-blue);
+        --utility-blue: var(--m-blue);
+        --primary-bg: var(--m-primary);
+        --primary-bg-hover: var(--m-primary-hover);
+        --primary-ink: var(--m-primary-text);
+        --bubble-char-bg: var(--m-card);
+        --bubble-user-bg: var(--m-fill);
+        --bubble-user-ink: var(--m-text);
+        --mobile-chevron: var(--m-tertiary);
+        --radius-xs: 8px;
+        --radius-sm: 12px;
+        --radius-md: 16px;
+        --radius-lg: 24px;
+        --shadow-1: none;
+        --shadow-2: 0 8px 24px rgb(0 0 0 / 8%);
+        font-size: 16px;
+        letter-spacing: -0.025em;
+    }
+
+    :root[data-theme='dark'] {
+        --m-page: #101012;
+        --m-card: #19191c;
+        --m-fill: #242428;
+        --m-pressed: #303035;
+        --m-text: #f2f3f5;
+        --m-secondary: #a5a8b0;
+        --m-tertiary: #7e828c;
+        --m-line: #2c2c32;
+        --m-blue: #80b5ff;
+        --m-blue-soft: #20324e;
+        --m-avatar-blue: #23344d;
+        --m-avatar-blue-text: #9bbfee;
+        --m-avatar-green: #253d36;
+        --m-avatar-green-text: #9cc8b8;
+        --m-avatar-peach: #43342c;
+        --m-avatar-peach-text: #d9b497;
+        --m-avatar-violet: #363047;
+        --m-avatar-violet-text: #bfb0e4;
+    }
+}
+
+@media (max-width: 899px) and (prefers-color-scheme: dark) {
+    :root:not([data-theme='light']) {
+        --m-page: #101012;
+        --m-card: #19191c;
+        --m-fill: #242428;
+        --m-pressed: #303035;
+        --m-text: #f2f3f5;
+        --m-secondary: #a5a8b0;
+        --m-tertiary: #7e828c;
+        --m-line: #2c2c32;
+        --m-blue: #80b5ff;
+        --m-blue-soft: #20324e;
+        --m-avatar-blue: #23344d;
+        --m-avatar-blue-text: #9bbfee;
+        --m-avatar-green: #253d36;
+        --m-avatar-green-text: #9cc8b8;
+        --m-avatar-peach: #43342c;
+        --m-avatar-peach-text: #d9b497;
+        --m-avatar-violet: #363047;
+        --m-avatar-violet-text: #bfb0e4;
+    }
+}

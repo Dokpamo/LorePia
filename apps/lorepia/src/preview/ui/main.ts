@@ -9,6 +9,8 @@ import './ui-editing.css';
 import './ui-composer.css';
 import './ui-cards.css';
 import './ui-chat.css';
+import './ui-feedback.css';
+import './ui-choices.css';
 
 const target = document.getElementById('app');
 if (target === null) throw new Error('LorePia UI preview root is missing.');

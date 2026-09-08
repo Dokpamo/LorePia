@@ -54,5 +54,8 @@ include!("content_import_validation.rs");
 include!("conversation_branching.rs");
 include!("async_reviewed_generation.rs");
 include!("generation_output.rs");
+include!("generation_presentations.rs");
 include!("semantic_prompt.rs");
 include!("generation_events.rs");
+
+mod greeting_branches;

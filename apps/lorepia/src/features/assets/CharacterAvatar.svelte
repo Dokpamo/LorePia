@@ -34,7 +34,13 @@
 
 <span class="character-avatar-initial" aria-hidden="true">{initial}</span>
 {#if assetClient !== undefined && selector !== null}
-    <TrustedAsset client={assetClient} {selector} expectedKind="image" alt={assetAlt} />
+    <TrustedAsset
+        client={assetClient}
+        {selector}
+        expectedKind="image"
+        alt={assetAlt}
+        statusPresentation="placeholder"
+    />
 {/if}
 
 <style>

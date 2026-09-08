@@ -1,3 +1,5 @@
+mod generation;
+
 use super::{
     Connection, ConversationBranchId, ConversationId, CoreError, CoreErrorCode, CoreResult,
     GenerationId, Message, MessageId, MessageRole, MessageStatus, OptionalExtension, Storage,

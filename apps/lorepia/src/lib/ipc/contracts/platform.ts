@@ -191,7 +191,15 @@ export interface ProviderWorkspaceDto {
     catalog_diff: ProviderCatalogDiffDto | null;
 }
 
+export interface StorageOverviewDto {
+    characters: number;
+    conversations: number;
+    messages: number;
+    import_jobs: number;
+}
+
 export interface LorepiaClient {
+    getStorageOverview?(): Promise<StorageOverviewDto>;
     bootstrapSnapshot(): Promise<BootstrapDto>;
     getMemorySupervisorStatus(): Promise<MemorySupervisorStatusDto>;
     subscribeMemorySupervisorStatus(
@@ -255,6 +263,11 @@ export interface LorepiaClient {
         mode: ConversationMode,
     ): Promise<ConversationStateDto>;
     listBranchMessages(branchId: string): Promise<MessageDto[]>;
+    listGenerationMessages?(
+        conversationId: string,
+        branchId: string,
+        generationId: string,
+    ): Promise<MessageDto[]>;
     listMessages(conversationId: string): Promise<MessageDto[]>;
     generateRuntimeText?(input: GenerateRuntimeTextInput): Promise<RuntimeTextGenerationDto>;
     cancelRuntimeText?(requestId: string): Promise<boolean>;

@@ -11,10 +11,13 @@
 
 ## Public Entry Points
 
-- `main.ts`: live entry; mounts `app/App.svelte` without an explicit client.
-  `App.svelte` creates the live client fallback.
+- `main.ts`: live entry; mounts `app/workspace/WorkspaceApp.svelte` without an
+  explicit client. `WorkspaceApp.svelte` creates the live client fallback.
 - `preview/main.ts`: isolated demo entry; injects `createPreviewClient()`.
-- `app/App.svelte`: screen composition, navigation, and responsive shell.
+- `app/workspace/WorkspaceApp.svelte`: live screen composition and controller wiring.
+- `ui/workspace/WorkspaceFrame.svelte`: shared mockup layout, navigation, gestures,
+  and editor/choice-sheet presentation.
+- `app/App.svelte`: earlier shell retained for the isolated demo and regressions.
 - `app/app-controller.ts`: root bootstrap/library/conversation/chat/provider
   application state and action facade.
 - `lib/ipc/contracts.ts`: renderer-safe DTO/client contracts and versions.
@@ -26,9 +29,10 @@ entry or use production data, Tauri IPC, credentials, database, or host files.
 
 ## State and Transaction Owner
 
-- `App.svelte` owns transient navigation, responsive layout, gestures, and open
-  panel state. It creates one shared client and the root feature controllers,
-  then disposes subscriptions/controllers on unmount.
+- `WorkspaceApp.svelte` owns live navigation and open panels; `WorkspaceFrame`
+  owns responsive geometry, gestures, and modal presentation. The app creates
+  one shared client and root feature controllers, then disposes subscriptions
+  and controllers on unmount.
 - `LorepiaAppController` owns the root store and composes the memory, provider,
   discovery, stream, generation, library, import, and conversation controllers.
 - `app/controllers/` owns the corresponding request epochs, serialized

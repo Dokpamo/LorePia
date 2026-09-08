@@ -58,14 +58,17 @@ export class SampleChatSession {
 
     edit(id: string): (text: string) => void {
         const owner = this.current();
+        const sourceBranch = owner.activeBranchId ?? 'main';
         const original = owner.messages.find((item) => item.id === id);
         let branch: string | undefined;
         let editedId: string | undefined;
         return (text) => {
             if (
                 !original ||
+                !text.trim() ||
                 this.current() !== owner ||
                 this.busy ||
+                (!branch && (owner.activeBranchId ?? 'main') !== sourceBranch) ||
                 (!branch && text === original.text)
             )
                 return;
@@ -140,7 +143,7 @@ export class SampleChatSession {
                 this.#run = undefined;
             } else this.#timer = setTimeout(step, 35);
         };
-        this.#timer = setTimeout(step, 280);
+        this.#timer = setTimeout(step, !retry && owner.responsePreview === 'slow' ? 12000 : 280);
     }
 
     stop() {

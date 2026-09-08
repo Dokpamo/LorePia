@@ -1,6 +1,7 @@
 mod capabilities;
 mod connections;
 mod model_reconciliation;
+mod overview;
 mod routes;
 mod templates;
 

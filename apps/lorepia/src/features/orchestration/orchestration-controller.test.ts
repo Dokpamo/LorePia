@@ -16,6 +16,7 @@ import type {
 } from '../../lib/ipc/contracts';
 import { LiveLorepiaClient, type LorepiaTransport } from '../../lib/ipc/client';
 import { LorepiaClientError } from '../../lib/ipc/errors';
+import { deferred } from '../../tests/deferred';
 import {
     MAX_VISIBLE_MEMORY_RECORDS,
     MAX_VISIBLE_PROMPT_BLOCKS,
@@ -202,22 +203,11 @@ function capableClient(
     } as unknown as OrchestrationCapableClient;
 }
 
-function deferred<Value>(): {
-    promise: Promise<Value>;
-    resolve: (value: Value) => void;
-} {
-    let resolvePromise!: (value: Value) => void;
-    const promise = new Promise<Value>((resolve) => {
-        resolvePromise = resolve;
-    });
-    return { promise, resolve: resolvePromise };
-}
-
 describe('OrchestrationController', () => {
     it('reaches ready and loads editable documents with the production live client shape', async () => {
         const commands: string[] = [];
         const transport: LorepiaTransport = {
-            invoke: (commandName) => {
+            invoke: (commandName, payload) => {
                 commands.push(commandName);
                 if (commandName === 'get_orchestration_workspace') {
                     return Promise.resolve(workspace());
@@ -242,14 +232,14 @@ describe('OrchestrationController', () => {
                         },
                     ]);
                 }
-                if (
-                    commandName === 'list_memory_profiles' ||
-                    commandName === 'list_knowledge_books' ||
-                    commandName === 'list_transform_sets' ||
-                    commandName === 'list_interaction_rule_sets' ||
-                    commandName === 'list_content_modules' ||
-                    commandName === 'list_interaction_proposals'
-                ) {
+                if (commandName === 'list_creator_documents_page') {
+                    return Promise.resolve({
+                        kind: (payload as { request: { kind: string } }).request.kind,
+                        documents: [],
+                        next_cursor: null,
+                    });
+                }
+                if (commandName === 'list_interaction_proposals') {
                     return Promise.resolve([]);
                 }
                 if (commandName === 'expire_interaction_proposals') {
@@ -280,7 +270,9 @@ describe('OrchestrationController', () => {
         expect(commands).toContain('get_orchestration_workspace');
         expect(commands).toContain('get_editable_prompt_preset');
         expect(commands).toContain('list_task_profiles');
-        expect(commands).toContain('list_content_modules');
+        expect(
+            commands.filter((command) => command === 'list_creator_documents_page'),
+        ).toHaveLength(5);
     });
 
     it('reports an unavailable Core boundary without manufacturing success', async () => {

@@ -14,6 +14,13 @@ class RecordingTransport implements LorepiaTransport {
 
     invoke(commandName: string, args?: Record<string, unknown>): Promise<unknown> {
         this.calls.push({ commandName, args });
+        if (commandName === 'list_creator_documents_page') {
+            return Promise.resolve({
+                kind: (args as { request: { kind: string } }).request.kind,
+                documents: [],
+                next_cursor: null,
+            });
+        }
         return Promise.resolve(undefined);
     }
 
@@ -141,27 +148,40 @@ describe('Creator document transport boundary', () => {
         });
 
         expect(transport.calls.map(({ commandName }) => commandName)).toEqual([
-            'list_memory_profiles',
+            'list_creator_documents_page',
             'get_memory_profile',
             'upsert_memory_profile',
             'delete_memory_profile',
-            'list_knowledge_books',
+            'list_creator_documents_page',
             'get_knowledge_book',
             'upsert_knowledge_book',
             'delete_knowledge_book',
-            'list_transform_sets',
+            'list_creator_documents_page',
             'get_transform_set',
             'upsert_transform_set',
             'delete_transform_set',
-            'list_interaction_rule_sets',
+            'list_creator_documents_page',
             'get_interaction_rule_set',
             'upsert_interaction_rule_set',
             'delete_interaction_rule_set',
-            'list_content_modules',
+            'list_creator_documents_page',
             'get_content_module',
             'upsert_content_module',
             'delete_content_module',
         ]);
+        expect(
+            transport.calls
+                .filter(({ commandName }) => commandName === 'list_creator_documents_page')
+                .map(({ args }) => args),
+        ).toEqual(
+            [
+                'memory_profile',
+                'knowledge_book',
+                'transform_set',
+                'interaction_rule_set',
+                'content_module',
+            ].map((kind) => ({ request: { kind, after: null, limit: 100 } })),
+        );
         expect(transport.calls[2]?.args).toEqual({
             request: { value: MEMORY_PROFILE, expected_revision: 3 },
         });

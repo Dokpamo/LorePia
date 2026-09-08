@@ -121,6 +121,20 @@ export abstract class ConversationClient extends ContentImportClient {
         });
     }
 
+    listGenerationMessages(
+        conversationId: string,
+        branchId: string,
+        generationId: string,
+    ): Promise<MessageDto[]> {
+        return this.call(LOREPIA_COMMANDS.listGenerationMessages, {
+            request: {
+                conversation_id: conversationId,
+                branch_id: branchId,
+                generation_id: generationId,
+            },
+        });
+    }
+
     listMessages(conversationId: string): Promise<MessageDto[]> {
         return this.call(LOREPIA_COMMANDS.listMessages, {
             request: { conversation_id: conversationId },

@@ -69,14 +69,17 @@ describe('UI state across viewport changes', () => {
         expect(container.querySelectorAll('.ui-page')).toHaveLength(3);
         await resize(320, 640);
         const main = screen.getByRole('main');
-        expect(main.style.width).toBe('360px');
-        expect(Number.parseFloat(main.style.height)).toBeCloseTo(720);
-        expect(main.style.transform).toBe(`scale(${String(320 / 360)})`);
+        expect(main.style.width).toBe('');
+        expect(main.style.height).toBe('');
+        expect(main.style.transform).toBe('');
+        expect(main.style.getPropertyValue('--ui-density')).toBe('0.9');
+        await waitFor(() => expect(main.style.getPropertyValue('--ui-chat-width')).toBe('320px'));
         expect(input).toHaveValue('창을 줄여도 이어 쓰기');
         await resize(393, 748);
         expect(main.style.width).toBe('');
         expect(main.style.height).toBe('');
         expect(main.style.transform).toBe('');
+        expect(main.style.getPropertyValue('--ui-density')).toBe('1');
         expect(main.style.left).toBe('');
         expect(main.style.top).toBe('');
         expect(input).toHaveValue('창을 줄여도 이어 쓰기');
@@ -181,8 +184,9 @@ describe('UI state across viewport changes', () => {
                 width >= 1120 ? 'wide' : width >= 760 ? 'split' : 'mobile',
             );
         }
-        expect(main.style.width).toBe('360px');
-        expect(Number.parseFloat(main.style.height)).toBeCloseTo(720);
+        expect(main.style.width).toBe('');
+        expect(main.style.height).toBe('');
+        expect(main.style.transform).toBe('');
         expect(main).toHaveAttribute('data-resizing', 'true');
         vi.advanceTimersToNextFrame();
         await tick();

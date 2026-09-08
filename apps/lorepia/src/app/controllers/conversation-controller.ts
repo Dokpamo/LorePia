@@ -36,13 +36,14 @@ function firstEnabledGreetingId(catalog: CharacterGreetingCatalogDto): string | 
 
 export class ConversationController {
     private readonly epoch = new EpochGuard();
+    private modeRequest = 0;
 
     constructor(
         private readonly context: AppControllerContext,
         private readonly hooks: ConversationControllerHooks,
     ) {}
 
-    async selectCharacter(character: CharacterDto): Promise<void> {
+    async selectCharacter(character: CharacterDto, openLatest = false): Promise<void> {
         const epoch = this.epoch.advance();
         this.hooks.detachStream();
         this.context.update((state) => ({
@@ -128,6 +129,10 @@ export class ConversationController {
                 }));
             });
         await Promise.all([conversationsRequest, greetingCatalogRequest]);
+        if (openLatest && this.epoch.isCurrent(epoch)) {
+            const latest = this.context.readState().conversations.items[0];
+            if (latest) await this.selectConversation(latest);
+        }
     }
 
     selectGreeting(greetingId: string): boolean {
@@ -151,7 +156,7 @@ export class ConversationController {
         return true;
     }
 
-    async openNewConversation(): Promise<boolean> {
+    async openNewConversation(title?: string, mode: ConversationMode = 'chat'): Promise<boolean> {
         const state = this.context.readState();
         const character = state.selected_character;
         const catalog = state.greeting_catalog.value;
@@ -175,8 +180,8 @@ export class ConversationController {
         try {
             const conversation = await this.context.client.createConversation(
                 character.id,
-                character.name,
-                'chat',
+                title?.trim() ? title.trim() : character.name,
+                mode,
                 {
                     character_content_revision_id: catalog.character_content_revision_id,
                     greeting_id: greetingId,
@@ -309,20 +314,37 @@ export class ConversationController {
         }
     }
 
-    async setConversationMode(mode: ConversationMode): Promise<void> {
+    async setConversationMode(mode: ConversationMode): Promise<boolean> {
         const conversation = this.context.readState().selected_conversation;
-        if (conversation === null) return;
+        if (conversation === null) return false;
+        const request = ++this.modeRequest;
+        const epoch = this.epoch.current();
+        const current = () =>
+            request === this.modeRequest &&
+            this.epoch.isCurrent(epoch) &&
+            this.context.readState().selected_conversation?.id === conversation.id;
         try {
             const conversationState = await this.context.client.setConversationMode(
                 conversation.id,
                 mode,
             );
-            this.context.update((state) => ({ ...state, conversation_state: conversationState }));
+            if (!current()) return false;
+            this.context.update((state) => ({
+                ...state,
+                conversation_state: state.conversation_state
+                    ? {
+                          ...state.conversation_state,
+                          selected_mode: conversationState.selected_mode,
+                      }
+                    : conversationState,
+            }));
             this.context.announce(
                 mode === 'chat' ? t('chat.notice.mode_chat') : t('chat.notice.mode_story'),
             );
+            return true;
         } catch (error: unknown) {
-            this.context.announce(this.context.errorLabel(error));
+            if (current()) this.context.announce(this.context.errorLabel(error));
+            return false;
         }
     }
 

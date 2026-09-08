@@ -1,4 +1,10 @@
 <script lang="ts">
+    import {
+        familyRoute,
+        createRoute,
+        editRoute,
+        parseDocumentRoute,
+    } from './creator-document-routes';
     import { Plus } from '@lucide/svelte';
     import { tick } from 'svelte';
 
@@ -25,10 +31,6 @@
         guide: string;
     }
     type EditableCreatorDocument = EditableCreatorDocumentState<CreatorDocumentValue>;
-    type CreatorDocumentRoute =
-        | { mode: 'index'; kind: null; id: null }
-        | { mode: 'list' | 'create'; kind: CreatorDocumentKind; id: null }
-        | { mode: 'edit'; kind: CreatorDocumentKind; id: string };
 
     const MAX_DOCUMENT_JSON_CHARS = 262_144;
     const CREATOR_DOCUMENT_FAMILIES: readonly CreatorDocumentFamily[] = [
@@ -79,7 +81,7 @@
     let draftContextKey = '';
     let lastDetailPage = detailPage;
 
-    const route = $derived(parseDocumentRoute(detailPage));
+    const route = $derived(parseDocumentRoute(detailPage, CREATOR_DOCUMENT_FAMILIES));
     const selectedFamily = $derived(
         route.kind === null
             ? null
@@ -108,41 +110,6 @@
         lastDetailPage = currentPage;
         pendingDeleteKey = null;
     });
-
-    function familyRoute(kind: CreatorDocumentKind): string {
-        return `documents/${kind}`;
-    }
-
-    function createRoute(kind: CreatorDocumentKind): string {
-        return `${familyRoute(kind)}/create`;
-    }
-
-    function editRoute(kind: CreatorDocumentKind, id: string): string {
-        return `${familyRoute(kind)}/edit/${encodeURIComponent(id)}`;
-    }
-
-    function parseDocumentRoute(page: string | null | undefined): CreatorDocumentRoute {
-        if (page === null || page === undefined || page === 'documents') {
-            return { mode: 'index', kind: null, id: null };
-        }
-        for (const family of CREATOR_DOCUMENT_FAMILIES) {
-            const base = familyRoute(family.kind);
-            if (page === base) return { mode: 'list', kind: family.kind, id: null };
-            if (page === `${base}/create`) {
-                return { mode: 'create', kind: family.kind, id: null };
-            }
-            const editPrefix = `${base}/edit/`;
-            if (page.startsWith(editPrefix)) {
-                const encodedId = page.slice(editPrefix.length);
-                try {
-                    return { mode: 'edit', kind: family.kind, id: decodeURIComponent(encodedId) };
-                } catch {
-                    return { mode: 'index', kind: null, id: null };
-                }
-            }
-        }
-        return { mode: 'index', kind: null, id: null };
-    }
 
     function documentsFor(kind: CreatorDocumentKind): EditableCreatorDocument[] {
         if (kind === 'memory_profile') {
@@ -373,6 +340,22 @@
                 </button>
             {/each}
         </div>
+        {#if orchestrationState.creator_document_cursors?.[selectedFamily.kind]}
+            <button
+                class="secondary"
+                type="button"
+                disabled={busy}
+                onclick={() => void controller.loadMoreCreatorDocuments(selectedFamily.kind)}
+                >{t('pagination.more')}</button
+            >
+        {/if}
+        <button
+            class="secondary"
+            type="button"
+            disabled={busy}
+            onclick={() => void controller.loadMoreCreatorDocuments(selectedFamily.kind, true)}
+            >{t('pagination.refresh')}</button
+        >
     {:else if route.mode === 'create' && selectedFamily !== null}
         <form
             id="creator-document-create-form"

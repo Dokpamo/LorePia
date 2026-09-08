@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from refactoring_archive import load_refactoring_archive
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = REPO_ROOT / "config" / "ai-context-map.json"
@@ -591,6 +593,7 @@ def evaluate_context_map(
     manifest: dict[str, Any],
     *,
     strict_budget: bool = False,
+    source_sizes: dict[str, int] | None = None,
 ) -> tuple[list[str], list[ContextMeasurement]]:
     failures: list[str] = []
     measurements: list[ContextMeasurement] = []
@@ -615,11 +618,19 @@ def evaluate_context_map(
     except ValueError as error:
         return [str(error)], []
 
+    def source_file(path: object, label: str) -> tuple[str, int]:
+        if source_sizes is None:
+            return validate_relative_file(root, path, label)
+        canonical = validate_relative_path(path, label)
+        if canonical not in source_sizes:
+            raise ValueError(f"{label} is missing from the archived source: {canonical}")
+        return canonical, source_sizes[canonical]
+
     shared_sizes: dict[str, int] = {}
     shared_sources: dict[str, str] = {}
     for path in shared:
         try:
-            canonical, size = validate_relative_file(root, path, "shared path")
+            canonical, size = source_file(path, "shared path")
             if canonical in shared_sizes:
                 failures.append(
                     f"duplicate bundle path: {path} aliases {shared_sources[canonical]}"
@@ -673,9 +684,7 @@ def evaluate_context_map(
                     continue
                 declared_paths.add(path)
                 try:
-                    canonical, size = validate_relative_file(
-                        root, path, f"{task_id}.{group}"
-                    )
+                    canonical, size = source_file(path, f"{task_id}.{group}")
                     if canonical in shared_sizes:
                         failures.append(
                             f"{task_id}: duplicate bundle path: {path} aliases "
@@ -777,6 +786,7 @@ def main() -> int:
     parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
     parser.add_argument("--base-ref")
     parser.add_argument("--strict-budget", action="store_true")
+    parser.add_argument("--current", action="store_true", help="Measure current source instead of completed campaign evidence.")
     parser.add_argument("--print-commands", metavar="TASK_ID")
     args = parser.parse_args()
     root = args.root.resolve()
@@ -786,10 +796,12 @@ def main() -> int:
         config = load_json(config_path, "AI context map")
         manifest = load_json(manifest_path, "task manifest")
         validate_repository_manifest(manifest)
+        archive = load_refactoring_archive(root)
+        archive_sizes = git_tree_file_sizes(root, archive) if archive and not args.current else None
         failures, measurements = evaluate_context_map(
-            root, config, manifest, strict_budget=args.strict_budget
+            root, config, manifest, strict_budget=args.strict_budget, source_sizes=archive_sizes
         )
-        if args.base_ref is not None:
+        if args.base_ref is not None and archive_sizes is None:
             commit = resolve_commit(root, args.base_ref)
             config_relative = repository_relative_path(root, config_path, "config")
             manifest_relative = repository_relative_path(root, manifest_path, "manifest")
@@ -828,6 +840,8 @@ def main() -> int:
         print("\n".join(commands))
         return 0
 
+    if archive_sizes is not None:
+        print(f"Completed refactoring context at {archive}; use --current for live measurements")
     print_measurements(measurements)
     print("AI context map: PASS")
     return 0

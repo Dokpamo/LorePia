@@ -7,6 +7,8 @@
         TextAlignStart,
     } from '@lucide/svelte';
 
+    import MobileStudioIndex from './studio/MobileStudioIndex.svelte';
+    import MobileMenuRow from '../../components/mobile/MobileMenuRow.svelte';
     import type { LorepiaAppController, LorepiaAppState } from '../../app/app-controller';
     import { tr as translate } from '../../lib/i18n';
     import type {
@@ -298,37 +300,7 @@
                 {/each}
             </div>
         {:else}
-            <div class="studio-home">
-                <ul
-                    class="setting-list studio-destination-list"
-                    aria-label={$translate('studio.tools.label')}
-                >
-                    {#each STUDIO_SECTIONS as id (id)}
-                        <li>
-                            <button
-                                class="setting-row studio-destination-row"
-                                type="button"
-                                onclick={() => onOpenSection(id)}
-                            >
-                                <span class="setting-icon" aria-hidden="true">
-                                    {@render tileMark(id)}
-                                </span>
-                                <span class="setting-content">
-                                    <span class="setting-copy">
-                                        <strong>
-                                            {$translate(
-                                                id === 'prompt'
-                                                    ? 'studio.feature.prompt.title'
-                                                    : `studio.section.${id}.title`,
-                                            )}
-                                        </strong>
-                                    </span>
-                                </span>
-                            </button>
-                        </li>
-                    {/each}
-                </ul>
-            </div>
+            <MobileStudioIndex onSelect={onOpenSection} />
         {/if}
     {/if}
 
@@ -345,26 +317,39 @@
     {/if}
 
     {#if section !== null && detailPage === null}
-        <div class="studio-home detail-index">
-            <ul class="setting-list studio-detail-list" aria-label="세부 도구">
+        {#if !desktop}
+            <ul class="mobile-flat-list" aria-label={$translate('mobile.studio.tools')}>
                 {#each STUDIO_DETAIL_DESTINATIONS[section] as destination (destination.id)}
                     <li>
-                        <button
-                            class="setting-row studio-detail-row"
-                            type="button"
-                            onclick={() => (detailPage = destination.id)}
-                        >
-                            <span class="setting-content">
-                                <span class="setting-copy">
-                                    <strong>{destination.title}</strong>
-                                    <small>{destination.description}</small>
-                                </span>
-                            </span>
-                        </button>
+                        <MobileMenuRow
+                            label={destination.title}
+                            onSelect={() => (detailPage = destination.id)}
+                        />
                     </li>
                 {/each}
             </ul>
-        </div>
+        {:else}
+            <div class="studio-home detail-index">
+                <ul class="setting-list studio-detail-list" aria-label="세부 도구">
+                    {#each STUDIO_DETAIL_DESTINATIONS[section] as destination (destination.id)}
+                        <li>
+                            <button
+                                class="setting-row studio-detail-row"
+                                type="button"
+                                onclick={() => (detailPage = destination.id)}
+                            >
+                                <span class="setting-content">
+                                    <span class="setting-copy">
+                                        <strong>{destination.title}</strong>
+                                        <small>{destination.description}</small>
+                                    </span>
+                                </span>
+                            </button>
+                        </li>
+                    {/each}
+                </ul>
+            </div>
+        {/if}
     {:else if section === 'prompt' || section === 'memory'}
         <div class="studio-panel">
             {#if section === 'prompt'}

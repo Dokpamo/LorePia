@@ -1,3 +1,4 @@
+import { CatalogPageController } from './controllers/catalog-page-controller';
 import type { Readable } from 'svelte/store';
 
 import type {
@@ -57,6 +58,7 @@ export type {
 } from './controllers/orchestration-state';
 
 export class OrchestrationController {
+    private readonly catalogPages: CatalogPageController;
     private readonly stateController: OrchestrationStateController;
     private readonly contextRoom: ContextRoomController;
     private readonly promptTasks: PromptTaskController;
@@ -69,6 +71,7 @@ export class OrchestrationController {
     constructor(client: OrchestrationCapableClient) {
         this.stateController = new OrchestrationStateController();
         this.state = this.stateController.state;
+        this.catalogPages = new CatalogPageController(client, this.stateController);
         this.promptTasks = new PromptTaskController(client, this.stateController);
         this.creatorDocuments = new CreatorDocumentController(client, this.stateController);
         this.contextRoom = new ContextRoomController(
@@ -83,6 +86,13 @@ export class OrchestrationController {
             this.contextRoom,
         );
         this.planInteraction = new PlanInteractionController(client, this.stateController);
+    }
+
+    async loadMoreMemoryRecords(restart = false): Promise<void> {
+        return this.catalogPages.loadMemoryPage(restart);
+    }
+    async loadMoreCreatorDocuments(kind: CreatorDocumentKind, restart = false): Promise<void> {
+        return this.creatorDocuments.loadMoreCreatorDocuments(kind, restart);
     }
 
     async loadContext(conversationId: string | null, branchId: string | null): Promise<void> {

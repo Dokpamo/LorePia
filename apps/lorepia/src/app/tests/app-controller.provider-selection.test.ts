@@ -71,29 +71,23 @@ describe('LorepiaAppController retained legacy profile selection', () => {
     it('keeps a completed legacy selection when an older provider refresh finishes later', async () => {
         const updateSettings = vi.fn(() => Promise.resolve(normalizedLegacySettings));
         const client = providerClient(updateSettings);
-        const providerCatalogHistory = client.providerCatalogHistory.bind(client);
-        const lateHistory = deferred<Awaited<ReturnType<typeof client.providerCatalogHistory>>>();
-        let historyReads = 0;
+        const getProviderOverview = client.getProviderOverview.bind(client);
+        const lateOverview = deferred<Awaited<ReturnType<typeof client.getProviderOverview>>>();
+        let overviewReads = 0;
         Object.assign(client, {
-            providerCatalogHistory: (
-                limit: number,
-                beforeRevision: number | null,
-                beforeStateVersion: number | null,
-            ) => {
-                historyReads += 1;
-                return historyReads === 1
-                    ? providerCatalogHistory(limit, beforeRevision, beforeStateVersion)
-                    : lateHistory.promise;
+            getProviderOverview: () => {
+                overviewReads += 1;
+                return overviewReads === 1 ? getProviderOverview() : lateOverview.promise;
             },
         });
         const controller = new LorepiaAppController(client);
         await controller.loadProviders();
 
         const staleRefresh = controller.loadProviders();
-        await vi.waitFor(() => expect(historyReads).toBe(2));
+        await vi.waitFor(() => expect(overviewReads).toBe(2));
         await expect(controller.selectLegacyProviderProfile(legacyProfile.id)).resolves.toBe(true);
 
-        lateHistory.resolve(await providerCatalogHistory(50, null, null));
+        lateOverview.resolve(await getProviderOverview());
         await staleRefresh;
 
         expect(get(controller.state).providers.workspace.settings).toEqual(
@@ -115,6 +109,8 @@ describe('LorepiaAppController retained legacy profile selection', () => {
                     templates: [],
                     connections: [normalizedLegacyConnection],
                     legacy_profiles: [legacyProfile],
+                    routes: [],
+                    presets: [],
                     settings: normalizedLegacySettings,
                 }),
             listModelRoutes: () => Promise.resolve([]),

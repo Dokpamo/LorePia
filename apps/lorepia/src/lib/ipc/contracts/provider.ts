@@ -460,6 +460,8 @@ export interface ProviderOverviewDto {
     templates: ProviderTemplateDto[];
     connections: ProviderConnectionDto[];
     legacy_profiles: ProviderProfileDto[];
+    routes: ModelRouteDto[];
+    presets: GenerationPresetDto[];
 }
 
 export type CredentialTargetDto =

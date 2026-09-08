@@ -7,6 +7,8 @@
 mod knowledge;
 mod memory;
 mod modules;
+mod pagination;
+pub use pagination::{CreatorDocument, CreatorDocumentKind, ReadPage, ReadPageCursor};
 mod presets;
 mod prompt_assembly;
 mod prompt_plan;

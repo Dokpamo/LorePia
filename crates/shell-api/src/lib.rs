@@ -25,8 +25,12 @@ mod package;
 mod persona;
 mod portable_runtime_state;
 mod provider;
+mod provider_overview;
 mod sensitive;
+mod settings;
 mod stream;
+
+pub use settings::StorageOverviewDto;
 
 #[cfg(any(test, feature = "test-support"))]
 #[doc(hidden)]
@@ -221,3 +225,8 @@ pub use sensitive::{
     StagedImportFile, TaskCredentialLease, TaskCredentialRead, TaskCredentialReader,
 };
 pub use stream::{ChatEventStream, ChatStreamItem, ReconcileReason, ReconciliationRequiredDto};
+
+pub use orchestration::{
+    CreatorDocumentDto, CreatorDocumentsPageDto, ListCreatorDocumentsPageInput,
+    ListMemoryRecordsPageInput, MemoryRecordsPageDto,
+};

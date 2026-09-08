@@ -1,3 +1,4 @@
+import type { ReadPageCursor } from './pagination';
 import type {
     CreatorControlValue,
     OrchestrationConditionExprDto,
@@ -488,6 +489,7 @@ export interface OrchestrationWorkspaceDto {
     knowledge_book_ids: string[];
     task_profiles: TaskProfileDto[];
     memory_records: MemoryRecordDto[];
+    memory_records_next_cursor?: ReadPageCursor | null;
     selection_evidence: PromptSelectionEvidenceDto[];
     interaction_state: InteractionStateEntryDto[];
     interaction_proposals: InteractionProposalListItemDto[];
@@ -514,6 +516,7 @@ export type OrchestrationWorkspaceSnapshotDto = Pick<
     | 'creator_controls'
     | 'knowledge_book_ids'
     | 'memory_records'
+    | 'memory_records_next_cursor'
 >;
 
 export interface SaveRoomOrchestrationConfigInput {

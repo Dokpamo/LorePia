@@ -6,6 +6,12 @@
 //! script payloads. Every mutation retains Core's optimistic-concurrency
 //! revision instead of inventing a shell-owned write model.
 
+mod pagination;
+pub use pagination::{
+    CreatorDocumentDto, CreatorDocumentsPageDto, ListCreatorDocumentsPageInput,
+    ListMemoryRecordsPageInput, MemoryRecordsPageDto,
+};
+
 use std::{collections::BTreeMap, future::Future, pin::Pin};
 
 use chrono::{DateTime, Utc};
@@ -57,8 +63,6 @@ const MAX_DOCUMENT_DEPTH: usize = 32;
 const MAX_DOCUMENT_NODES: usize = 100_000;
 const MAX_COLLECTION_ITEMS: usize = 4_096;
 const MAX_PREVIEW_TEXT_BYTES: usize = 16 * 1024;
-const MAX_MEMORY_LIST_ITEMS: usize = 250;
-const MAX_CREATOR_DOCUMENTS: usize = 100;
 const MAX_SELECTION_ITEMS: usize = 300;
 const MAX_MODULE_REVISIONS: usize = 64;
 const MAX_PROMPT_PRESET_REVISIONS: usize = 100;
@@ -1424,6 +1428,8 @@ pub struct OrchestrationWorkspaceSnapshotDto {
     pub creator_controls: Vec<CreatorControlProjectionDto>,
     pub knowledge_book_ids: Vec<String>,
     pub memory_records: Vec<MemoryRecordProjectionDto>,
+    #[serde(default)]
+    pub memory_records_next_cursor: Option<lorepia_core::ReadPageCursor>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -3115,15 +3121,13 @@ impl ShellApi {
             .map_err(ShellError::from)?
             .last()
             .map(|message| message.id.0.clone());
-        let memory_records = self
-            .core
-            .list_memory_records(&conversation_id, &branch_id, false)
-            .map_err(ShellError::from)?
-            .into_iter()
-            .take(MAX_MEMORY_LIST_ITEMS.saturating_add(1))
-            .map(RevisionedDto::from)
-            .map(Into::into)
-            .collect();
+        let memory_page = self.list_memory_records_page(ListMemoryRecordsPageInput {
+            conversation_id: conversation_id.0.clone(),
+            branch_id: branch_id.0.clone(),
+            include_invalidated: false,
+            after: None,
+            limit: 100,
+        })?;
         let interaction_state_revision = self
             .core
             .get_interaction_state_revision(&conversation_id, &branch_id)
@@ -3140,7 +3144,8 @@ impl ShellApi {
             prompt_blocks,
             creator_controls,
             knowledge_book_ids,
-            memory_records,
+            memory_records: memory_page.records,
+            memory_records_next_cursor: memory_page.next_cursor,
         };
         validate_document(&result)?;
         Ok(result)
@@ -3483,19 +3488,6 @@ impl ShellApi {
             .and_then(validated_output)
     }
 
-    pub fn list_memory_profiles(&self) -> ShellResult<Vec<RevisionedDto<MemoryProfileDto>>> {
-        let values = self
-            .core
-            .list_memory_profiles()
-            .and_then(bound_core_collection)
-            .map_err(ShellError::from)?;
-        project_creator_revisions(
-            values,
-            |value| &value.provenance,
-            CreatorMemoryProfileDocumentDto::try_from,
-        )
-    }
-
     pub fn delete_memory_profile(
         &self,
         input: DeleteMemoryProfileInput,
@@ -3749,19 +3741,6 @@ impl ShellApi {
             .and_then(validated_output)
     }
 
-    pub fn list_knowledge_books(&self) -> ShellResult<Vec<RevisionedDto<KnowledgeBookDto>>> {
-        let values = self
-            .core
-            .list_knowledge_books()
-            .and_then(bound_core_collection)
-            .map_err(ShellError::from)?;
-        project_creator_revisions(
-            values,
-            |value| &value.provenance,
-            CreatorKnowledgeBookDocumentDto::try_from,
-        )
-    }
-
     pub fn delete_knowledge_book(
         &self,
         input: DeleteKnowledgeBookInput,
@@ -3828,19 +3807,6 @@ impl ShellApi {
             .and_then(validated_output)
     }
 
-    pub fn list_transform_sets(&self) -> ShellResult<Vec<RevisionedDto<TransformSetDto>>> {
-        let values = self
-            .core
-            .list_transform_sets()
-            .and_then(bound_core_collection)
-            .map_err(ShellError::from)?;
-        project_creator_revisions(
-            values,
-            |value| &value.provenance,
-            CreatorTransformSetDocumentDto::try_from,
-        )
-    }
-
     pub fn delete_transform_set(
         &self,
         input: DeleteTransformSetInput,
@@ -3905,21 +3871,6 @@ impl ShellApi {
             .map_err(ShellError::from)
             .and_then(|value| value.try_project(TryInto::try_into))
             .and_then(validated_output)
-    }
-
-    pub fn list_interaction_rule_sets(
-        &self,
-    ) -> ShellResult<Vec<RevisionedDto<InteractionRuleSetDto>>> {
-        let values = self
-            .core
-            .list_interaction_rule_sets()
-            .and_then(bound_core_collection)
-            .map_err(ShellError::from)?;
-        project_creator_revisions(
-            values,
-            |value| &value.provenance,
-            CreatorInteractionRuleSetDocumentDto::try_from,
-        )
     }
 
     pub fn delete_interaction_rule_set(
@@ -3991,19 +3942,6 @@ impl ShellApi {
             .and_then(validated_output)
     }
 
-    pub fn list_content_modules(&self) -> ShellResult<Vec<RevisionedDto<ContentModuleDto>>> {
-        let values = self
-            .core
-            .list_content_modules()
-            .and_then(bound_core_collection)
-            .map_err(ShellError::from)?;
-        project_creator_revisions(
-            values,
-            |value| &value.metadata.provenance,
-            CreatorContentModuleDocumentDto::try_from,
-        )
-    }
-
     pub fn delete_content_module(
         &self,
         input: DeleteContentModuleInput,
@@ -4049,23 +3987,16 @@ impl ShellApi {
     ) -> ShellResult<MemoryRecordListDto> {
         validate_identifier("conversation_id", &input.conversation_id)?;
         validate_identifier("branch_id", &input.branch_id)?;
-        let values = self
-            .core
-            .list_memory_records(
-                &lorepia_core::ConversationId(input.conversation_id),
-                &lorepia_core::ConversationBranchId(input.branch_id),
-                input.include_invalidated,
-            )
-            .map_err(ShellError::from)?;
-        let truncated = values.len() > MAX_MEMORY_LIST_ITEMS;
+        let page = self.list_memory_records_page(ListMemoryRecordsPageInput {
+            conversation_id: input.conversation_id,
+            branch_id: input.branch_id,
+            include_invalidated: input.include_invalidated,
+            after: None,
+            limit: 100,
+        })?;
         let result = MemoryRecordListDto {
-            records: values
-                .into_iter()
-                .take(MAX_MEMORY_LIST_ITEMS)
-                .map(RevisionedDto::from)
-                .map(Into::into)
-                .collect(),
-            truncated,
+            records: page.records,
+            truncated: page.next_cursor.is_some(),
         };
         validate_document(&result)?;
         Ok(result)
@@ -4299,27 +4230,6 @@ fn require_creator_revision(
             "{document_label} changed before the requested mutation"
         )))
     }
-}
-
-fn project_creator_revisions<T, U>(
-    values: Vec<Revisioned<T>>,
-    provenance: impl Fn(&T) -> &Provenance,
-    project: impl Fn(T) -> ShellResult<U>,
-) -> ShellResult<Vec<RevisionedDto<U>>>
-where
-    U: Serialize,
-{
-    let mut projected = Vec::new();
-    for value in values {
-        if provenance(&value.value).source_kind != SourceKind::UserCreated {
-            continue;
-        }
-        if projected.len() == MAX_CREATOR_DOCUMENTS {
-            break;
-        }
-        projected.push(RevisionedDto::from(value).try_project(&project)?);
-    }
-    validated_output(projected)
 }
 
 fn validate_creator_content_module_input(

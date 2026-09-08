@@ -1,5 +1,11 @@
 <script lang="ts">
-    import { EllipsisVertical } from '@lucide/svelte';
+    import AiSettingsHome from './settings/AiSettingsHome.svelte';
+    import LanguageSettings from './settings/LanguageSettings.svelte';
+    import PlaySettings from './settings/PlaySettings.svelte';
+    import type { SettingsServices } from './settings/settings-services';
+    import './settings/styles/settings-workspace.css';
+    import MobileAll from '../../components/mobile/MobileAll.svelte';
+    import type { StudioSection } from '../orchestration/studio-contracts';
     import { setContext } from 'svelte';
 
     import type { LorepiaAppController, LorepiaAppState } from '../../app/app-controller';
@@ -34,6 +40,7 @@
     import './settings/styles/provider-settings-b.css';
 
     interface Props {
+        services?: SettingsServices;
         appState: LorepiaAppState;
         desktop?: boolean;
         section?: SettingsSection | null;
@@ -47,9 +54,11 @@
         editorTitle?: string;
         onDetailScroll?: DetailScrollListener;
         titlebarOverlay?: boolean;
+        onOpenStudio?: (section: StudioSection) => void;
     }
 
     let {
+        services,
         appState,
         controller,
         desktop = false,
@@ -63,13 +72,13 @@
         onOpenSection = () => undefined,
         onDetailScroll = () => undefined,
         titlebarOverlay = false,
+        onOpenStudio = () => undefined,
     }: Props = $props();
 
     setContext<DetailScrollListener>(DETAIL_SCROLL_CONTEXT, (scrollTop) => {
         onDetailScroll(scrollTop);
     });
 
-    let settingsMenuOpen = $state(false);
     let savingKey = $state<string | null>(null);
     let selectingProfileId = $state<string | null>(null);
     let settingsBusy = $state(false);
@@ -255,7 +264,6 @@
     }
 
     function openSettingsShortcut(next: SettingsSection): void {
-        settingsMenuOpen = false;
         onOpenSection(next);
     }
 
@@ -306,6 +314,7 @@
 
 <section
     class="provider-pane"
+    data-mobile-overview={!desktop && section === null ? 'true' : undefined}
     aria-label={section === null
         ? $tr('app.tab.providers')
         : $tr(`settings.section.${section}.title`)}
@@ -327,57 +336,30 @@
             class="provider-scroll desktop-settings-overview"
             onscroll={handleSettingsDetailScroll}
         >
-            <SettingsOverview
-                {appState}
-                {desktop}
-                {personaState}
-                {titlebarOverlay}
-                onSelectSection={openSettingsShortcut}
-            />
+            <SettingsOverview {appState} {personaState} onSelectSection={openSettingsShortcut} />
         </div>
     {:else if section === null}
-        <div
-            class="mobile-top-frame settings-toolbar"
-            class:titlebar-overlay={titlebarOverlay}
-            role="toolbar"
-            aria-label="설정 도구"
-            data-tauri-drag-region={titlebarOverlay ? '' : undefined}
-        >
-            <button
-                class="icon-button ghost mobile-top-action settings-tool-button"
-                type="button"
-                aria-label="설정 더보기"
-                aria-expanded={settingsMenuOpen}
-                aria-controls="settings-shortcuts"
-                onclick={() => (settingsMenuOpen = !settingsMenuOpen)}
-            >
-                <EllipsisVertical aria-hidden="true" />
-            </button>
-            {#if settingsMenuOpen}
-                <div
-                    id="settings-shortcuts"
-                    class="settings-shortcuts"
-                    role="group"
-                    aria-label="설정 바로가기"
-                >
-                    <button type="button" onclick={() => openSettingsShortcut('appearance')}
-                        >화면 모드</button
-                    >
-                    <button type="button" onclick={() => openSettingsShortcut('advanced')}
-                        >고급 설정</button
-                    >
-                </div>
-            {/if}
+        <MobileAll
+            {appState}
+            {onOpenStudio}
+            {titlebarOverlay}
+            onOpenSettings={openSettingsShortcut}
+        />
+    {:else if section === 'ai'}
+        <div class="provider-scroll settings-detail-scroll">
+            <AiSettingsHome onSelect={openSettingsShortcut} />
         </div>
-        <div class="provider-scroll settings-home-scroll">
-            <SettingsOverview
-                {appState}
-                {desktop}
-                {personaState}
-                {titlebarOverlay}
-                onSelectSection={openSettingsShortcut}
-            />
-        </div>
+    {:else if section === 'language'}
+        <div class="provider-scroll settings-detail-scroll"><LanguageSettings /></div>
+    {:else if section === 'prompt' || section === 'memory' || section === 'plugins' || section === 'storage'}
+        {#if services}<div class="provider-scroll settings-detail-scroll">
+                {#key section}<PlaySettings
+                        {services}
+                        {section}
+                        {onOpenStudio}
+                        bind:detailPage
+                    />{/key}
+            </div>{/if}
     {:else if section === 'persona'}
         {#if personaState && personaController}
             <PersonaPanel
@@ -455,6 +437,7 @@
                 {@const workspace = appState.providers.workspace}
                 {#if section === 'target'}
                     <ModelRouteSection
+                        {desktop}
                         {appState}
                         {settingsBusy}
                         {selectedRouteId}
@@ -476,6 +459,7 @@
                 {/if}
                 {#if section === 'connections'}
                     <ConnectionSection
+                        {desktop}
                         {appState}
                         connection={selectedConnection()}
                         legacyProfile={selectedLegacyProfile()}
@@ -489,20 +473,15 @@
                 {/if}
                 {#if section === 'templates'}
                     <TemplateSection
+                        {desktop}
                         {appState}
                         {detailPage}
                         onOpenDetailPage={(page: string, title = '') => openDetailPage(page, title)}
                     />
                 {/if}
-                {#if section === 'discovery' && detailPage === null}
+                {#if (section === 'discovery' && detailPage === null) || section === 'advanced'}
                     <SettingsToolsSection
-                        {section}
-                        {workspace}
-                        onOpenDetailPage={(page: string) => openDetailPage(page)}
-                    />
-                {/if}
-                {#if section === 'advanced'}
-                    <SettingsToolsSection
+                        {desktop}
                         {section}
                         {workspace}
                         onOpenDetailPage={(page: string) => openDetailPage(page)}

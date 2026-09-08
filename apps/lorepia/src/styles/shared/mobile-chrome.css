@@ -1,0 +1,287 @@
+@media (max-width: 899px) {
+    .app-shell[data-mobile-design='reference']:has(.mobile-detail-header),
+    .app-shell[data-mobile-design='reference']:has(.chat-pane) {
+        --bg: var(--m-card);
+    }
+    .mobile-detail-header {
+        position: absolute;
+        z-index: 10;
+        inset: 0 0 auto;
+        display: grid;
+        width: 100%;
+        height: calc(136px + env(safe-area-inset-top));
+        grid-template-rows: 56px 80px;
+        padding-top: env(safe-area-inset-top);
+        padding-inline: max(24px, calc((100% - 552px) / 2));
+        background: var(--m-card);
+    }
+    .mobile-detail-header > .mobile-icon-button {
+        align-self: center;
+        margin-left: -12px;
+    }
+    .mobile-detail-header h1 {
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        overflow: hidden;
+        min-width: 0;
+        align-self: end;
+        padding: 0;
+        margin: 0 0 12px;
+        color: var(--m-text);
+        font-size: 28px;
+        font-weight: 700;
+        line-height: 1.3;
+        letter-spacing: -0.04em;
+        word-break: keep-all;
+        overflow-wrap: anywhere;
+    }
+    .mobile-detail-header h1:focus {
+        outline: none;
+    }
+    .app-shell[data-layout='mobile'][data-mobile-design='reference']
+        :is(.studio-detail-scroll, .settings-detail-scroll) {
+        padding-top: calc(148px + env(safe-area-inset-top));
+        padding-inline: max(24px, calc((100% - 552px) / 2));
+        scroll-padding-top: calc(148px + env(safe-area-inset-top));
+        background: var(--m-card);
+    }
+    .app-shell[data-layout='mobile'][data-mobile-design='reference'] .mobile-flat-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+    .app-shell[data-layout='mobile'][data-mobile-design='reference']
+        .mobile-flat-list
+        .mobile-menu-row {
+        min-height: 60px;
+        padding-inline: 0;
+        font-size: 18px;
+    }
+    .mobile-detail-intro {
+        margin: 0 0 24px;
+        color: var(--m-secondary);
+        font-size: 16px;
+        line-height: 1.6;
+        word-break: keep-all;
+    }
+    .app-shell[data-layout='mobile'][data-mobile-design='reference']
+        :is(.studio-detail-scroll, .settings-detail-scroll)
+        .setting-list {
+        padding: 0;
+        margin: 0;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        box-shadow: none;
+        gap: 0;
+    }
+    .app-shell[data-layout='mobile'][data-mobile-design='reference']
+        :is(.studio-detail-scroll, .settings-detail-scroll)
+        .setting-row {
+        min-height: 64px;
+        padding: 16px 0;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        box-shadow: none;
+    }
+    .app-shell[data-layout='mobile'][data-mobile-design='reference'] .setting-copy > strong {
+        color: var(--m-text);
+        font-size: 18px;
+        font-weight: 500;
+        line-height: 1.5;
+    }
+    .app-shell[data-layout='mobile'][data-mobile-design='reference'] .setting-value {
+        color: var(--m-secondary);
+        font-size: 16px;
+        font-weight: 400;
+    }
+    .app-shell[data-layout='mobile'][data-mobile-design='reference']
+        :is(.studio-detail-scroll, .settings-detail-scroll)
+        :is(
+            input:not([type]),
+            input[type='text'],
+            input[type='search'],
+            input[type='number'],
+            input[type='password'],
+            input[type='url'],
+            textarea
+        ) {
+        width: 100%;
+        min-height: 56px;
+        padding: 16px;
+        border: 1px solid transparent;
+        border-radius: 16px;
+        background: var(--m-fill);
+        color: var(--m-text);
+        font-size: 16px;
+        font-weight: 400;
+        line-height: 1.5;
+        box-shadow: none;
+    }
+    .app-shell[data-mobile-design='reference']
+        :is(.studio-detail-scroll, .settings-detail-scroll)
+        :is(.detail-form, .persona-form) {
+        gap: 28px;
+    }
+    .app-shell[data-mobile-design='reference'] .target-page {
+        gap: 24px;
+    }
+    .app-shell[data-mobile-design='reference'] .target-page .mobile-detail-intro {
+        margin-bottom: 0;
+    }
+    .app-shell[data-mobile-design='reference']
+        :is(.studio-detail-scroll, .settings-detail-scroll)
+        .choice-field {
+        gap: 10px;
+        color: var(--m-secondary);
+        font-size: 15px;
+        font-weight: 500;
+    }
+    .app-shell[data-mobile-design='reference']
+        :is(.studio-detail-scroll, .settings-detail-scroll)
+        .choice-trigger.field {
+        min-height: 56px;
+        padding: 14px 16px;
+        border: 0;
+        border-radius: 16px;
+        background: var(--m-fill);
+        box-shadow: none;
+    }
+    .app-shell[data-mobile-design='reference']
+        :is(.studio-detail-scroll, .settings-detail-scroll)
+        .choice-value {
+        font-size: 17px;
+        font-weight: 500;
+    }
+    .app-shell[data-mobile-design='reference'] .choice-menu .choice-option {
+        min-height: 48px;
+        font-size: 16px;
+    }
+    .app-shell[data-mobile-design='reference'] .settings-control-row {
+        min-height: 80px;
+        padding-block: 20px;
+        border-top: 0;
+        margin-top: 4px;
+        gap: 20px;
+    }
+    .app-shell[data-mobile-design='reference'] .settings-control-copy strong {
+        font-size: 17px;
+        font-weight: 500;
+    }
+    .app-shell[data-mobile-design='reference'] .settings-control-copy small {
+        font-size: 14px;
+        line-height: 1.6;
+    }
+    .app-shell[data-mobile-design='reference'] .toggle-switch:not(.with-label) {
+        width: 52px;
+        height: 44px;
+        min-height: 44px;
+    }
+    .app-shell[data-mobile-design='reference'] .toggle-switch-track {
+        width: 44px;
+        height: 26px;
+        flex-basis: 44px;
+    }
+    .app-shell[data-mobile-design='reference'] .toggle-switch-thumb {
+        width: 22px;
+        height: 22px;
+        background: #fff;
+    }
+    .app-shell[data-mobile-design='reference']
+        .toggle-switch[aria-checked='true']
+        .toggle-switch-thumb {
+        transform: translate3d(18px, 0, 0);
+    }
+    .app-shell[data-mobile-design='reference'] .detail-secondary-action {
+        min-height: 52px;
+        border: 0;
+        border-radius: 14px;
+        background: var(--m-fill);
+        color: var(--m-secondary);
+        font-size: 15px;
+        font-weight: 500;
+        box-shadow: none;
+    }
+    .app-shell[data-mobile-design='reference'] .detail-action-bar {
+        width: min(calc(100% - 40px), 560px);
+        height: 56px;
+        min-height: 56px;
+        bottom: calc(12px + env(safe-area-inset-bottom));
+        gap: 8px;
+    }
+    .app-shell[data-mobile-design='reference'] .detail-action-bar .detail-action {
+        flex: 1;
+        min-height: 56px;
+        border: 0;
+        border-radius: 16px;
+        background: var(--m-fill);
+        font-size: 17px;
+        font-weight: 600;
+        box-shadow: none;
+    }
+    .app-shell[data-mobile-design='reference'] .detail-action-bar.fixed::before {
+        position: absolute;
+        z-index: -1;
+        inset: -12px -20px calc(-12px - env(safe-area-inset-bottom));
+        background: var(--m-card);
+        content: '';
+        pointer-events: none;
+    }
+    .app-shell[data-mobile-design='reference'] .detail-action-bar .primary {
+        background: var(--m-primary);
+        color: var(--m-primary-text);
+    }
+    .mobile-theme-options {
+        display: grid;
+        gap: 8px;
+    }
+    .app-shell[data-mobile-design='reference'] .mobile-theme-option {
+        display: flex;
+        width: 100%;
+        min-height: 76px;
+        align-items: center;
+        justify-content: flex-start;
+        gap: 16px;
+        padding: 12px 0;
+        border: 0;
+        border-radius: 16px;
+        background: transparent;
+        color: var(--m-text);
+        font-size: 18px;
+        font-weight: 500;
+        text-align: left;
+        box-shadow: none;
+    }
+    .mobile-theme-icon {
+        display: grid;
+        width: 44px;
+        height: 44px;
+        flex: none;
+        place-items: center;
+        border-radius: 16px;
+        background: var(--m-fill);
+        color: var(--m-secondary);
+    }
+    .mobile-theme-icon svg {
+        width: 24px;
+        height: 24px;
+    }
+    .mobile-theme-check {
+        width: 24px;
+        height: 24px;
+        flex: none;
+        margin-left: auto;
+        color: var(--m-blue);
+    }
+    .app-shell[data-mobile-design='reference'] .persona-row-description {
+        margin-top: 5px;
+        font-size: 15px;
+        line-height: 1.6;
+    }
+    .app-shell[data-mobile-design='reference'] .license-notice pre {
+        font-size: 14px;
+        line-height: 1.65;
+    }
+}

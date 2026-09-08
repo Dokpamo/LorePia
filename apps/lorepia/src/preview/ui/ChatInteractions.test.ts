@@ -77,9 +77,13 @@ describe('chat presentation and inline message tools', () => {
         await fireEvent.click(screen.getByRole('button', { name: t('uiPreview.branchFrom') }));
         expect(within(log).getAllByRole('article')).toHaveLength(1);
         expect(log).toHaveFocus();
-        await fireEvent.change(screen.getByRole('combobox', { name: t('uiPreview.branch') }), {
-            target: { value: 'main' },
-        });
+        const trigger = screen.getByRole('button', { name: t('uiPreview.branch') });
+        await fireEvent.click(trigger);
+        const original = screen.getAllByRole('radio')[0];
+        if (!original) throw new Error('Missing original branch');
+        await fireEvent.click(original);
+        await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+        expect(trigger).toHaveFocus();
         await waitFor(() => expect(within(log).getAllByRole('article')).toHaveLength(3));
     });
 });

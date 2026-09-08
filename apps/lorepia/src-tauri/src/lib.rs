@@ -7,14 +7,17 @@ mod commands;
 pub mod contract;
 mod credential_operations;
 mod error;
+mod generation_messages_commands;
 mod module_lifecycle_commands;
 mod orchestration_commands;
 mod package_commands;
+mod pagination_commands;
 mod persona_commands;
 mod portable_runtime_state_commands;
 mod provider_commands;
 mod runtime_contract;
 mod runtime_generation_registry;
+mod settings_commands;
 mod state;
 #[cfg(target_os = "macos")]
 mod ui_preview_window;
@@ -85,7 +88,7 @@ fn hold_phone_aspect(window: &tauri::Window) {
 fn uses_fixed_preview_minimum(config: &tauri::utils::config::WindowConfig) -> bool {
     matches!(
         &config.url,
-        tauri::utils::config::WebviewUrl::App(path) if path == std::path::Path::new("ui-preview.html")
+        tauri::utils::config::WebviewUrl::App(path) if path == std::path::Path::new("ui-preview.html") || path == std::path::Path::new("workspace.html") || path == std::path::Path::new("index.html")
     )
 }
 
@@ -107,20 +110,7 @@ pub fn run() {
         .register_asynchronous_uri_scheme_protocol(
             "lorepia-asset",
             move |context, request, responder| {
-                if let Some(response) = asset_protocol::preflight_response(&request) {
-                    responder.respond(response);
-                    return;
-                }
-                let Some(permit) = asset_admission.try_acquire(&request) else {
-                    responder.respond(asset_protocol::overloaded_response());
-                    return;
-                };
-                let app = context.app_handle().clone();
-                let _task = tauri::async_runtime::spawn_blocking(move || {
-                    let mut response = asset_protocol::handle(app.state(), request);
-                    asset_protocol::retain_permit_in_response(&mut response, permit);
-                    responder.respond(response);
-                });
+                asset_admission.respond(context.app_handle().clone(), request, responder);
             },
         )
         .on_window_event(|window, event| {
@@ -148,6 +138,7 @@ pub fn run() {
             appearance_commands::set_system_bar_style,
             commands::get_memory_supervisor_status,
             commands::list_characters,
+            settings_commands::get_storage_overview,
             commands::get_character,
             commands::get_character_greeting_catalog,
             commands::get_character_render_profile,
@@ -187,8 +178,9 @@ pub fn run() {
             persona_commands::get_conversation_persona_selection,
             persona_commands::select_conversation_persona,
             persona_commands::clear_conversation_persona,
-            commands::list_branch_messages,
-            commands::list_messages,
+            generation_messages_commands::list_branch_messages,
+            generation_messages_commands::list_messages,
+            generation_messages_commands::list_generation_messages,
             commands::generate_runtime_text,
             commands::cancel_runtime_text,
             commands::send_message,
@@ -332,6 +324,8 @@ pub fn run() {
             orchestration_commands::delete_content_module,
             orchestration_commands::list_prompt_preset_bindings,
             orchestration_commands::list_memory_records,
+            pagination_commands::list_memory_records_page,
+            pagination_commands::list_creator_documents_page,
             orchestration_commands::retry_interrupted_memory_job,
             orchestration_commands::list_interrupted_memory_jobs,
             orchestration_commands::list_retryable_memory_query_embeddings,
@@ -363,11 +357,12 @@ mod window_size_tests {
     use tauri::utils::config::{WebviewUrl, WindowConfig};
 
     #[test]
-    fn only_ui_preview_keeps_its_configured_fixed_minimum() {
+    fn workspace_and_ui_preview_keep_their_configured_fixed_minimum() {
         for (entry, expected) in [
             ("ui-preview.html", true),
+            ("workspace.html", true),
             ("preview.html", false),
-            ("index.html", false),
+            ("index.html", true),
         ] {
             let config = WindowConfig {
                 url: WebviewUrl::App(entry.into()),

@@ -118,6 +118,7 @@ describe('ChatPane composer', () => {
         );
 
         await fireEvent.click(screen.getByRole('button', { name: t('quick.toggle') }));
+        await fireEvent.click(screen.getByRole('button', { name: t('mobile.room.room') }));
         await fireEvent.click(
             await screen.findByRole('button', {
                 name: t('chat.runtime.permissions.approve_selected'),
@@ -200,6 +201,7 @@ describe('ChatPane composer', () => {
         });
 
         await fireEvent.click(screen.getByRole('button', { name: '대화 설정' }));
+        await fireEvent.click(screen.getByRole('button', { name: t('mobile.room.room') }));
         const approve = await screen.findByRole('button', {
             name: '선택한 기능만 이번 세션에서 허용',
         });
@@ -304,6 +306,7 @@ describe('ChatPane composer', () => {
         const { controller, orchestrationController } = renderChatWithSettings(appState, client);
 
         await fireEvent.click(screen.getByRole('button', { name: '대화 설정' }));
+        await fireEvent.click(screen.getByRole('button', { name: t('mobile.room.room') }));
         const chatRead = await screen.findByRole('checkbox', { name: '현재 대화 읽기' });
         expect(chatRead).not.toBeChecked();
         await fireEvent.click(
@@ -375,6 +378,7 @@ describe('ChatPane composer', () => {
         const { controller, orchestrationController } = renderChatWithSettings(appState, client);
 
         await fireEvent.click(screen.getByRole('button', { name: t('quick.toggle') }));
+        await fireEvent.click(screen.getByRole('button', { name: t('mobile.room.room') }));
         const approve = await screen.findByRole('button', {
             name: t('chat.runtime.permissions.approve_selected'),
         });
@@ -468,6 +472,7 @@ describe('ChatPane composer', () => {
         const { controller, orchestrationController } = renderChatWithSettings(appState, client);
 
         await fireEvent.click(screen.getByRole('button', { name: t('quick.toggle') }));
+        await fireEvent.click(screen.getByRole('button', { name: t('mobile.room.room') }));
         const approve = await screen.findByRole('button', {
             name: t('chat.runtime.permissions.approve_selected'),
         });
@@ -522,6 +527,7 @@ describe('ChatPane composer', () => {
         );
 
         await fireEvent.click(screen.getByRole('button', { name: '대화 설정' }));
+        await fireEvent.click(screen.getByRole('button', { name: t('mobile.room.room') }));
         await screen.findByRole('button', {
             name: '선택한 기능만 이번 세션에서 허용',
         });
@@ -579,6 +585,7 @@ describe('ChatPane composer', () => {
         );
 
         await fireEvent.click(screen.getByRole('button', { name: t('quick.toggle') }));
+        await fireEvent.click(screen.getByRole('button', { name: t('mobile.room.room') }));
         expect(
             screen.queryByRole('checkbox', { name: t('chat.runtime.capability.callbacks') }),
         ).toBeNull();
@@ -661,6 +668,7 @@ describe('ChatPane composer', () => {
         );
 
         await fireEvent.click(screen.getByRole('button', { name: '대화 설정' }));
+        await fireEvent.click(screen.getByRole('button', { name: t('mobile.room.room') }));
         expect(createRuntime).not.toHaveBeenCalled();
         expect(screen.queryByRole('switch', { name: '배경음악' })).not.toBeInTheDocument();
         await fireEvent.click(
@@ -761,6 +769,7 @@ describe('ChatPane composer', () => {
             .mockResolvedValue(removalResult);
 
         await fireEvent.click(screen.getByRole('button', { name: t('quick.toggle') }));
+        await fireEvent.click(screen.getByRole('button', { name: t('mobile.room.room') }));
         await fireEvent.click(
             await screen.findByRole('button', {
                 name: t('chat.runtime.permissions.approve_selected'),
@@ -855,6 +864,7 @@ describe('ChatPane composer', () => {
         );
 
         await fireEvent.click(screen.getByRole('button', { name: t('quick.toggle') }));
+        await fireEvent.click(screen.getByRole('button', { name: t('mobile.room.room') }));
         await fireEvent.click(
             await screen.findByRole('button', {
                 name: t('chat.runtime.permissions.approve_selected'),

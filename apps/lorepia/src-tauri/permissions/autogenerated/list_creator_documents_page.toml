@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-creator-documents-page"
+description = "Enables the list_creator_documents_page command without any pre-configured scope."
+commands.allow = ["list_creator_documents_page"]
+
+[[permission]]
+identifier = "deny-list-creator-documents-page"
+description = "Denies the list_creator_documents_page command without any pre-configured scope."
+commands.deny = ["list_creator_documents_page"]

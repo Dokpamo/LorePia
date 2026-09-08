@@ -211,3 +211,5 @@ pub const CORE_API_VERSION: u32 = 10;
 pub fn core_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
+
+pub use orchestration::{CreatorDocument, CreatorDocumentKind, ReadPage, ReadPageCursor};

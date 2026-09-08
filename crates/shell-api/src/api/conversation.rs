@@ -1,4 +1,6 @@
-use lorepia_core::{ConversationBranchId, ConversationId, ConversationMode, MessageId};
+use lorepia_core::{
+    ConversationBranchId, ConversationId, ConversationMode, GenerationId, MessageId,
+};
 
 use crate::{
     ConversationBranchDto, ConversationDto, ConversationStateDto, CreateConversationBranchInput,
@@ -159,6 +161,25 @@ impl ShellApi {
         validate_identifier("branch_id", branch_id)?;
         self.core
             .list_branch_message_presentations(&ConversationBranchId(branch_id.to_owned()))
+            .map(|values| values.into_iter().map(Into::into).collect())
+            .map_err(ShellError::from)
+    }
+
+    pub fn list_generation_messages(
+        &self,
+        conversation_id: &str,
+        branch_id: &str,
+        generation_id: &str,
+    ) -> ShellResult<Vec<MessageDto>> {
+        validate_identifier("conversation_id", conversation_id)?;
+        validate_identifier("branch_id", branch_id)?;
+        validate_identifier("generation_id", generation_id)?;
+        self.core
+            .list_generation_message_presentations(
+                &ConversationId(conversation_id.to_owned()),
+                &ConversationBranchId(branch_id.to_owned()),
+                &GenerationId(generation_id.to_owned()),
+            )
             .map(|values| values.into_iter().map(Into::into).collect())
             .map_err(ShellError::from)
     }

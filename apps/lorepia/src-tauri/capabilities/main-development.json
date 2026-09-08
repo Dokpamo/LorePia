@@ -2,7 +2,9 @@
   "identifier": "main-development",
   "description": "Allows the bundled LorePia development main window to call only the explicit application command allowlist.",
   "local": true,
-  "windows": ["main"],
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:window:allow-start-dragging",
     "core:window:allow-internal-toggle-maximize",
@@ -52,6 +54,7 @@
     "allow-select-conversation-persona",
     "allow-clear-conversation-persona",
     "allow-list-branch-messages",
+    "allow-list-generation-messages",
     "allow-list-messages",
     "allow-generate-runtime-text",
     "allow-cancel-runtime-text",
@@ -75,6 +78,7 @@
     "allow-capture-credential",
     "allow-delete-credential",
     "allow-get-settings",
+    "allow-get-storage-overview",
     "allow-update-settings",
     "allow-select-generation-target",
     "allow-list-provider-templates",
@@ -196,6 +200,8 @@
     "allow-delete-content-module",
     "allow-list-prompt-preset-bindings",
     "allow-list-memory-records",
+    "allow-list-memory-records-page",
+    "allow-list-creator-documents-page",
     "allow-retry-interrupted-memory-job",
     "allow-list-interrupted-memory-jobs",
     "allow-list-retryable-memory-query-embeddings",

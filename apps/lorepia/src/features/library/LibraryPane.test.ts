@@ -7,6 +7,7 @@ import {
     type LorepiaAppState,
 } from '../../app/app-controller';
 import type { LorepiaClient } from '../../lib/ipc/contracts';
+import { t } from '../../lib/i18n';
 
 const tauriMocks = vi.hoisted(() => ({
     convertFileSrc: vi.fn<(filePath: string, protocol?: string) => string>(),
@@ -268,7 +269,13 @@ describe('LibraryPane safe local sources', () => {
             onOpenChat: () => undefined,
         });
 
+        const pendingImage = await screen.findByAltText(
+            t('library.character.image', { name: state.library.characters[0]?.name ?? '' }),
+        );
+        expect(pendingImage).not.toBeVisible();
+        await fireEvent.load(pendingImage);
         const image = await screen.findByRole('img', { name: '라온 캐릭터 이미지' });
+        expect(image).toBeVisible();
         expect(resolveAssetDelivery).toHaveBeenCalledWith({
             selector: { kind: 'asset_id', asset_id: 'avatar-1' },
         });
@@ -318,6 +325,10 @@ describe('LibraryPane safe local sources', () => {
             onOpenChat: () => undefined,
         });
 
+        const pendingImage = await screen.findByAltText(
+            t('library.character.image', { name: state.library.characters[0]?.name ?? '' }),
+        );
+        await fireEvent.load(pendingImage);
         await screen.findByRole('img', { name: '라온 캐릭터 이미지' });
         expect(resolveAssetDelivery).toHaveBeenCalledWith({
             selector: { kind: 'sha256', sha256 },

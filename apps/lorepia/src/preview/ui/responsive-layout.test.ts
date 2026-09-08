@@ -10,10 +10,11 @@ describe('responsive connected pages', () => {
         [430, 932],
         [480, 700],
         [600, 500],
-    ])('fills all of the %i×%i viewport while scaling controls uniformly', (width, height) => {
+    ])('fills all of the %i×%i viewport without transforming page coordinates', (width, height) => {
         const layout = responsiveLayout({ width, height }, 1, true);
         expect(layout.width * layout.scale).toBeCloseTo(width);
         expect(layout.height * layout.scale).toBeCloseTo(height);
+        expect(layout.scale).toBe(1);
     });
 
     it.each([
@@ -28,14 +29,30 @@ describe('responsive connected pages', () => {
         expect(responsiveLayout({ width, height: 780 }, 1, true).mode).toBe(mode);
     });
 
-    it('keeps the same logical layout below 360px and fills the physical viewport', () => {
-        const reference = responsiveLayout({ width: 360, height: 720 }, 1, true);
+    it('keeps compact density bounded and independent of height or desktop growth', () => {
+        const density = (width: number, height = 780) =>
+            responsiveLayout({ width, height }, 1, true).density;
+        expect(density(320)).toBe(0.9);
+        expect(density(360)).toBeCloseTo(360 / 393);
+        expect(density(393)).toBe(1);
+        expect(density(430)).toBe(1);
+        expect(density(1920)).toBe(1);
+        expect(density(320, 480)).toBe(density(320, 1000));
+        expect(density(240)).toBe(0.9);
+        for (let width = 321; width < 450; width++) {
+            expect(density(width)).toBeGreaterThanOrEqual(density(width - 1));
+            expect(density(width) - density(width - 1)).toBeLessThan(0.003);
+        }
+    });
+
+    it('uses available width below 360px without introducing letterboxing', () => {
         const smaller = responsiveLayout({ width: 320, height: 640 }, 1, true);
-        expect(smaller.width).toBe(reference.width);
-        expect(smaller.height).toBe(reference.height);
-        expect(smaller.left).toBe(reference.left);
-        expect(smaller.chat).toBe(reference.chat);
-        expect(smaller.offset).toBe(reference.offset);
+        expect(smaller.width).toBe(320);
+        expect(smaller.height).toBe(640);
+        expect(smaller.left).toBe(320);
+        expect(smaller.chat).toBe(320);
+        expect(smaller.offset).toBe(-320);
+        expect(smaller.scale).toBe(1);
         expect(smaller.width * smaller.scale).toBe(320);
         expect(smaller.height * smaller.scale).toBe(640);
         expect(responsiveLayout({ width: 393, height: 780 }, 1, true).scale).toBe(1);
@@ -58,7 +75,7 @@ describe('responsive connected pages', () => {
                     expect(positions[last] + widths[last] + layout.offset).toBeCloseTo(
                         layout.width,
                     );
-                    expect(layout.chat).toBeGreaterThanOrEqual(360);
+                    expect(layout.chat).toBeGreaterThanOrEqual(Math.min(360, width));
                     if (!subpage) {
                         expect(layout.visible).not.toContain(2);
                         expect(layout.right).toBe(0);

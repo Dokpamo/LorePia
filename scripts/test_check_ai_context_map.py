@@ -103,6 +103,23 @@ class AiContextMapTests(unittest.TestCase):
             "contexts": {"GOV-001": entry("src/feature.rs")},
         }
 
+    def test_completed_source_sizes_stay_bounded_while_current_sources_evolve(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = self.make_root(temporary)
+            config = self.base_config()
+            config["default_max_context_bytes"] = 100
+            config["contexts"]["GOV-001"]["max_context_bytes"] = 100
+            sizes = {"docs/guide.md": 50, "src/feature.rs": 46}
+            (root / "docs/guide.md").write_text("x" * 200, encoding="utf-8")
+            failures, measured = evaluate_context_map(root, config, manifest("GOV-001"), strict_budget=True, source_sizes=sizes)
+            self.assertEqual(failures, [])
+            self.assertEqual(measured[0].bytes, 96)
+            self.assertTrue(evaluate_context_map(root, config, manifest("GOV-001"), strict_budget=True)[0])
+            sizes["src/feature.rs"] = 51
+            self.assertTrue(evaluate_context_map(root, config, manifest("GOV-001"), strict_budget=True, source_sizes=sizes)[0])
+            del sizes["src/feature.rs"]
+            self.assertTrue(any("missing from the archived" in item for item in evaluate_context_map(root, config, manifest("GOV-001"), source_sizes=sizes)[0]))
+
     def test_manifest_and_context_ids_must_match(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = self.make_root(temporary)

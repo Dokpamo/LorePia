@@ -17,8 +17,6 @@ import type {
     MessageDto,
     ModelRouteDto,
     OrchestrationWorkspaceDto,
-    ProviderCatalogHistoryDto,
-    ProviderCatalogStatusDto,
     ProviderConnectionDto,
     ProviderOverviewDto,
     ProviderTemplateDto,
@@ -28,13 +26,13 @@ import type {
 import type { PersonaDto } from '../features/personas/persona-contracts';
 import { emptyOrchestrationWorkspace } from '../features/orchestration/orchestration-controller';
 
+export { DEMO_CATALOG_HISTORY, DEMO_CATALOG_STATUS } from './demo-catalog';
+
 export const DEMO_INITIAL_CHARACTER_ID = 'character-aria';
 export const DEMO_INITIAL_CONVERSATION_ID = 'conversation-archive';
 
 const CREATED_AT = '2026-08-20T09:30:00.000Z';
 const UPDATED_AT = '2026-08-24T12:42:00.000Z';
-const CATALOG_SHA = 'b'.repeat(64);
-const BASELINE_SHA = 'c'.repeat(64);
 
 export const DEMO_BOOTSTRAP: BootstrapDto = {
     app_version: '0.1.0-demo',
@@ -612,43 +610,8 @@ export const DEMO_PROVIDER_OVERVIEW: ProviderOverviewDto = {
     templates: DEMO_PROVIDER_TEMPLATES,
     connections: DEMO_PROVIDER_CONNECTIONS,
     legacy_profiles: [],
-};
-
-export const DEMO_CATALOG_STATUS: ProviderCatalogStatusDto = {
-    status_schema_version: 1,
-    state_version: 4,
-    active_revision: 4,
-    active_snapshot_sha256: CATALOG_SHA,
-    bundled_baseline_sha256: BASELINE_SHA,
-    snapshot_count: 4,
-    signed_update_count: 2,
-    highest_accepted_revision: 4,
-    latest_issued_at: '2026-08-22T00:00:00.000Z',
-    active_signed_revisions: [3, 4],
-};
-
-export const DEMO_CATALOG_HISTORY: ProviderCatalogHistoryDto = {
-    history_schema_version: 1,
-    active_revision: 4,
-    revisions: [
-        {
-            revision: 4,
-            captured_at: '2026-08-22T00:00:00.000Z',
-            snapshot_sha256: CATALOG_SHA,
-            signed_revisions: [4],
-            active: true,
-        },
-        {
-            revision: 3,
-            captured_at: '2026-08-10T00:00:00.000Z',
-            snapshot_sha256: 'd'.repeat(64),
-            signed_revisions: [3],
-            active: false,
-        },
-    ],
-    activations: [],
-    next_before_revision: null,
-    next_before_state_version: null,
+    routes: DEMO_MODEL_ROUTES,
+    presets: DEMO_GENERATION_PRESETS,
 };
 
 export const DEMO_PERSONAS: PersonaDto[] = [
@@ -944,7 +907,7 @@ export function createDemoOrchestrationWorkspace(
             prompt_preset_id: 'prompt-story-demo',
             generation_preset_id: 'preset-balanced-demo',
             response_length: 'balanced',
-            creativity: 0.65,
+            creativity: 65,
             reasoning_effort: 'medium',
             memory_enabled: true,
             knowledge_enabled: true,

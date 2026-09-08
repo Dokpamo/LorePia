@@ -27,7 +27,10 @@ export default defineConfig(({ mode }) => ({
     plugins: [mode === 'demo' && demoEntryPlugin(), svelte()],
     clearScreen: false,
     envPrefix: ['VITE_', 'TAURI_'],
-    build: mode === 'ui' ? { rolldownOptions: { input: 'ui-preview.html' } } : undefined,
+    build:
+        mode === 'ui'
+            ? { rolldownOptions: { input: ['index.html', 'workspace.html', 'ui-preview.html'] } }
+            : undefined,
     resolve: {
         conditions: ['browser'],
     },

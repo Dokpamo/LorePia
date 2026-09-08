@@ -20,7 +20,7 @@ pub const MAX_GENERATED_OUTPUT_BYTES: usize = 256 * 1024;
 pub const MAX_GENERATED_OUTPUT_CHARS: usize = 64 * 1024;
 /// Maximum number of inert tool calls represented by one generation.
 pub const MAX_GENERATED_TOOL_CALLS: usize = 128;
-/// Maximum number of provider protocol events consumed by one generation.
+/// Maximum provider events that do not consume the bounded text/argument budget.
 pub const MAX_GENERATED_PROVIDER_EVENTS: usize = 8_192;
 /// Maximum cumulative UTF-8 size of tool-call argument fragments.
 pub const MAX_GENERATED_TOOL_ARGUMENT_BYTES: usize = 256 * 1024;
@@ -204,7 +204,7 @@ struct GenerationAccumulator<'credential> {
     completed_tool_calls: BTreeSet<ToolCallId>,
     tool_argument_reflections: BTreeMap<ToolCallId, ReflectionStream<'credential>>,
     pending_tool_completions: Vec<(ToolCallId, ReflectionStream<'credential>)>,
-    provider_event_count: usize,
+    non_progress_event_count: usize,
     preserve_opaque_reasoning_state: bool,
     provider_family: Option<ApiFamily>,
     opaque_reasoning_state: Vec<OpaqueReasoningState>,
@@ -225,13 +225,22 @@ impl GenerationAccumulator<'_> {
         event: ProviderEvent,
         events: &mpsc::Sender<ChatEvent>,
     ) -> CoreResult<()> {
-        self.provider_event_count = self
-            .provider_event_count
-            .checked_add(1)
-            .ok_or_else(provider_event_limit_error)?;
-        if self.provider_event_count > MAX_GENERATED_PROVIDER_EVENTS {
-            zeroize_rejected_provider_event(event);
-            return Err(provider_event_limit_error());
+        // Nonempty deltas are already bounded by cumulative output/argument
+        // limits. Count every other event cumulatively, even across progress,
+        // so empty/control floods cannot reset their allowance with text.
+        let progresses = match &event {
+            ProviderEvent::TextDelta(delta) | ProviderEvent::ReasoningDelta(delta) => {
+                !delta.is_empty()
+            }
+            ProviderEvent::ToolCallArgumentsDelta { delta, .. } => !delta.as_str().is_empty(),
+            _ => false,
+        };
+        if !progresses {
+            self.non_progress_event_count += 1;
+            if self.non_progress_event_count > MAX_GENERATED_PROVIDER_EVENTS {
+                zeroize_rejected_provider_event(event);
+                return Err(provider_event_limit_error());
+            }
         }
 
         match event {
@@ -517,7 +526,7 @@ pub async fn run_generation(
         completed_tool_calls: BTreeSet::new(),
         tool_argument_reflections: BTreeMap::new(),
         pending_tool_completions: Vec::new(),
-        provider_event_count: 0,
+        non_progress_event_count: 0,
         preserve_opaque_reasoning_state: request.preserve_opaque_reasoning_state,
         provider_family: request
             .provider_provenance
@@ -866,7 +875,7 @@ fn tool_arguments_limit_error() -> CoreError {
 }
 
 fn provider_event_limit_error() -> CoreError {
-    tool_protocol_error("provider exceeded the 8192-event generation limit")
+    tool_protocol_error("provider exceeded the 8192 non-progress event limit")
 }
 
 fn bound_provider_error(
@@ -950,6 +959,7 @@ fn zeroize_unsent_chat_event(event: ChatEvent) {
 
 #[cfg(test)]
 mod tests {
+    mod event_budget;
     use std::{
         sync::{Arc, Mutex},
         time::Duration,
@@ -1904,43 +1914,6 @@ mod tests {
         assert_eq!(
             failure.error.message,
             "provider exceeded the 128 tool-call generation limit"
-        );
-    }
-
-    #[tokio::test]
-    async fn enforces_a_total_provider_event_limit_including_empty_deltas() {
-        let exact = ProtocolProvider {
-            protocol_events: vec![
-                ProviderEvent::ReasoningDelta(String::new());
-                MAX_GENERATED_PROVIDER_EVENTS
-            ],
-        };
-        let (events, _receiver) = mpsc::channel(MAX_GENERATED_PROVIDER_EVENTS + 2);
-        let (_cancel, cancelled) = watch::channel(false);
-        run_generation(&exact, request(), None, events, cancelled)
-            .await
-            .expect("exact provider-event count");
-
-        let overflow = ProtocolProvider {
-            protocol_events: vec![
-                ProviderEvent::ReasoningDelta(String::new());
-                MAX_GENERATED_PROVIDER_EVENTS + 1
-            ],
-        };
-        let (events, _receiver) = mpsc::channel(MAX_GENERATED_PROVIDER_EVENTS + 2);
-        let (_cancel, cancelled) = watch::channel(false);
-        let failure = run_generation(&overflow, request(), None, events, cancelled)
-            .await
-            .expect_err("provider-event overflow must fail");
-        assert_eq!(failure.error.code, CoreErrorCode::ProviderUnavailable);
-        assert_eq!(
-            failure.error.message,
-            "provider exceeded the 8192-event generation limit"
-        );
-        assert!(!failure.error.recoverable);
-        assert_eq!(
-            failure.last_sequence,
-            u64::try_from(MAX_GENERATED_PROVIDER_EVENTS + 1).expect("bounded sequence")
         );
     }
 

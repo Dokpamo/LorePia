@@ -86,6 +86,7 @@ describe('LorepiaAppController discovery credential status', () => {
         const controller = new LorepiaAppController(client);
 
         await controller.loadProviders();
+        await controller.loadProviderDiagnostics('discovery');
 
         const discoveryTargets = credentialStatus.mock.calls
             .map(([target]) => target)

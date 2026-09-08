@@ -5,10 +5,11 @@
 //! accepts a path, package member name, URL, MIME override, or caller-provided
 //! bytes.
 
-use std::sync::{
-    Arc,
-    atomic::{AtomicU64, AtomicUsize, Ordering},
-};
+mod admission;
+mod png;
+
+pub(crate) use admission::AssetProtocolAdmission;
+use admission::AssetProtocolPermit;
 
 use lorepia_shell_api::{
     AssetDeliveryDto, AssetDeliveryKindDto, AssetProtocolRange, ShellApi, ShellErrorCode,
@@ -30,18 +31,19 @@ use crate::state::AppState;
 const MAX_RENDERABLE_ASSET_BYTES: u64 = 64 * 1_024 * 1_024;
 const MAX_RENDERABLE_IMAGE_BYTES: u64 = 16 * 1_024 * 1_024;
 const MAX_RANGE_BYTES: u64 = 1_024 * 1_024;
-// Admit at most two worst-case GET bodies and four total blocking jobs.
-const MAX_INFLIGHT_REQUESTS: usize = 4;
-const MAX_INFLIGHT_BYTES: u64 = 2 * MAX_RENDERABLE_ASSET_BYTES;
 
-pub(crate) fn handle(state: State<'_, AppState>, request: Request<Vec<u8>>) -> Response<Vec<u8>> {
+fn handle(
+    state: State<'_, AppState>,
+    request: Request<Vec<u8>>,
+    permit: &mut AssetProtocolPermit,
+) -> Response<Vec<u8>> {
     if let Some(response) = preflight_response(&request) {
         return response;
     }
     let Ok(shell) = state.shell() else {
         return empty(StatusCode::SERVICE_UNAVAILABLE);
     };
-    handle_with_backend(&shell, request)
+    handle_with_backend(&shell, request, permit)
 }
 
 trait AssetProtocolBackend {
@@ -75,6 +77,7 @@ impl AssetProtocolBackend for ShellApi {
 fn handle_with_backend(
     backend: &impl AssetProtocolBackend,
     request: Request<Vec<u8>>,
+    permit: &mut AssetProtocolPermit,
 ) -> Response<Vec<u8>> {
     if let Some(response) = preflight_response(&request) {
         return response;
@@ -133,20 +136,42 @@ fn handle_with_backend(
     if request.method() == Method::HEAD {
         return finish(builder, Vec::new());
     }
-    let verified =
-        match backend.read_verified_range(sha256, response_range.start, response_range.length) {
-            Ok(verified) => verified,
-            Err(error) => return empty(status_for_shell_error(error)),
-        };
-    if verified.descriptor != descriptor || verified.start != response_range.start {
+    // A partial PNG response must not bypass validation of the complete image.
+    let is_png = descriptor.media_type == "image/png";
+    let read_range = if is_png {
+        ByteRange {
+            start: 0,
+            length: descriptor.size_bytes,
+        }
+    } else {
+        response_range
+    };
+    if !permit.reserve_bytes(read_range.length) {
+        return overloaded_response();
+    }
+    let verified = match backend.read_verified_range(sha256, read_range.start, read_range.length) {
+        Ok(verified) => verified,
+        Err(error) => return empty(status_for_shell_error(error)),
+    };
+    if verified.descriptor != descriptor || verified.start != read_range.start {
         return empty(StatusCode::INTERNAL_SERVER_ERROR);
     }
-    let body = verified.bytes;
+    let mut body = verified.bytes;
     let Ok(actual_length) = u64::try_from(body.len()) else {
         return empty(StatusCode::INTERNAL_SERVER_ERROR);
     };
-    if actual_length != response_range.length {
+    if actual_length != read_range.length {
         return empty(StatusCode::INTERNAL_SERVER_ERROR);
+    }
+    if is_png {
+        if !png::has_valid_chunk_checksums(&body) {
+            return empty(StatusCode::UNSUPPORTED_MEDIA_TYPE);
+        }
+        // Keep the full buffer reservation; avoid allocating another range buffer.
+        let start = usize::try_from(response_range.start).expect("bounded image offset");
+        let length = usize::try_from(response_range.length).expect("bounded image length");
+        body.copy_within(start..start + length, 0);
+        body.truncate(length);
     }
     finish(builder, body)
 }
@@ -158,7 +183,7 @@ pub(crate) fn preflight_response(request: &Request<Vec<u8>>) -> Option<Response<
             Vec::new(),
         ));
     }
-    if digest_from_uri(request.uri()).is_none() {
+    if !request.body().is_empty() || digest_from_uri(request.uri()).is_none() {
         return Some(empty(StatusCode::BAD_REQUEST));
     }
     None
@@ -171,115 +196,6 @@ pub(crate) fn overloaded_response() -> Response<Vec<u8>> {
             .header(CONTENT_LENGTH, "0"),
         Vec::new(),
     )
-}
-
-pub(crate) fn retain_permit_in_response(
-    response: &mut Response<Vec<u8>>,
-    permit: AssetProtocolPermit,
-) {
-    // Tauri and Wry preserve HTTP extensions while converting Vec into Cow.
-    // On Windows the converted response is queued to the main thread, so this
-    // lease remains alive through response conversion, SetResponse, and the
-    // WebView2 deferral completion instead of ending when respond() returns.
-    let previous = response
-        .extensions_mut()
-        .insert(AssetProtocolResponseLease {
-            _permit: Arc::new(permit),
-        });
-    debug_assert!(previous.is_none());
-}
-
-#[derive(Clone)]
-pub(crate) struct AssetProtocolAdmission {
-    inner: Arc<AssetProtocolAdmissionInner>,
-}
-
-struct AssetProtocolAdmissionInner {
-    max_requests: usize,
-    max_bytes: u64,
-    active_requests: AtomicUsize,
-    active_bytes: AtomicU64,
-}
-
-pub(crate) struct AssetProtocolPermit {
-    inner: Arc<AssetProtocolAdmissionInner>,
-    reserved_bytes: u64,
-}
-
-#[derive(Clone)]
-struct AssetProtocolResponseLease {
-    _permit: Arc<AssetProtocolPermit>,
-}
-
-impl AssetProtocolAdmission {
-    fn new(max_requests: usize, max_bytes: u64) -> Self {
-        Self {
-            inner: Arc::new(AssetProtocolAdmissionInner {
-                max_requests,
-                max_bytes,
-                active_requests: AtomicUsize::new(0),
-                active_bytes: AtomicU64::new(0),
-            }),
-        }
-    }
-
-    pub(crate) fn try_acquire(&self, request: &Request<Vec<u8>>) -> Option<AssetProtocolPermit> {
-        self.inner
-            .active_requests
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |active| {
-                active
-                    .checked_add(1)
-                    .filter(|next| *next <= self.inner.max_requests)
-            })
-            .ok()?;
-
-        let reserved_bytes = if request.method() == Method::GET {
-            MAX_RENDERABLE_ASSET_BYTES
-        } else {
-            0
-        };
-        let bytes_reserved = self
-            .inner
-            .active_bytes
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |active| {
-                active
-                    .checked_add(reserved_bytes)
-                    .filter(|next| *next <= self.inner.max_bytes)
-            })
-            .is_ok();
-        if !bytes_reserved {
-            self.inner.active_requests.fetch_sub(1, Ordering::Release);
-            return None;
-        }
-
-        Some(AssetProtocolPermit {
-            inner: Arc::clone(&self.inner),
-            reserved_bytes,
-        })
-    }
-
-    #[cfg(test)]
-    fn active_for_test(&self) -> (usize, u64) {
-        (
-            self.inner.active_requests.load(Ordering::Acquire),
-            self.inner.active_bytes.load(Ordering::Acquire),
-        )
-    }
-}
-
-impl Default for AssetProtocolAdmission {
-    fn default() -> Self {
-        Self::new(MAX_INFLIGHT_REQUESTS, MAX_INFLIGHT_BYTES)
-    }
-}
-
-impl Drop for AssetProtocolPermit {
-    fn drop(&mut self) {
-        self.inner
-            .active_bytes
-            .fetch_sub(self.reserved_bytes, Ordering::Release);
-        self.inner.active_requests.fetch_sub(1, Ordering::Release);
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -430,6 +346,18 @@ mod tests {
 
     use super::*;
 
+    fn respond(
+        backend: &impl AssetProtocolBackend,
+        request: Request<Vec<u8>>,
+    ) -> Response<Vec<u8>> {
+        let admission = AssetProtocolAdmission::default();
+        let mut permit = admission.try_acquire().expect("request slot");
+        handle_with_backend(backend, request, &mut permit)
+    }
+
+    mod admission_integration;
+    mod png_rendering;
+
     struct CountingBackend {
         descriptor: AssetDeliveryDto,
         bytes: Vec<u8>,
@@ -446,7 +374,7 @@ mod tests {
                 descriptor: AssetDeliveryDto {
                     asset_id: "asset".to_owned(),
                     sha256: sha256.clone(),
-                    media_type: "image/png".to_owned(),
+                    media_type: "image/webp".to_owned(),
                     kind: AssetDeliveryKindDto::Image,
                     size_bytes: 8,
                     width: Some(1),
@@ -576,11 +504,11 @@ mod tests {
             .header("range", "bytes=2-4")
             .body(Vec::new())
             .expect("GET request");
-        let response = handle_with_backend(&get_backend, get);
+        let response = respond(&get_backend, get);
 
         assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
         assert_eq!(response.headers()[CONTENT_RANGE], "bytes 2-4/8");
-        assert_eq!(response.headers()[CONTENT_TYPE], "image/png");
+        assert_eq!(response.headers()[CONTENT_TYPE], "image/webp");
         assert_eq!(response.body(), &[2, 3, 4]);
         assert_eq!(get_backend.resolve_calls.get(), 1);
         assert_eq!(get_backend.read_calls.get(), 1);
@@ -593,7 +521,7 @@ mod tests {
             .uri(format!("lorepia-asset://sha256/{digest}"))
             .body(Vec::new())
             .expect("HEAD request");
-        let response = handle_with_backend(&head_backend, head);
+        let response = respond(&head_backend, head);
 
         assert_eq!(response.status(), StatusCode::OK);
         assert!(response.body().is_empty());
@@ -607,7 +535,7 @@ mod tests {
             .header("range", "bytes=2-4")
             .body(Vec::new())
             .expect("ranged HEAD request");
-        let response = handle_with_backend(&ranged_head_backend, ranged_head);
+        let response = respond(&ranged_head_backend, ranged_head);
 
         assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
         assert_eq!(response.headers()[CONTENT_RANGE], "bytes 2-4/8");
@@ -615,105 +543,5 @@ mod tests {
         assert!(response.body().is_empty());
         assert_eq!(ranged_head_backend.resolve_calls.get(), 1);
         assert_eq!(ranged_head_backend.read_calls.get(), 0);
-    }
-
-    #[test]
-    fn admission_deterministically_bounds_worker_fanout_and_bytes() {
-        let digest = "ab".repeat(32);
-        let get = || {
-            Request::builder()
-                .method(Method::GET)
-                .uri(format!("lorepia-asset://sha256/{digest}"))
-                .body(Vec::new())
-                .expect("GET request")
-        };
-        let head = || {
-            Request::builder()
-                .method(Method::HEAD)
-                .uri(format!("lorepia-asset://sha256/{digest}"))
-                .body(Vec::new())
-                .expect("HEAD request")
-        };
-
-        let request_limited = AssetProtocolAdmission::new(2, u64::MAX);
-        let first = request_limited.try_acquire(&get()).expect("first permit");
-        let second = request_limited.try_acquire(&head()).expect("second permit");
-        assert!(request_limited.try_acquire(&head()).is_none());
-        assert_eq!(
-            request_limited.active_for_test(),
-            (2, MAX_RENDERABLE_ASSET_BYTES)
-        );
-        drop(first);
-        let replacement = request_limited
-            .try_acquire(&head())
-            .expect("released request slot");
-        assert_eq!(request_limited.active_for_test(), (2, 0));
-        drop(replacement);
-        drop(second);
-        assert_eq!(request_limited.active_for_test(), (0, 0));
-
-        let byte_limited = AssetProtocolAdmission::new(4, MAX_RENDERABLE_ASSET_BYTES);
-        let full_body = byte_limited.try_acquire(&get()).expect("body budget");
-        assert!(byte_limited.try_acquire(&get()).is_none());
-        assert_eq!(
-            byte_limited.active_for_test(),
-            (1, MAX_RENDERABLE_ASSET_BYTES)
-        );
-        let metadata_only = byte_limited
-            .try_acquire(&head())
-            .expect("HEAD has no body reservation");
-        assert_eq!(
-            byte_limited.active_for_test(),
-            (2, MAX_RENDERABLE_ASSET_BYTES)
-        );
-        drop(metadata_only);
-        drop(full_body);
-        assert_eq!(byte_limited.active_for_test(), (0, 0));
-        let reused = byte_limited
-            .try_acquire(&get())
-            .expect("released byte budget");
-        drop(reused);
-
-        let defaults = AssetProtocolAdmission::default();
-        let first_body = defaults.try_acquire(&get()).expect("first default body");
-        let second_body = defaults.try_acquire(&get()).expect("second default body");
-        assert!(defaults.try_acquire(&get()).is_none());
-        let first_head = defaults.try_acquire(&head()).expect("first default HEAD");
-        let second_head = defaults.try_acquire(&head()).expect("second default HEAD");
-        assert!(defaults.try_acquire(&head()).is_none());
-        assert_eq!(
-            defaults.active_for_test(),
-            (MAX_INFLIGHT_REQUESTS, MAX_INFLIGHT_BYTES)
-        );
-        drop(first_body);
-        drop(second_body);
-        drop(first_head);
-        drop(second_head);
-        assert_eq!(defaults.active_for_test(), (0, 0));
-    }
-
-    #[test]
-    fn response_handoff_keeps_permit_until_converted_response_is_consumed() {
-        let digest = "ab".repeat(32);
-        let request = Request::builder()
-            .method(Method::GET)
-            .uri(format!("lorepia-asset://sha256/{digest}"))
-            .body(Vec::new())
-            .expect("GET request");
-        let admission = AssetProtocolAdmission::new(1, MAX_RENDERABLE_ASSET_BYTES);
-        let permit = admission.try_acquire(&request).expect("response permit");
-        let mut response = Response::new(vec![1, 2, 3]);
-
-        retain_permit_in_response(&mut response, permit);
-        let (parts, body) = response.into_parts();
-        let queued = Response::from_parts(parts, std::borrow::Cow::<'static, [u8]>::Owned(body));
-
-        assert_eq!(admission.active_for_test(), (1, MAX_RENDERABLE_ASSET_BYTES));
-        assert!(admission.try_acquire(&request).is_none());
-        assert_eq!(queued.body().as_ref(), &[1, 2, 3]);
-
-        drop(queued);
-        assert_eq!(admission.active_for_test(), (0, 0));
-        assert!(admission.try_acquire(&request).is_some());
     }
 }

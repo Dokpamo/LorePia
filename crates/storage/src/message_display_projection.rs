@@ -1,3 +1,4 @@
+mod loading;
 mod persistence;
 
 use chrono::{DateTime, Utc};
@@ -5,7 +6,6 @@ use lorepia_domain::{
     CoreError, CoreErrorCode, CoreResult, GenerationId, Message, MessageId, MessageRole,
     MessageStatus, Sha256Digest,
 };
-use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -210,107 +210,6 @@ struct StoredRuleDiagnosticRow {
     created_at: String,
 }
 
-impl Storage {
-    /// Loads and verifies a sidecar for one already-loaded canonical message.
-    /// A missing sidecar is a legitimate identity projection.
-    pub fn get_message_display_projection(
-        &self,
-        message: &Message,
-    ) -> CoreResult<Option<StoredMessageDisplayProjection>> {
-        let connection = self.connection()?;
-        let row = connection
-            .query_row(
-                "SELECT generation_id, canonical_content_sha256, display_content,
-                        display_content_sha256, pipeline_diagnostics_json,
-                        diagnostics_sha256, created_at
-                 FROM message_display_projections
-                 WHERE message_id = ?1",
-                [&message.id.0],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
-                        row.get::<_, String>(4)?,
-                        row.get::<_, String>(5)?,
-                        row.get::<_, String>(6)?,
-                    ))
-                },
-            )
-            .optional()
-            .map_err(storage_db_error)?;
-        let Some(row) = row else {
-            return Ok(None);
-        };
-        validate_terminal_projection_owner(message).map_err(|_| {
-            storage_corrupted("display projection belongs to a nonterminal assistant message")
-        })?;
-        let generation_id = GenerationId(row.0);
-        if message.generation_id.as_ref() != Some(&generation_id) {
-            return Err(storage_corrupted(
-                "display projection generation ownership is inconsistent",
-            ));
-        }
-        validate_display_content(&row.2)
-            .map_err(|_| storage_corrupted("stored display projection violates content bounds"))?;
-        let canonical_content_sha256 = parse_sha256("canonical content", row.1)?;
-        let display_content_sha256 = parse_sha256("display content", row.3)?;
-        let diagnostics_sha256_stored = parse_sha256("transform diagnostics", row.5)?;
-        if sha256_digest(message.content.as_bytes())? != canonical_content_sha256
-            || sha256_digest(row.2.as_bytes())? != display_content_sha256
-        {
-            return Err(storage_corrupted(
-                "stored display projection content hash is inconsistent",
-            ));
-        }
-        let pipeline: StoredPipelineDiagnostics = serde_json::from_str(&row.4)
-            .map_err(|_| storage_corrupted("stored transform pipeline diagnostics are invalid"))?;
-        validate_pipeline_failures(&pipeline.failures).map_err(|_| {
-            storage_corrupted("stored transform pipeline diagnostics violate bounds")
-        })?;
-        if pipeline.schema_version != DIAGNOSTIC_SCHEMA_VERSION {
-            return Err(storage_corrupted(
-                "stored transform pipeline diagnostics schema is unsupported",
-            ));
-        }
-        let created_at = parse_datetime("display projection created_at", &row.6)?;
-        let mut diagnostics =
-            load_rule_diagnostics(&connection, &message.id, &generation_id, created_at)?;
-        diagnostics.extend(
-            pipeline
-                .failures
-                .iter()
-                .map(|failure| MessageTransformDiagnostic {
-                    set_revision_id: None,
-                    rule_id: None,
-                    stage: failure.stage,
-                    disposition: MessageTransformDisposition::PipelineRejected,
-                    code: Some(failure.code.clone()),
-                    before_sha256: failure.before_sha256.clone(),
-                    after_sha256: None,
-                    recorded_at: created_at,
-                }),
-        );
-        sort_diagnostics(&mut diagnostics);
-        if diagnostics_sha256(&diagnostics)? != diagnostics_sha256_stored {
-            return Err(storage_corrupted(
-                "stored transform diagnostics hash is inconsistent",
-            ));
-        }
-        Ok(Some(StoredMessageDisplayProjection {
-            message_id: message.id.clone(),
-            generation_id,
-            display_content: row.2,
-            canonical_content_sha256,
-            display_content_sha256,
-            diagnostics_sha256: diagnostics_sha256_stored,
-            diagnostics,
-            created_at,
-        }))
-    }
-}
-
 fn validate_terminal_projection_owner(assistant: &Message) -> CoreResult<()> {
     if assistant.role != MessageRole::Assistant || assistant.status == MessageStatus::Pending {
         return Err(CoreError::invalid(
@@ -483,56 +382,6 @@ fn validate_code(value: Option<&str>) -> CoreResult<()> {
         }
     }
     Ok(())
-}
-
-fn load_rule_diagnostics(
-    connection: &rusqlite::Connection,
-    message_id: &MessageId,
-    generation_id: &GenerationId,
-    projection_created_at: DateTime<Utc>,
-) -> CoreResult<Vec<MessageTransformDiagnostic>> {
-    let mut statement = connection
-        .prepare(
-            "SELECT log.set_revision_id, set_revision.transform_set_id,
-                    log.rule_id, log.phase, log.status, log.before_sha256,
-                    log.after_sha256, log.error_code, log.diagnostics_json,
-                    log.created_at
-             FROM transform_application_logs AS log
-             JOIN transform_set_revisions AS set_revision
-               ON set_revision.revision_id = log.set_revision_id
-             WHERE log.message_id = ?1 AND log.generation_id = ?2
-               AND log.phase IN ('provider_output_canonical', 'display_only')
-             ORDER BY CASE log.phase
-                        WHEN 'provider_output_canonical' THEN 0 ELSE 1 END,
-                      log.ordinal, log.id",
-        )
-        .map_err(storage_db_error)?;
-    let rows = statement
-        .query_map(params![message_id.0, generation_id.0], |row| {
-            Ok(StoredRuleDiagnosticRow {
-                set_revision_id: row.get(0)?,
-                set_id: row.get(1)?,
-                rule_id: row.get(2)?,
-                phase: row.get(3)?,
-                status: row.get(4)?,
-                before_sha256: row.get(5)?,
-                after_sha256: row.get(6)?,
-                error_code: row.get(7)?,
-                diagnostics_json: row.get(8)?,
-                created_at: row.get(9)?,
-            })
-        })
-        .map_err(storage_db_error)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(storage_db_error)?;
-    if rows.len() > MAX_MESSAGE_TRANSFORM_APPLICATIONS {
-        return Err(storage_corrupted(
-            "stored message transform application count exceeds its bound",
-        ));
-    }
-    rows.into_iter()
-        .map(|row| decode_rule_diagnostic(row, projection_created_at))
-        .collect()
 }
 
 fn decode_rule_diagnostic(

@@ -5,9 +5,9 @@ use lorepia_shell_api::{
     ConversationBranchDto, ConversationDto, ConversationStateDto, CreateConversationBranchInput,
     CreateConversationInput, EditUserMessageInput, GenerateRuntimeTextInput, GenerationCredential,
     GenerationPresetDto, GenerationSelectionInput, GenerationStartedDto,
-    MessageActionGenerationDto, MessageDto, ModelRouteDto, RegenerateAssistantMessageInput,
-    RemoveMessageInput, RequestPreviewDto, ResolveAssetDeliveryInput, RuntimeTextGenerationDto,
-    SecretCredential, SelectConversationBranchInput, SendMessageInput, SetConversationModeInput,
+    MessageActionGenerationDto, ModelRouteDto, RegenerateAssistantMessageInput, RemoveMessageInput,
+    RequestPreviewDto, ResolveAssetDeliveryInput, RuntimeTextGenerationDto, SecretCredential,
+    SelectConversationBranchInput, SendMessageInput, SetConversationModeInput,
 };
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, State, ipc::Channel};
@@ -22,10 +22,10 @@ use crate::runtime_contract::RuntimeGenerationRequest;
 use crate::{
     channels::forward_chat_stream,
     contract::{
-        BranchMessagesRequest, CharacterConversationsRequest, CharacterRenderProfileRequest,
-        CharacterRequest, ChatStreamRequest, CredentialStatusDto, CredentialStatusRequest,
-        CredentialTarget, GenerationPresetsRequest, GenerationRequest, MemorySupervisorStatusDto,
-        ModelRoutesRequest, NativeCaptureStatusDto, PreviewProviderRequest, ProviderOverviewDto,
+        CharacterConversationsRequest, CharacterRenderProfileRequest, CharacterRequest,
+        ChatStreamRequest, CredentialStatusDto, CredentialStatusRequest, CredentialTarget,
+        GenerationPresetsRequest, GenerationRequest, MemorySupervisorStatusDto, ModelRoutesRequest,
+        NativeCaptureStatusDto, PreviewProviderRequest, ProviderOverviewDto,
         SubscribeGenerationRequest,
     },
     error::{CommandError, CommandResult},
@@ -242,28 +242,6 @@ pub fn set_conversation_mode(
     state
         .shell()?
         .set_conversation_mode(input)
-        .map_err(Into::into)
-}
-
-#[tauri::command]
-pub fn list_branch_messages(
-    state: State<'_, AppState>,
-    request: BranchMessagesRequest,
-) -> CommandResult<Vec<MessageDto>> {
-    state
-        .shell()?
-        .list_branch_messages(&request.branch_id)
-        .map_err(Into::into)
-}
-
-#[tauri::command]
-pub fn list_messages(
-    state: State<'_, AppState>,
-    request: crate::contract::ConversationRequest,
-) -> CommandResult<Vec<MessageDto>> {
-    state
-        .shell()?
-        .list_messages(&request.conversation_id)
         .map_err(Into::into)
 }
 
@@ -1107,11 +1085,14 @@ fn consume_discovery_capture_confirmation(
 #[tauri::command]
 pub fn get_provider_overview(state: State<'_, AppState>) -> CommandResult<ProviderOverviewDto> {
     let shell = state.shell()?;
+    let (routes, presets) = shell.provider_generation_catalog()?;
     Ok(ProviderOverviewDto {
         settings: shell.get_settings()?,
         templates: shell.list_provider_templates()?,
         connections: shell.list_provider_connections()?,
         legacy_profiles: shell.list_provider_profiles()?,
+        routes,
+        presets,
     })
 }
 

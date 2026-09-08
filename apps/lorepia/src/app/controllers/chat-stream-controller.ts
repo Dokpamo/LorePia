@@ -5,6 +5,7 @@ import { ChatStreamVerifier, type ChatStreamExpectation } from '../../features/c
 import type { ChatState } from '../app-state';
 import { EpochGuard } from '../operations/epoch-guard';
 import type { AppControllerContext } from './controller-context';
+import { loadReconciledMessages, pendingAssistantMessage } from './terminal-message-refresh';
 
 interface ChatStreamControllerHooks {
     refreshMemoryQueryRetries(): Promise<void>;
@@ -279,17 +280,7 @@ export class ChatStreamController {
     }
 
     pendingAssistantMessage(messages: MessageDto[], generationId?: string): MessageDto | null {
-        return (
-            [...messages]
-                .reverse()
-                .find(
-                    (message) =>
-                        message.role === 'assistant' &&
-                        message.status === 'pending' &&
-                        message.generation_id !== null &&
-                        (generationId === undefined || message.generation_id === generationId),
-                ) ?? null
-        );
+        return pendingAssistantMessage(messages, generationId);
     }
 
     acceptStreamItem(item: ChatStreamItemDto, epoch: number, streamId: string): void {
@@ -468,10 +459,15 @@ export class ChatStreamController {
             const conversationState = await this.context.client.getConversationState(
                 conversation.id,
             );
-            const [branches, messages] = await Promise.all([
-                this.context.client.listBranches(conversation.id),
-                this.context.client.listBranchMessages(conversationState.active_branch_id),
-            ]);
+            const branches = await this.context.client.listBranches(conversation.id);
+            const messages = await loadReconciledMessages(
+                this.context.client,
+                this.context.readState(),
+                conversationState,
+                branches,
+                generationId,
+                reason,
+            );
             if (!this.streamEpoch.isCurrent(epoch)) return;
             const pendingAssistant = this.pendingAssistantMessage(messages, generationId);
             this.streamVerifier = null;

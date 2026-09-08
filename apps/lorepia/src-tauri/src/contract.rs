@@ -43,17 +43,7 @@ pub use import::{
 };
 use tauri_plugin_lorepia_platform::{CredentialStatus, NativeCaptureStatus};
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ConversationRequest {
-    pub conversation_id: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct BranchMessagesRequest {
-    pub branch_id: String,
-}
+pub use crate::generation_messages_commands::{BranchMessagesRequest, ConversationRequest};
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -191,6 +181,8 @@ pub struct ProviderOverviewDto {
     pub templates: Vec<ProviderTemplateDto>,
     pub connections: Vec<ProviderConnectionDto>,
     pub legacy_profiles: Vec<ProviderProfileDto>,
+    pub routes: Vec<ModelRouteDto>,
+    pub presets: Vec<GenerationPresetDto>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]

@@ -5,16 +5,12 @@
       "lines": 2155
     },
     "apps/lorepia/src/features/orchestration/orchestration-controller.test.ts": {
-      "bytes": 79825,
-      "lines": 1910
+      "bytes": 79626,
+      "lines": 1902
     },
     "apps/lorepia/src/lib/ipc/client.test.ts": {
       "bytes": 69408,
       "lines": 1828
-    },
-    "apps/lorepia/src/styles/hover-contract.test.ts": {
-      "bytes": 91320,
-      "lines": 1339
     },
     "crates/core/tests/generation_attempt_derived_closure.rs": {
       "bytes": 180370,

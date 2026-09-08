@@ -4,6 +4,14 @@
 
 - This file applies to the entire repository. A nearer `AGENTS.md` may add
   local constraints, but it must not weaken the boundaries below.
+- Completed refactoring context/report evidence is archived under
+  `config/refactoring/archive.json`; later feature work does not rewrite it.
+  Use `check_ai_context_map.py --current` or
+  `report_refactoring_baseline.py --print` for current informational measurements.
+- API and Cargo declaration changes require an explicit checked-in contract
+  update and normal code review. Their historical inventories are not permanent
+  feature freezes; layer, credential, Stored* and deterministic boundaries still
+  apply. See ADR 0006.
 - Use the Rust and Node versions pinned by `rust-toolchain.toml` and
   `.node-version`.
 - For refactoring work, perform one Task ID at a time. Before editing, record:
@@ -157,6 +165,7 @@ python3 -m unittest \
   scripts/test_check_i18n_literal_baseline.py \
   scripts/test_check_source_architecture.py \
   scripts/test_report_refactoring_baseline.py \
+  scripts/test_refactoring_archive.py \
   scripts/test_check_github_workflow_security.py
 python3 scripts/generate_ipc_commands.py --check
 python3 scripts/report_refactoring_baseline.py --check

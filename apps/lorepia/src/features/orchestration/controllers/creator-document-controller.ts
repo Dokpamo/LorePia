@@ -1,3 +1,5 @@
+import { loadLegacyCreatorDocuments } from './legacy-creator-catalog';
+import { CatalogPageController } from './catalog-page-controller';
 import { t } from '../../../lib/i18n';
 import type {
     CreatorContentModuleDocumentDto,
@@ -10,7 +12,6 @@ import type {
 
 import {
     contentModuleDraft,
-    editableCreatorDocuments,
     errorLabel,
     interactionRuleSetDraft,
     knowledgeBookDraft,
@@ -29,68 +30,24 @@ import {
 import type { OrchestrationStateController } from './orchestration-state-controller';
 
 export class CreatorDocumentController {
+    private readonly pages: CatalogPageController;
     constructor(
         private readonly client: OrchestrationCapableClient,
         private readonly state: OrchestrationStateController,
-    ) {}
+    ) {
+        this.pages = new CatalogPageController(client, state);
+    }
 
     async loadEditableCreatorDocumentsForContext(contextKey: string): Promise<void> {
-        const listMemoryProfiles = this.client.listMemoryProfiles;
-        const listKnowledgeBooks = this.client.listKnowledgeBooks;
-        const listTransformSets = this.client.listTransformSets;
-        const listInteractionRuleSets = this.client.listInteractionRuleSets;
-        const listContentModules = this.client.listContentModules;
-        if (
-            listMemoryProfiles === undefined ||
-            listKnowledgeBooks === undefined ||
-            listTransformSets === undefined ||
-            listInteractionRuleSets === undefined ||
-            listContentModules === undefined
-        ) {
-            this.state.updateForContext(contextKey, (state) => ({
-                ...state,
-                editable_creator_documents_loading: false,
-                editable_creator_documents_error: t('orchestration.error.unsupported_creator_edit'),
-            }));
-            return;
-        }
-        this.state.updateForContext(contextKey, (state) => ({
-            ...state,
-            editable_creator_documents_loading: true,
-            editable_creator_documents_error: null,
-        }));
-        try {
-            const [
-                memoryProfiles,
-                knowledgeBooks,
-                transformSets,
-                interactionRuleSets,
-                contentModules,
-            ] = await Promise.all([
-                listMemoryProfiles.call(this.client),
-                listKnowledgeBooks.call(this.client),
-                listTransformSets.call(this.client),
-                listInteractionRuleSets.call(this.client),
-                listContentModules.call(this.client),
-            ]);
-            this.state.updateForContext(contextKey, (state) => ({
-                ...state,
-                editable_memory_profiles: editableCreatorDocuments(memoryProfiles),
-                editable_knowledge_books: editableCreatorDocuments(knowledgeBooks),
-                editable_transform_sets: editableCreatorDocuments(transformSets),
-                editable_interaction_rule_sets: editableCreatorDocuments(interactionRuleSets),
-                editable_content_modules: editableCreatorDocuments(contentModules),
-                editable_creator_documents_loading: false,
-                editable_creator_documents_error: null,
-            }));
-        } catch (error: unknown) {
-            this.state.updateForContext(contextKey, (state) => ({
-                ...state,
-                editable_creator_documents_loading: false,
-                editable_creator_documents_error: errorLabel(error),
-            }));
-        }
+        if (this.client.listCreatorDocumentsPage !== undefined)
+            return this.pages.loadInitialCreatorPages(contextKey);
+        return loadLegacyCreatorDocuments(this.client, this.state, contextKey);
     }
+
+    async loadMoreCreatorDocuments(kind: CreatorDocumentKind, restart = false): Promise<void> {
+        return this.pages.loadCreatorPage(kind, restart);
+    }
+
     addCreatorDocumentDraft(kind: CreatorDocumentKind, requestedId: string): boolean {
         const state = this.state.snapshot();
         const id = requestedId.trim();

@@ -144,7 +144,7 @@ describe('ChatPane transcript chrome', () => {
         const { controller, orchestrationController } = renderChatWithSettings(appState);
         const setConversationMode = vi
             .spyOn(controller, 'setConversationMode')
-            .mockResolvedValue(undefined);
+            .mockResolvedValue(true);
         const selectBranch = vi.spyOn(controller, 'selectBranch').mockResolvedValue(undefined);
 
         expect(screen.queryByRole('radiogroup', { name: '대화 모드' })).not.toBeInTheDocument();
@@ -154,7 +154,13 @@ describe('ChatPane transcript chrome', () => {
         const settings = screen.getByRole('dialog', { name: '대화 설정' });
         const settingsUi = within(settings);
 
-        expect(settingsUi.getByRole('heading', { name: '대화' })).toBeInTheDocument();
+        expect(
+            settingsUi.queryByRole('radiogroup', { name: t('quick.panel.summary.mode') }),
+        ).not.toBeInTheDocument();
+        await fireEvent.click(settingsUi.getByRole('button', { name: t('mobile.room.room') }));
+        expect(
+            settingsUi.getByRole('heading', { name: t('mobile.room.room') }),
+        ).toBeInTheDocument();
         expect(settingsUi.getByRole('radiogroup', { name: '대화 모드' })).toBeInTheDocument();
         expect(settingsUi.getByRole('combobox', { name: /^분기:/ })).toHaveAttribute(
             'aria-expanded',
@@ -186,9 +192,11 @@ describe('ChatPane transcript chrome', () => {
             endX: 160,
             endY: 304,
         });
-        const utilityPage = await screen.findByRole('dialog', { name: '도구 패널' });
+        const utilityPage = await screen.findByRole('dialog', { name: t('quick.title') });
         expect(utilityPage).toHaveClass('open');
-        expect(within(utilityPage).getByRole('button', { name: '대화 설정 열기' })).toBeVisible();
+        expect(
+            within(utilityPage).getByRole('button', { name: new RegExp(t('mobile.room.answer')) }),
+        ).toBeVisible();
         expect(
             within(utilityPage).queryByRole('button', { name: /^프롬프트 프리셋:/ }),
         ).not.toBeInTheDocument();
@@ -203,7 +211,9 @@ describe('ChatPane transcript chrome', () => {
         });
         expect(utilityPage).toHaveClass('utility-settling');
         await waitFor(() =>
-            expect(screen.queryByRole('dialog', { name: '도구 패널' })).not.toBeInTheDocument(),
+            expect(
+                screen.queryByRole('dialog', { name: t('quick.title') }),
+            ).not.toBeInTheDocument(),
         );
         controller.destroy();
     });
