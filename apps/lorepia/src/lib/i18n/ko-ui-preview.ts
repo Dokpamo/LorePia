@@ -105,6 +105,7 @@ export const koUiPreview = {
     'uiPreview.regenerate': '다시 생성',
     'uiPreview.removeFrom': '여기부터 삭제',
     'uiPreview.removeConfirm': '이 메시지부터 삭제할까요?',
+    'uiPreview.removeMessageHint': '이 메시지와 이후 대화가 현재 브랜치에서 사라져요.',
     'uiPreview.confirmRemove': '삭제 확인',
     'uiPreview.cancel': '취소',
     'uiPreview.openMessageTools': '{speaker} 메시지 도구 열기',

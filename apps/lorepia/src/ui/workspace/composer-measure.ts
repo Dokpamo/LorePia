@@ -61,10 +61,16 @@ export function measureComposer(
         const actions = field.querySelector<HTMLElement>('.ui-compose-actions');
         const actionsStyle = actions ? getComputedStyle(actions) : null;
         const actionHeight = actions?.offsetHeight ?? 0;
+        // Measure writing chrome, not a resting row halfway through expansion.
+        const writingGap = Number.parseFloat(
+            getComputedStyle(field).getPropertyValue('--ui-compose-tools-gap'),
+        );
         const chrome =
-            (actionHeight > 0 ? actionHeight : 48) +
-            2 * (Number.parseFloat(actionsStyle?.bottom ?? '') || 8) +
-            (Number.parseFloat(getComputedStyle(input.parentElement ?? field).top) || 8);
+            writingGap > 0
+                ? (actionHeight > 0 ? actionHeight : 44) + 24
+                : (actionHeight > 0 ? actionHeight : 48) +
+                  2 * (Number.parseFloat(actionsStyle?.bottom ?? '') || 8) +
+                  (Number.parseFloat(getComputedStyle(input.parentElement ?? field).top) || 8);
         const available = chat?.clientHeight ? chat.clientHeight - header - 32 : Infinity;
         const textLimit = Math.max(
             line + padding,

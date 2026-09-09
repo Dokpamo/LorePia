@@ -2,7 +2,7 @@
     import { ArrowLeft } from '@lucide/svelte';
     import { onMount, tick, untrack, type Snippet } from 'svelte';
     import { tr } from '../../lib/i18n';
-    import { edgeBack, requestBack } from './edge-back';
+    import { edgeBack, requestBack, type BackDecision } from './edge-back';
     import { trapFocus } from './focus-trap';
     import { pageSlide } from './navigation-motion';
 
@@ -21,7 +21,7 @@
         title: string;
         kind?: string;
         onclose: () => void;
-        beforeback?: () => boolean;
+        beforeback?: () => BackDecision;
         disabled?: boolean;
         covered?: boolean;
         root?: boolean;
@@ -71,7 +71,7 @@
         tabindex="-1"
         use:edgeBack={{ onback: onclose, beforeback, enabled: !root && !disabled && !covered }}
         onkeydown={root ? undefined : trapFocus}
-        data-ui-no-swipe
+        data-ui-no-swipe={root ? undefined : ''}
     >
         <header class="ui-page-header ui-navigation-header" class:seed-header-root={root}>
             {#if root}<h1 class="seed-root-title">{title}</h1>{:else}

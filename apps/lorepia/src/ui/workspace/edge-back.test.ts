@@ -72,6 +72,40 @@ function drag(node: HTMLElement, distance: number) {
 }
 
 describe('overlay back gestures', () => {
+    it('finishes leaving before asking about edits, then resumes from the right only on keep', async () => {
+        const confirm = vi.fn<(resume: () => Promise<void>) => void>();
+        const { node, parent, animation, animations, onback, options, action } = setup({
+            beforeback: () => ({ confirm }),
+        });
+        drag(node, 150);
+        expect(animation(0).keyframes.at(-1)?.transform).toBe('translate3d(393px,0,0)');
+        expect(confirm).not.toHaveBeenCalled();
+        animation(0).finish();
+        await Promise.resolve();
+        expect(confirm).toHaveBeenCalledOnce();
+        expect(onback).not.toHaveBeenCalled();
+        expect(parent.style.translate).toBe('');
+        expect(node.style.getPropertyValue('--ui-back-offset')).toBe('100%');
+        action.update({ ...options, enabled: false });
+        window.dispatchEvent(new Event('resize'));
+        requestBack(node);
+        expect(node.style.getPropertyValue('--ui-back-offset')).toBe('100%');
+        expect(animations).toHaveLength(2);
+        action.update({ ...options, enabled: true });
+        const resume = confirm.mock.calls[0]?.[0];
+        if (!resume) throw new Error('Missing resume action');
+        const returning = resume();
+        expect(animation(2).keyframes).toEqual([
+            { transform: 'translate3d(393px,0,0)' },
+            { transform: 'translate3d(0px,0,0)' },
+        ]);
+        animation(2).finish();
+        await returning;
+        expect(node.dataset.backDismissed).toBeUndefined();
+        expect(node.style.getPropertyValue('--ui-back-offset')).toBe('');
+        expect(onback).not.toHaveBeenCalled();
+    });
+
     it.each(['input', 'label'])(
         'keeps a starting-situation %s clickable at the back-gesture edge',
         (target) => {

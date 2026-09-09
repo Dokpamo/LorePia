@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { onMount, untrack } from 'svelte';
+    import { onMount, tick, untrack } from 'svelte';
     import { tr } from '../../../lib/i18n';
     import type { SettingsServices } from '../../../features/providers/settings/settings-services';
     import type {
@@ -14,6 +14,7 @@
     import StorageData from './StorageData.svelte';
     import PluginsData from './PluginsData.svelte';
     import DiscardChanges from '../../../ui/workspace/DiscardChanges.svelte';
+    import type { BackDecision } from '../../../ui/workspace/edge-back';
     import PackageData from './PackageData.svelte';
     import SettingsRow from '../../../ui/workspace/SettingsRow.svelte';
     import DataAction from './DataAction.svelte';
@@ -57,11 +58,22 @@
     );
     let editor = $state<{ isDirty: () => boolean; isBusy: () => boolean }>();
     let confirming = $state(false);
-    function beforeback() {
+    let resumeBack: (() => Promise<void>) | undefined;
+    async function keepEditing() {
+        confirming = false;
+        await tick();
+        await resumeBack?.();
+        resumeBack = undefined;
+    }
+    function beforeback(): BackDecision {
         if (packageEditor?.isBusy() || editor?.isBusy()) return false;
         if (editor?.isDirty()) {
-            confirming = true;
-            return false;
+            return {
+                confirm: (resume) => {
+                    resumeBack = resume;
+                    confirming = true;
+                },
+            };
         }
         return true;
     }
@@ -122,4 +134,4 @@
     </SettingsPanel>
 {/if}
 
-{#if confirming}<DiscardChanges onkeep={() => (confirming = false)} ondiscard={onclose} />{/if}
+{#if confirming}<DiscardChanges onkeep={keepEditing} ondiscard={onclose} />{/if}

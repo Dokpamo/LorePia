@@ -22,10 +22,6 @@
     padding: 0;
     overscroll-behavior-y: contain;
     scroll-padding-block: calc(var(--ui-header) + 12px) 20px;
-    scrollbar-width: none;
-}
-.seed-app .ui-overlay[data-kind='character-profile'] > .ui-overlay-body::-webkit-scrollbar {
-    display: none;
 }
 .seed-profile-hero {
     position: relative;
@@ -125,8 +121,11 @@
     margin-inline: auto;
     padding: 0 var(--profile-gutter) 32px;
 }
-.seed-profile-play-links {
-    margin-top: 24px;
+.seed-profile-content > .seed-profile-play-links {
+    margin-top: 0;
+}
+.seed-profile-content .seed-row {
+    display: block;
 }
 .seed-app .ui-overlay[data-kind='profile-resource'] > .ui-overlay-body {
     width: 100%;

@@ -1,7 +1,6 @@
 <script lang="ts">
     import type { Snippet } from 'svelte';
     import type { SampleMessage } from './view-types';
-    import { onDestroy } from 'svelte';
     import { tr } from '../../lib/i18n';
     import type {
         ChatScrollLifecycle,
@@ -9,7 +8,6 @@
         MessageMeasurementInput,
     } from '../../features/chat/chat-scroll.svelte';
     import ChatMessage from './ChatMessage.svelte';
-    import { messageExpansion } from './message-expansion';
     import type { SampleCharacter, SampleConversation } from './view-types';
     import type { ChatSession } from './chat-session';
     let {
@@ -39,41 +37,12 @@
     } = $props();
     const viewport = $derived(scroll.virtualWindow());
     const visible = $derived(conversation.messages.slice(viewport.start, viewport.end));
-    let revealFrame: number | undefined;
     function measure(node: HTMLElement, input: MessageMeasurementInput) {
         return scroll.measureMessage(node, input);
     }
-    function interruptReveal() {
-        if (revealFrame !== undefined) cancelAnimationFrame(revealFrame);
-        revealFrame = undefined;
-    }
     function activate(id: string | null) {
-        interruptReveal();
         onactive(id);
-        if (!id) return;
-        scroll.stabilizeMessageActionLayout(id);
-        // Follow the expanding inline row, stopping as soon as the user scrolls.
-        const until = performance.now() + 400;
-        const reveal = () => {
-            const log = scroll.scroller;
-            if (!log || active !== id) return;
-            const row = [...log.querySelectorAll<HTMLElement>('[data-message-id]')].find(
-                (item) => item.dataset.messageId === id,
-            );
-            const tools = row?.querySelector('.ui-message-tools-shell');
-            const dock = log.parentElement?.querySelector('.ui-compose-field');
-            if (tools && dock) {
-                const overlap =
-                    tools.getBoundingClientRect().bottom - dock.getBoundingClientRect().top + 12;
-                const scale = log.getBoundingClientRect().width / log.offsetWidth || 1;
-                if (overlap > 0)
-                    scroll.applyProgrammaticScrollPosition(log, log.scrollTop + overlap / scale);
-            }
-            revealFrame = performance.now() < until ? requestAnimationFrame(reveal) : undefined;
-        };
-        revealFrame = requestAnimationFrame(reveal);
     }
-    onDestroy(interruptReveal);
 </script>
 
 <div
@@ -83,17 +52,13 @@
     tabindex="-1"
     aria-label={$tr('uiPreview.messages')}
     onscroll={(event) => scroll.handleScroll(event)}
-    onwheel={interruptReveal}
     onpointerdown={(event) => {
-        interruptReveal();
         if (!(event.target instanceof Element) || !event.target.closest('[data-message-id]'))
             activate(null);
     }}
 >
     <div
         class="ui-transcript-list"
-        data-tools-open={!!active}
-        use:messageExpansion={{ active, start: viewport.start, end: viewport.end }}
         style:padding-top={String(22 + viewport.topSpacer) + 'px'}
         style:padding-bottom={'calc(' +
             String(22 + viewport.bottomSpacer) +
@@ -130,7 +95,8 @@
                     {renderMessage}
                     messageIndex={viewport.start + index}
                     active={active === message.id}
-                    onactivate={() => activate(active === message.id ? null : message.id)}
+                    branchId={conversation.activeBranchId}
+                    onactivate={() => activate(message.id)}
                     onclose={() => activate(null)}
                     focusReturn={scroll.scroller}
                     {onnotice}

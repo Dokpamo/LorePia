@@ -65,8 +65,9 @@
     color: var(--ui-ink);
 }
 .seed-search:focus-within {
-    outline: 2px solid var(--ui-muted);
-    outline-offset: 2px;
+    background: color-mix(in srgb, var(--ui-soft) 86%, var(--ui-selected));
+    outline: none;
+    box-shadow: none;
 }
 .seed-library-search input::-webkit-search-cancel-button {
     -webkit-appearance: none;

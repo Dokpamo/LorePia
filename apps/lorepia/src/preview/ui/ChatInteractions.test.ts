@@ -14,7 +14,7 @@ async function openChat() {
     await fireEvent.click(screen.getByRole('button', { name: '비 오는 오후 · 오늘' }));
     return screen.getByRole('log');
 }
-describe('chat presentation and inline message tools', () => {
+describe('chat presentation and contextual message tools', () => {
     it('follows a newly sent message after reading older history, while typing preserves the reading position', async () => {
         const log = await openChat();
         Object.defineProperties(log, {
@@ -34,19 +34,21 @@ describe('chat presentation and inline message tools', () => {
     it('opens tools on the message itself and closes them on another message or empty space', async () => {
         const log = await openChat();
         const messages = within(log).getAllByRole('button', { name: t('uiPreview.messageMenu') });
-        await fireEvent.click(messageAt(log, 0));
+        await fireEvent.click(messageAt(log, 0), { detail: 1 });
+        expect(messages[0]).toHaveAttribute('aria-expanded', 'false');
+        await fireEvent.contextMenu(messageAt(log, 0));
         expect(messages[0]).toHaveAttribute('aria-expanded', 'true');
         expect(
             within(log)
-                .getByRole('group', { name: t('uiPreview.messageTools') })
+                .getByRole('menu', { name: t('uiPreview.messageTools') })
                 .closest('article'),
         ).toBe(messages[0]?.closest('article'));
         await fireEvent.keyDown(messageAt(log, 1), { key: 'Enter' });
         expect(messages[0]).toHaveAttribute('aria-expanded', 'false');
         expect(messages[1]).toHaveAttribute('aria-expanded', 'true');
-        expect(screen.getByRole('button', { name: t('uiPreview.editMessage') })).toBeVisible();
+        expect(screen.getByRole('menuitem', { name: t('uiPreview.editMessage') })).toBeVisible();
         await fireEvent.pointerDown(log);
-        expect(screen.queryByRole('group', { name: t('uiPreview.messageTools') })).toBeNull();
+        expect(screen.queryByRole('menu', { name: t('uiPreview.messageTools') })).toBeNull();
     });
     it('switches chat/story from room settings without replacing the conversation', async () => {
         const log = await openChat();
@@ -62,11 +64,11 @@ describe('chat presentation and inline message tools', () => {
     it('requires a second action before removing a message and its continuation', async () => {
         const log = await openChat();
         await fireEvent.click(messageAt(log, 1));
-        await fireEvent.click(screen.getByRole('button', { name: t('uiPreview.removeFrom') }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: t('uiPreview.removeFrom') }));
         expect(within(log).getAllByRole('article')).toHaveLength(3);
         await fireEvent.click(screen.getByRole('button', { name: t('uiPreview.cancel') }));
         expect(within(log).getAllByRole('article')).toHaveLength(3);
-        await fireEvent.click(screen.getByRole('button', { name: t('uiPreview.removeFrom') }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: t('uiPreview.removeFrom') }));
         await fireEvent.click(screen.getByRole('button', { name: t('uiPreview.confirmRemove') }));
         expect(within(log).getAllByRole('article')).toHaveLength(1);
         expect(log).toHaveFocus();
@@ -74,16 +76,18 @@ describe('chat presentation and inline message tools', () => {
     it('returns to the original continuation using the branch picker', async () => {
         const log = await openChat();
         await fireEvent.click(messageAt(log, 0));
-        await fireEvent.click(screen.getByRole('button', { name: t('uiPreview.branchFrom') }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: t('uiPreview.branch') }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: t('uiPreview.branchFrom') }));
         expect(within(log).getAllByRole('article')).toHaveLength(1);
         expect(log).toHaveFocus();
-        const trigger = screen.getByRole('button', { name: t('uiPreview.branch') });
+        await fireEvent.contextMenu(messageAt(log, 0));
+        const trigger = screen.getByRole('menuitem', { name: t('uiPreview.branch') });
         await fireEvent.click(trigger);
-        const original = screen.getAllByRole('radio')[0];
+        const original = screen.getAllByRole('menuitemradio')[0];
         if (!original) throw new Error('Missing original branch');
         await fireEvent.click(original);
         await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-        expect(trigger).toHaveFocus();
+        expect(log).toHaveFocus();
         await waitFor(() => expect(within(log).getAllByRole('article')).toHaveLength(3));
     });
 });

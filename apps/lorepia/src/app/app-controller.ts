@@ -238,12 +238,12 @@ export class LorepiaAppController {
         return this.conversationController.selectCharacter(card, latest);
     }
 
-    selectGreeting(greetingId: string): boolean {
+    selectGreeting(greetingId: string) {
         return this.conversationController.selectGreeting(greetingId);
     }
 
-    openNewConversation(title?: string, mode: ConversationMode = 'chat') {
-        return this.conversationController.openNewConversation(title, mode);
+    openNewConversation(...args: Parameters<ConversationController['openNewConversation']>) {
+        return this.conversationController.openNewConversation(...args);
     }
 
     selectConversation(conversation: ConversationDto) {

@@ -3,6 +3,12 @@ import { enNavigation } from './en-navigation';
 
 export const en = {
     ...enNavigation,
+    'workspace.noPersona': 'Start without a persona',
+    'workspace.startingScene': 'Starting scene',
+    'workspace.finishStart':
+        'Setup could not finish. Retry to continue preparing the conversation already created.',
+    'uiPreview.removeMessageHint':
+        'This message and the following conversation will be removed from this branch.',
     'settingsLive.personaForRoom': 'Persona for this conversation',
     'settingsLive.builtIn': 'Built-in',
     'settingsLive.builtInHint':

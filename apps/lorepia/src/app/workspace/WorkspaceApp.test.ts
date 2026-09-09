@@ -58,6 +58,27 @@ describe('connected workspace', () => {
         ).toBeNull();
         expect(screen.getByRole('button', { name: t('workspace.importCard') })).toBeEnabled();
     });
+    it('dismisses message tools with Escape before the native back handler sees it', async () => {
+        const client = createPreviewClient();
+        const character = required((await client.listCharacters())[0]);
+        const conversation = required((await client.listConversations(character.id))[0]);
+        render(WorkspaceApp, { client });
+        await fireEvent.click(screen.getByRole('button', { name: t('navigation.chats') }));
+        await fireEvent.click(
+            await screen.findByRole('button', {
+                name: new RegExp('^' + conversation.title + ' ·'),
+            }),
+        );
+        const bubble = required(
+            (await screen.findAllByRole('button', { name: t('uiPreview.messageMenu') }))[0],
+        );
+        await fireEvent.contextMenu(bubble);
+        const copy = screen.getByRole('menuitem', { name: t('uiPreview.copyMessage') });
+        await fireEvent.keyDown(copy, { key: 'Escape' });
+        expect(screen.queryByRole('menu')).toBeNull();
+        expect(screen.getByRole('textbox', { name: t('uiPreview.message') })).toBeVisible();
+        expect(bubble).toHaveFocus();
+    });
     it('resolves a character avatar hash through the approved digest selector', async () => {
         const client = createPreviewClient();
         const character = required((await client.listCharacters())[0]);
@@ -146,7 +167,8 @@ describe('connected workspace', () => {
         const messageId = menu.closest('[data-message-id]')?.getAttribute('data-message-id');
         expect(messageId).toBeTruthy();
         await fireEvent.click(menu);
-        const fork = screen.getByRole('button', { name: t('uiPreview.branchFrom') });
+        await fireEvent.click(screen.getByRole('menuitem', { name: t('uiPreview.branch') }));
+        const fork = screen.getByRole('menuitem', { name: t('uiPreview.branchFrom') });
         await waitFor(() => expect(fork).toBeEnabled());
         await fireEvent.click(fork);
         await screen.findByText(t('workspace.errorNotFound'));

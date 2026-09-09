@@ -19,9 +19,6 @@
     margin-top: 0;
     transition: margin-top var(--ui-message-motion-duration) var(--ui-message-motion-ease);
 }
-.ui-preview .ui-transcript-list[data-tools-open='true'] {
-    margin-top: calc(-1 * var(--ui-tools-height, 0px));
-}
 .ui-preview .ui-message-turn {
     display: flex;
     flex-direction: column;
@@ -79,49 +76,6 @@
     background: transparent;
     border-radius: 0;
     line-height: 1.8;
-}
-.ui-preview .ui-message-tools-shell {
-    display: grid;
-    grid-template-rows: 0fr;
-    opacity: 0;
-    width: 100%;
-    transition:
-        grid-template-rows var(--ui-message-motion-duration) var(--ui-message-motion-ease),
-        opacity 220ms ease;
-}
-.ui-preview .ui-message-tools-shell[data-open='true'] {
-    grid-template-rows: 1fr;
-    opacity: 1;
-}
-.ui-preview .ui-message-tools-clip {
-    min-height: 0;
-    overflow: hidden;
-}
-.ui-preview .ui-message-tools {
-    display: flex;
-    align-items: center;
-    min-height: 52px;
-    padding-top: 4px;
-}
-.ui-preview .ui-user-turn .ui-message-tools {
-    justify-content: flex-end;
-}
-.ui-preview .ui-message-tools[data-confirming='true'] > button > .ui-press-visual {
-    background: var(--ui-confirm-surface, var(--ui-soft));
-    color: var(--ui-confirm-ink, var(--ui-secondary));
-}
-.ui-preview .ui-message-tools[data-confirming='true'] > button:last-child {
-    --ui-confirm-surface: var(--ui-action);
-    --ui-confirm-ink: var(--ui-on-action);
-    --ui-pressed-surface: var(--ui-action-pressed);
-}
-.ui-preview .ui-message-tools .ui-icon-button {
-    --ui-icon-size: 20px;
-}
-.ui-preview .ui-remove-prompt {
-    flex: 1;
-    font-size: var(--ui-type-caption);
-    color: var(--ui-muted);
 }
 .ui-preview .ui-chat-floaters {
     position: absolute;
@@ -273,8 +227,7 @@
     font-size: var(--ui-type-caption);
 }
 @media (prefers-reduced-motion: reduce) {
-    .ui-preview .ui-transcript-list,
-    .ui-preview .ui-message-tools-shell {
+    .ui-preview .ui-transcript-list {
         transition: none;
     }
     .ui-preview .ui-typing i {

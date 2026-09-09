@@ -10,3 +10,4 @@ import './ui-chat.css';
 import './ui-feedback.css';
 import './ui-choices.css';
 import './ui-icons.css';
+import './ui-scrollbars.css';

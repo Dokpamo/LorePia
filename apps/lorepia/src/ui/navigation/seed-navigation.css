@@ -39,6 +39,9 @@
     --seed-nav-icon: clamp(23px, 7.179487vw, 34px);
     --seed-nav-edge: clamp(32px, 10vw, 48px);
     --seed-tab-bottom: clamp(10px, 3.236246vw, 16px);
+    --seed-dock-width: 93.203883%;
+    --seed-dock-max-width: 440px;
+    --seed-dock-height: max(50px, calc(min(93.203883vw, 440px) * 97 / 576));
     width: 100%;
     height: 100dvh;
     min-width: 0;
@@ -159,8 +162,9 @@
     --seed-tab-selected: var(--ui-icon-ink);
     container-type: inline-size;
     position: relative;
-    width: 93.203883%;
-    max-width: 440px;
+    width: var(--seed-dock-width);
+    max-width: var(--seed-dock-max-width);
+    height: var(--seed-dock-height);
     min-height: 50px;
     aspect-ratio: 576 / 97;
     margin-inline: auto;
@@ -174,6 +178,23 @@
         inset 0 1px 0 light-dark(rgb(255 255 255 / 70%), rgb(255 255 255 / 8%));
     isolation: isolate;
     pointer-events: auto;
+}
+.seed-app.ui-preview .ui-chat > .ui-compose {
+    display: flex;
+    justify-content: center;
+    padding: 8px 0 max(var(--seed-tab-bottom), env(safe-area-inset-bottom, 0px));
+}
+.seed-app.ui-preview .ui-compose-field {
+    --ui-compose-row: var(--seed-dock-height);
+    width: var(--seed-dock-width);
+    max-width: var(--seed-dock-max-width);
+}
+.seed-app.ui-preview :is(.ui-compose-send, [data-editor-send]) .ui-icon-button > .ui-press-visual {
+    /* Generic icon padding used to squeeze a 24px arrow into a 20px content box. */
+    padding: 0;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
 }
 .seed-bottom-items {
     /* Reference artwork, label and spacing scale with the 576px capsule. */

@@ -8,6 +8,8 @@ import type {
 import { t } from '../../lib/i18n';
 import { INITIAL_APP_STATE, type LorepiaAppState } from '../app-state';
 import { EpochGuard } from '../operations/epoch-guard';
+import { nextConversationTitle } from '../operations/conversation-title';
+import type { PersonaClientApi } from '../../features/personas/persona-contracts';
 import type { AppControllerContext } from './controller-context';
 
 interface RemoveMessageResult {
@@ -37,6 +39,8 @@ function firstEnabledGreetingId(catalog: CharacterGreetingCatalogDto): string | 
 export class ConversationController {
     private readonly epoch = new EpochGuard();
     private modeRequest = 0;
+    private starting = false;
+    private pendingStart: LorepiaAppState['pending_conversation_start'] = null;
 
     constructor(
         private readonly context: AppControllerContext,
@@ -45,11 +49,13 @@ export class ConversationController {
 
     async selectCharacter(character: CharacterDto, openLatest = false): Promise<void> {
         const epoch = this.epoch.advance();
+        this.pendingStart = null;
         this.hooks.detachStream();
         this.context.update((state) => ({
             ...state,
             selected_character: character,
             selected_conversation: null,
+            pending_conversation_start: null,
             conversation_state: null,
             branches: [],
             messages: { phase: 'idle', error: null, items: [] },
@@ -156,7 +162,12 @@ export class ConversationController {
         return true;
     }
 
-    async openNewConversation(title?: string, mode: ConversationMode = 'chat'): Promise<boolean> {
+    async openNewConversation(
+        title?: string,
+        mode: ConversationMode = 'chat',
+        personaId?: string,
+    ): Promise<boolean> {
+        if (this.starting) return false;
         const state = this.context.readState();
         const character = state.selected_character;
         const catalog = state.greeting_catalog.value;
@@ -177,19 +188,32 @@ export class ConversationController {
             return false;
         }
         const epoch = this.epoch.advance();
+        this.starting = true;
         try {
-            const conversation = await this.context.client.createConversation(
-                character.id,
-                title?.trim() ? title.trim() : character.name,
-                mode,
-                {
-                    character_content_revision_id: catalog.character_content_revision_id,
-                    greeting_id: greetingId,
-                },
-            );
+            const personas = this.context.client as Partial<PersonaClientApi>;
+            if (
+                personaId &&
+                (!personas.getConversationPersonaSelection || !personas.selectConversationPersona)
+            )
+                throw new Error(t('persona.error.unsupported'));
+            const conversation =
+                this.pendingStart?.conversation ??
+                (await this.context.client.createConversation(
+                    character.id,
+                    title?.trim()
+                        ? title.trim()
+                        : nextConversationTitle(state.conversations.items, t('uiPreview.newChat')),
+                    mode,
+                    {
+                        character_content_revision_id: catalog.character_content_revision_id,
+                        greeting_id: greetingId,
+                    },
+                ));
             if (!this.epoch.isCurrent(epoch)) return false;
+            this.pendingStart ??= { conversation, personaId, mode, greetingId };
             this.context.update((current) => ({
                 ...current,
+                pending_conversation_start: this.pendingStart,
                 conversations: {
                     phase: 'ready',
                     error: null,
@@ -201,8 +225,42 @@ export class ConversationController {
                     ],
                 },
             }));
+            const selectedPersonaId = this.pendingStart.personaId;
+            if (
+                selectedPersonaId &&
+                personas.getConversationPersonaSelection &&
+                personas.selectConversationPersona
+            ) {
+                const selection = await personas.getConversationPersonaSelection({
+                    conversation_id: conversation.id,
+                });
+                if (!this.epoch.isCurrent(epoch)) return false;
+                if (selection.conversation_id !== conversation.id)
+                    throw new Error(t('persona.error.generic'));
+                if (selection.selected_persona?.value.id !== selectedPersonaId) {
+                    const selected = await personas.selectConversationPersona({
+                        conversation_id: conversation.id,
+                        persona_id: selectedPersonaId,
+                        expected_state_revision: selection.state_revision,
+                    });
+                    if (!this.epoch.isCurrent(epoch)) return false;
+                    if (
+                        selected.conversation_id !== conversation.id ||
+                        selected.selected_persona?.value.id !== selectedPersonaId
+                    )
+                        throw new Error(t('persona.error.generic'));
+                }
+            }
             this.prepareConversationLoad(conversation);
-            return await this.loadPreparedConversation(conversation, epoch);
+            const loaded = await this.loadPreparedConversation(conversation, epoch);
+            if (loaded && this.epoch.isCurrent(epoch)) {
+                this.pendingStart = null;
+                this.context.update((current) => ({
+                    ...current,
+                    pending_conversation_start: null,
+                }));
+            }
+            return loaded;
         } catch (error: unknown) {
             if (!this.epoch.isCurrent(epoch)) return false;
             this.context.update((current) => ({
@@ -214,11 +272,15 @@ export class ConversationController {
                 },
             }));
             return false;
+        } finally {
+            this.starting = false;
         }
     }
 
     async selectConversation(conversation: ConversationDto): Promise<boolean> {
         const epoch = this.epoch.advance();
+        this.pendingStart = null;
+        this.context.update((current) => ({ ...current, pending_conversation_start: null }));
         this.prepareConversationLoad(conversation);
         try {
             const opened = await this.context.client.openExistingConversation(conversation.id);

@@ -55,11 +55,15 @@ it('opens chat setup from the profile and restores that profile before returning
     const greetingCatalog = await client.getCharacterGreetingCatalog(character.id);
     const alternate = greetingCatalog.greetings.find((item) => item.kind === 'alternate');
     if (!alternate) throw new Error('Alternate greeting fixture missing');
+    const alternateTitle =
+        (await client.getCharacterRenderProfile(character.id)).greeting_previews?.find(
+            (item) => item.id === alternate.id,
+        )?.title ?? t('navigation.numberedStart', { number: 1 });
     await fireEvent.click(
-        within(profile).getByRole('button', { name: t('navigation.numberedStart', { number: 1 }) }),
+        within(profile).getByRole('button', { name: new RegExp('^' + alternateTitle) }),
     );
     const reader = await screen.findByRole('dialog', {
-        name: t('navigation.numberedStart', { number: 1 }),
+        name: alternateTitle,
     });
     const start = within(reader).getByRole('button', { name: t('navigation.startChat') });
     await waitFor(() => expect(start).toBeEnabled());
@@ -68,7 +72,7 @@ it('opens chat setup from the profile and restores that profile before returning
     await waitFor(() => expect(screen.getAllByRole('dialog')).toEqual([setup]));
     expect(profile).toHaveProperty('inert', true);
     expect(createConversation).not.toHaveBeenCalled();
-    expect(within(setup).getByText(t('workspace.alternateGreeting', { number: 1 }))).toBeVisible();
+    expect(within(setup).getByText(alternateTitle)).toBeVisible();
     expect(
         within(setup).getByRole('radio', { name: new RegExp(t('uiPreview.chatMode')) }),
     ).toBeVisible();

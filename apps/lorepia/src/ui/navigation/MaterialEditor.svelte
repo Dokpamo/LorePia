@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { untrack } from 'svelte';
+    import { tick, untrack } from 'svelte';
     import { tr, t } from '../../lib/i18n';
     import type { CreatorKnowledgeBookDocumentDto } from '../../lib/ipc/contracts';
     import type {
@@ -13,6 +13,7 @@
     import { useTextEditor } from '../workspace/text-editor.svelte';
     import EditField from '../workspace/EditField.svelte';
     import DiscardChanges from '../workspace/DiscardChanges.svelte';
+    import type { BackDecision } from '../workspace/edge-back';
     let {
         value,
         kind,
@@ -33,6 +34,13 @@
     let original = $state(untrack(() => JSON.stringify(value)));
     let advanced = $state<string | null>(null);
     let confirming = $state(false);
+    let resumeBack: (() => Promise<void>) | undefined;
+    async function keepEditing() {
+        confirming = false;
+        await tick();
+        await resumeBack?.();
+        resumeBack = undefined;
+    }
     let busy = $state(false);
     let error = $state('');
     let notice = $state('');
@@ -40,11 +48,15 @@
     const book = $derived(
         kind === 'knowledge_book' ? (draft as CreatorKnowledgeBookDocumentDto) : null,
     );
-    function beforeback() {
+    function beforeback(): BackDecision {
         if (busy) return false;
         if (dirty) {
-            confirming = true;
-            return false;
+            return {
+                confirm: (resume) => {
+                    resumeBack = resume;
+                    confirming = true;
+                },
+            };
         }
         return true;
     }
@@ -210,4 +222,4 @@
     {#if error}<p role="alert">{error}</p>{/if}
     {#if notice}<p role="status">{notice}</p>{/if}
 </SettingsPanel>
-{#if confirming}<DiscardChanges onkeep={() => (confirming = false)} ondiscard={onclose} />{/if}
+{#if confirming}<DiscardChanges onkeep={keepEditing} ondiscard={onclose} />{/if}

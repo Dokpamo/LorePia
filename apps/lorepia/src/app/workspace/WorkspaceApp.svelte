@@ -218,6 +218,7 @@
     {#snippet home()}
         <CharacterLibrary
             {characters}
+            conversations={allConversations}
             client={appClient}
             ondetail={(active: boolean) => (rootDetails.home = active)}
             ready={appState.bootstrap.phase === 'ready'}
@@ -240,9 +241,6 @@
             error={$catalog.error}
             onopen={(id: string) => void selectConversation(id)}
             onnew={(id: string, trigger: HTMLButtonElement) => void newConversation(id, trigger)}
-            onsettings={async (id: string, trigger: HTMLButtonElement) => {
-                if (await navigation.selectConversation(id)) open('room-settings', trigger);
-            }}
             onretry={() => void navigation.load()}
         />
     {/snippet}

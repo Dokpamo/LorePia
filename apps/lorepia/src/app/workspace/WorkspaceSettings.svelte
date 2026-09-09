@@ -7,10 +7,11 @@
     import SettingsPanel from '../../ui/workspace/SettingsPanel.svelte';
     import SettingsRow from '../../ui/workspace/SettingsRow.svelte';
     import EditField from '../../ui/workspace/EditField.svelte';
-    import ChoiceField from '../../ui/workspace/ChoiceField.svelte';
+    import ConversationStartFields from './ConversationStartFields.svelte';
+    import { nextConversationTitle } from '../operations/conversation-title';
     import CharacterImage from '../../ui/workspace/CharacterImage.svelte';
     import DiscardChanges from '../../ui/workspace/DiscardChanges.svelte';
-    import { useChoiceSheet } from '../../ui/workspace/choice-sheet.svelte';
+    import type { BackDecision } from '../../ui/workspace/edge-back';
     import { workspaceFeedback } from './workspace-feedback';
 
     let {
@@ -34,20 +35,48 @@
         onadvanced: () => void;
         covered?: boolean;
     } = $props();
-    const choices = useChoiceSheet();
     let busy = $state(false);
     let confirming = $state(false);
+    let resumeBack: (() => Promise<void>) | undefined;
     let panel: { focusBack: () => void };
     let saveError = $state('');
     let afterDiscard = () => onclose();
-    let name = $state('');
+    let name = $state(
+        untrack(() =>
+            kind === 'new-chat'
+                ? (appState.pending_conversation_start?.conversation.title ??
+                  nextConversationTitle(appState.conversations.items, t('uiPreview.newChat')))
+                : '',
+        ),
+    );
+    const originalName = untrack(() => name);
+    let personaId = $state(untrack(() => appState.pending_conversation_start?.personaId ?? ''));
+    const originalPersona = untrack(() => personaId);
+    let greetingId = $state(
+        untrack(
+            () =>
+                appState.pending_conversation_start?.greetingId ??
+                appState.greeting_catalog.selected_greeting_id,
+        ),
+    );
+    const originalGreeting = untrack(() => greetingId);
+    const pendingStart = $derived(
+        kind === 'new-chat' && appState.pending_conversation_start !== null,
+    );
     let mode = $state<ConversationMode>(
         untrack(() =>
-            kind === 'new-chat' ? 'chat' : (appState.conversation_state?.selected_mode ?? 'chat'),
+            kind === 'new-chat'
+                ? (appState.pending_conversation_start?.mode ?? 'chat')
+                : (appState.conversation_state?.selected_mode ?? 'chat'),
         ),
     );
     const originalMode = untrack(() => mode);
-    const dirty = $derived(name.trim() !== '' || mode !== originalMode);
+    const dirty = $derived(
+        name.trim() !== originalName ||
+            mode !== originalMode ||
+            personaId !== originalPersona ||
+            greetingId !== originalGreeting,
+    );
     const title = $derived(
         $tr(
             kind === 'new-chat'
@@ -61,12 +90,16 @@
     );
     const character = $derived(appState.selected_character);
     const error = $derived(appState.conversations.error ?? appState.greeting_catalog.error);
-    function beforeback() {
+    function beforeback(): BackDecision {
         if (busy) return false;
         if (dirty) {
             afterDiscard = onclose;
-            confirming = true;
-            return false;
+            return {
+                confirm: (resume) => {
+                    resumeBack = resume;
+                    confirming = true;
+                },
+            };
         }
         return true;
     }
@@ -77,21 +110,12 @@
             confirming = true;
         } else action();
     }
-    function keepEditing() {
+    async function keepEditing() {
         confirming = false;
-        void tick().then(() => panel.focusBack());
-    }
-    function greetingLabel(id: string) {
-        const items = appState.greeting_catalog.value?.greetings ?? [];
-        const item = items.find((value) => value.id === id);
-        return item?.kind === 'default'
-            ? t('workspace.defaultGreeting')
-            : t('workspace.alternateGreeting', {
-                  number:
-                      items
-                          .filter((value) => value.kind === 'alternate')
-                          .findIndex((value) => value.id === id) + 1,
-              });
+        await tick();
+        await resumeBack?.();
+        resumeBack = undefined;
+        panel.focusBack();
     }
     async function save() {
         if (busy) return;
@@ -99,7 +123,12 @@
         busy = true;
         try {
             if (kind === 'new-chat') {
-                if (await controller.openNewConversation(name, mode)) oncreated();
+                if (greetingId && !controller.selectGreeting(greetingId)) {
+                    saveError = t('chat.notice.greeting_reselect');
+                    return;
+                }
+                if (await controller.openNewConversation(name, mode, personaId || undefined))
+                    oncreated();
             } else {
                 if (
                     appState.conversation_state?.selected_mode === mode ||
@@ -133,7 +162,26 @@
                 void save();
             }}
         >
-            <fieldset class="ui-chat-mode-options" disabled={busy}>
+            {#if kind === 'new-chat'}
+                <fieldset class="start-name" disabled={busy || pendingStart}>
+                    <EditField
+                        label={$tr('uiPreview.chatName')}
+                        value={name}
+                        onchange={(value: string) => (name = value.replaceAll('\n', ' '))}
+                        placeholder={$tr('uiPreview.newChat')}
+                        maxlength={60}
+                        hint={$tr('uiPreview.settingsEditorHint')}
+                    />
+                </fieldset>
+                <ConversationStartFields
+                    {client}
+                    catalog={appState.greeting_catalog.value}
+                    bind:personaId
+                    bind:greetingId
+                    disabled={busy || pendingStart}
+                />
+            {/if}
+            <fieldset class="ui-chat-mode-options" disabled={busy || pendingStart}>
                 <legend>{$tr('uiPreview.conversationMode')}</legend>
                 {#each ['chat', 'story'] as value (value)}
                     <label>
@@ -155,41 +203,7 @@
                     </label>
                 {/each}
             </fieldset>
-            {#if kind === 'new-chat'}
-                <EditField
-                    label={$tr('uiPreview.chatName')}
-                    value={name}
-                    onchange={(value: string) => (name = value.replaceAll('\n', ' '))}
-                    placeholder={$tr('uiPreview.newChat')}
-                    maxlength={60}
-                    hint={$tr('uiPreview.settingsEditorHint')}
-                />
-                {#if appState.greeting_catalog.value}
-                    <ChoiceField
-                        label={$tr('workspace.greeting')}
-                        value={appState.greeting_catalog.selected_greeting_id
-                            ? greetingLabel(appState.greeting_catalog.selected_greeting_id)
-                            : $tr('workspace.noGreeting')}
-                        onopen={(opener: HTMLButtonElement) =>
-                            choices.open(
-                                {
-                                    label: t('workspace.greeting'),
-                                    value: appState.greeting_catalog.selected_greeting_id ?? '',
-                                    options: (appState.greeting_catalog.value?.greetings ?? [])
-                                        .filter((item) => item.enabled)
-                                        .map((item) => ({
-                                            value: item.id,
-                                            label: greetingLabel(item.id),
-                                        })),
-                                    onselect: (value) => {
-                                        controller.selectGreeting(value);
-                                    },
-                                },
-                                opener,
-                            )}
-                    />
-                {/if}
-            {:else}
+            {#if kind === 'room-settings'}
                 <dl class="ui-card-details">
                     <dt>{$tr('uiPreview.chatName')}</dt>
                     <dd>{appState.selected_conversation?.title}</dd>
@@ -197,6 +211,9 @@
             {/if}
             {#if saveError || error}<p class="ui-field-error" role="alert">
                     {saveError || workspaceFeedback(error ?? '')}
+                </p>{/if}
+            {#if pendingStart && !busy}<p class="ui-field-error" role="status">
+                    {$tr('workspace.finishStart')}
                 </p>{/if}
             <button
                 type="submit"
@@ -256,3 +273,12 @@
 {#if confirming}
     <DiscardChanges onkeep={keepEditing} ondiscard={() => afterDiscard()} />
 {/if}
+
+<style>
+    .start-name {
+        border: 0;
+        padding: 0;
+        margin: 0;
+        min-width: 0;
+    }
+</style>

@@ -1,10 +1,10 @@
 <script lang="ts">
     import type { Snippet } from 'svelte';
-    import { Check, Copy, GitBranch, Pencil, RotateCcw, Trash2, X } from '@lucide/svelte';
     import { onDestroy } from 'svelte';
     import { t, tr } from '../../lib/i18n';
     import MarkdownText from '../../features/chat/MarkdownText.svelte';
-    import IconButton from './IconButton.svelte';
+    import MessageMenu from './MessageMenu.svelte';
+    import { messagePress } from './message-press';
     import ResponseStatus from './ResponseStatus.svelte';
     import { useTextEditor } from './text-editor.svelte';
     import type { SampleCharacter, SampleMessage } from './view-types';
@@ -15,6 +15,7 @@
         session,
         renderMessage,
         messageIndex = 0,
+        branchId,
         active,
         onactivate,
         onclose,
@@ -25,6 +26,7 @@
         character: SampleCharacter;
         session: ChatSession;
         messageIndex?: number;
+        branchId?: string;
         renderMessage?: Snippet<[SampleMessage, number]>;
         active: boolean;
         onactivate: () => void;
@@ -33,16 +35,16 @@
         onnotice: (text: string, retry?: () => void) => void;
     } = $props();
     const editor = useTextEditor();
-    let removing = $state(false);
+    let body = $state<HTMLDivElement>();
     let copyAttempt = 0;
     let mounted = true;
     onDestroy(() => {
         mounted = false;
     });
-    const toolsId = $derived('ui-tools-' + message.id);
-    $effect(() => {
-        if (!active) removing = false;
-    });
+    function closeMenu(restoreFocus: boolean) {
+        if (restoreFocus) body?.focus({ preventScroll: true });
+        onclose();
+    }
     async function copy() {
         const attempt = ++copyAttempt;
         try {
@@ -63,7 +65,7 @@
                 applyOnDone: true,
                 onchange: session.edit(message.id),
             },
-            focusReturn ?? undefined,
+            body,
         );
     }
     function mutate(action: () => unknown) {
@@ -75,16 +77,19 @@
 
 <div
     class="ui-message-body ui-message"
+    bind:this={body}
+    data-ui-selectable
+    use:messagePress={onactivate}
     role="button"
     tabindex="0"
     aria-label={$tr('uiPreview.messageMenu')}
     aria-describedby={'ui-message-text-' + message.id}
     aria-expanded={active}
-    aria-controls={toolsId}
+    aria-haspopup="menu"
     onclick={(event) => {
         if (event.target instanceof Element && event.target.closest('a, button')) return;
-        if (window.getSelection()?.toString()) return;
-        onactivate();
+        // Keyboard/assistive activation has no pointer click count.
+        if (event.detail === 0) onactivate();
     }}
     onkeydown={(event) => {
         if (event.target !== event.currentTarget) return;
@@ -112,72 +117,19 @@
     busy={session.busy}
     onretry={() => mutate(() => session.regenerate(message.id, true))}
 />
-<div
-    class="ui-message-tools-shell"
-    id={toolsId}
-    data-open={active}
-    inert={!active}
-    aria-hidden={!active}
->
-    <div class="ui-message-tools-clip">
-        <div
-            class="ui-message-tools"
-            data-confirming={removing}
-            role="group"
-            aria-label={$tr('uiPreview.messageTools')}
-            data-ui-no-swipe
-        >
-            {#if removing}
-                <span class="ui-remove-prompt">{$tr('uiPreview.removeConfirm')}</span>
-                <IconButton
-                    label={$tr('uiPreview.confirmRemove')}
-                    caption={$tr('uiPreview.deleteTool')}
-                    disabled={session.busy}
-                    onclick={() => {
-                        mutate(() => session.removeFrom(message.id));
-                        onclose();
-                    }}><Check /></IconButton
-                >
-                <IconButton
-                    label={$tr('uiPreview.cancel')}
-                    caption={$tr('uiPreview.cancel')}
-                    onclick={() => (removing = false)}><X /></IconButton
-                >
-            {:else}
-                <IconButton
-                    label={$tr('uiPreview.copyMessage')}
-                    caption={$tr('uiPreview.copyTool')}
-                    onclick={() => void copy()}><Copy /></IconButton
-                >
-                <IconButton
-                    label={$tr('uiPreview.branchFrom')}
-                    caption={$tr('uiPreview.branchTool')}
-                    disabled={session.busy}
-                    onclick={() => mutate(() => session.fork(message.id))}><GitBranch /></IconButton
-                >
-                {#if message.role === 'user'}
-                    <IconButton
-                        label={$tr('uiPreview.editMessage')}
-                        caption={$tr('uiPreview.editTool')}
-                        disabled={session.busy}
-                        onclick={edit}><Pencil /></IconButton
-                    >
-                {:else if message.role === 'assistant'}
-                    <IconButton
-                        label={$tr('uiPreview.regenerate')}
-                        caption={$tr('uiPreview.regenerate')}
-                        disabled={session.busy}
-                        onclick={() => mutate(() => session.regenerate(message.id))}
-                        ><RotateCcw /></IconButton
-                    >
-                {/if}
-                <IconButton
-                    label={$tr('uiPreview.removeFrom')}
-                    caption={$tr('uiPreview.deleteTool')}
-                    disabled={session.busy}
-                    onclick={() => (removing = true)}><Trash2 /></IconButton
-                >
-            {/if}
-        </div>
-    </div>
-</div>
+{#if active && body}
+    <MessageMenu
+        anchor={body}
+        {message}
+        busy={session.busy}
+        branches={session.branches()}
+        {branchId}
+        onclose={closeMenu}
+        oncopy={() => void copy()}
+        onedit={edit}
+        onfork={() => mutate(() => session.fork(message.id))}
+        onbranch={(id: string) => mutate(() => session.selectBranch(id))}
+        onremove={() => mutate(() => session.removeFrom(message.id))}
+        onregenerate={() => mutate(() => session.regenerate(message.id))}
+    />
+{/if}

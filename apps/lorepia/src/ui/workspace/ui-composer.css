@@ -12,36 +12,36 @@
 }
 .ui-preview .ui-compose-field {
     --ui-compose-row: calc(var(--ui-control) + 2 * var(--ui-space-2));
-    --ui-compose-chrome: calc(var(--ui-compose-row) + var(--ui-space-2));
+    --ui-compose-tools-gap: 4px;
+    --ui-compose-chrome: calc(var(--ui-control) + 24px);
     --ui-compose-text-size: 34px;
     --ui-compose-limit: 336px;
-    --ui-compose-writing-padding: var(--ui-space-2) var(--ui-space-2) 0;
+    --ui-compose-writing-padding: 0 var(--ui-space-2);
     position: relative;
     height: var(--ui-compose-row);
     min-height: var(--ui-compose-row);
     max-height: var(--ui-compose-limit);
-    border-radius: var(--ui-space-5);
+    border-radius: calc(var(--ui-compose-row) / 2);
     background: var(--ui-soft);
     pointer-events: auto;
     overflow: hidden;
     transition:
-        height 360ms cubic-bezier(0.22, 1, 0.36, 1),
-        border-radius 360ms cubic-bezier(0.22, 1, 0.36, 1);
+        height 300ms cubic-bezier(0, 0, 0.15, 1),
+        border-radius 300ms cubic-bezier(0, 0, 0.15, 1);
 }
 .ui-preview .ui-compose-field.ui-compose-expanded {
-    height: max(
-        calc(var(--ui-compose-chrome) + var(--ui-space-8)),
-        calc(var(--ui-compose-text-size) + var(--ui-compose-chrome))
-    );
+    height: calc(var(--ui-compose-text-size) + var(--ui-compose-chrome));
+    border-radius: 24px;
 }
 .ui-preview .ui-compose-text-region {
     position: absolute;
     inset: var(--ui-space-2) var(--ui-space-2) var(--ui-space-2) var(--ui-compose-row);
     overflow: hidden;
     transition:
-        left 360ms cubic-bezier(0.22, 1, 0.36, 1),
-        right 360ms cubic-bezier(0.22, 1, 0.36, 1),
-        bottom 360ms cubic-bezier(0.22, 1, 0.36, 1);
+        left 300ms cubic-bezier(0, 0, 0.15, 1),
+        right 300ms cubic-bezier(0, 0, 0.15, 1),
+        top 300ms cubic-bezier(0, 0, 0.15, 1),
+        bottom 300ms cubic-bezier(0, 0, 0.15, 1);
 }
 .ui-preview .ui-compose-text-region textarea {
     display: block;
@@ -67,9 +67,10 @@
     color: var(--ui-hint);
 }
 .ui-preview .ui-compose-expanded .ui-compose-text-region {
+    top: 12px;
     left: var(--ui-space-2);
     right: var(--ui-space-2);
-    bottom: var(--ui-compose-row);
+    bottom: calc(var(--ui-control) + 8px + var(--ui-compose-tools-gap));
 }
 .ui-preview .ui-compose-expanded textarea {
     padding: var(--ui-compose-writing-padding);
@@ -80,12 +81,16 @@
 }
 .ui-preview .ui-compose-actions {
     position: absolute;
-    inset: auto var(--ui-space-2) var(--ui-space-2);
+    inset: auto var(--ui-space-2) calc((var(--ui-compose-row) - var(--ui-control)) / 2);
     display: flex;
     align-items: center;
     gap: var(--ui-space-1);
     height: var(--ui-control);
     pointer-events: none;
+    transition: bottom 300ms cubic-bezier(0, 0, 0.15, 1);
+}
+.ui-preview .ui-compose-expanded .ui-compose-actions {
+    bottom: 8px;
 }
 .ui-preview .ui-compose-actions > div {
     pointer-events: auto;
@@ -121,6 +126,7 @@
 .ui-preview :is(.ui-compose-send, [data-editor-send]) .ui-icon-button > .ui-press-visual {
     width: calc(40px * var(--ui-density));
     height: calc(40px * var(--ui-density));
+    padding: 0;
     margin: auto;
     border-radius: 50%;
 }
@@ -192,33 +198,17 @@
 .ui-preview .ui-editor-morph :is(.ui-title-group, .ui-editor-footer) {
     opacity: var(--ui-editor-progress, 1);
 }
-.ui-preview:not([data-layout='mobile']) .ui-compose-field {
-    height: max(
-        calc(var(--ui-compose-chrome) + var(--ui-space-8)),
-        calc(var(--ui-compose-text-size) + var(--ui-compose-chrome))
-    );
-    border-radius: 16px;
-}
-.ui-preview:not([data-layout='mobile']) .ui-compose-text-region {
-    inset: var(--ui-space-2) var(--ui-space-2) var(--ui-compose-row);
-}
-.ui-preview:not([data-layout='mobile']) .ui-compose-text-region textarea {
-    padding: var(--ui-compose-writing-padding);
-    white-space: pre-wrap;
-}
-.ui-preview:not([data-layout='mobile']) .ui-compose-send {
-    visibility: visible;
-}
 .ui-preview :is(.ui-compose-send, [data-editor-send]) .ui-icon-button:disabled .ui-press-visual {
     background: var(--ui-hint);
     color: var(--ui-paper);
 }
 @media (prefers-reduced-motion: reduce) {
-    .ui-preview :is(.ui-compose-field, .ui-compose-text-region, .ui-compose-expand) {
+    .ui-preview
+        :is(.ui-compose-field, .ui-compose-text-region, .ui-compose-expand, .ui-compose-actions) {
         transition: none;
     }
 }
 .ui-preview:is([data-resizing='true'], [data-reflowing='true'])
-    :is(.ui-compose-field, .ui-compose-text-region, .ui-compose-expand) {
+    :is(.ui-compose-field, .ui-compose-text-region, .ui-compose-expand, .ui-compose-actions) {
     transition: none;
 }

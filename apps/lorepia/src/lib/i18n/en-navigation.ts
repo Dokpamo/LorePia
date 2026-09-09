@@ -1,4 +1,6 @@
 export const enNavigation = {
+    'navigation.lastChatAt': 'Last chat {time}',
+
     'navigation.home': 'Home',
     'navigation.chats': 'Chats',
     'navigation.create': 'Create',

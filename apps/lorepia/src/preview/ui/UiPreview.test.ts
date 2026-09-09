@@ -202,9 +202,13 @@ describe('native UI preview', () => {
         await fireEvent.click(
             within(userTurn).getByRole('button', { name: t('uiPreview.messageMenu') }),
         );
-        await fireEvent.input(await edit('uiPreview.editMessage'), {
-            target: { value: '메시지 고치기' },
-        });
+        await fireEvent.click(screen.getByRole('menuitem', { name: t('uiPreview.editMessage') }));
+        await fireEvent.input(
+            await screen.findByRole('textbox', { name: t('uiPreview.editMessage') }),
+            {
+                target: { value: '메시지 고치기' },
+            },
+        );
         await fireEvent.click(screen.getByRole('button', { name: t('uiPreview.editDone') }));
         await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
         expect(within(screen.getByRole('log')).getByText('메시지 고치기')).toBeVisible();

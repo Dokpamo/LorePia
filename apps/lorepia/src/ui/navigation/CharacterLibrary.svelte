@@ -8,8 +8,12 @@
     import LibrarySort from './LibrarySort.svelte';
     import { queryCharacterLibrary, type CharacterLibrarySort } from './character-library-query';
     import { tr } from '../../lib/i18n';
+    import type { ConversationListItem } from './navigation-types';
+    import { latestChatTimes } from './chat-activity';
+    import LastChatTime from './LastChatTime.svelte';
     let {
         characters,
+        conversations = [],
         client,
         ready,
         onselect,
@@ -17,6 +21,7 @@
         ondetail,
     }: {
         characters: SampleCharacter[];
+        conversations?: ConversationListItem[];
         client: LorepiaClient;
         ready: boolean;
         onselect: (id: string) => void;
@@ -27,6 +32,7 @@
     let sort = $state<CharacterLibrarySort>('newest');
     const filtered = $derived(queryCharacterLibrary(characters, query, sort));
     const library = $derived(queryCharacterLibrary(characters, '', sort));
+    const played = $derived(latestChatTimes(conversations));
 </script>
 
 {#snippet cards(items: SampleCharacter[])}
@@ -46,6 +52,7 @@
                             />{:else}<span>{item.thumbnail}</span>{/if}
                     </span>
                     <strong>{item.name}</strong><small>{item.description}</small>
+                    <LastChatTime value={played.get(item.id)} caption />
                 </span>
             </button>
         {/each}

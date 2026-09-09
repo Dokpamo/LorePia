@@ -1,4 +1,5 @@
 import type { CharacterRenderProfileDto } from '../lib/ipc/contracts';
+import { DEMO_CHARACTER_PRESENTATIONS } from './profile-fixtures';
 
 interface LoreSeed {
     name: string;
@@ -120,6 +121,16 @@ export function demoRenderProfile(characterId: string, scoped = false): Characte
     return structuredClone({
         character_id: characterId,
         character_content_revision_id: `${characterId}-content-r3`,
+        recommended_language: DEMO_CHARACTER_PRESENTATIONS[characterId]?.recommendedLanguage,
+        greeting_previews: Object.entries(
+            DEMO_CHARACTER_PRESENTATIONS[characterId]?.introductions ?? {},
+        ).map(([id, item]) => ({
+            id,
+            title: item.title ?? null,
+            excerpt: item.body,
+            language: item.language,
+            group_id: item.groupId,
+        })),
         assets,
         background_markup: '',
         toggle_schema: '',

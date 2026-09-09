@@ -1,7 +1,7 @@
 <script lang="ts">
     import { untrack, type Snippet } from 'svelte';
     import type { Appearance, Page } from '../workspace/view-types';
-    import type { RootTab } from './navigation-types';
+    import { ROOT_TABS, type RootTab } from './navigation-types';
     import BottomNavigation from './BottomNavigation.svelte';
     import TextEditor from '../workspace/TextEditor.svelte';
     import ChoiceSheet from '../workspace/ChoiceSheet.svelte';
@@ -10,6 +10,8 @@
     import { provideChoiceSheet } from '../workspace/choice-sheet.svelte';
     import { pressFeedback } from '../workspace/press-feedback';
     import { edgeBack, requestBack } from '../workspace/edge-back';
+    import { rootTabSwipe } from './root-tab-swipe';
+    import './root-tab-swipe.css';
 
     let {
         page = $bindable<Page>(0),
@@ -121,13 +123,29 @@
             class="seed-roots ui-management-content"
             inert={page !== 0 || blocked}
             aria-hidden={page !== 0 || blocked}
+            style:--seed-active-tab={ROOT_TABS.indexOf(rootTab)}
+            data-root-swipe-enabled={page === 0 && !blocked && !nested}
+            use:rootTabSwipe={{
+                enabled: page === 0 && !blocked && !nested,
+                index: ROOT_TABS.indexOf(rootTab),
+                count: ROOT_TABS.length,
+                prepare: (index: number) => {
+                    const tab = ROOT_TABS[index];
+                    if (tab && !visited.includes(tab)) visited = [...visited, tab];
+                },
+                select: (index: number) => {
+                    const tab = ROOT_TABS[index];
+                    if (tab) rootTab = tab;
+                },
+            }}
         >
             {#each visited as tab (tab)}
                 <section
                     class="seed-root"
-                    hidden={rootTab !== tab}
                     inert={rootTab !== tab}
+                    aria-hidden={rootTab !== tab}
                     data-root-tab={tab}
+                    style:--seed-tab-index={ROOT_TABS.indexOf(tab)}
                 >
                     {@render snippets[tab]()}
                 </section>

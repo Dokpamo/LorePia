@@ -5,6 +5,7 @@
     import { workspaceFeedback } from '../workspace-feedback';
     import SettingsPanel from '../../../ui/workspace/SettingsPanel.svelte';
     import DiscardChanges from '../../../ui/workspace/DiscardChanges.svelte';
+    import type { BackDecision } from '../../../ui/workspace/edge-back';
     import AiAction from './AiAction.svelte';
     let {
         title,
@@ -26,18 +27,25 @@
         children: Snippet;
     } = $props();
     let confirming = $state(false);
+    let resumeBack: (() => Promise<void>) | undefined;
     let previousFocus: HTMLElement | null = null;
-    function beforeback() {
+    function beforeback(): BackDecision {
         if (confirming || disabled) return false;
         if (!dirty) return true;
         previousFocus =
             document.activeElement instanceof HTMLElement ? document.activeElement : null;
-        confirming = true;
-        return false;
+        return {
+            confirm: (resume) => {
+                resumeBack = resume;
+                confirming = true;
+            },
+        };
     }
     async function keepEditing() {
         confirming = false;
         await tick();
+        await resumeBack?.();
+        resumeBack = undefined;
         previousFocus?.focus({ preventScroll: true });
     }
 </script>

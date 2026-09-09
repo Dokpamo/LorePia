@@ -12,9 +12,9 @@ async function editMessage() {
     const message = within(log).getAllByRole('button', { name: t('uiPreview.messageMenu') })[1];
     if (!message) throw new Error('Missing user message');
     await fireEvent.click(message);
-    await fireEvent.click(screen.getByRole('button', { name: t('uiPreview.editMessage') }));
+    await fireEvent.click(screen.getByRole('menuitem', { name: t('uiPreview.editMessage') }));
     const input = screen.getByRole('textbox', { name: t('uiPreview.editMessage') });
-    return { ...app, input, log };
+    return { ...app, input, log, message };
 }
 async function done() {
     await fireEvent.click(screen.getByRole('button', { name: t('uiPreview.editDone') }));
@@ -34,11 +34,14 @@ describe('preview editor commit and validation', () => {
         await fireEvent.compositionEnd(input);
         await done();
         await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-        const branches = screen.getByRole('button', { name: t('uiPreview.branch') });
+        const bubble = within(log).getAllByRole('button', { name: t('uiPreview.messageMenu') })[0];
+        if (!bubble) throw new Error('Missing branch message');
+        await fireEvent.contextMenu(bubble);
+        const branches = screen.getByRole('menuitem', { name: t('uiPreview.branch') });
         expect(log).toHaveTextContent('수정이 끝난 문장');
         expect(log).not.toHaveTextContent('그럼, 이 책은 어때요?');
         await fireEvent.click(branches);
-        const options = screen.getAllByRole('radio');
+        const options = screen.getAllByRole('menuitemradio');
         expect(options).toHaveLength(2);
         const original = options[0];
         if (!original) throw new Error('Missing original branch');
@@ -51,7 +54,7 @@ describe('preview editor commit and validation', () => {
     it.each(['button', 'escape'] as const)(
         'protects a changed message on %s and discards only its edit',
         async (via) => {
-            const { input, log, container } = await editMessage();
+            const { input, log, container, message } = await editMessage();
             const before = log.textContent;
             await fireEvent.input(input, { target: { value: '저장하지 않을 수정' } });
             const back = async () => {
@@ -76,7 +79,7 @@ describe('preview editor commit and validation', () => {
             await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
             expect(log.textContent).toBe(before);
             expect(container.querySelector('.ui-branch-select')).toBeNull();
-            expect(log).toHaveFocus();
+            expect(message).toHaveFocus();
         },
     );
 

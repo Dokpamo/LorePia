@@ -1,4 +1,5 @@
-export type RootTab = 'home' | 'chats' | 'create' | 'settings';
+export const ROOT_TABS = ['home', 'chats', 'create', 'settings'] as const;
+export type RootTab = (typeof ROOT_TABS)[number];
 export type LibrarySortOrder = 'newest' | 'oldest' | 'name';
 
 export interface ConversationListItem {

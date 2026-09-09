@@ -5,6 +5,10 @@ export const koWorkspace = {
     'workspace.chooseChat': '채팅 내역을 선택하거나 새 대화를 시작해 주세요',
     'workspace.emptyHistories': '아직 대화가 없어요',
     'workspace.newChat': '새 대화 시작',
+    'workspace.noPersona': '페르소나 없이 시작',
+    'workspace.startingScene': '시작 상황',
+    'workspace.finishStart':
+        '시작 준비를 마치지 못했어요. 다시 시도하면 만들어 둔 대화에서 이어서 준비해요.',
     'workspace.retry': '다시 불러오기',
     'workspace.aiSettings': 'AI 연결과 모델',
     'workspace.cardSource': '가져온 카드 정보',

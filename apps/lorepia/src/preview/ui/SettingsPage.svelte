@@ -10,6 +10,7 @@
     import type { ChoiceRequest } from './settings-choice';
     import { trapFocus } from './focus-trap';
     import { edgeBack, requestBack } from './edge-back';
+    import type { BackDecision } from '../../ui/workspace/edge-back';
     import type {
         Appearance,
         Overlay,
@@ -70,20 +71,28 @@
         JSON.stringify({ name, description, title, subpage, mode, responsePreview }) !== original,
     );
     let confirming = $state(false);
+    let resumeBack: (() => Promise<void>) | undefined;
     let choice = $state<ChoiceRequest | null>(null);
     let choiceOpener: HTMLButtonElement;
     let backButton: HTMLButtonElement;
     let panel: HTMLDivElement;
     onMount(() => backButton.focus({ preventScroll: true }));
-    function beforeBack() {
+    function beforeBack(): BackDecision {
         if (confirming) return false;
         if (!dirty) return true;
-        confirming = true;
-        return false;
+        return {
+            confirm: (resume) => {
+                resumeBack = resume;
+                confirming = true;
+            },
+        };
     }
-    function keepEditing() {
+    async function keepEditing() {
         confirming = false;
-        void tick().then(() => backButton.focus({ preventScroll: true }));
+        await tick();
+        await resumeBack?.();
+        resumeBack = undefined;
+        backButton.focus({ preventScroll: true });
     }
     function openChoice(request: ChoiceRequest, opener: HTMLButtonElement) {
         choiceOpener = opener;

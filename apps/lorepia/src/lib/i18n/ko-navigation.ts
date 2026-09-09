@@ -1,4 +1,6 @@
 export const koNavigation = {
+    'navigation.lastChatAt': '최근 대화 {time}',
+
     'navigation.home': '홈',
     'navigation.chats': '채팅',
     'navigation.create': '생성',

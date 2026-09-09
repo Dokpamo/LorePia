@@ -5,6 +5,7 @@ import type {
     CharacterGreetingCatalogDto,
     ConversationBranchDto,
     ConversationDto,
+    ConversationMode,
     ConversationStateDto,
     ImportInspectionDto,
     InterruptedMemoryJobDto,
@@ -56,6 +57,12 @@ export interface LorepiaAppState {
     conversations: SectionState & { items: ConversationDto[] };
     greeting_catalog: GreetingCatalogState;
     selected_conversation: ConversationDto | null;
+    pending_conversation_start: {
+        conversation: ConversationDto;
+        personaId?: string;
+        mode: ConversationMode;
+        greetingId: string | null;
+    } | null;
     conversation_state: ConversationStateDto | null;
     branches: ConversationBranchDto[];
     messages: SectionState & { items: MessageDto[] };
@@ -128,6 +135,7 @@ export const INITIAL_APP_STATE: LorepiaAppState = {
         selected_greeting_id: null,
     },
     selected_conversation: null,
+    pending_conversation_start: null,
     conversation_state: null,
     branches: [],
     messages: { phase: 'idle', error: null, items: [] },

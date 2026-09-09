@@ -5,7 +5,7 @@
     import { tr } from '../../lib/i18n';
     import { shouldSubmitComposer } from '../../features/chat/composer';
     import IconButton from './IconButton.svelte';
-    import { edgeBack, requestBack } from './edge-back';
+    import { edgeBack, requestBack, type BackDecision } from './edge-back';
     import type { TextEditRequest } from './text-editor.svelte';
     import SearchResults from './SearchResults.svelte';
     import { trapFocus } from './focus-trap';
@@ -25,6 +25,7 @@
     let composing = $state(false);
     let attempted = $state(false);
     let confirming = $state(false);
+    let resumeBack: (() => Promise<void>) | undefined;
     let saving = $state(false);
     let saveError = $state(false);
     const ids = $props.id();
@@ -70,16 +71,23 @@
             saving = false;
         }
     }
-    function beforeBack() {
+    function beforeBack(): BackDecision {
         if (saving) return false;
         if (confirming) return false;
         if (!request.applyOnDone || !dirty) return true;
-        confirming = true;
-        return false;
+        return {
+            confirm: (resume) => {
+                resumeBack = resume;
+                confirming = true;
+            },
+        };
     }
-    function keepEditing() {
+    async function keepEditing() {
         confirming = false;
-        void tick().then(() => input?.focus({ preventScroll: true }));
+        await tick();
+        await resumeBack?.();
+        resumeBack = undefined;
+        input?.focus({ preventScroll: true });
     }
     function close() {
         if (saving) return;

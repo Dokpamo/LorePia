@@ -10,7 +10,6 @@
         type MessageCollectionSnapshot,
     } from '../../features/chat/chat-scroll.svelte';
     import IconButton from './IconButton.svelte';
-    import BranchPicker from './BranchPicker.svelte';
     import ChatTranscript from './ChatTranscript.svelte';
     import MessageComposer from './MessageComposer.svelte';
     import UiNotice from './UiNotice.svelte';
@@ -89,11 +88,9 @@
     const collection: MessageCollectionSnapshot = $derived(
         scroll.snapshotMessageCollection(projected),
     );
-    const branches = $derived(session.branches());
     function activate(id: string | null) {
         active = id;
-        if (id) scroll.stabilizeMessageActionLayout(id);
-        else scroll.clearStableMessageActionLayout();
+        scroll.clearStableMessageActionLayout();
     }
     const branchKey = $derived(
         conversation.id +
@@ -147,14 +144,6 @@
     <div class="ui-title-group">
         <strong>{character.name}</strong><small>{conversation.title}</small>
     </div>
-    {#if branches.length > 1}
-        <BranchPicker
-            {branches}
-            value={conversation.activeBranchId ?? 'main'}
-            disabled={session.busy}
-            onselect={(value: string) => session.selectBranch(value)}
-        />
-    {/if}
     {#if character.subpage && !creatorVisible}<IconButton
             label={$tr('uiPreview.openSubpage')}
             onclick={() => onnavigate(2)}><PanelRight /></IconButton

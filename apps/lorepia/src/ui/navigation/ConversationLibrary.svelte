@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { MessageCircle, Settings } from '@lucide/svelte';
+    import { MessageCircle } from '@lucide/svelte';
     import { tr } from '../../lib/i18n';
     import type { SampleCharacter } from '../workspace/view-types';
     import type { ConversationListItem, LibrarySortOrder } from './navigation-types';
@@ -7,7 +7,7 @@
     import LibrarySort from './LibrarySort.svelte';
     import LibraryScreen from './LibraryScreen.svelte';
     import NewConversationButton from './NewConversationButton.svelte';
-    import IconButton from '../workspace/IconButton.svelte';
+    import LastChatTime from './LastChatTime.svelte';
     let {
         conversations,
         characters,
@@ -15,7 +15,6 @@
         error,
         onopen,
         onnew,
-        onsettings,
         onretry,
         ondetail,
     }: {
@@ -25,7 +24,6 @@
         error: string | null;
         onopen: (id: string) => void;
         onnew: (id: string, trigger: HTMLButtonElement) => void;
-        onsettings: (id: string, trigger: HTMLButtonElement) => void;
         onretry: () => void;
         ondetail: (active: boolean) => void;
     } = $props();
@@ -54,16 +52,9 @@
                 ><span class="ui-press-visual"
                     ><span class="seed-conversation-avatar">{item.characterName.slice(0, 1)}</span
                     ><span class="seed-row-copy"
-                        ><strong>{item.title}</strong><small
-                            >{item.characterName} · {item.date}</small
-                        ></span
-                    ></span
+                        ><strong>{item.title}</strong><small>{item.characterName}</small></span
+                    ><LastChatTime value={item.updatedAt} /></span
                 ></button
-            >
-            <IconButton
-                label={$tr('uiPreview.namedRoomSettings', { title: item.title })}
-                onclick={(event: MouseEvent & { currentTarget: HTMLButtonElement }) =>
-                    onsettings(item.id, event.currentTarget)}><Settings /></IconButton
             >
         </div>
     {:else}

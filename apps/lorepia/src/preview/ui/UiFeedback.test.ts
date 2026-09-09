@@ -146,7 +146,7 @@ describe('settings, search and action feedback', () => {
             .mockResolvedValue(undefined);
         clipboard(writeText);
         await openTools();
-        await fireEvent.click(screen.getByRole('button', { name: t('uiPreview.copyMessage') }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: t('uiPreview.copyMessage') }));
         const error = await screen.findByText(t('uiPreview.copyFailed'));
         expect(error.closest('.ui-notice')).not.toBeNull();
         expect(error.closest('.ui-sr')).toBeNull();
@@ -172,7 +172,7 @@ describe('settings, search and action feedback', () => {
         );
         clipboard(writeText);
         await openTools();
-        await fireEvent.click(screen.getByRole('button', { name: t('uiPreview.copyMessage') }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: t('uiPreview.copyMessage') }));
         await fireEvent.click(screen.getByRole('button', { name: t('uiPreview.openManagement') }));
         await fireEvent.click(screen.getByRole('button', { name: '하루 캐릭터 선택' }));
         finish();
@@ -182,11 +182,12 @@ describe('settings, search and action feedback', () => {
 
     it('shows a keyboard tooltip and dismisses it with Escape without navigating away', async () => {
         await openTools();
+        await fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
         await fireEvent.keyDown(window, { key: 'Tab' });
-        const button = screen.getByRole('button', { name: t('uiPreview.branchFrom') });
+        const button = screen.getByRole('button', { name: t('uiPreview.roomSettings') });
         button.focus();
         await waitFor(() =>
-            expect(screen.getByRole('tooltip')).toHaveTextContent(t('uiPreview.branchFrom')),
+            expect(screen.getByRole('tooltip')).toHaveTextContent(t('uiPreview.roomSettings')),
         );
         expect(button).toHaveAttribute('aria-describedby');
         await fireEvent.keyDown(button, { key: 'Escape' });

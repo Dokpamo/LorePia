@@ -7,11 +7,13 @@
         value,
         onopen,
         prefix,
+        disabled = false,
     }: {
         label: string;
         value: string;
         onopen: (opener: HTMLButtonElement) => void;
         prefix?: Snippet;
+        disabled?: boolean;
     } = $props();
     const id = $props.id();
 </script>
@@ -22,6 +24,7 @@
     aria-label={label}
     aria-describedby={id}
     aria-haspopup="dialog"
+    {disabled}
     onclick={(event) => onopen(event.currentTarget)}
 >
     <span class="ui-press-visual">

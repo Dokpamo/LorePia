@@ -5,9 +5,11 @@ export function requestBack(node: HTMLElement) {
     node.dispatchEvent(new Event('ui-back'));
 }
 
+export type BackDecision = boolean | { confirm: (resume: () => Promise<void>) => void };
+
 interface BackOptions {
     onback: () => void;
-    beforeback?: () => boolean;
+    beforeback?: () => BackDecision;
     enabled?: boolean;
 }
 
@@ -31,6 +33,7 @@ export function edgeBack(node: HTMLElement, initial: BackOptions) {
     let animation: Animation | undefined;
     let underlayAnimation: Animation | undefined;
     let settlingCommit = false;
+    let awaitingConfirmation = false;
     const layer = node.parentElement;
     const underlay = layer ? navigationUnderlay(layer) : null;
     const originalTranslate = underlay?.style.translate ?? '';
@@ -124,7 +127,7 @@ export function edgeBack(node: HTMLElement, initial: BackOptions) {
         if (!dragging) {
             if (Math.max(Math.abs(dx), Math.abs(dy)) < 8) return;
             if ((dx < 0 && pointer.origin === 0) || Math.abs(dx) < Math.abs(dy) * 1.25) {
-                if (pointer.origin) settle(false);
+                if (pointer.origin) void settle(false);
                 else {
                     clear();
                     restoreUnderlay();
@@ -149,9 +152,47 @@ export function edgeBack(node: HTMLElement, initial: BackOptions) {
         );
     }
 
+    function completeBack(decision: BackDecision | undefined, onback: () => void) {
+        node.dataset.backDismissed = 'true';
+        if (typeof decision === 'object') {
+            awaitingConfirmation = true;
+            node.style.setProperty('--ui-back-offset', '100%');
+            animation?.cancel();
+            animation = undefined;
+            decision.confirm(resume);
+        } else onback();
+    }
+
+    async function resume() {
+        if (!awaitingConfirmation || !node.isConnected) return;
+        awaitingConfirmation = false;
+        delete node.dataset.backDismissed;
+        const bounds = node.getBoundingClientRect();
+        const width = node.clientWidth || bounds.width;
+        node.style.setProperty('--ui-back-offset', `${String(width)}px`);
+        if (!width) {
+            node.style.removeProperty('--ui-back-offset');
+            return;
+        }
+        pointer = {
+            id: -1,
+            x: 0,
+            y: 0,
+            width,
+            scale: 1,
+            time: 0,
+            origin: width,
+            velocity: 0,
+            lastX: 0,
+            lastTime: 0,
+        };
+        await settle(false);
+    }
+
     function settle(requested: boolean) {
-        if (!pointer) return;
-        const commit = requested && options.beforeback?.() !== false;
+        if (!pointer) return Promise.resolve();
+        const decision = requested ? options.beforeback?.() : false;
+        const commit = requested && decision !== false;
         const onback = options.onback;
         const from = visibleOffset();
         const width = pointer.width / pointer.scale;
@@ -188,16 +229,15 @@ export function edgeBack(node: HTMLElement, initial: BackOptions) {
             animationOptions,
         );
         const settling = animation;
-        void animation.finished
+        return animation.finished
             .then(() => {
                 if (animation !== settling) return;
                 delete node.dataset.backSettling;
                 restoreUnderlay();
                 if (commit) {
-                    node.dataset.backDismissed = 'true';
                     // Hold the offscreen frame through any component outro.
                     // Clearing it here would flash the editor back into view.
-                    onback();
+                    completeBack(decision, onback);
                     return;
                 }
                 settling.cancel();
@@ -209,22 +249,23 @@ export function edgeBack(node: HTMLElement, initial: BackOptions) {
     function up(event: PointerEvent) {
         if (event.pointerId !== pointer?.id) return;
         if (!dragging) {
-            if (pointer.origin) settle(settlingCommit);
+            if (pointer.origin) void settle(settlingCommit);
             else clear();
             return;
         }
         const distance = pointer.origin * pointer.scale + event.clientX - pointer.x;
         const elapsed = event.timeStamp - pointer.time;
-        settle(
+        void settle(
             pointer.velocity >= -0.4 &&
                 (distance >= Math.min(110, pointer.width * 0.28) ||
                     (distance > 32 && elapsed > 0 && distance / elapsed > 0.55)),
         );
     }
     function cancel(event?: PointerEvent) {
+        if (awaitingConfirmation) return;
         if (event && event.pointerId !== pointer?.id) return;
         if (event && dragging) {
-            settle(false);
+            void settle(false);
             return;
         }
         animation?.cancel();
@@ -244,10 +285,8 @@ export function edgeBack(node: HTMLElement, initial: BackOptions) {
         if (unavailable()) return;
         const bounds = node.getBoundingClientRect();
         if (!bounds.width) {
-            if (options.beforeback?.() !== false) {
-                node.dataset.backDismissed = 'true';
-                options.onback();
-            }
+            const decision = options.beforeback?.();
+            if (decision !== false) completeBack(decision, options.onback);
             return;
         }
         pointer = {
@@ -262,7 +301,7 @@ export function edgeBack(node: HTMLElement, initial: BackOptions) {
             lastX: 0,
             lastTime: 0,
         };
-        settle(true);
+        void settle(true);
     }
     function keydown(event: KeyboardEvent) {
         if (event.key !== 'Escape') return;
@@ -305,7 +344,7 @@ export function edgeBack(node: HTMLElement, initial: BackOptions) {
             );
         },
         finish(distance) {
-            settle(distance >= 64);
+            void settle(distance >= 64);
         },
         cancel: interrupt,
     });
@@ -332,6 +371,7 @@ export function edgeBack(node: HTMLElement, initial: BackOptions) {
             }
         },
         destroy() {
+            awaitingConfirmation = false;
             cancel();
             wheel.destroy();
             node.removeEventListener('pointerdown', down);

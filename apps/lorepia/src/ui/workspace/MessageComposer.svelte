@@ -61,6 +61,17 @@
     }
 </script>
 
+<svelte:window
+    onpointerdowncapture={(event: PointerEvent) => {
+        if (!focused || draft.trim() || !(event.target instanceof Node)) return;
+        if (field.contains(event.target)) return;
+        // Back gestures can prevent pointerdown's default focus change.
+        focused = false;
+        if (field.contains(document.activeElement) && document.activeElement instanceof HTMLElement)
+            document.activeElement.blur();
+    }}
+/>
+
 <form
     class="ui-compose"
     aria-label={$tr('uiPreview.compose')}

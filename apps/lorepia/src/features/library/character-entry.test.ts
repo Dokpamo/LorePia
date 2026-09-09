@@ -1,3 +1,4 @@
+import { t } from '../../lib/i18n';
 import { get } from 'svelte/store';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -45,10 +46,15 @@ describe('character conversation entry', () => {
 
         await expect(enterCharacter(controller, character)).resolves.toBe(true);
 
-        expect(createConversation).toHaveBeenCalledWith(character.id, character.name, 'chat', {
-            character_content_revision_id: greetingCatalog.character_content_revision_id,
-            greeting_id: 'default-enabled',
-        });
+        expect(createConversation).toHaveBeenCalledWith(
+            character.id,
+            t('uiPreview.newChat'),
+            'chat',
+            {
+                character_content_revision_id: greetingCatalog.character_content_revision_id,
+                greeting_id: 'default-enabled',
+            },
+        );
         expect(get(controller.state).selected_conversation).toEqual(created);
         controller.destroy();
     });

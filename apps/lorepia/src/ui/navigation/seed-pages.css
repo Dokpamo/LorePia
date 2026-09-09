@@ -196,7 +196,6 @@
     display: flex;
     align-items: center;
     margin-inline: -16px;
-    padding-inline-end: calc(var(--seed-nav-edge) - var(--seed-root-gutter) - 6px);
 }
 .seed-conversation-row > .seed-row {
     flex: 1;
@@ -253,5 +252,5 @@
 .seed-scroll,
 .seed-app .ui-overlay-body {
     scrollbar-width: thin;
-    scrollbar-color: var(--ui-selected) transparent;
+    scrollbar-color: var(--ui-scroll-thumb) transparent;
 }

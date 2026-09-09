@@ -38,13 +38,20 @@ describe('workspace settings navigation', () => {
             if (origin === 'history') {
                 await fireEvent.keyDown(window, { key: 'Escape' });
                 await screen.findByRole('region', { name: t('uiPreview.history') });
+                expect(
+                    screen.queryByRole('button', {
+                        name: t('uiPreview.namedRoomSettings', { title: conversation.title }),
+                    }),
+                ).toBeNull();
+                await fireEvent.click(
+                    screen.getByRole('button', {
+                        name: new RegExp('^' + conversation.title + ' ·'),
+                    }),
+                );
             }
             await fireEvent.click(
                 await screen.findByRole('button', {
-                    name:
-                        origin === 'history'
-                            ? t('uiPreview.namedRoomSettings', { title: conversation.title })
-                            : t('uiPreview.roomSettings'),
+                    name: t('uiPreview.roomSettings'),
                 }),
             );
             const room = await screen.findByRole('dialog', { name: t('uiPreview.roomSettings') });
@@ -60,10 +67,7 @@ describe('workspace settings navigation', () => {
             expect(room).toHaveProperty('inert', false);
             await fireEvent.click(within(room).getByRole('button', { name: t('uiPreview.back') }));
             await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-            if (origin === 'history')
-                expect(screen.getByRole('region', { name: t('uiPreview.history') })).toBeVisible();
-            else
-                expect(screen.getByRole('textbox', { name: t('uiPreview.message') })).toBeVisible();
+            expect(screen.getByRole('textbox', { name: t('uiPreview.message') })).toBeVisible();
         },
     );
 
