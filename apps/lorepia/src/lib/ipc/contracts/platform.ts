@@ -2,6 +2,8 @@ import type {
     AssetDeliveryDto,
     CharacterDto,
     CharacterGreetingCatalogDto,
+    CharacterGreetingDetailDto,
+    CharacterGreetingDetailInput,
     CharacterGreetingSelectionInput,
     ResolveAssetDeliveryInput,
 } from './character';
@@ -209,6 +211,9 @@ export interface LorepiaClient {
     listCharacters(): Promise<CharacterDto[]>;
     getCharacter(characterId: string): Promise<CharacterDto>;
     getCharacterGreetingCatalog(characterId: string): Promise<CharacterGreetingCatalogDto>;
+    getCharacterGreetingDetail?(
+        input: CharacterGreetingDetailInput,
+    ): Promise<CharacterGreetingDetailDto>;
     getCharacterRenderProfile?(
         characterId: string,
         scope?: { conversation_id: string; branch_id: string },

@@ -65,6 +65,9 @@ fn import_character(storage: &Storage, root: &TempDir, name: &str) -> Character 
 
 fn greeting_content(default: &str, alternates: &[&str]) -> CharacterContentV1 {
     CharacterContentV1 {
+        creator: "Synthetic author".to_owned(),
+        creator_notes: "Inert author note".to_owned(),
+        tags: vec!["library".to_owned()],
         first_message: default.to_owned(),
         alternate_greetings: alternates
             .iter()
@@ -131,6 +134,15 @@ fn safe_catalog_and_alternate_start_survive_lost_response_and_restart() {
     drop(storage);
 
     let reopened = Storage::open(root.path()).expect("reopen after lost response");
+    let stored_note: String = Connection::open(active_database_path(root.path()))
+        .expect("open database for projection assertion")
+        .query_row(
+            "SELECT creator_notes FROM character_content_revisions WHERE revision_id = ?1",
+            [&revision_id],
+            |row| row.get(0),
+        )
+        .expect("stored author note");
+    assert_eq!(stored_note, "Inert author note");
     let binding = reopened
         .get_conversation_greeting_binding(&conversation_id)
         .expect("recover exact greeting binding");

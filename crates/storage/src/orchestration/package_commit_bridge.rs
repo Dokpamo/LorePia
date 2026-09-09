@@ -68,7 +68,7 @@ fn write_character_content_header(
              (revision_id, object_id, personality, scenario, first_message,
               system_instruction, post_history_instruction, creator_notes,
               unknown_extensions_json, metadata_json, payload_json)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, '', ?8, ?9, ?10)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 revision_id,
                 object_id,
@@ -77,6 +77,7 @@ fn write_character_content_header(
                 content.first_message,
                 content.system_instruction,
                 content.post_history_instruction,
+                content.creator_notes,
                 unknown_extensions_json,
                 metadata_json,
                 document_json,

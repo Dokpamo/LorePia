@@ -175,10 +175,7 @@ fn reports_only_unconsumed_ccv3_data_fields_in_stable_order() {
     let inspection =
         inspect_file(card.path(), ImportLimits::default()).expect("optional fields review");
 
-    assert_eq!(
-        inspection.unsupported_optional_fields,
-        ["creator", "z_unknown"]
-    );
+    assert_eq!(inspection.unsupported_optional_fields, ["z_unknown"]);
     assert!(inspection.representative_image.is_none());
 }
 

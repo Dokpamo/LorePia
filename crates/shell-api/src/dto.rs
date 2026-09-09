@@ -1,7 +1,11 @@
 mod bootstrap;
 mod conversation;
 mod generation;
+mod greeting_preview;
+mod greeting_variants;
 mod library;
+
+pub use greeting_preview::CharacterGreetingPreviewDto;
 
 pub use bootstrap::{BootstrapDto, HealthDto};
 pub use conversation::{

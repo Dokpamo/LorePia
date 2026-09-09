@@ -62,6 +62,7 @@ function pointer(target: EventTarget, type: string, x: number, time: number) {
     for (const [key, value] of Object.entries({ pointerId: 1, isPrimary: true, timeStamp: time }))
         Object.defineProperty(event, key, { value });
     target.dispatchEvent(event);
+    return event;
 }
 
 function drag(node: HTMLElement, distance: number) {
@@ -71,6 +72,26 @@ function drag(node: HTMLElement, distance: number) {
 }
 
 describe('overlay back gestures', () => {
+    it.each(['input', 'label'])(
+        'keeps a starting-situation %s clickable at the back-gesture edge',
+        (target) => {
+            const { node, onback } = setup();
+            const label = document.createElement('label');
+            const input = document.createElement('input');
+            input.type = 'radio';
+            label.append(input);
+            node.append(label);
+            const control = target === 'input' ? input : label;
+            const down = pointer(control, 'pointerdown', 30, 0);
+            expect(down.defaultPrevented).toBe(false);
+            expect(node.hasPointerCapture(1)).toBe(false);
+            pointer(window, 'pointerup', 30, 100);
+            control.click();
+            expect(input.checked).toBe(true);
+            expect(onback).not.toHaveBeenCalled();
+        },
+    );
+
     it('preserves an active drag across unchanged enabled options', async () => {
         const { node, animation, onback, options, action } = setup({ enabled: true });
         pointer(node, 'pointerdown', 10, 0);

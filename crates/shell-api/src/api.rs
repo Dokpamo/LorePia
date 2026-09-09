@@ -15,7 +15,9 @@ use crate::{
 mod conversation;
 mod generation;
 mod generation_async;
+mod greeting;
 mod library;
+pub use greeting::CharacterGreetingDetailDto;
 
 pub use crate::dto::{
     ConversationGreetingSelectionInput, CreateConversationBranchInput, CreateConversationInput,

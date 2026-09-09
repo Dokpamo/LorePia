@@ -8,6 +8,8 @@ use lorepia_core::{
 };
 use serde::{Deserialize, Serialize};
 
+use super::greeting_preview::{CharacterGreetingPreviewDto, greeting_previews};
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CharacterDto {
@@ -38,6 +40,7 @@ impl From<Character> for CharacterDto {
 pub struct CharacterRenderAssetDto {
     pub asset_id: String,
     pub aliases: Vec<String>,
+    pub media_type: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -82,6 +85,16 @@ pub struct CharacterRuntimeKnowledgeDto {
 #[serde(deny_unknown_fields)]
 pub struct CharacterRenderProfileDto {
     pub character_id: String,
+    #[serde(default)]
+    pub creator: String,
+    #[serde(default)]
+    pub creator_notes: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub recommended_language: Option<String>,
+    #[serde(default)]
+    pub greeting_previews: Vec<CharacterGreetingPreviewDto>,
     pub character_content_revision_id: Option<String>,
     pub assets: Vec<CharacterRenderAssetDto>,
     pub background_markup: String,
@@ -103,6 +116,7 @@ impl CharacterRenderProfileDto {
         content: CharacterContentV1,
     ) -> Self {
         let assets = render_assets(&content);
+        let greeting_previews = greeting_previews(&content);
         let output_transforms = display_transforms(
             &content,
             lorepia_core::PortableTransformPhase::ProviderOutput,
@@ -123,6 +137,11 @@ impl CharacterRenderProfileDto {
         let runtime_script_count = u32::try_from(content.runtime.scripts.len()).unwrap_or(u32::MAX);
         Self {
             character_id,
+            creator: content.creator,
+            creator_notes: content.creator_notes,
+            tags: content.tags,
+            recommended_language: content.recommended_language,
+            greeting_previews,
             character_content_revision_id,
             assets,
             background_markup: content.runtime.background_markup,
@@ -146,6 +165,7 @@ fn render_assets(content: &CharacterContentV1) -> Vec<CharacterRenderAssetDto> {
         .map(|asset| CharacterRenderAssetDto {
             asset_id: asset.id.as_str().to_owned(),
             aliases: character_asset_aliases(asset),
+            media_type: asset.media_type.clone(),
         })
         .collect()
 }

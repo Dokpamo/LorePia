@@ -12,11 +12,26 @@ import {
     DEMO_INITIAL_CHARACTER_ID,
     DEMO_INITIAL_CONVERSATION_ID,
 } from './demo-data';
-import { createPreviewClient } from './mock-client';
+import { createPreviewClient, createPreviewCharacterPresentations } from './mock-client';
 
 afterEach(() => cleanup());
 
 describe('preview demo client', () => {
+    it('keeps profile presentation examples isolated and keyed to real demo greetings', async () => {
+        const client = createPreviewClient();
+        const first = createPreviewCharacterPresentations();
+        const second = createPreviewCharacterPresentations();
+        for (const character of await client.listCharacters()) {
+            const profile = first[character.id];
+            expect(profile?.tags?.length).toBeGreaterThan(0);
+            const catalog = await client.getCharacterGreetingCatalog(character.id);
+            expect(Object.keys(profile?.introductions ?? {})).toEqual(
+                catalog.greetings.map((item) => item.id),
+            );
+            profile?.tags?.push('mutation');
+            expect(second[character.id]?.tags).not.toContain('mutation');
+        }
+    });
     it('connects home, chat, settings, studio, and persona fixtures', async () => {
         const client = createPreviewClient();
         const characters = await client.listCharacters();
@@ -176,4 +191,27 @@ describe('preview demo client', () => {
         studio.destroy();
         personas.destroy();
     });
+});
+
+it('returns independent character-specific plugin bindings from the preview client', async () => {
+    const client = createPreviewClient();
+    const [character] = await client.listCharacters();
+    if (!client.listContentModules || !client.listContentModuleBindings)
+        throw new Error('Missing plugin fixture API');
+    const [module] = await client.listContentModules();
+    if (!character || !module) throw new Error('Missing fixtures');
+    const bindings = await client.listContentModuleBindings({
+        content_module_id: module.value.id,
+    });
+    expect(bindings[0]?.value).toMatchObject({
+        scope: 'character',
+        target_id: character.id,
+        enabled: true,
+    });
+    const [binding] = bindings;
+    if (!binding) throw new Error('Missing binding fixture');
+    binding.value.enabled = false;
+    const again = await client.listContentModuleBindings({ content_module_id: module.value.id });
+    expect(again[0]?.value.enabled).toBe(true);
+    expect(await client.listContentModuleBindings({ content_module_id: 'unknown' })).toEqual([]);
 });

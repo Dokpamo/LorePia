@@ -8,6 +8,24 @@
     use super::{CharacterRenderProfileDto, ChatEventDto, ChatEventKindDto, MessageDto};
 
     #[test]
+    fn character_render_profile_exposes_inert_author_metadata() {
+        let content: CharacterContentV1 = serde_json::from_value(serde_json::json!({
+            "creator": "Synthetic author",
+            "creator_notes": "<script>inert text</script>",
+            "tags": ["survival"],
+            "recommended_language": "ja"
+        })).expect("decode profile metadata");
+        let profile = CharacterRenderProfileDto::from_content("character-1".to_owned(), None, content);
+        assert_eq!(profile.creator, "Synthetic author");
+        assert_eq!(profile.creator_notes, "<script>inert text</script>");
+        assert_eq!(profile.tags, ["survival"]);
+        assert_eq!(profile.recommended_language.as_deref(), Some("ja"));
+        let mut old = serde_json::to_value(&profile).unwrap();
+        old.as_object_mut().unwrap().remove("recommended_language");
+        assert_eq!(serde_json::from_value::<CharacterRenderProfileDto>(old).unwrap().recommended_language, None);
+    }
+
+    #[test]
     fn character_render_profile_partitions_transforms_and_indexes_misleading_asset_names() {
         let content: CharacterContentV1 = serde_json::from_value(serde_json::json!({
             "knowledge_book": {
@@ -90,6 +108,7 @@
         );
 
         assert_eq!(profile.assets.len(), 1);
+        assert_eq!(profile.assets[0].media_type, "image/webp");
         assert!(
             profile.assets[0]
                 .aliases

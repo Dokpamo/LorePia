@@ -40,3 +40,13 @@ export interface AssetDeliveryDto {
     duration_ms: number | null;
     url: string;
 }
+
+/** Immutable opening read; never sent back as a conversation input. */
+export interface CharacterGreetingDetailInput {
+    character_id: string;
+    character_content_revision_id: string;
+    greeting_id: string;
+}
+export interface CharacterGreetingDetailDto extends CharacterGreetingDetailInput {
+    text: string;
+}

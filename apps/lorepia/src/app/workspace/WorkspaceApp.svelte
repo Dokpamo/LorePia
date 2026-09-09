@@ -18,6 +18,7 @@
     import ApplicationFrame from '../../ui/navigation/ApplicationFrame.svelte';
     import CharacterLibrary from '../../ui/navigation/CharacterLibrary.svelte';
     import CharacterOverview from '../../ui/navigation/CharacterOverview.svelte';
+    import type { CharacterProfilePresentation } from '../../ui/navigation/character-profile-types';
     import ConversationLibrary from '../../ui/navigation/ConversationLibrary.svelte';
     import CreationHub from '../../ui/navigation/CreationHub.svelte';
     import type { RootTab } from '../../ui/navigation/navigation-types';
@@ -34,7 +35,13 @@
     import { characterViews, conversationView } from './workspace-projection';
     import { workspaceFeedback } from './workspace-feedback';
 
-    let { client }: { client?: LorepiaClient } = $props();
+    let {
+        client,
+        characterPresentations = {},
+    }: {
+        client?: LorepiaClient;
+        characterPresentations?: Record<string, CharacterProfilePresentation>;
+    } = $props();
     const appClient = untrack(() => client ?? createLiveLorepiaClient());
     const controller = new LorepiaAppController(appClient);
     let appState = $state.raw<LorepiaAppState>(structuredClone(INITIAL_APP_STATE));
@@ -262,6 +269,18 @@
     {#snippet detail()}
         {#if overview && character}<CharacterOverview
                 {character}
+                presentation={characterPresentations[character.id]}
+                greetings={appState.greeting_catalog.value?.character_id === character.id
+                    ? appState.greeting_catalog.value.greetings
+                    : []}
+                selectedGreetingId={appState.greeting_catalog.selected_greeting_id}
+                greetingRevisionId={appState.greeting_catalog.value?.character_id === character.id
+                    ? appState.greeting_catalog.value.character_content_revision_id
+                    : undefined}
+                greetingsLoading={appState.greeting_catalog.phase === 'loading'}
+                onselectGreeting={(id: string) => {
+                    controller.selectGreeting(id);
+                }}
                 client={appClient}
                 covered={overlay !== null}
                 onclose={() => (overview = false)}
@@ -270,14 +289,13 @@
                     overview = false;
                     rootTab = 'chats';
                 }}
-                onmaterials={() => {
-                    overview = false;
-                    rootTab = 'create';
-                }}
-                onplugins={() => {
-                    featureSection = 'plugins';
-                    overlay = 'app-settings';
-                }}
+                runtimeTarget={appState.selected_conversation?.character_id === character.id &&
+                appState.conversation_state?.conversation_id === appState.selected_conversation.id
+                    ? {
+                          conversation_id: appState.selected_conversation.id,
+                          branch_id: appState.conversation_state.active_branch_id,
+                      }
+                    : undefined}
             />{/if}
         {#if overlay === 'app-settings' || overlay === 'providers' || overlay === 'studio'}
             <WorkspaceFeatures

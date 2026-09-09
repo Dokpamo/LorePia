@@ -1,4 +1,8 @@
 import type {
+    CharacterGreetingDetailDto,
+    CharacterGreetingDetailInput,
+} from '../contracts/character';
+import type {
     ClearConversationPersonaInput,
     ConversationPersonaSelectionDto,
     CreatePersonaInput,
@@ -66,6 +70,12 @@ export abstract class LibraryClient extends ClientTransportBase {
         return this.call(LOREPIA_COMMANDS.getCharacterGreetingCatalog, {
             request: { character_id: characterId },
         });
+    }
+
+    getCharacterGreetingDetail(
+        input: CharacterGreetingDetailInput,
+    ): Promise<CharacterGreetingDetailDto> {
+        return this.call(LOREPIA_COMMANDS.getCharacterGreetingDetail, { request: input });
     }
 
     getCharacterRenderProfile(

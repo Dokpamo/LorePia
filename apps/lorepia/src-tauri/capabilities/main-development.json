@@ -16,6 +16,7 @@
     "allow-list-characters",
     "allow-get-character",
     "allow-get-character-greeting-catalog",
+    "allow-get-character-greeting-detail",
     "allow-get-character-render-profile",
     "allow-get-portable-runtime-state",
     "allow-put-portable-runtime-state",

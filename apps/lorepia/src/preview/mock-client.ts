@@ -6,6 +6,7 @@
  */
 
 import type {
+    CharacterGreetingSelectionInput,
     ChatEventDto,
     ChatStreamItemDto,
     ConversationBranchDto,
@@ -32,7 +33,9 @@ import {
     DEMO_CATALOG_HISTORY,
     DEMO_CATALOG_STATUS,
     DEMO_CHARACTERS,
+    DEMO_CHARACTER_PRESENTATIONS,
     DEMO_CONTENT_MODULE_DOCUMENTS,
+    DEMO_CONTENT_MODULE_BINDINGS,
     DEMO_CONVERSATIONS,
     DEMO_GENERATION_PRESETS,
     DEMO_GREETINGS,
@@ -51,6 +54,8 @@ import {
 } from './demo-data';
 
 import { createDemoSettingsDocuments } from './settings-documents';
+import { demoOpening, demoReply } from './profile-chat';
+import { demoRenderProfile } from './profile-resources';
 
 export type PreviewClient = LorepiaClient &
     PersonaClientApi &
@@ -61,6 +66,10 @@ const DEMO_NOW = '2026-08-24T13:00:00.000Z';
 
 function clone<Value>(value: Value): Value {
     return structuredClone(value);
+}
+
+export function createPreviewCharacterPresentations() {
+    return clone(DEMO_CHARACTER_PRESENTATIONS);
 }
 
 function selectedPersonaSnapshot(persona: PersonaDto | null) {
@@ -190,9 +199,16 @@ export function createPreviewClient(): PreviewClient {
         };
     }
 
-    function createConversation(characterId: string, title: string, mode: ConversationMode) {
+    function createConversation(
+        characterId: string,
+        title: string,
+        mode: ConversationMode,
+        greeting?: CharacterGreetingSelectionInput,
+    ) {
         characterById(characterId);
+        const opening = demoOpening(characterId, greeting);
         const suffix = String(nextConversation++);
+        const openingId = opening === null ? null : `message-demo-opening-${suffix}`;
         const conversation = {
             id: `conversation-demo-${suffix}`,
             character_id: characterId,
@@ -205,7 +221,7 @@ export function createPreviewClient(): PreviewClient {
             conversation_id: conversation.id,
             title: null,
             fork_message_id: null,
-            head_message_id: null,
+            head_message_id: openingId,
             created_at: DEMO_NOW,
             updated_at: DEMO_NOW,
         };
@@ -213,7 +229,18 @@ export function createPreviewClient(): PreviewClient {
         branches = [branch, ...branches];
         selectedBranchIds.set(conversation.id, branch.id);
         conversationModes.set(conversation.id, mode);
-        branchMessageIds.set(branch.id, []);
+        branchMessageIds.set(branch.id, openingId === null ? [] : [openingId]);
+        if (openingId !== null && opening !== null)
+            messages.push({
+                id: openingId,
+                conversation_id: conversation.id,
+                parent_id: null,
+                role: 'assistant',
+                content: opening,
+                status: 'complete',
+                generation_id: null,
+                created_at: DEMO_NOW,
+            });
         return conversation;
     }
 
@@ -225,8 +252,10 @@ export function createPreviewClient(): PreviewClient {
         const generationId = `generation-demo-${String(nextGeneration++)}`;
         const userMessageId = `message-demo-user-${String(nextMessage++)}`;
         const assistantMessageId = `message-demo-assistant-${String(nextMessage++)}`;
-        const reply =
-            '좋아요. 이 대화는 데모 모드에서 로컬로만 추가됐어요. 새로고침하면 원래 테스트 데이터로 돌아갑니다.';
+        const reply = demoReply(
+            conversationById(input.conversation_id).character_id,
+            messagesForBranch(branch.id).filter((message) => message.role === 'user').length,
+        );
 
         messages.push(
             {
@@ -299,6 +328,22 @@ export function createPreviewClient(): PreviewClient {
             if (!catalog) throw new Error(`Unknown demo greeting catalog: ${characterId}`);
             return Promise.resolve(clone(catalog));
         },
+        getCharacterGreetingDetail: (input) =>
+            Promise.resolve().then(() => ({
+                ...input,
+                text: demoOpening(input.character_id, input) ?? '',
+            })),
+        getCharacterRenderProfile: (characterId, scope) =>
+            Promise.resolve().then(() => {
+                characterById(characterId);
+                if (
+                    scope &&
+                    (conversationById(scope.conversation_id).character_id !== characterId ||
+                        branchById(scope.branch_id).conversation_id !== scope.conversation_id)
+                )
+                    throw new Error('Demo render profile scope mismatch');
+                return demoRenderProfile(characterId, scope !== undefined);
+            }),
         selectImportSource: () => Promise.resolve(null),
         discardImport: () => Promise.resolve(),
 
@@ -313,8 +358,10 @@ export function createPreviewClient(): PreviewClient {
                         .sort((left, right) => right.updated_at.localeCompare(left.updated_at)),
                 ),
             ),
-        createConversation: (characterId, title, mode) =>
-            Promise.resolve(clone(createConversation(characterId, title, mode))),
+        createConversation: (characterId, title, mode, greeting) =>
+            Promise.resolve().then(() =>
+                clone(createConversation(characterId, title, mode, greeting)),
+            ),
         openConversation: (characterId) => {
             const existing = conversations.find(
                 (conversation) => conversation.character_id === characterId,
@@ -460,6 +507,14 @@ export function createPreviewClient(): PreviewClient {
         listTransformSets: () => Promise.resolve(clone(DEMO_TRANSFORM_SET_DOCUMENTS)),
         listInteractionRuleSets: () => Promise.resolve(clone(DEMO_INTERACTION_RULE_DOCUMENTS)),
         listContentModules: () => Promise.resolve(clone(DEMO_CONTENT_MODULE_DOCUMENTS)),
+        listContentModuleBindings: ({ content_module_id }) =>
+            Promise.resolve(
+                clone(
+                    DEMO_CONTENT_MODULE_BINDINGS.filter(
+                        (item) => item.value.module_id === content_module_id,
+                    ),
+                ),
+            ),
         upsertKnowledgeBook: (input) =>
             Promise.resolve(revisioned(input.value, (input.expected_revision ?? 0) + 1)),
         upsertTransformSet: (input) =>

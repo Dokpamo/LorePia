@@ -50,6 +50,8 @@ fn normalizes_all_public_character_fields_and_indexes_unknown_extensions() {
                     {"type":"icon","uri":"https://invalid.example/avatar.png","name":"avatar"}
                 ],
                 "creator":"LorePia synthetic fixture",
+                "creator_notes":"A note, not a prompt.",
+                "tags":["library","guide"],
                 "z_unknown":{"safe":true},
                 "extensions":{
                     "script":"alert(1)",
@@ -68,6 +70,9 @@ fn normalizes_all_public_character_fields_and_indexes_unknown_extensions() {
 
     assert_eq!(first.plan_hash, second.plan_hash);
     assert_eq!(content.personality, "Warm and precise");
+    assert_eq!(content.creator, "LorePia synthetic fixture");
+    assert_eq!(content.creator_notes, "A note, not a prompt.");
+    assert_eq!(content.tags, ["library", "guide"]);
     assert_eq!(content.scenario, "A local library");
     assert_eq!(content.first_message, "Welcome.");
     assert_eq!(content.example_dialogs, ["User: Hello\nSegu: Welcome."]);
@@ -90,10 +95,7 @@ fn normalizes_all_public_character_fields_and_indexes_unknown_extensions() {
             .as_str(),
         first.inspection.source_sha256
     );
-    assert_eq!(
-        first.inspection.unsupported_optional_fields,
-        ["creator", "z_unknown"]
-    );
+    assert_eq!(first.inspection.unsupported_optional_fields, ["z_unknown"]);
 
     let quarantines = content
         .unknown_extensions

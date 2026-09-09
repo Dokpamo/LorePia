@@ -1,0 +1,96 @@
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/svelte';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { t } from '../../lib/i18n';
+import { createPreviewClient } from '../../preview/mock-client';
+import CharacterProfileHero from './CharacterProfileHero.svelte';
+
+beforeEach(() =>
+    vi.stubGlobal(
+        'ResizeObserver',
+        class {
+            observe = vi.fn();
+            disconnect = vi.fn();
+            unobserve = vi.fn();
+        },
+    ),
+);
+afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+});
+
+it('keeps representative thumbnails in sync with swipes, keyboard and original-image viewing', async () => {
+    const images = Array.from({ length: 29 }, (_, i) => ({
+        assetId: `asset-${String(i)}`,
+        title: `Image ${String(i + 1)}`,
+    }));
+    const onview = vi.fn();
+    const { container } = render(CharacterProfileHero, {
+        images,
+        client: createPreviewClient(),
+        onview,
+        ondetails: vi.fn(),
+        character: {
+            id: 'character',
+            name: 'Example',
+            description: '',
+            thumbnail: 'A',
+            subpage: false,
+            histories: [],
+        },
+    });
+    const image = (number: number) =>
+        screen.getByRole('button', {
+            name: t('navigation.imageSelectItem', { name: `Image ${String(number)}` }),
+        });
+    const navigation = screen.getByRole('toolbar', { name: t('navigation.representativeImages') });
+    const thumbnail = (number: number) =>
+        within(navigation).getByRole('button', {
+            name: t('navigation.imageThumbnail', { number, name: `Image ${String(number)}` }),
+        });
+    expect(within(navigation).getAllByRole('button')).toHaveLength(29);
+    expect(thumbnail(1)).toHaveAttribute('aria-pressed', 'true');
+    await fireEvent.click(thumbnail(12));
+    expect(image(12)).toBeVisible();
+    expect(thumbnail(12)).toHaveAttribute('aria-pressed', 'true');
+    await fireEvent.keyDown(thumbnail(12), { key: 'Home' });
+    expect(thumbnail(1)).toHaveFocus();
+    await fireEvent.keyDown(image(1), { key: 'ArrowRight' });
+    expect(image(2)).toHaveFocus();
+    await fireEvent.keyDown(image(2), { key: 'ArrowRight' });
+    const third = image(3);
+    expect(third).toHaveFocus();
+    await fireEvent.click(third);
+    expect(onview).toHaveBeenCalledExactlyOnceWith('asset-2', third);
+    await fireEvent.keyDown(third, { key: 'End' });
+    expect(image(29)).toHaveFocus();
+    await fireEvent.keyDown(image(29), { key: 'ArrowLeft' });
+    expect(image(28)).toHaveFocus();
+    await fireEvent.keyDown(image(28), { key: 'Home' });
+    expect(image(1)).toHaveFocus();
+
+    const carousel = container.querySelector<HTMLElement>('.seed-profile-carousel');
+    if (!carousel) throw new Error('Missing carousel');
+    Object.defineProperty(carousel, 'clientWidth', { value: 394 });
+    carousel.setPointerCapture = vi.fn();
+    carousel.hasPointerCapture = () => true;
+    carousel.releasePointerCapture = vi.fn();
+    const pointer = async (type: string, x: number, time: number) => {
+        const event = new Event(type, { bubbles: true, cancelable: true });
+        Object.defineProperties(event, {
+            pointerId: { value: 1 },
+            isPrimary: { value: true },
+            button: { value: 0 },
+            clientX: { value: x },
+            clientY: { value: 100 },
+            timeStamp: { value: time },
+        });
+        await fireEvent(carousel, event);
+    };
+    await pointer('pointerdown', 300, 0);
+    await pointer('pointermove', 100, 160);
+    await pointer('pointerup', 100, 200);
+    expect(thumbnail(2)).toHaveAttribute('aria-pressed', 'true');
+    expect(thumbnail(1)).toHaveAttribute('aria-pressed', 'false');
+    expect(image(2)).toBeVisible();
+});

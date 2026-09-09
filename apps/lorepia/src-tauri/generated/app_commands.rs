@@ -9,6 +9,7 @@ const APP_COMMANDS: &[&str] = &[
     "list_characters",
     "get_character",
     "get_character_greeting_catalog",
+    "get_character_greeting_detail",
     "get_character_render_profile",
     "resolve_asset_delivery",
     "list_interaction_effects",

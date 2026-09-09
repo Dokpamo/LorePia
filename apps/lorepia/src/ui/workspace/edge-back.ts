@@ -104,10 +104,13 @@ export function edgeBack(node: HTMLElement, initial: BackOptions) {
             lastX: event.clientX,
             lastTime: event.timeStamp,
         };
-        if (!(event.target instanceof Element && event.target.closest('button, a'))) {
+        if (!(
+            event.target instanceof Element &&
+            event.target.closest('button, a, label, input, select')
+        )) {
             // WebKit starts native text tracking on pointerdown and can consume
             // all following moves. Reserve the accepted edge/free surface now;
-            // the editable interior returned above keeps native selection.
+            // controls keep native click activation until a drag is established.
             event.preventDefault();
             node.setPointerCapture(event.pointerId);
         }

@@ -141,6 +141,7 @@ pub fn run() {
             settings_commands::get_storage_overview,
             commands::get_character,
             commands::get_character_greeting_catalog,
+            character_commands::get_character_greeting_detail,
             commands::get_character_render_profile,
             portable_runtime_state_commands::get_portable_runtime_state,
             portable_runtime_state_commands::put_portable_runtime_state,

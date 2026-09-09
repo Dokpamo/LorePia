@@ -45,7 +45,8 @@
     max-width: none;
     background: var(--ui-paper);
     position: relative;
-    overflow: hidden;
+    /* A focused control scrolls its page body, never the retained page stack. */
+    overflow: clip;
 }
 .seed-app [hidden] {
     display: none !important;

@@ -16,6 +16,7 @@ import type {
     MemorySupervisorStatusDto,
     MessageDto,
     ModelRouteDto,
+    ModuleBindingDocumentDto,
     OrchestrationWorkspaceDto,
     ProviderConnectionDto,
     ProviderOverviewDto,
@@ -25,8 +26,10 @@ import type {
 } from '../lib/ipc/contracts';
 import type { PersonaDto } from '../features/personas/persona-contracts';
 import { emptyOrchestrationWorkspace } from '../features/orchestration/orchestration-controller';
+import { DEMO_DESCRIPTIONS } from './profile-fixtures';
 
 export { DEMO_CATALOG_HISTORY, DEMO_CATALOG_STATUS } from './demo-catalog';
+export { DEMO_CHARACTER_PRESENTATIONS } from './profile-fixtures';
 
 export const DEMO_INITIAL_CHARACTER_ID = 'character-aria';
 export const DEMO_INITIAL_CONVERSATION_ID = 'conversation-archive';
@@ -71,33 +74,33 @@ export const DEMO_CHARACTERS: CharacterDto[] = [
     {
         id: DEMO_INITIAL_CHARACTER_ID,
         name: '아리아',
-        description: '오래된 항해 기록을 지키는 달빛 서고의 사서',
+        description: DEMO_DESCRIPTIONS['character-aria'] ?? '',
         source_hash: '1'.repeat(64),
-        avatar_asset_id: null,
+        avatar_asset_id: 'portrait-aria',
         created_at: '2026-08-20T09:30:00.000Z',
     },
     {
         id: 'character-kai',
         name: '카이',
-        description: '도시 외곽을 떠도는 무뚝뚝한 기계 정비공',
+        description: DEMO_DESCRIPTIONS['character-kai'] ?? '',
         source_hash: '2'.repeat(64),
-        avatar_asset_id: null,
+        avatar_asset_id: 'portrait-kai',
         created_at: '2026-08-21T03:15:00.000Z',
     },
     {
         id: 'character-sera',
         name: '세라',
-        description: '별의 움직임으로 미지의 항로를 찾는 항해사',
+        description: DEMO_DESCRIPTIONS['character-sera'] ?? '',
         source_hash: '3'.repeat(64),
-        avatar_asset_id: null,
+        avatar_asset_id: 'portrait-sera',
         created_at: '2026-08-22T16:00:00.000Z',
     },
     {
         id: 'character-noa',
         name: '노아',
-        description: '꿈에서 본 장면을 짧은 이야기로 기록하는 화가',
+        description: DEMO_DESCRIPTIONS['character-noa'] ?? '',
         source_hash: '4'.repeat(64),
-        avatar_asset_id: null,
+        avatar_asset_id: 'portrait-noa',
         created_at: '2026-08-23T07:40:00.000Z',
     },
 ];
@@ -461,6 +464,7 @@ export const DEMO_GREETINGS: Record<string, CharacterGreetingCatalogDto> = Objec
             greetings: [
                 { id: `${character.id}-greeting-default`, kind: 'default', enabled: true },
                 { id: `${character.id}-greeting-evening`, kind: 'alternate', enabled: true },
+                { id: `${character.id}-greeting-letter`, kind: 'alternate', enabled: true },
             ],
         },
     ]),
@@ -863,6 +867,19 @@ export const DEMO_CONTENT_MODULE_DOCUMENTS: RevisionedDto<CreatorContentModuleDo
             description: '달빛 서고 장면을 점검하기 위한 로컬 데모 모듈입니다.',
             tags: ['서고', '분위기', '데모'],
         },
+    }),
+];
+
+export const DEMO_CONTENT_MODULE_BINDINGS: RevisionedDto<ModuleBindingDocumentDto>[] = [
+    revisioned({
+        id: 'binding-atmosphere-demo',
+        module_id: 'module-atmosphere-demo',
+        scope: 'character',
+        target_id: DEMO_INITIAL_CHARACTER_ID,
+        enabled: true,
+        approved: true,
+        revision_id: 'revision-atmosphere-demo',
+        created_at: '2026-08-24T13:00:00.000Z',
     }),
 ];
 

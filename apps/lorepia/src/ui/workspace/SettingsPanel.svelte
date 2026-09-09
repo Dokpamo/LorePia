@@ -14,6 +14,8 @@
         disabled = false,
         covered = false,
         root = false,
+        showTitle = true,
+        footer,
         children,
     }: {
         title: string;
@@ -23,9 +25,12 @@
         disabled?: boolean;
         covered?: boolean;
         root?: boolean;
+        showTitle?: boolean;
+        footer?: Snippet;
         children: Snippet;
     } = $props();
     let panel: HTMLDivElement;
+    let scrolled = $state(false);
     let backButton = $state<HTMLButtonElement>();
     onMount(() => {
         if (!covered && !root) backButton?.focus({ preventScroll: true });
@@ -56,6 +61,7 @@
         class="ui-overlay"
         bind:this={panel}
         data-kind={kind}
+        data-scrolled={scrolled}
         role={root ? 'region' : 'dialog'}
         aria-modal={root ? undefined : true}
         aria-label={title}
@@ -80,9 +86,13 @@
                 >
             {/if}
         </header>
-        <div class="ui-overlay-body">
-            {#if !root}<h1 class="ui-detail-title">{title}</h1>{/if}
+        <div
+            class="ui-overlay-body"
+            onscroll={(event) => (scrolled = event.currentTarget.scrollTop > 8)}
+        >
+            {#if !root && showTitle}<h1 class="ui-detail-title">{title}</h1>{/if}
             {@render children()}
         </div>
+        {#if footer}<div class="ui-panel-footer">{@render footer()}</div>{/if}
     </div>
 </div>

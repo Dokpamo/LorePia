@@ -1,0 +1,71 @@
+.seed-image-strip-fog {
+    min-width: 0;
+    mask-image: linear-gradient(
+        to right,
+        transparent,
+        #000 20px,
+        #000 calc(100% - 20px),
+        transparent
+    );
+    -webkit-mask-image: linear-gradient(
+        to right,
+        transparent,
+        #000 20px,
+        #000 calc(100% - 20px),
+        transparent
+    );
+}
+.seed-image-strip {
+    position: relative;
+    display: flex;
+    gap: 4px;
+    padding: 6px calc(50% - 24px);
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    touch-action: pan-x;
+    scrollbar-width: none;
+    user-select: none;
+}
+.seed-image-strip::-webkit-scrollbar {
+    display: none;
+}
+.seed-image-strip-item {
+    flex: 0 0 48px;
+    width: 48px;
+    height: 56px;
+    padding: 2px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: inherit;
+}
+.seed-image-strip-item > .ui-press-visual {
+    display: block;
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    border-radius: 6px;
+    overflow: hidden;
+    opacity: 0.62;
+    scale: 0.88;
+    transition:
+        opacity 150ms cubic-bezier(0.35, 0, 0.35, 1),
+        scale 150ms cubic-bezier(0.35, 0, 0.35, 1);
+}
+.seed-image-strip-item[aria-pressed='true'] > .ui-press-visual {
+    opacity: 1;
+    scale: 1;
+    outline: 2px solid var(--ui-ink);
+    outline-offset: -2px;
+}
+.seed-image-strip img {
+    pointer-events: none;
+    -webkit-user-drag: none;
+    object-fit: cover;
+}
+@media (prefers-reduced-motion: reduce) {
+    .seed-image-strip-item > .ui-press-visual {
+        transition: none;
+    }
+}

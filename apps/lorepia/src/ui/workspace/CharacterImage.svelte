@@ -1,6 +1,9 @@
 <script lang="ts">
+    import { getContext } from 'svelte';
     import type { LorepiaClient } from '../../lib/ipc/contracts';
     import CharacterAvatar from '../../features/assets/CharacterAvatar.svelte';
+    import { assetPresentationContext, type AssetPresentation } from './asset-presentation';
+    const AssetView = getContext<AssetPresentation | undefined>(assetPresentationContext);
 
     let {
         client,
@@ -14,7 +17,9 @@
 </script>
 
 <span class="ui-character-image">
-    <CharacterAvatar {client} character={{ name, avatar_asset_id: assetId }} alt={name} />
+    {#if AssetView}<AssetView {assetId} {name} />{:else}
+        <CharacterAvatar {client} character={{ name, avatar_asset_id: assetId }} alt={name} />
+    {/if}
 </span>
 
 <style>

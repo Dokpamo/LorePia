@@ -13,6 +13,7 @@ export type PortableRuntimeCapabilityDto =
 export interface CharacterRenderAssetDto {
     asset_id: string;
     aliases: string[];
+    media_type?: string;
 }
 
 export interface CharacterDisplayTransformDto {
@@ -48,6 +49,20 @@ export interface CharacterRuntimeKnowledgeDto {
 
 export interface CharacterRenderProfileDto {
     character_id: string;
+    /** Inert CCv2/CCv3 metadata; optional for older shell responses. */
+    creator?: string;
+    creator_notes?: string;
+    tags?: string[];
+    /** Explicit inert recommendation, never inferred from script source or prose. */
+    recommended_language?: string | null;
+    /** Bounded inert reading aids; only for the exact profile revision. */
+    greeting_previews?: {
+        id: string;
+        title: string | null;
+        excerpt: string;
+        language?: string | null;
+        group_id?: string | null;
+    }[];
     character_content_revision_id: string | null;
     assets: CharacterRenderAssetDto[];
     background_markup: string;

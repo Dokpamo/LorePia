@@ -9,6 +9,7 @@ export const LOREPIA_COMMANDS = {
     listCharacters: 'list_characters',
     getCharacter: 'get_character',
     getCharacterGreetingCatalog: 'get_character_greeting_catalog',
+    getCharacterGreetingDetail: 'get_character_greeting_detail',
     getCharacterRenderProfile: 'get_character_render_profile',
     resolveAssetDelivery: 'resolve_asset_delivery',
     listInteractionEffects: 'list_interaction_effects',

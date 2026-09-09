@@ -22,8 +22,12 @@ export class ChoiceSheetState {
         if (this.request) return;
         this.present = false;
         void tick().then(() => {
-            if (this.#opener?.isConnected && !this.#opener.closest('[inert]'))
-                this.#opener.focus({ preventScroll: true });
+            // Covered pages resume their own focus effects during the same flush.
+            // Restore the specific selector after those effects, not before them.
+            requestAnimationFrame(() => {
+                if (!this.present && this.#opener?.isConnected && !this.#opener.closest('[inert]'))
+                    this.#opener.focus({ preventScroll: true });
+            });
         });
     }
 }

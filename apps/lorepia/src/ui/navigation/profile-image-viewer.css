@@ -1,0 +1,107 @@
+.seed-image-viewer {
+    --ui-icon-ink: #fff;
+    --ui-heading: #fff;
+    --ui-ink: #fff;
+    position: absolute;
+    inset: 0;
+    z-index: 30;
+    overflow: hidden;
+    color: #fff;
+}
+.seed-image-viewer-backdrop {
+    position: absolute;
+    inset: 0;
+    background: #111214;
+}
+.seed-image-viewer-surface {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    user-select: none;
+    transition: transform 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.seed-image-viewer-surface[data-dragging='true'],
+.seed-image-viewer-track[data-dragging='true'],
+.seed-image-viewer-track[data-jumping='true'] {
+    transition: none;
+}
+.seed-image-viewer header {
+    position: relative;
+    flex: 0 0 64px;
+    display: flex;
+    align-items: center;
+    padding: max(6px, env(safe-area-inset-top, 0px)) 8px 6px;
+    touch-action: none;
+}
+.seed-image-viewer .ui-icon-button {
+    color: #fff;
+}
+.seed-image-viewer .ui-icon-button:disabled {
+    opacity: 0.25;
+}
+.seed-image-viewer-handle {
+    position: absolute;
+    top: 12px;
+    left: calc(50% - 18px);
+    width: 36px;
+    height: 4px;
+    border-radius: 4px;
+    background: #ffffff60;
+}
+.seed-image-viewer-window {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    touch-action: none;
+}
+.seed-image-viewer-track {
+    display: flex;
+    width: 100%;
+    height: 100%;
+    transition: transform 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.seed-image-viewer figure {
+    flex: 0 0 100%;
+    min-width: 0;
+    height: 100%;
+    margin: 0;
+}
+.seed-image-viewer .trusted-asset {
+    width: 100%;
+    height: 100%;
+}
+.seed-image-viewer img {
+    pointer-events: none;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+.seed-image-viewer footer {
+    flex: 0 0 auto;
+    padding: 16px 0 max(24px, env(safe-area-inset-bottom, 0px));
+}
+.seed-image-viewer .seed-image-strip img {
+    object-fit: cover;
+}
+.seed-image-viewer-jump {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    animation: seed-image-viewer-depart 150ms cubic-bezier(0.35, 0, 0.35, 1) forwards;
+}
+@keyframes seed-image-viewer-depart {
+    from {
+        opacity: 1;
+    }
+    to {
+        opacity: 0;
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    .seed-image-viewer-surface,
+    .seed-image-viewer-track {
+        transition: none;
+    }
+}

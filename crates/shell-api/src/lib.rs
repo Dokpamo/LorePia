@@ -12,6 +12,7 @@
 pub const SHELL_API_VERSION: u32 = 3;
 
 mod api;
+pub use api::CharacterGreetingDetailDto;
 mod asset;
 mod catalog;
 mod discovery;
@@ -77,14 +78,15 @@ pub use discovery::{
 };
 pub use dto::{
     BootstrapDto, CharacterDisplayTransformDto, CharacterDto, CharacterGreetingCatalogDto,
-    CharacterGreetingKindDto, CharacterGreetingOptionDto, CharacterRenderAssetDto,
-    CharacterRenderProfileDto, CharacterRuntimeKnowledgeDto, CharacterRuntimeScriptDto,
-    ChatEventDto, ChatEventKindDto, ContentKindDto, ConversationBranchDto, ConversationDto,
-    ConversationModeDto, ConversationStateDto, GenerationStartedDto, GenerationTargetDto,
-    GenerationUsageDto, HealthDto, ImportCommitResultDto, ImportImagePreviewDto,
-    ImportInspectionDto, ImportWarningDto, ImportedContentSummaryDto, MessageActionGenerationDto,
-    MessageDisplayProjectionDto, MessageDto, MessageRoleDto, MessageStatusDto,
-    MessageTransformDiagnosticDto, MessageTransformDispositionDto, MessageTransformStageDto,
+    CharacterGreetingKindDto, CharacterGreetingOptionDto, CharacterGreetingPreviewDto,
+    CharacterRenderAssetDto, CharacterRenderProfileDto, CharacterRuntimeKnowledgeDto,
+    CharacterRuntimeScriptDto, ChatEventDto, ChatEventKindDto, ContentKindDto,
+    ConversationBranchDto, ConversationDto, ConversationModeDto, ConversationStateDto,
+    GenerationStartedDto, GenerationTargetDto, GenerationUsageDto, HealthDto,
+    ImportCommitResultDto, ImportImagePreviewDto, ImportInspectionDto, ImportWarningDto,
+    ImportedContentSummaryDto, MessageActionGenerationDto, MessageDisplayProjectionDto, MessageDto,
+    MessageRoleDto, MessageStatusDto, MessageTransformDiagnosticDto,
+    MessageTransformDispositionDto, MessageTransformStageDto,
 };
 pub use error::{ShellError, ShellErrorCode, ShellResult};
 pub use interaction::{
