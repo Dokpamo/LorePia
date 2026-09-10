@@ -244,7 +244,7 @@
       "optional": false,
       "package": "zip",
       "rename": null,
-      "requirement": "^4.3",
+      "requirement": "^8.6.0",
       "source": "registry+https://github.com/rust-lang/crates.io-index",
       "target": null
     },
@@ -421,7 +421,7 @@
       "optional": false,
       "package": "zip",
       "rename": null,
-      "requirement": "^4.3",
+      "requirement": "^8.6.0",
       "source": "registry+https://github.com/rust-lang/crates.io-index",
       "target": null
     },
@@ -975,7 +975,7 @@
       "optional": false,
       "package": "zip",
       "rename": null,
-      "requirement": "^4.3",
+      "requirement": "^8.6.0",
       "source": "registry+https://github.com/rust-lang/crates.io-index",
       "target": null
     },
@@ -1295,7 +1295,7 @@
       "optional": false,
       "package": "zip",
       "rename": null,
-      "requirement": "^4.3",
+      "requirement": "^8.6.0",
       "source": "registry+https://github.com/rust-lang/crates.io-index",
       "target": null
     },

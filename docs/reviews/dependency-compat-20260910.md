@@ -65,8 +65,35 @@ passed unchanged. Transitive consumers retain their supported sha2 0.10 and
 base64 0.22 versions in Cargo.lock; only workspace direct consumers are upgraded.
 Further group and full-gate results will follow.
 
-rusqlite: the complete `lorepia-storage` suite passed, including immutable
+rusqlite: the `lorepia-storage` run passed 413 tests, with its 3 existing ignored
+helper/manual tests unchanged, including immutable
 schema-11 fixtures, cutover/reopen and recovery tests. The added unsigned-counter
 regression verifies INTEGER affinity and round trips at 0/1/i64::MAX, rejects
 larger u64 inputs and negative/floating reads, and checks rollback after a
 rejected bind. No schema or fixture was changed.
+
+Android compatibility also includes `config/android/tauri-2.11.5.gradle.kts`.
+Both settings files select this checked-in build script while keeping each
+Tauri project's original source directory. It only replaces the deprecated
+Android/Kotlin compiler-options DSL; the Tauri source tree and its dependencies
+are unchanged. The locked upstream build script has SHA-256
+`aab1b0ecb929ea70b33ad42d7df55c185a3485f9609ec998047232b45df76a4d`.
+The app explicitly keeps both Java and Kotlin on JVM 1.8, avoiding AGP's changed
+Java default. The platform plugin retains Java/Kotlin 17. CI now builds the
+Tauri Android APK before compiling instrumented sources, so Cargo emits the
+real Wry/Tauri activity classes; it also runs the standalone plugin's unit tests.
+
+Android lock/verification maintenance can be reproduced with the checked-in
+`scripts/resolve_android_dependencies.gradle` init script and Gradle's
+`--write-locks --write-verification-metadata sha256 resolveDependencyIntegrity`
+flags, using `--no-configuration-cache` for this maintenance-only task. Run it
+for the app and standalone plugin after the existing Tauri preparation step,
+review the new artifact hashes, then run normal strict-verification builds.
+
+ZIP 8.6.0: retain `default-features = false` with only `deflate`; both old
+and new versions use the same zopfli/flate2-zlib-rs feature composition. The
+existing Content suite and 10 Core import/export vertical tests passed. Static
+CHARX and malicious archive fixtures remain byte-for-byte unchanged, covering
+paths/collisions, symlinks, duplicate/ZIP64 records, size/ratio boundaries, MIME
+mismatch and corrupted metadata. Source export/reimport still preserves exact
+original bytes. No archive validation path or limit was relaxed.
