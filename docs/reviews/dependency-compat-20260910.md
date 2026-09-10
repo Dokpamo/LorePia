@@ -27,7 +27,10 @@ extraction or a change to archived refactoring evidence.
   `Project.exec` with injected `ExecOperations`, preserving arguments, working
   directory, exit checks, and Windows fallbacks. AppCompat is a direct runtime
   requirement of the platform plugin; declaring it only as compile-only left
-  standalone runtime resolution on Tauri's older version.
+  standalone runtime resolution on Tauri's older version. Explicitly align the
+  buildSrc Kotlin plugin dependency as well: AGP otherwise exposes its older
+  transitive Kotlin plugin to the app, overriding the root declaration and
+  producing a shared platform-plugin lock incompatible with standalone builds.
 - rusqlite 0.40.2: preserve SQLite integer bounds, SQL/schema, transaction
   ownership, migration fixtures, and recovery behavior. Its `fallible_uint`
   feature preserves the original checked u64/usize conversions; `cache`
@@ -63,7 +66,7 @@ Providers, and native platform suites passed 689 tests (no failures or ignored
 cases). The independent cross-platform canonical-plan JSON/SHA golden test
 passed unchanged. Transitive consumers retain their supported sha2 0.10 and
 base64 0.22 versions in Cargo.lock; only workspace direct consumers are upgraded.
-Further group and full-gate results will follow.
+Full-gate results are recorded below as they finish.
 
 rusqlite: the `lorepia-storage` run passed 413 tests, with its 3 existing ignored
 helper/manual tests unchanged, including immutable
@@ -97,3 +100,42 @@ CHARX and malicious archive fixtures remain byte-for-byte unchanged, covering
 paths/collisions, symlinks, duplicate/ZIP64 records, size/ratio boundaries, MIME
 mismatch and corrupted metadata. Source export/reimport still preserves exact
 original bytes. No archive validation path or limit was relaxed.
+
+The Gradle host-tool metadata includes the Linux, macOS, and Windows AAPT2
+classifiers for `com.android.tools.build:aapt2:9.3.2-15703166`, verified against
+Google Maven. This is needed because the local build runs on macOS and the
+required Android GitHub job runs on Linux. Generate these additional classifier
+entries with a temporary detached Gradle configuration and the same
+`--write-verification-metadata sha256` maintenance flag; do not change strict
+verification for normal builds.
+
+Frontend: Svelte/TypeScript checking passed with the two existing ChatPane
+initial-reference warnings. All 1,072 tests (163 files) passed on the full rerun
+with `--maxWorkers=2`; an earlier concurrent run had a transient import-preview
+validation failure, which also passed in isolation. Lua and regexp worker
+posttests passed. No renderer code changed.
+
+Repository Python suites passed 108 tests, including Android preparation path
+safety. IPC generation, frozen refactoring report, workflow security, Android
+integrity, i18n baseline, AI context budgets, and source architecture checks
+passed. No architecture/size ceiling or archived report was relaxed.
+
+Android: the full Tauri CLI produced a debug ARM64 APK with strict verification.
+After aligning buildSrc with Kotlin 2.4.20, standalone plugin Kotlin and
+instrumented sources recompiled with `--dependency-verification strict
+--rerun-tasks`, and all 30 platform JVM tests passed. The app's ARM64 APK and
+instrumented sources then compiled in strict mode again, reusing the unchanged
+native library from the Tauri build. CI runs the full native+Gradle build on
+Linux without skipping the native task. Instrumented Android tests were compiled,
+not executed on a device.
+
+All 443 new Gradle artifact checksums were independently verified against their
+primary Maven publisher repositories. The wrapper JAR and distribution match
+Gradle's official SHA-256 checksums. No existing artifact checksum was replaced,
+and no trusted-artifact or verification bypass was introduced. AGP 9's explicit
+external-Kotlin/legacy-DSL compatibility flags remain necessary for Tauri 2.11.5;
+AGP 10 is outside this update and needs a separate upstream migration.
+
+Workspace formatting and warning-free Clippy passed. Full Rust workspace tests
+and the required cross-platform GitHub gates must pass before this follow-up is
+merged; the targeted group results above do not replace them.

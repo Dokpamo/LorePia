@@ -112,7 +112,23 @@ def main() -> int:
 
     require_text(
         "apps/lorepia/src-tauri/gen/android/gradle/wrapper/gradle-wrapper.properties",
-        "distributionSha256Sum=bd71102213493060956ec229d946beee57158dbd89d0e62b91bca0fa2c5f3531",
+        "distributionSha256Sum=acd53f1edaf02f1a8ff99879f8a34b302661a057d9b063ae9e35b552f804d20a",
+        failures,
+    )
+    require_text(
+        "scripts/prepare_tauri_android_gradle.py",
+        'EXPECTED_TAURI_VERSION = "2.11.5"',
+        failures,
+    )
+    for settings in (
+        "apps/lorepia/src-tauri/gen/android/settings.gradle",
+        "plugins/lorepia-platform/android/settings.gradle",
+    ):
+        require_text(settings, "config/android/tauri-2.11.5.gradle.kts", failures)
+        require_text(settings, "if (!tauriBuild.isFile())", failures)
+    require_text(
+        "config/android/tauri-2.11.5.gradle.kts",
+        "jvmTarget.set(JvmTarget.JVM_1_8)",
         failures,
     )
     for properties in (
@@ -182,6 +198,9 @@ def main() -> int:
         ":tauri-plugin-lorepia-platform:dependencies",
         ":tauri-android:dependencies",
         "releaseRuntimeClasspath",
+        ":app:compileArm64DebugKotlin",
+        ":app:compileArm64DebugAndroidTestKotlin",
+        "compileDebugAndroidTestKotlin testDebugUnitTest",
     ):
         require_text(workflow, expected, failures)
     forbid_text(workflow, "node-version-file: apps/lorepia/.node-version", failures)

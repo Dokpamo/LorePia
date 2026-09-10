@@ -1,3 +1,8 @@
 include ':app'
 
 apply from: 'tauri.settings.gradle'
+
+// Preserve locked Tauri sources while migrating its Kotlin compiler-options DSL.
+def tauriBuild = new File(rootDir, '../../../../../config/android/tauri-2.11.5.gradle.kts').canonicalFile
+if (!tauriBuild.isFile()) throw new GradleException('Missing Tauri 2.11.5 build compatibility script')
+project(':tauri-android').buildFileName = project(':tauri-android').projectDir.toPath().relativize(tauriBuild.toPath()).toString()

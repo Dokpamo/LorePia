@@ -129,7 +129,7 @@ class PlatformPolicyTest {
                 .resolve("sha256")
                 .resolve(digest.take(2))
                 .resolve(digest.drop(2))
-            assertTrue(source.parentFile.mkdirs())
+            assertTrue(requireNotNull(source.parentFile).mkdirs())
             source.writeBytes(bytes)
 
             val verified = PlatformPolicy.validateContentSourceExport(
