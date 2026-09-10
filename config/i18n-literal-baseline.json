@@ -187,8 +187,8 @@
       "sha256": "bc1671448cd230354af6819c12b91cb8719976e134b901eadd7e40c68b7ea02f"
     },
     "src/features/orchestration/ContentModuleLifecyclePanel.test.ts": {
-      "hangul_lines": 43,
-      "sha256": "7191e55896ba3f67cf8fb02e3ddc3f9762bee2d8afe288ba7ff21f98f4c1ab09"
+      "hangul_lines": 41,
+      "sha256": "988e6ac70cd6d6964cc1f5bfb644963d0d9948a3a74070aa4dcdc6ae6fc6b9a7"
     },
     "src/features/orchestration/CreatorDocumentEditors.svelte": {
       "hangul_lines": 42,

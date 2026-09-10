@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { t } from '../../lib/i18n';
 
 import ContentModuleLifecyclePanel from './ContentModuleLifecyclePanel.svelte';
 import type {
@@ -420,11 +421,11 @@ describe('ContentModuleLifecyclePanel', () => {
         });
 
         const candidateButton = await screen.findByRole('button', {
-            name: '이 불변 리비전 활성화 검토',
+            name: t('content.module.activation_review'),
         });
         const card = candidateButton.closest('article');
         if (card === null) throw new Error('candidate card is missing');
-        expect(within(card).getByText('격리 런타임')).toBeInTheDocument();
+        expect(within(card).getByText(t('content.capability.portable_runtime'))).toBeInTheDocument();
     });
 
     it('pushes the module index into candidate and activation pages one level at a time', async () => {
