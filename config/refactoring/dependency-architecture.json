@@ -287,10 +287,12 @@
       "target": null
     },
     {
-      "default_features": true,
+      "default_features": false,
       "features": [
         "backup",
         "bundled",
+        "cache",
+        "fallible_uint",
         "functions"
       ],
       "from": "lorepia-core",
@@ -298,7 +300,7 @@
       "optional": false,
       "package": "rusqlite",
       "rename": null,
-      "requirement": "^0.37",
+      "requirement": "^0.40.2",
       "source": "registry+https://github.com/rust-lang/crates.io-index",
       "target": null
     },
@@ -837,10 +839,12 @@
       "target": null
     },
     {
-      "default_features": true,
+      "default_features": false,
       "features": [
         "backup",
         "bundled",
+        "cache",
+        "fallible_uint",
         "functions"
       ],
       "from": "lorepia-shell-api",
@@ -848,15 +852,17 @@
       "optional": false,
       "package": "rusqlite",
       "rename": null,
-      "requirement": "^0.37",
+      "requirement": "^0.40.2",
       "source": "registry+https://github.com/rust-lang/crates.io-index",
       "target": null
     },
     {
-      "default_features": true,
+      "default_features": false,
       "features": [
         "backup",
         "bundled",
+        "cache",
+        "fallible_uint",
         "functions"
       ],
       "from": "lorepia-shell-api",
@@ -864,7 +870,7 @@
       "optional": true,
       "package": "rusqlite",
       "rename": null,
-      "requirement": "^0.37",
+      "requirement": "^0.40.2",
       "source": "registry+https://github.com/rust-lang/crates.io-index",
       "target": null
     },
@@ -1000,10 +1006,12 @@
       "target": null
     },
     {
-      "default_features": true,
+      "default_features": false,
       "features": [
         "backup",
         "bundled",
+        "cache",
+        "fallible_uint",
         "functions"
       ],
       "from": "lorepia-storage",
@@ -1011,7 +1019,7 @@
       "optional": false,
       "package": "rusqlite",
       "rename": null,
-      "requirement": "^0.37",
+      "requirement": "^0.40.2",
       "source": "registry+https://github.com/rust-lang/crates.io-index",
       "target": null
     },
