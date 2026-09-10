@@ -1,3 +1,4 @@
+import re
 import shutil
 import sys
 import tempfile
@@ -68,11 +69,13 @@ class GithubWorkflowSecurityTests(unittest.TestCase):
             root = self.copied_workflows(temporary)
             ci = root / ".github/workflows/ci.yml"
             text = ci.read_text(encoding="utf-8")
-            text = text.replace(
-                "actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961",
-                "actions/setup-java@v5",
-                1,
+            text, replacements = re.subn(
+                r"actions/setup-java@[0-9a-f]{40}",
+                "actions/setup-java@v6",
+                text,
+                count=1,
             )
+            self.assertEqual(replacements, 1)
             text = text.replace(
                 "          persist-credentials: false\n",
                 "          # persist-credentials: false\n",

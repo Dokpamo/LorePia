@@ -42,6 +42,10 @@ pub fn get_character_greeting_detail(
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
+#[expect(
+    clippy::struct_field_names,
+    reason = "Field names match the renderer IPC contract"
+)]
 pub struct CharacterGreetingDetailRequest {
     pub character_id: String,
     pub character_content_revision_id: String,
