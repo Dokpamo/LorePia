@@ -84,12 +84,9 @@ fn creator_pages_ignore_large_imported_catalog_and_reach_all_editable_documents(
     let mut current = first;
     loop {
         validate_document(&current).unwrap();
-        ids.extend(
-            current
-                .documents
-                .iter()
-                .map(|document| document.id().to_owned()),
-        );
+        for document in &current.documents {
+            ids.push(document.id().to_owned());
+        }
         let Some(after) = current.next_cursor else {
             break;
         };
@@ -102,7 +99,13 @@ fn creator_pages_ignore_large_imported_catalog_and_reach_all_editable_documents(
             .unwrap();
     }
     assert_eq!(ids.len(), 105);
-    assert!(ids.windows(2).all(|pair| pair[0] < pair[1]));
+    assert_eq!(
+        ids,
+        (0..105)
+            .rev()
+            .map(|index| format!("user-{index:03}"))
+            .collect::<Vec<_>>()
+    );
     let mut edited = book("user-104", false, 32);
     edited.name = "Edited beyond the old cap".into();
     shell
@@ -142,7 +145,8 @@ fn creator_pages_ignore_large_imported_catalog_and_reach_all_editable_documents(
                 kind: CreatorDocumentKind::KnowledgeBook,
                 after: Some(ReadPageCursor {
                     scope: "bad".into(),
-                    after_id: "user-1".into()
+                    after_id: "user-1".into(),
+                    after_updated_at: None,
                 }),
                 limit: 100
             })

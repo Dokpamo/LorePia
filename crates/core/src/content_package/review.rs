@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use lorepia_content::{ContentPackageSelectionPlan, select_content_package_components};
-use lorepia_domain::{CoreError, CoreErrorCode, CoreResult, ImportLimits, PackageId, Sha256Digest};
+use lorepia_domain::{CoreError, CoreErrorCode, CoreResult, PackageId, Sha256Digest};
 use lorepia_orchestration::{
     ApprovedPackageImportPlan, PackageImportApproval, PackageSelectionRequest, SelectiveImportPlan,
     approve_selective_import_plan, build_selective_import_plan,
@@ -144,7 +144,7 @@ impl Core {
         &self,
         import_id: &str,
     ) -> CoreResult<ContentPackageImportReview> {
-        let loaded = load_durable_content_package(self, import_id, ImportLimits::default())?;
+        let loaded = load_durable_content_package(self, import_id)?;
         let capability_review = self.storage().get_package_capability_review(import_id)?;
         let capability_review_sha256 = package_capability_review_sha256(&capability_review)?;
         let mut review = ContentPackageImportReview {
@@ -182,7 +182,7 @@ impl Core {
             self,
             &loaded,
             &import_plan,
-            ImportLimits::default(),
+            loaded.limits,
             Some(&replay_bindings),
         )?;
         let normalization_evidence_sha256 =
@@ -264,7 +264,7 @@ impl Core {
         import_id: &str,
         request: &ContentPackageSelectionRequest,
     ) -> CoreResult<ContentPackageSelectionReceipt> {
-        let mut loaded = load_durable_content_package(self, import_id, ImportLimits::default())?;
+        let mut loaded = load_durable_content_package(self, import_id)?;
         if !matches!(
             loaded.record.status,
             PackageImportStatus::Inspected | PackageImportStatus::AwaitingReview
@@ -320,7 +320,7 @@ impl Core {
             self,
             &loaded,
             &import_plan,
-            ImportLimits::default(),
+            loaded.limits,
             replay_bindings.as_deref(),
         )?;
         let normalization_evidence_sha256 =
@@ -348,7 +348,7 @@ impl Core {
         import_id: &str,
         request: &ContentPackageApprovalRequest,
     ) -> CoreResult<ContentPackageApprovalReceipt> {
-        let loaded = load_durable_content_package(self, import_id, ImportLimits::default())?;
+        let loaded = load_durable_content_package(self, import_id)?;
         if !matches!(
             loaded.record.status,
             PackageImportStatus::AwaitingReview | PackageImportStatus::Approved
@@ -379,7 +379,7 @@ impl Core {
             self,
             &loaded,
             &import_plan,
-            ImportLimits::default(),
+            loaded.limits,
             replay_approval
                 .as_ref()
                 .map(|approval| approval.document_bindings.as_slice()),

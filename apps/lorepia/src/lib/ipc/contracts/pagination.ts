@@ -11,6 +11,7 @@ import type {
 export interface ReadPageCursor {
     scope: string;
     after_id: string;
+    after_updated_at?: string;
 }
 export interface CreatorDocumentsByKind {
     memory_profile: CreatorMemoryProfileDocumentDto;

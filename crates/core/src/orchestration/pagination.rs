@@ -20,6 +20,9 @@ pub enum CreatorDocumentKind {
 pub struct ReadPageCursor {
     pub scope: String,
     pub after_id: String,
+    /// Creator pages retain the observed timestamp even if the anchor is edited or deleted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after_updated_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 impl From<CreatorDocumentKind> for lorepia_storage::CreatorDocumentKind {
     fn from(value: CreatorDocumentKind) -> Self {
@@ -37,6 +40,7 @@ impl From<&ReadPageCursor> for lorepia_storage::ReadPageCursor {
         Self {
             scope: value.scope.clone(),
             after_id: value.after_id.clone(),
+            after_updated_at: value.after_updated_at,
         }
     }
 }

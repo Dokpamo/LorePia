@@ -10,6 +10,7 @@ import type {
 } from '../contracts/pagination';
 import { LOREPIA_COMMANDS } from '../commands';
 import { DiscoveryClient } from './discovery';
+import { creatorCursorAdvances } from '../pagination-cursor';
 
 export abstract class PaginationClient extends DiscoveryClient {
     listCreatorDocumentsPage<K extends CreatorPageKind>(
@@ -36,7 +37,7 @@ export abstract class PaginationClient extends DiscoveryClient {
                 page.kind !== kind ||
                 (page.next_cursor !== null &&
                     (page.documents.length === 0 ||
-                        (after !== null && page.next_cursor.after_id <= after.after_id)))
+                        (after !== null && !creatorCursorAdvances(after, page.next_cursor))))
             ) {
                 throw new Error('Invalid creator page continuation');
             }

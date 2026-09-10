@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { tick } from 'svelte';
+    import { onMount, tick } from 'svelte';
     import type { LorepiaAppState, LorepiaAppController } from '../../app-controller';
     import { tr } from '../../../lib/i18n';
     import SettingsPanel from './AiPanel.svelte';
@@ -18,7 +18,7 @@
     let busy = $state(false);
     const workspace = $derived(appState.providers.workspace);
     const job = $derived(workspace.model_sync_jobs.find((j) => j.id === jobId));
-    async function run(action: () => Promise<void>) {
+    async function run(action: () => Promise<unknown>) {
         if (busy) return;
         busy = true;
         try {
@@ -27,6 +27,9 @@
             busy = false;
         }
     }
+    onMount(() => {
+        void run(() => controller.loadProviderDiagnostics('sync'));
+    });
     async function start() {
         if (busy || !workspace.connections.some((item) => item.id === connection)) return;
         const previousJobId = workspace.selected_model_sync_job_id;

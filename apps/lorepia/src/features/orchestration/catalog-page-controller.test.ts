@@ -68,15 +68,25 @@ function memory(index: number): MemoryRecordDto {
         revision: 1,
     };
 }
-function cursor(after_id: string): ReadPageCursor {
-    return { scope, after_id };
+function cursor(after_id: string, after_updated_at?: string): ReadPageCursor {
+    return { scope, after_id, after_updated_at };
+}
+
+function recentBooks(count: number) {
+    return Array.from({ length: count }, (_, index) => ({
+        ...book(index),
+        updated_at: new Date(Date.UTC(2026, 8, 8, 0, 0, index)).toISOString(),
+    })).reverse();
 }
 
 describe('creator and memory page access', () => {
     it('keeps every creator document reachable after100 and preserves edits when appending', async () => {
-        const books = Array.from({ length: 105 }, (_, index) => book(index));
+        const books = recentBooks(105);
         const listCreatorDocumentsPage = vi.fn((request: CreatorPageRequest) => {
-            const start = request.after === null ? 0 : Number(request.after.after_id.slice(5)) + 1;
+            const start =
+                request.after === null
+                    ? 0
+                    : books.findIndex((b) => b.value.id === request.after?.after_id) + 1;
             const documents =
                 request.kind === 'knowledge_book' ? books.slice(start, start + request.limit) : [];
             return Promise.resolve({
@@ -84,7 +94,7 @@ describe('creator and memory page access', () => {
                 documents,
                 next_cursor:
                     start + documents.length < books.length && documents.length > 0
-                        ? cursor(documents.at(-1)?.value.id ?? '')
+                        ? cursor(documents.at(-1)?.value.id ?? '', documents.at(-1)?.updated_at)
                         : null,
             });
         });
@@ -111,20 +121,20 @@ describe('creator and memory page access', () => {
         await controller.loadCreatorPage('knowledge_book');
         const documents = state.snapshot().editable_knowledge_books;
         expect(documents).toHaveLength(105);
-        expect(documents.at(-1)?.value.id).toBe('book-104');
+        expect(documents.at(-1)?.value.id).toBe('book-000');
         expect(documents[0]?.value.name).toBe('Unsaved edit');
         expect(state.snapshot().creator_document_cursors?.knowledge_book).toBeNull();
         state.update((value) => ({
             ...value,
             editable_knowledge_books: value.editable_knowledge_books.map((document) =>
-                document.value.id === 'book-104' ? { ...document, dirty: true } : document,
+                document.value.id === 'book-000' ? { ...document, dirty: true } : document,
             ),
         }));
         await controller.loadCreatorPage('knowledge_book', true);
         expect(
             state
                 .snapshot()
-                .editable_knowledge_books.find((document) => document.value.id === 'book-104')
+                .editable_knowledge_books.find((document) => document.value.id === 'book-000')
                 ?.dirty,
         ).toBe(true);
     });
@@ -200,20 +210,29 @@ describe('creator and memory page access', () => {
         expect(state.snapshot().editable_creator_documents_loading).toBe(false);
     });
     it('keeps existing settings collection clients complete via bounded IPC pages', async () => {
+        const books = recentBooks(205);
         const invoke = vi.fn((_command: string, args?: Record<string, unknown>) => {
             const request = args?.request as CreatorPageRequest;
-            const first = request.after === null;
+            const start =
+                request.after === null
+                    ? 0
+                    : books.findIndex((b) => b.value.id === request.after?.after_id) + 1;
+            const documents = books.slice(start, start + request.limit);
+            const last = documents.at(-1);
+            if (last === undefined) throw new Error('Expected a nonempty fixture page');
             return Promise.resolve({
                 kind: request.kind,
-                documents: Array.from({ length: first ? 100 : 5 }, (_, index) =>
-                    book((first ? 0 : 100) + index),
-                ),
-                next_cursor: first ? cursor('book-099') : null,
+                documents,
+                next_cursor:
+                    start + documents.length < books.length
+                        ? cursor(last.value.id, last.updated_at)
+                        : null,
             } satisfies CreatorDocumentsPage);
         });
         const client = new LiveLorepiaClient({ invoke } as unknown as LorepiaTransport);
-        expect(await client.listKnowledgeBooks()).toHaveLength(105);
+        expect(await client.listKnowledgeBooks()).toEqual(books);
         expect(invoke.mock.calls.map((call) => call[0])).toEqual([
+            'list_creator_documents_page',
             'list_creator_documents_page',
             'list_creator_documents_page',
         ]);

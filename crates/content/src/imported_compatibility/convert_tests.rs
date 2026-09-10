@@ -19,8 +19,8 @@ fn converted_module_enables_only_its_reviewed_declarative_components() {
                     name: "Safe transform".to_owned(),
                     phase: PortableTransformPhase::ProviderOutput,
                     enabled: true,
-                    pattern: "foo".to_owned(),
-                    replacement: "bar".to_owned(),
+                    pattern: "a".to_owned(),
+                    replacement: "aa".to_owned(),
                     flags: String::new(),
                     metadata: BTreeMap::new(),
                 }],
@@ -46,15 +46,72 @@ fn converted_module_enables_only_its_reviewed_declarative_components() {
         .expect("converted content module");
 
     assert!(module.imported_components_enabled);
-    assert!(module.portable_runtime.is_some());
+    assert!(module.portable_runtime.is_none());
     assert!(
-        module
+        !module
             .required_capabilities
             .contains(&lorepia_domain::ContentCapability::PortableRuntime)
     );
     assert_eq!(module.transform_set_ids.len(), 1);
     assert!(module.prompt_fragments.is_empty());
     assert!(module.interaction_rule_set_ids.is_empty());
+    let set = converted
+        .documents
+        .iter()
+        .find_map(|entry| match &entry.document {
+            NormalizedDocument::TransformSet(set) => Some(set),
+            _ => None,
+        })
+        .expect("native transform set");
+    assert_eq!(set.rules[0].pattern.pattern, "a");
+    assert_eq!(set.rules[0].replacement, "aa");
+}
+
+#[test]
+fn converted_module_keeps_rules_that_only_the_portable_renderer_can_apply() {
+    let profile = CharacterRuntimeProfile {
+        transforms: [("native", "a"), ("portable", "(?<=a)b")]
+            .into_iter()
+            .map(|(id, pattern)| PortableTextTransform {
+                id: id.to_owned(),
+                name: id.to_owned(),
+                phase: PortableTransformPhase::Display,
+                enabled: true,
+                pattern: pattern.to_owned(),
+                replacement: "expanded".to_owned(),
+                flags: String::new(),
+                metadata: BTreeMap::new(),
+            })
+            .collect(),
+        ..CharacterRuntimeProfile::default()
+    };
+    let converted = convert_module(
+        ImportedModuleSource {
+            metadata: runtime::DecodedRuntimeMetadata {
+                profile,
+                knowledge_entries: None,
+                asset_metadata: Vec::new(),
+                name: "Mixed rules".to_owned(),
+                description: String::new(),
+                warnings: Vec::new(),
+            },
+            assets: Vec::new(),
+        },
+        &"d".repeat(64),
+    )
+    .unwrap();
+    let module = converted
+        .documents
+        .iter()
+        .find_map(|entry| match &entry.document {
+            NormalizedDocument::ContentModule(module) => Some(module),
+            _ => None,
+        })
+        .unwrap();
+    let transforms = &module.portable_runtime.as_ref().unwrap().transforms;
+    assert_eq!(transforms.len(), 1);
+    assert_eq!(transforms[0].id, "portable");
+    assert_eq!(transforms[0].pattern, "(?<=a)b");
 }
 
 #[test]

@@ -83,6 +83,7 @@ async function loadPortableRuntimePersona(
 
 export class PortableRuntimeLifecycle {
     profile = $state<CharacterRenderProfileDto | null>(null);
+    personaName = $state<string | undefined>(undefined);
     runtime = $state<PortableCharacterRuntime | null>(null);
     selectedCapabilities = $state<PortableRuntimeCapability[]>([]);
     modelCall = $state<PortableRuntimeModelCallStatus | null>(null);
@@ -98,6 +99,7 @@ export class PortableRuntimeLifecycle {
     #resetEpoch = $state(0);
     #lastOutputKey = '';
     #actionCount = 0;
+    #persona = Promise.resolve({ name: t('chat.runtime.persona.default'), description: '' });
 
     constructor(private readonly options: PortableRuntimeLifecycleOptions) {}
 
@@ -213,6 +215,14 @@ export class PortableRuntimeLifecycle {
         this.selectedCapabilities = [];
         this.modelCall = null;
         this.persistenceStatus = null;
+        this.personaName = undefined;
+        this.#persona =
+            client !== undefined && conversationId !== null
+                ? loadPortableRuntimePersona(client, conversationId)
+                : Promise.resolve({ name: t('chat.runtime.persona.default'), description: '' });
+        void this.#persona.then((persona) => {
+            if (!cancelled && profileEpoch === this.#profileEpoch) this.personaName = persona.name;
+        });
         if (characterId !== null && getCharacterRenderProfile !== undefined) {
             const scope =
                 conversationId !== null && branchId !== null
@@ -278,7 +288,7 @@ export class PortableRuntimeLifecycle {
         ) {
             return () => undefined;
         }
-        void loadPortableRuntimePersona(client, conversationId)
+        void this.#persona
             .then((persona) =>
                 PortableCharacterRuntime.create({
                     profile,

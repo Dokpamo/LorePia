@@ -34,6 +34,15 @@ pub enum CreatorDocumentDto {
     ContentModule(RevisionedDto<CreatorContentModuleDocumentDto>),
 }
 impl CreatorDocumentDto {
+    fn updated_at(&self) -> chrono::DateTime<chrono::Utc> {
+        match self {
+            Self::MemoryProfile(value) => value.updated_at,
+            Self::KnowledgeBook(value) => value.updated_at,
+            Self::TransformSet(value) => value.updated_at,
+            Self::InteractionRuleSet(value) => value.updated_at,
+            Self::ContentModule(value) => value.updated_at,
+        }
+    }
     fn id(&self) -> &str {
         match self {
             Self::MemoryProfile(value) => &value.value.id,
@@ -103,6 +112,7 @@ impl ShellApi {
                 result.documents.last().map(|value| ReadPageCursor {
                     scope: page.scope.clone(),
                     after_id: value.id().to_owned(),
+                    after_updated_at: Some(value.updated_at()),
                 })
             } else {
                 None
@@ -148,6 +158,7 @@ impl ShellApi {
                 result.records.last().map(|value| ReadPageCursor {
                     scope: page.scope.clone(),
                     after_id: value.id.clone(),
+                    after_updated_at: None,
                 })
             } else {
                 None

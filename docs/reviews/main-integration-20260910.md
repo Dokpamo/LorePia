@@ -55,3 +55,18 @@ Ten update branches are included for validation. Fifteen remain open for separat
 - [Setup Java v6.0.0](https://github.com/actions/setup-java/releases/tag/v6.0.0)
 - [Setup Python v7.0.0](https://github.com/actions/setup-python/releases/tag/v7.0.0)
 - [CodeQL action v4.37.9](https://github.com/github/codeql-action/releases/tag/v4.37.9)
+
+## PR #47 review corrections
+
+Baseline: `2665bff1e8842825f688913df11130a1d608e11c`, clean integration worktree before these fixes. Six review findings were reproduced or confirmed in the live call paths. No approved UI layout is replaced.
+
+- Package continuation reconstructs its byte envelope from the durable, verified source size and reviewed asset descriptors. Selection, review, approval, preparation and asset staging reuse it, including after restart. Initial admission limits, compression ratio, entry count, package validation policy, CAS digest checks and renderer asset limits remain independent checks. The regression admits a 65 MiB asset only with explicit enlarged limits, removes the original file, then restarts between each subsequent transition and commits it.
+- A failed compatibility commit discards the inner durable package before restoring the outer pending import. Each new inner import also receives a distinct approval ID so retry does not collide with the retained discarded audit. A transactional commit-failure injection verifies cleanup and a single successful retry.
+- The live model-sync page loads controller-owned sync diagnostics on mount, making existing jobs reachable. Its settings navigation regression now includes sync.
+- Creator catalogs again sort by `updated_at DESC, id ASC`. Their keyset cursor retains the observed timestamp across anchor edits/deletion; both renderer consumers validate that ordering, including nanosecond precision. Memory pagination retains its ID ordering.
+- Imported module rules materialized into a native transform set are removed from the portable copy, preventing duplicate application of non-idempotent rules. Portable-only rules, scripts and other runtime content remain. Conversion tests cover both cases.
+- Stored and streaming portable messages receive the selected persona name even without a Lua worker. The lifecycle shares the existing persona request and rejects a delayed result from a departed conversation.
+
+### Pagination contract update
+
+`ReadPageCursor` in Core, Storage and the renderer adds optional `after_updated_at` (UTC RFC 3339 string over IPC). New creator cursors include it. Memory cursors omit it. Older ID-only creator cursors still decode and use the stored anchor timestamp; new cursors retain their original timestamp even when that anchor changes. Page shape, command names, count/byte limits, collection scope binding and mutation revision checks remain unchanged. The exact Core/Storage public inventory is updated for this one struct; no new Core `Stored*` export, dependency, SQL migration, archive fixture or source-size exception is introduced.

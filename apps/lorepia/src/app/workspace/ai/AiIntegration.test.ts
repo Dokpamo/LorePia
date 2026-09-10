@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import {
     INITIAL_APP_STATE,
     LorepiaAppController,
@@ -17,6 +17,9 @@ import AiSync from './AiSync.svelte';
 import AiDiscovery from './AiDiscovery.svelte';
 import AiReview from './AiReview.svelte';
 const mocks = vi.hoisted(() => ({ choice: vi.fn() }));
+beforeEach(() => {
+    vi.spyOn(LorepiaAppController.prototype, 'loadProviderDiagnostics').mockResolvedValue(null);
+});
 vi.mock('../../../ui/workspace/choice-sheet.svelte', () => ({
     useChoiceSheet: () => ({ open: mocks.choice }),
 }));
@@ -36,6 +39,7 @@ function state(): LorepiaAppState {
 it.each([
     ['settings.page.discovery.provider', 'discovery'],
     ['settings.section.catalog.title', 'catalog'],
+    ['settings.page.discovery.sync_job', 'sync'],
 ] as const)(
     'opens %s from AI settings and loads its controller-owned data',
     async (label, section) => {

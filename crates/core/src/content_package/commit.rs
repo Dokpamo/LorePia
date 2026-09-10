@@ -102,7 +102,7 @@ impl Core {
         import_id: &str,
         request: &ContentPackageCommitRequest,
     ) -> CoreResult<ContentPackageCommitReceipt> {
-        let loaded = load_durable_content_package(self, import_id, ImportLimits::default())?;
+        let loaded = load_durable_content_package(self, import_id)?;
         if !matches!(
             loaded.record.status,
             PackageImportStatus::Approved | PackageImportStatus::Completed
@@ -134,13 +134,8 @@ impl Core {
         }
         let replay_bindings = (loaded.record.status == PackageImportStatus::Completed)
             .then_some(approval.document_bindings.as_slice());
-        let prepared = prepare_package_commit(
-            self,
-            &loaded,
-            &import_plan,
-            ImportLimits::default(),
-            replay_bindings,
-        )?;
+        let prepared =
+            prepare_package_commit(self, &loaded, &import_plan, loaded.limits, replay_bindings)?;
         if approval.document_bindings != prepared.bindings
             || approval.plan.assets != prepared.assets
             || approval.normalization_evidence != prepared.normalization_evidence
@@ -191,7 +186,7 @@ fn persist_prepared_package_commit(
     } else {
         stage_selected_content_package_assets(
             &loaded.owned.path,
-            ImportLimits::default(),
+            loaded.limits,
             &prepared.content_selection,
             &core.storage().staging_dir(),
         )?

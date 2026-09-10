@@ -411,7 +411,7 @@ impl Core {
                     .clone(),
                 expected_target_review_sha256: selection.target_review.target_review_sha256.clone(),
                 confirmed_update_targets,
-                approval_id: format!("compatible-import-{}", inspection_id.0),
+                approval_id: format!("compatible-import-{}-{import_id}", inspection_id.0),
                 enable_component_ids: selected_component_ids,
                 approved_capabilities,
             },
@@ -436,7 +436,14 @@ impl Core {
                 expected_capability_review_sha256: inspection.capability_review_sha256,
                 expected_normalization_evidence_sha256: approval.normalization_evidence_sha256,
             },
-        )?;
+        );
+        let commit = match commit {
+            Ok(commit) => commit,
+            Err(error) => {
+                self.discard_normalized_package_best_effort(&import_id);
+                return Err(error);
+            }
+        };
         Ok(ImportedContentSummary {
             kind: source_inspection.kind,
             import_id: commit.import.id,

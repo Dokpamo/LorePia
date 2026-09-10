@@ -1,5 +1,10 @@
 import { t } from '../../../lib/i18n';
-import type { CreatorPageKind, CreatorDocumentsPage } from '../../../lib/ipc/contracts/pagination';
+import type {
+    CreatorPageKind,
+    CreatorDocumentsPage,
+    ReadPageCursor,
+} from '../../../lib/ipc/contracts/pagination';
+import { creatorCursorAdvances } from '../../../lib/ipc/pagination-cursor';
 import {
     editableCreatorDocuments,
     errorLabel,
@@ -65,7 +70,7 @@ export class CatalogPageController {
         try {
             const page = await loader.call(this.client, { kind, after, limit: 50 });
             if (this.epochs.get(key) !== epoch || !this.state.isContextEpoch(contextEpoch)) return;
-            validateCreatorPage(page, kind, after?.after_id);
+            validateCreatorPage(page, kind, after);
             this.state.updateForContext(contextKey, (state) =>
                 mergeCreatorPage(state, kind, page, restart),
             );
@@ -164,14 +169,14 @@ export class CatalogPageController {
 function validateCreatorPage(
     page: CreatorDocumentsPage,
     kind: CreatorPageKind,
-    after?: string,
+    after: ReadPageCursor | null,
 ): void {
     if (
         page.kind !== kind ||
         page.documents.length > 100 ||
         (page.next_cursor !== null &&
             (page.documents.length === 0 ||
-                (after !== undefined && page.next_cursor.after_id <= after)))
+                (after !== null && !creatorCursorAdvances(after, page.next_cursor))))
     )
         throw new Error(t('pagination.invalid_page'));
 }

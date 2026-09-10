@@ -11,6 +11,8 @@ use super::{
 pub struct ReadPageCursor {
     pub scope: String,
     pub after_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after_updated_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -62,7 +64,7 @@ const MEMORY_FROM: &str = "FROM memory_records AS record
 const PAGE_RAW_BYTES: usize = 512 * 1024;
 
 impl Storage {
-    /// Creator-only documents in stable ID order. Imported documents are filtered in SQL.
+    /// Creator-only documents by recency, then ID. Imported documents are filtered in SQL.
     pub fn list_creator_documents_page<T: DeserializeOwned>(
         &self,
         kind: CreatorDocumentKind,
@@ -74,15 +76,35 @@ impl Storage {
         let transaction = connection.transaction().map_err(storage_db_error)?;
         let table = kind.table();
         let scope = page_scope(table.object_kind(), after)?;
+        let after_time = match after {
+            Some(cursor) => Some(match cursor.after_updated_at {
+                Some(time) => time.to_rfc3339(),
+                None => transaction
+                    .query_row(
+                        "SELECT state.updated_at FROM content_object_state AS state
+                     JOIN content_objects AS object ON object.id = state.object_id
+                     WHERE object.id = ?1 AND object.object_kind = ?2",
+                        params![cursor.after_id, table.object_kind()],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .optional()
+                    .map_err(storage_db_error)?
+                    .ok_or_else(|| CoreError::invalid("creator cursor anchor no longer exists"))?,
+            }),
+            None => None,
+        };
         let query = format!(
             "SELECT revision.document_json, state.state_version, revision.id,
             object.created_at, state.updated_at, object.deleted_at {DOCUMENT_FROM}
-            AND (?2 IS NULL OR object.id > ?2) ORDER BY object.id LIMIT ?3"
+            AND (?2 IS NULL OR state.updated_at < ?2
+                 OR (state.updated_at = ?2 AND object.id > ?3))
+            ORDER BY state.updated_at DESC, object.id LIMIT ?4"
         );
         let mut statement = transaction.prepare(&query).map_err(storage_db_error)?;
         let mut rows = statement
             .query(params![
                 table.object_kind(),
+                after_time,
                 after.map(|c| &c.after_id),
                 limit + 1
             ])

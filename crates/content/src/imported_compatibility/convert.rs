@@ -90,8 +90,17 @@ pub(super) fn convert_module(
     let knowledge_book = runtime_knowledge
         .and_then(|reference| reference.embedded)
         .map(|book| book.materialize(provenance.clone()));
-    let portable_runtime =
-        runtime_profile_present(&source.metadata.profile).then(|| source.metadata.profile.clone());
+    let mut portable_profile = source.metadata.profile.clone();
+    if let Some(set) = &transform_set {
+        // Native output/display projection already applies these exact rules.
+        // Keep only portable-only rules so non-idempotent transforms run once.
+        portable_profile.transforms.retain(|transform| {
+            !set.rules
+                .iter()
+                .any(|rule| rule.id.as_str() == transform.id)
+        });
+    }
+    let portable_runtime = runtime_profile_present(&portable_profile).then_some(portable_profile);
     let warnings = module_warnings(
         source.metadata.warnings,
         original_script_count,
