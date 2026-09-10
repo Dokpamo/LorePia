@@ -218,7 +218,6 @@
     {#snippet home()}
         <CharacterLibrary
             {characters}
-            conversations={allConversations}
             client={appClient}
             ondetail={(active: boolean) => (rootDetails.home = active)}
             ready={appState.bootstrap.phase === 'ready'}
@@ -283,10 +282,11 @@
                 covered={overlay !== null}
                 onclose={() => (overview = false)}
                 onaction={open}
-                onchat={() => {
-                    overview = false;
-                    rootTab = 'chats';
-                }}
+                conversations={allConversations}
+                conversationsLoading={$catalog.loading}
+                conversationsError={$catalog.error}
+                onretryConversations={() => void navigation.load()}
+                onchat={(id: string) => void selectConversation(id)}
                 runtimeTarget={appState.selected_conversation?.character_id === character.id &&
                 appState.conversation_state?.conversation_id === appState.selected_conversation.id
                     ? {

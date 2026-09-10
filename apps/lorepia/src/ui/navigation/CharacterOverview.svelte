@@ -14,6 +14,8 @@
     import CharacterProfileResources from './CharacterProfileResources.svelte';
     import ProfileResourcePage from './ProfileResourcePage.svelte';
     import ProfilePluginsPage from './ProfilePluginsPage.svelte';
+    import ProfileConversationsPage from './ProfileConversationsPage.svelte';
+    import type { ConversationListItem } from './navigation-types';
     import type { ContentModuleRuntimeTargetInput } from '../../features/orchestration/module-lifecycle-contracts';
     import ProfileGallery from './ProfileGallery.svelte';
     import { profileImageGroups } from './profile-image-groups';
@@ -41,6 +43,10 @@
         onclose,
         onaction,
         onchat,
+        conversations = [],
+        conversationsLoading = false,
+        conversationsError = null,
+        onretryConversations = () => undefined,
         runtimeTarget,
         presentation,
         greetings = [],
@@ -55,7 +61,11 @@
         client: LorepiaClient;
         onclose: () => void;
         onaction: (kind: Overlay, trigger: HTMLButtonElement) => void;
-        onchat: () => void;
+        onchat: (id: string) => void;
+        conversations?: ConversationListItem[];
+        conversationsLoading?: boolean;
+        conversationsError?: string | null;
+        onretryConversations?: () => void;
         runtimeTarget?: ContentModuleRuntimeTargetInput;
         presentation?: CharacterProfilePresentation;
         greetings?: CharacterGreetingCatalogDto['greetings'];
@@ -64,6 +74,17 @@
         onselectGreeting: (id: string) => void;
         greetingsLoading?: boolean;
     } = $props();
+    let chats = $state<HTMLButtonElement | null>(null);
+    function closeChats() {
+        const trigger = chats;
+        chats = null;
+        void tick().then(() =>
+            requestAnimationFrame(() => {
+                if (!covered && trigger?.isConnected && !trigger.closest('[inert]'))
+                    trigger.focus({ preventScroll: true });
+            }),
+        );
+    }
     let plugins = $state<HTMLButtonElement | null>(null);
     function closePlugins() {
         const trigger = plugins;
@@ -205,11 +226,13 @@
     title={$tr('navigation.characterInfo')}
     kind="character-profile"
     showTitle={false}
+    collapsedTitle={character.name}
     {onclose}
     covered={covered ||
         resource !== null ||
         opening !== null ||
         gallery !== null ||
+        chats !== null ||
         plugins !== null}
 >
     {#snippet footer()}
@@ -262,7 +285,10 @@
             onopen={openResource}
         />
         <div class="seed-group seed-profile-play-links">
-            <NavigationRow title={$tr('navigation.viewChats')} onclick={onchat}
+            <NavigationRow
+                title={$tr('navigation.viewChats')}
+                onclick={(event: MouseEvent & { currentTarget: HTMLButtonElement }) =>
+                    (chats = event.currentTarget)}
                 >{#snippet prefix()}<MessageSquare />{/snippet}</NavigationRow
             >
             <NavigationRow
@@ -276,9 +302,21 @@
         </div>
     </div>
 </SettingsPanel>
+{#if chats}<ProfileConversationsPage
+        {character}
+        {conversations}
+        loading={conversationsLoading}
+        error={conversationsError}
+        {covered}
+        onclose={closeChats}
+        onopen={onchat}
+        onnew={(trigger: HTMLButtonElement) => onaction('new-chat', trigger)}
+        onretry={onretryConversations}
+    />{/if}
 {#if plugins}<ProfilePluginsPage
         {client}
         characterId={character.id}
+        characterName={character.name}
         {runtimeTarget}
         {covered}
         onclose={closePlugins}

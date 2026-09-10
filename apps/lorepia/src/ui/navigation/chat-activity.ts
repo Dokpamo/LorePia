@@ -18,13 +18,19 @@ export function chatActivityTime(value: string, locale: string, now = new Date()
         date,
     );
     const sameDay = date.toDateString() === now.toDateString();
+    const korean = new Intl.Locale(locale).language === 'ko';
     const short = new Intl.DateTimeFormat(
         locale,
         sameDay
             ? { hour: 'numeric', minute: '2-digit' }
             : {
-                  ...(date.getFullYear() !== now.getFullYear() ? { year: 'numeric' as const } : {}),
-                  month: 'numeric',
+                  year:
+                      date.getFullYear() !== now.getFullYear()
+                          ? korean
+                              ? '2-digit'
+                              : 'numeric'
+                          : undefined,
+                  month: korean ? 'long' : 'numeric',
                   day: 'numeric',
               },
     ).format(date);

@@ -249,7 +249,7 @@
         {#if choices.request}
             <ChoiceSheet
                 request={choices.request}
-                onclose={() => choices.close()}
+                onclose={(afterClose?: () => void) => choices.close(afterClose)}
                 onclosed={() => choices.finish()}
             />
         {/if}

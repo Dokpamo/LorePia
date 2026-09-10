@@ -9,12 +9,14 @@
     let {
         client,
         characterId,
+        characterName,
         runtimeTarget,
         covered = false,
         onclose,
     }: {
         client: LorepiaClient;
         characterId: string;
+        characterName?: string;
         runtimeTarget?: ContentModuleRuntimeTargetInput;
         covered?: boolean;
         onclose: () => void;
@@ -75,9 +77,11 @@
 <SettingsPanel
     title={$tr('settings.section.plugins.title')}
     kind="profile-resource"
+    inlineTitle
     {covered}
     {onclose}
 >
+    {#if characterName}<p class="seed-profile-caption">{characterName}</p>{/if}
     <p class="seed-profile-caption">{$tr('navigation.profilePluginsIntro')}</p>
     {#if !runtimeTarget}<p class="seed-profile-caption">
             {$tr('navigation.profilePluginsBeforeChat')}

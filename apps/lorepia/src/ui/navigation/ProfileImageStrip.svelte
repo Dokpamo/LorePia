@@ -4,6 +4,7 @@
     import type { LorepiaClient } from '../../lib/ipc/contracts';
     import type { ProfileImage } from './character-profile-types';
     import ProfileThumbnail from './ProfileThumbnail.svelte';
+    import { imageStripNavigation } from './image-strip-navigation';
     import './profile-image-strip.css';
 
     let {
@@ -17,52 +18,32 @@
         images: ProfileImage[];
         index: number;
         label: string;
-        onselect: (index: number) => void;
+        onselect: (index: number, browsing?: boolean) => void;
     } = $props();
     let strip: HTMLDivElement;
-    let mounted = false;
-    let frame = 0;
-    function center(animate: boolean) {
-        cancelAnimationFrame(frame);
-        const selected = strip.querySelector<HTMLElement>('[aria-pressed="true"]');
-        if (!selected || !strip.clientWidth) return;
-        const from = strip.scrollLeft;
-        const to = selected.offsetLeft + selected.offsetWidth / 2 - strip.clientWidth / 2;
-        if (!animate || matchMedia('(prefers-reduced-motion: reduce)').matches) {
-            strip.scrollLeft = to;
-            return;
-        }
-        const start = performance.now();
-        function step(now: number) {
-            const progress = Math.min(1, (now - start) / 200);
-            strip.scrollLeft = from + (to - from) * (1 - (1 - progress) ** 3);
-            if (progress < 1) frame = requestAnimationFrame(step);
-        }
-        frame = requestAnimationFrame(step);
-    }
+    let navigation: ReturnType<typeof imageStripNavigation> | undefined;
+    let previousImages: ProfileImage[];
     $effect(() => {
-        void index;
-        void images;
+        const selectedIndex = index;
+        const selectedImages = images;
         let current = true;
         void tick().then(() => {
-            if (current && mounted) center(true);
+            if (!current || !navigation) return;
+            navigation.sync(selectedIndex, selectedImages !== previousImages);
+            previousImages = selectedImages;
         });
         return () => {
             current = false;
         };
     });
     onMount(() => {
-        mounted = true;
-        center(false);
-        const observer =
-            typeof ResizeObserver === 'undefined'
-                ? undefined
-                : new ResizeObserver(() => center(false));
-        observer?.observe(strip);
+        previousImages = images;
+        navigation = imageStripNavigation(strip, index, (position, browsing) =>
+            onselect(position, browsing),
+        );
         return () => {
-            mounted = false;
-            observer?.disconnect();
-            cancelAnimationFrame(frame);
+            navigation?.destroy();
+            navigation = undefined;
         };
     });
     function key(event: KeyboardEvent, position: number) {
@@ -79,7 +60,7 @@
         if (next === null) return;
         event.preventDefault();
         event.stopPropagation();
-        onselect(next);
+        navigation?.choose(next);
         void tick().then(() =>
             strip
                 .querySelectorAll<HTMLButtonElement>('button')
@@ -106,7 +87,7 @@
                 aria-pressed={i === index}
                 tabindex={i === index ? 0 : -1}
                 title={image.title}
-                onclick={() => onselect(i)}
+                onclick={() => navigation?.choose(i)}
                 onkeydown={(event) => key(event, i)}
             >
                 <span class="ui-press-visual"

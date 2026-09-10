@@ -6,14 +6,21 @@ import UiPreview from './UiPreview.svelte';
 afterEach(cleanup);
 
 describe('preview settings choices', () => {
-    it('dismisses from the accessible handle without changing the setting and restores focus', async () => {
+    it('expands, collapses, and dismisses from the keyboard handle without changing the setting', async () => {
         render(UiPreview);
         await fireEvent.click(screen.getByRole('button', { name: t('uiPreview.appSettings') }));
         const opener = screen.getByRole('button', { name: t('uiPreview.theme') });
         await fireEvent.click(opener);
-        await fireEvent.click(
-            screen.getByRole('button', { name: t('uiPreview.dragChoicesToClose') }),
+        const handle = screen.getByRole('button', { name: t('uiPreview.expandSheet') });
+        await fireEvent.click(handle);
+        expect(handle).toHaveAttribute('aria-expanded', 'true');
+        expect(screen.getByRole('dialog', { name: t('uiPreview.theme') })).toHaveAttribute(
+            'data-sheet-expanded',
+            'true',
         );
+        await fireEvent.keyDown(handle, { key: 'ArrowDown' });
+        expect(handle).toHaveAttribute('aria-expanded', 'false');
+        await fireEvent.keyDown(handle, { key: 'ArrowDown' });
         await waitFor(() =>
             expect(screen.queryByRole('dialog', { name: t('uiPreview.theme') })).toBeNull(),
         );
@@ -29,6 +36,7 @@ describe('preview settings choices', () => {
         const sheet = screen.getByRole('dialog', { name: t('uiPreview.theme') });
         const selected = within(sheet).getByRole('radio', { name: t('uiPreview.system') });
         const close = within(sheet).getByRole('button', { name: t('uiPreview.closeChoices') });
+        const handle = within(sheet).getByRole('button', { name: t('uiPreview.expandSheet') });
         expect(selected).toHaveAttribute('aria-checked', 'true');
         expect(selected).toHaveFocus();
         await fireEvent.keyDown(selected, { key: 'ArrowDown' });
@@ -36,10 +44,10 @@ describe('preview settings choices', () => {
         expect(next).toHaveFocus();
         expect(screen.getByRole('main')).toHaveAttribute('data-appearance', 'system');
         await fireEvent.keyDown(next, { key: 'Tab' });
-        expect(close).toHaveFocus();
-        await fireEvent.keyDown(close, { key: 'Tab', shiftKey: true });
+        expect(handle).toHaveFocus();
+        await fireEvent.keyDown(handle, { key: 'Tab', shiftKey: true });
         expect(next).toHaveFocus();
-        await fireEvent.keyDown(next, { key: 'Escape' });
+        await fireEvent.click(close);
         await waitFor(() =>
             expect(screen.queryByRole('dialog', { name: t('uiPreview.theme') })).toBeNull(),
         );

@@ -79,7 +79,7 @@ describe('native UI preview', () => {
         );
         await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
         expect(messageInput()).toBe(input);
-        expect(input).toHaveFocus();
+        await waitFor(() => expect(input).toHaveFocus());
         expect(input).toHaveValue('두 줄을\n편집했어요');
     });
     it('returns from room settings to the chat that opened them', async () => {
@@ -91,7 +91,7 @@ describe('native UI preview', () => {
         expect(messageInput()).toBeVisible();
         expect(trigger).toHaveFocus();
     });
-    it('opens fields in a focused full-screen editor and returns keyboard focus without losing edits', async () => {
+    it('opens fields in a focused popup and returns keyboard focus after closing without losing edits', async () => {
         render(UiPreview);
         const main = screen.getByRole('main');
         const trigger = screen.getByRole('button', { name: t('uiPreview.cardSettings') });
@@ -106,7 +106,7 @@ describe('native UI preview', () => {
         await fireEvent.input(input, { target: { value: '새로운 서연' } });
         expect(main).toHaveAttribute('data-keyboard-focus', 'false');
         await closeEditor();
-        expect(field).toHaveFocus();
+        await waitFor(() => expect(field).toHaveFocus());
         expect(field).toHaveTextContent('새로운 서연');
         await fireEvent.click(screen.getByRole('button', { name: t('uiPreview.save') }));
         expect(trigger).toHaveFocus();

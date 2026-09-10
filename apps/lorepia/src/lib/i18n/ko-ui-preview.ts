@@ -68,6 +68,8 @@ export const koUiPreview = {
     'uiPreview.collapseComposer': '입력바로 축소',
     'uiPreview.closeChoices': '선택 닫기',
     'uiPreview.dragChoicesToClose': '아래로 내려 닫기',
+    'uiPreview.expandSheet': '전체화면으로 펼치기',
+    'uiPreview.collapseSheet': '팝업 크기로 줄이기',
     'uiPreview.required': '필수',
     'uiPreview.cardNameRequired': '캐릭터 이름을 입력해 주세요.',
     'uiPreview.chatNameRequired': '대화 이름을 입력해 주세요.',

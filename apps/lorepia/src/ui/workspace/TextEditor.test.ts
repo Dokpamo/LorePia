@@ -5,7 +5,29 @@ import TextEditor from './TextEditor.svelte';
 
 afterEach(cleanup);
 
-describe('durable fullscreen edits', () => {
+describe('text editing sheets', () => {
+    it('opens a focus-safe popup and retains the draft while expanding and collapsing', async () => {
+        const focus = vi.spyOn(HTMLElement.prototype, 'focus');
+        const onchange = vi.fn();
+        render(TextEditor, {
+            request: { label: 'Name', value: 'original', applyOnDone: true, onchange },
+            onclose: vi.fn(),
+            onclosed: () => undefined,
+        });
+        expect(screen.getByRole('dialog', { name: 'Name' })).toHaveClass('ui-choice-sheet');
+        expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+        const input = screen.getByRole('textbox', { name: 'Name' });
+        await fireEvent.input(input, { target: { value: 'retained draft' } });
+        const handle = screen.getByRole('button', { name: t('uiPreview.expandSheet') });
+        await fireEvent.click(handle);
+        expect(handle).toHaveAttribute('aria-expanded', 'true');
+        await fireEvent.keyDown(handle, { key: 'ArrowDown' });
+        expect(handle).toHaveAttribute('aria-expanded', 'false');
+        expect(input).toHaveValue('retained draft');
+        expect(onchange).not.toHaveBeenCalled();
+        focus.mockRestore();
+    });
+
     it('keeps a rejected edit and blocks duplicate saves and back navigation while saving', async () => {
         let finish: (accepted: boolean) => void = () => undefined;
         const onchange = vi.fn(() => new Promise<boolean>((resolve) => (finish = resolve)));

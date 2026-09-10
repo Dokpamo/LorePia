@@ -12,6 +12,8 @@
     import { edgeBack, requestBack } from '../workspace/edge-back';
     import { rootTabSwipe } from './root-tab-swipe';
     import './root-tab-swipe.css';
+    import { scrollHeaders } from './scroll-headers';
+    import './scroll-headers.css';
 
     let {
         page = $bindable<Page>(0),
@@ -109,6 +111,7 @@
     class="ui-preview seed-app"
     bind:this={surface}
     use:pressFeedback
+    use:scrollHeaders
     data-layout="mobile"
     data-appearance={appearance}
     data-keyboard-focus={keyboardFocus}
@@ -203,7 +206,7 @@
         />{/if}
     {#if choices.request}<ChoiceSheet
             request={choices.request}
-            onclose={() => choices.close()}
+            onclose={(afterClose?: () => void) => choices.close(afterClose)}
             onclosed={() => choices.finish()}
         />{/if}
     {#if surface}<UiTooltip root={surface} />{/if}

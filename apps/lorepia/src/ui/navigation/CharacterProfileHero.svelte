@@ -7,7 +7,6 @@
     import CharacterImage from '../workspace/CharacterImage.svelte';
     import type { ProfileImage } from './character-profile-types';
     import { imageGestures } from './image-gestures';
-    import ProfileImageStrip from './ProfileImageStrip.svelte';
 
     let {
         character,
@@ -155,17 +154,8 @@
     {:else}{@render portrait()}{/if}
     <div class="seed-profile-blur" aria-hidden="true">{@render portrait()}</div>
     <div class="seed-profile-summary" bind:clientHeight={summaryHeight}>
-        {#if images.length > 1}
-            <ProfileImageStrip
-                {client}
-                {images}
-                {index}
-                label={$tr('navigation.representativeImages')}
-                onselect={select}
-            />
-        {/if}
         <div class="seed-profile-copy" use:measureCopy={character.name}>
-            <h1>{character.name}</h1>
+            <h1 data-scroll-title>{character.name}</h1>
         </div>
         {#if clipped}
             <button

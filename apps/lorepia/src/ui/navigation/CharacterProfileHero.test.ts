@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { t } from '../../lib/i18n';
 import { createPreviewClient } from '../../preview/mock-client';
@@ -19,7 +19,7 @@ afterEach(() => {
     vi.unstubAllGlobals();
 });
 
-it('keeps representative thumbnails in sync with swipes, keyboard and original-image viewing', async () => {
+it('keeps swipes, keyboard and original-image viewing available without a thumbnail strip', async () => {
     const images = Array.from({ length: 29 }, (_, i) => ({
         assetId: `asset-${String(i)}`,
         title: `Image ${String(i + 1)}`,
@@ -43,18 +43,7 @@ it('keeps representative thumbnails in sync with swipes, keyboard and original-i
         screen.getByRole('button', {
             name: t('navigation.imageSelectItem', { name: `Image ${String(number)}` }),
         });
-    const navigation = screen.getByRole('toolbar', { name: t('navigation.representativeImages') });
-    const thumbnail = (number: number) =>
-        within(navigation).getByRole('button', {
-            name: t('navigation.imageThumbnail', { number, name: `Image ${String(number)}` }),
-        });
-    expect(within(navigation).getAllByRole('button')).toHaveLength(29);
-    expect(thumbnail(1)).toHaveAttribute('aria-pressed', 'true');
-    await fireEvent.click(thumbnail(12));
-    expect(image(12)).toBeVisible();
-    expect(thumbnail(12)).toHaveAttribute('aria-pressed', 'true');
-    await fireEvent.keyDown(thumbnail(12), { key: 'Home' });
-    expect(thumbnail(1)).toHaveFocus();
+    expect(screen.queryByRole('toolbar')).toBeNull();
     await fireEvent.keyDown(image(1), { key: 'ArrowRight' });
     expect(image(2)).toHaveFocus();
     await fireEvent.keyDown(image(2), { key: 'ArrowRight' });
@@ -90,7 +79,5 @@ it('keeps representative thumbnails in sync with swipes, keyboard and original-i
     await pointer('pointerdown', 300, 0);
     await pointer('pointermove', 100, 160);
     await pointer('pointerup', 100, 200);
-    expect(thumbnail(2)).toHaveAttribute('aria-pressed', 'true');
-    expect(thumbnail(1)).toHaveAttribute('aria-pressed', 'false');
     expect(image(2)).toBeVisible();
 });

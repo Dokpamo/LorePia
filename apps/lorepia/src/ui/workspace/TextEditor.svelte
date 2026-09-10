@@ -1,6 +1,7 @@
 <script lang="ts">
     import { ArrowLeft, ArrowUp, Check, Minimize2, Search, X } from '@lucide/svelte';
-    import { onMount, tick, untrack } from 'svelte';
+    import { onDestroy, onMount, tick, untrack } from 'svelte';
+    import { fade } from 'svelte/transition';
     import { editorMorph } from './editor-morph';
     import { tr } from '../../lib/i18n';
     import { shouldSubmitComposer } from '../../features/chat/composer';
@@ -10,6 +11,9 @@
     import SearchResults from './SearchResults.svelte';
     import { trapFocus } from './focus-trap';
     import DiscardChanges from './DiscardChanges.svelte';
+    import SheetHandle from './SheetHandle.svelte';
+    import { choiceSheetTransition } from './choice-sheet-motion';
+    import { sheetDeparture } from './sheet-departure';
 
     let {
         request,
@@ -25,6 +29,11 @@
     let composing = $state(false);
     let attempted = $state(false);
     let confirming = $state(false);
+    let departing = $state(false);
+    let closing = $state(false);
+    let expanded = $state(false);
+    let backdrop = $state<HTMLButtonElement>();
+    let departure: ReturnType<typeof sheetDeparture> | undefined;
     let resumeBack: (() => Promise<void>) | undefined;
     let saving = $state(false);
     let saveError = $state(false);
@@ -38,6 +47,8 @@
     let input = $state<HTMLTextAreaElement | HTMLInputElement>();
     let panel: HTMLDivElement;
     const search = untrack(() => request.search);
+    const popup = untrack(() => !request.message && !request.search);
+    const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
     const results = $derived(
         search?.items.filter((item) =>
             item.title.toLocaleLowerCase('ko').includes(value.trim().toLocaleLowerCase('ko')),
@@ -49,14 +60,14 @@
         if (!request.applyOnDone) void request.onchange(next);
     }
     async function done() {
-        if (composing || saving) return;
+        if (composing || saving || departing || closing) return;
         attempted = true;
         if (request.requiredMessage && !value.trim()) {
             input?.focus({ preventScroll: true });
             return;
         }
         if (!request.applyOnDone) {
-            onclose();
+            finish();
             return;
         }
         saving = true;
@@ -64,7 +75,7 @@
         try {
             const accepted = await request.onchange(value);
             if (accepted === false) saveError = true;
-            else onclose();
+            else finish();
         } catch {
             saveError = true;
         } finally {
@@ -84,13 +95,55 @@
     }
     async function keepEditing() {
         confirming = false;
+        departing = true;
         await tick();
-        await resumeBack?.();
+        if (popup) await departure?.show();
+        else await resumeBack?.();
         resumeBack = undefined;
+        departing = false;
+        await tick();
         input?.focus({ preventScroll: true });
+    }
+    function finish(afterClose?: () => void) {
+        if (closing) return;
+        closing = true;
+        onclose(afterClose);
+    }
+    async function closePopup() {
+        if (saving || departing || closing || confirming) return;
+        if (!request.applyOnDone || !dirty) {
+            finish();
+            return;
+        }
+        input?.blur();
+        departing = true;
+        if (await departure?.hide()) confirming = true;
+        departing = false;
+    }
+    function popupBack(node: HTMLElement) {
+        if (!popup) return;
+        departure = sheetDeparture(node, () => backdrop);
+        node.addEventListener('ui-back', closePopup);
+        return {
+            destroy() {
+                departure?.destroy();
+                node.removeEventListener('ui-back', closePopup);
+            },
+        };
+    }
+    function layerTransition(node: HTMLElement) {
+        return popup ? { duration: 0 } : editorMorph(node, origin);
+    }
+    function panelTransition(node: HTMLElement) {
+        if (!popup || confirming) return { duration: 0 };
+        return choiceSheetTransition(node, reduced);
     }
     function close() {
         if (saving) return;
+        if (popup) {
+            void closePopup();
+            return;
+        }
         // The composer folds back into its own field; other editors navigate back.
         if (request.message) onclose();
         else requestBack(panel);
@@ -107,6 +160,12 @@
         input.focus({ preventScroll: true });
         if (!search) input.setSelectionRange(value.length, value.length);
     });
+    onDestroy(() => {
+        origin?.().surface.removeAttribute('data-ui-editor-origin');
+        // Notify outside the outro's teardown batch, which can still read the
+        // request snapshot from before dismissal.
+        queueMicrotask(onclosed);
+    });
     function send() {
         if (!value.trim() || composing) return;
         request.onsend?.();
@@ -116,26 +175,34 @@
 
 <div
     class="ui-editor-layer"
+    class:ui-choice-layer={popup}
     class:ui-editor-morph={!!origin}
-    transition:editorMorph={origin}
-    onoutroend={(event) => {
-        if (event.target !== event.currentTarget) return;
-        origin?.().surface.removeAttribute('data-ui-editor-origin');
-        onclosed();
-    }}
+    transition:layerTransition
 >
+    {#if popup}<button
+            class="ui-choice-backdrop"
+            aria-hidden="true"
+            tabindex="-1"
+            bind:this={backdrop}
+            transition:fade={{ duration: reduced || confirming ? 0 : 300 }}
+            onclick={close}
+        ></button>{/if}
     <div
         class="ui-text-editor"
+        class:ui-choice-sheet={popup}
         class:ui-message-editor={request.message}
+        data-sheet-expanded={expanded}
         bind:this={panel}
         role="dialog"
         tabindex="-1"
         aria-modal="true"
         aria-label={request.label}
         aria-busy={saving}
-        inert={confirming}
-        aria-hidden={confirming}
-        use:edgeBack={{ onback: () => onclose(), beforeback: beforeBack }}
+        inert={confirming || departing || closing}
+        aria-hidden={confirming || closing}
+        transition:panelTransition
+        use:edgeBack={{ onback: () => onclose(), beforeback: beforeBack, enabled: !popup }}
+        use:popupBack
         data-ui-no-swipe
         onkeydowncapture={(event) => {
             if (event.key === 'Escape') {
@@ -146,76 +213,93 @@
             trapFocus(event);
         }}
     >
-        <header
-            class={request.message
-                ? 'ui-compose-editor-header'
-                : 'ui-page-header ui-navigation-header'}
-        >
-            <div data-editor-back>
-                <IconButton
-                    label={$tr(
-                        request.message ? 'uiPreview.collapseComposer' : 'uiPreview.closeEditor',
-                    )}
-                    onclick={close}
-                    >{#if request.message}<Minimize2 />{:else}<ArrowLeft />{/if}</IconButton
+        {#if popup}
+            <SheetHandle
+                panel={() => panel}
+                onclose={close}
+                bind:expanded
+                disabled={saving || departing || confirming || closing}
+            />
+            <header>
+                <h2>{request.label}</h2>
+                <IconButton label={$tr('uiPreview.closeEditor')} disabled={saving} onclick={close}
+                    ><X /></IconButton
                 >
-            </div>
-            {#if search}
-                <div class="ui-search-input" role="search" aria-label={request.label}>
-                    <Search aria-hidden="true" />
-                    <input
-                        readonly={saving}
-                        type="search"
-                        bind:this={input}
-                        aria-label={request.label}
-                        placeholder={request.placeholder}
-                        {value}
-                        maxlength={request.maxlength}
-                        autocomplete="off"
-                        spellcheck="false"
-                        oninput={(event) => change(event.currentTarget.value)}
-                        oncompositionstart={() => (composing = true)}
-                        oncompositionend={() => (composing = false)}
-                        onkeydown={(event) => {
-                            if (composing || event.isComposing) return;
-                            if (event.key === 'ArrowDown') {
-                                event.preventDefault();
-                                panel
-                                    .querySelector<HTMLButtonElement>('.ui-search-results button')
-                                    ?.focus();
-                            }
-                            if (event.key === 'Enter' && results[0]) {
-                                event.preventDefault();
-                                selectResult(results[0].id);
-                            }
-                        }}
-                    />
-                    {#if value}<IconButton
-                            label={$tr('uiPreview.clearChatSearch')}
-                            onclick={clearSearch}><X /></IconButton
-                        >{/if}
-                </div>
-            {:else}
-                <div class="ui-title-group">
-                    {#if !request.message}<strong>{request.label}</strong>{/if}
-                </div>
-            {/if}
-            {#if request.message}
-                <div data-editor-send>
+            </header>
+        {:else}<header
+                class={request.message
+                    ? 'ui-compose-editor-header'
+                    : 'ui-page-header ui-navigation-header'}
+            >
+                <div data-editor-back>
                     <IconButton
-                        label={$tr('uiPreview.send')}
-                        disabled={!value.trim() || composing}
-                        onclick={send}><ArrowUp /></IconButton
+                        label={$tr(
+                            request.message
+                                ? 'uiPreview.collapseComposer'
+                                : 'uiPreview.closeEditor',
+                        )}
+                        onclick={close}
+                        >{#if request.message}<Minimize2 />{:else}<ArrowLeft />{/if}</IconButton
                     >
                 </div>
-            {:else if !search}
-                <IconButton
-                    label={$tr('uiPreview.editDone')}
-                    disabled={composing || saving}
-                    onclick={done}><Check /></IconButton
-                >
-            {/if}
-        </header>
+                {#if search}
+                    <div class="ui-search-input" role="search" aria-label={request.label}>
+                        <Search aria-hidden="true" />
+                        <input
+                            readonly={saving}
+                            type="search"
+                            bind:this={input}
+                            aria-label={request.label}
+                            placeholder={request.placeholder}
+                            {value}
+                            maxlength={request.maxlength}
+                            autocomplete="off"
+                            spellcheck="false"
+                            oninput={(event) => change(event.currentTarget.value)}
+                            oncompositionstart={() => (composing = true)}
+                            oncompositionend={() => (composing = false)}
+                            onkeydown={(event) => {
+                                if (composing || event.isComposing) return;
+                                if (event.key === 'ArrowDown') {
+                                    event.preventDefault();
+                                    panel
+                                        .querySelector<HTMLButtonElement>(
+                                            '.ui-search-results button',
+                                        )
+                                        ?.focus();
+                                }
+                                if (event.key === 'Enter' && results[0]) {
+                                    event.preventDefault();
+                                    selectResult(results[0].id);
+                                }
+                            }}
+                        />
+                        {#if value}<IconButton
+                                label={$tr('uiPreview.clearChatSearch')}
+                                onclick={clearSearch}><X /></IconButton
+                            >{/if}
+                    </div>
+                {:else}
+                    <div class="ui-title-group">
+                        {#if !request.message}<strong>{request.label}</strong>{/if}
+                    </div>
+                {/if}
+                {#if request.message}
+                    <div data-editor-send>
+                        <IconButton
+                            label={$tr('uiPreview.send')}
+                            disabled={!value.trim() || composing}
+                            onclick={send}><ArrowUp /></IconButton
+                        >
+                    </div>
+                {:else if !search}
+                    <IconButton
+                        label={$tr('uiPreview.editDone')}
+                        disabled={composing || saving}
+                        onclick={done}><Check /></IconButton
+                    >
+                {/if}
+            </header>{/if}
         {#if search}
             <SearchResults
                 items={results}
@@ -270,6 +354,16 @@
                     >
                 {:else if request.maxlength}<span>{value.length} / {request.maxlength}</span>{/if}
             </footer>{/if}
+        {#if popup}<footer class="ui-choice-footer">
+                <button
+                    type="button"
+                    class="ui-submit ui-pressable"
+                    disabled={composing || saving}
+                    onclick={done}
+                >
+                    <span class="ui-press-visual">{$tr('uiPreview.editDone')}</span>
+                </button>
+            </footer>{/if}
     </div>
-    {#if confirming}<DiscardChanges onkeep={keepEditing} ondiscard={() => onclose()} />{/if}
+    {#if confirming}<DiscardChanges onkeep={keepEditing} ondiscard={() => finish()} />{/if}
 </div>

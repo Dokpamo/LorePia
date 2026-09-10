@@ -26,6 +26,7 @@ export const enNavigation = {
     'navigation.noResultsHint': 'Try another name.',
     'navigation.noChats': 'Start a conversation',
     'navigation.noChatsHint': 'Choose a character for your first conversation.',
+    'navigation.noCharacterChatsHint': 'Start your first conversation with this character.',
     'navigation.allCharacters': 'All characters',
     'navigation.recentChats': 'Recent conversations',
     'navigation.characterInfo': 'Character information',

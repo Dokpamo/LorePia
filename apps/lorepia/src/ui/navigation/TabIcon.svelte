@@ -1,8 +1,8 @@
 <script lang="ts">
-    import { House, MessageCircle, SquarePen, Settings } from '@lucide/svelte';
+    import { House, MessageCircle, CirclePlus, Settings } from '@lucide/svelte';
     import type { RootTab } from './navigation-types';
     let { tab }: { tab: RootTab } = $props();
-    const icons = { home: House, chats: MessageCircle, create: SquarePen, settings: Settings };
+    const icons = { home: House, chats: MessageCircle, create: CirclePlus, settings: Settings };
     const Icon = $derived(icons[tab]);
 </script>
 

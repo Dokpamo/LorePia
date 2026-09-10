@@ -6,13 +6,16 @@
     import type { Overlay } from '../../ui/workspace/view-types';
     import SettingsPanel from '../../ui/workspace/SettingsPanel.svelte';
     import SettingsRow from '../../ui/workspace/SettingsRow.svelte';
-    import EditField from '../../ui/workspace/EditField.svelte';
     import ConversationStartFields from './ConversationStartFields.svelte';
+    import ConversationPersonaCreate from './ConversationPersonaCreate.svelte';
+    import type { PersonaController } from '../../features/personas/persona-controller';
+    import type { PersonaDto } from '../../features/personas/persona-contracts';
     import { nextConversationTitle } from '../operations/conversation-title';
     import CharacterImage from '../../ui/workspace/CharacterImage.svelte';
     import DiscardChanges from '../../ui/workspace/DiscardChanges.svelte';
     import type { BackDecision } from '../../ui/workspace/edge-back';
     import { workspaceFeedback } from './workspace-feedback';
+    import './conversation-start.css';
 
     let {
         kind,
@@ -35,8 +38,10 @@
         onadvanced: () => void;
         covered?: boolean;
     } = $props();
+    const formId = $props.id();
     let busy = $state(false);
     let confirming = $state(false);
+    let addingPersona = $state<PersonaController | null>(null);
     let resumeBack: (() => Promise<void>) | undefined;
     let panel: { focusBack: () => void };
     let saveError = $state('');
@@ -145,6 +150,19 @@
     }
 </script>
 
+{#snippet startAction()}
+    <button
+        type="submit"
+        form={formId}
+        class="ui-submit ui-pressable"
+        disabled={busy || appState.greeting_catalog.phase !== 'ready'}
+    >
+        <span class="ui-press-visual"
+            >{$tr(busy ? 'workspace.loading' : 'uiPreview.startChat')}</span
+        >
+    </button>
+{/snippet}
+
 <SettingsPanel
     bind:this={panel}
     {title}
@@ -152,10 +170,14 @@
     {onclose}
     {beforeback}
     disabled={busy}
-    covered={covered || confirming}
+    covered={covered || confirming || addingPersona !== null}
+    inlineTitle={kind === 'new-chat'}
+    footer={kind === 'new-chat' ? startAction : undefined}
 >
     {#if kind === 'new-chat' || kind === 'room-settings'}
         <form
+            id={formId}
+            aria-label={title}
             class="ui-edit-form"
             onsubmit={(event) => {
                 event.preventDefault();
@@ -163,47 +185,48 @@
             }}
         >
             {#if kind === 'new-chat'}
-                <fieldset class="start-name" disabled={busy || pendingStart}>
-                    <EditField
-                        label={$tr('uiPreview.chatName')}
-                        value={name}
-                        onchange={(value: string) => (name = value.replaceAll('\n', ' '))}
-                        placeholder={$tr('uiPreview.newChat')}
-                        maxlength={60}
-                        hint={$tr('uiPreview.settingsEditorHint')}
-                    />
-                </fieldset>
                 <ConversationStartFields
                     {client}
                     catalog={appState.greeting_catalog.value}
+                    bind:name
+                    bind:mode
                     bind:personaId
                     bind:greetingId
                     disabled={busy || pendingStart}
+                    onaddpersona={(personas: PersonaController) => {
+                        addingPersona = personas;
+                    }}
                 />
-            {/if}
-            <fieldset class="ui-chat-mode-options" disabled={busy || pendingStart}>
-                <legend>{$tr('uiPreview.conversationMode')}</legend>
-                {#each ['chat', 'story'] as value (value)}
-                    <label>
-                        <input type="radio" name="ui-conversation-mode" {value} bind:group={mode} />
-                        <span>
-                            <strong
-                                >{$tr(
-                                    value === 'chat' ? 'uiPreview.chatMode' : 'uiPreview.storyMode',
-                                )}</strong
-                            >
-                            <small
-                                >{$tr(
-                                    value === 'chat'
-                                        ? 'uiPreview.chatModeHint'
-                                        : 'uiPreview.storyModeHint',
-                                )}</small
-                            >
-                        </span>
-                    </label>
-                {/each}
-            </fieldset>
-            {#if kind === 'room-settings'}
+            {:else}
+                <fieldset class="ui-chat-mode-options" disabled={busy || pendingStart}>
+                    <legend>{$tr('uiPreview.conversationMode')}</legend>
+                    {#each ['chat', 'story'] as value (value)}
+                        <label>
+                            <input
+                                type="radio"
+                                name="ui-conversation-mode"
+                                {value}
+                                bind:group={mode}
+                            />
+                            <span>
+                                <strong
+                                    >{$tr(
+                                        value === 'chat'
+                                            ? 'uiPreview.chatMode'
+                                            : 'uiPreview.storyMode',
+                                    )}</strong
+                                >
+                                <small
+                                    >{$tr(
+                                        value === 'chat'
+                                            ? 'uiPreview.chatModeHint'
+                                            : 'uiPreview.storyModeHint',
+                                    )}</small
+                                >
+                            </span>
+                        </label>
+                    {/each}
+                </fieldset>
                 <dl class="ui-card-details">
                     <dt>{$tr('uiPreview.chatName')}</dt>
                     <dd>{appState.selected_conversation?.title}</dd>
@@ -215,16 +238,13 @@
             {#if pendingStart && !busy}<p class="ui-field-error" role="status">
                     {$tr('workspace.finishStart')}
                 </p>{/if}
-            <button
-                type="submit"
-                class="ui-submit ui-pressable"
-                disabled={busy ||
-                    (kind === 'new-chat' && appState.greeting_catalog.phase !== 'ready')}
-            >
-                <span class="ui-press-visual"
-                    >{$tr(kind === 'new-chat' ? 'uiPreview.startChat' : 'uiPreview.save')}</span
+            {#if kind === 'room-settings'}<button
+                    type="submit"
+                    class="ui-submit ui-pressable"
+                    disabled={busy}
                 >
-            </button>
+                    <span class="ui-press-visual">{$tr('uiPreview.save')}</span>
+                </button>{/if}
         </form>
         {#if kind === 'room-settings'}
             <section class="ui-settings-group">
@@ -270,15 +290,19 @@
         {/if}
     {/if}
 </SettingsPanel>
+{#if addingPersona}
+    <ConversationPersonaCreate
+        controller={addingPersona}
+        {covered}
+        onclose={() => {
+            addingPersona = null;
+        }}
+        oncreated={(persona: PersonaDto) => {
+            personaId = persona.value.id;
+            addingPersona = null;
+        }}
+    />
+{/if}
 {#if confirming}
     <DiscardChanges onkeep={keepEditing} ondiscard={() => afterDiscard()} />
 {/if}
-
-<style>
-    .start-name {
-        border: 0;
-        padding: 0;
-        margin: 0;
-        min-width: 0;
-    }
-</style>

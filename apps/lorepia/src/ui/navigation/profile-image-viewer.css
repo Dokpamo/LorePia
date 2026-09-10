@@ -23,6 +23,7 @@
 }
 .seed-image-viewer-surface[data-dragging='true'],
 .seed-image-viewer-track[data-dragging='true'],
+.seed-image-viewer-track[data-browsing='true'],
 .seed-image-viewer-track[data-jumping='true'] {
     transition: none;
 }

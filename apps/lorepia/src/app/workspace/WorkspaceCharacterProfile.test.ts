@@ -74,8 +74,8 @@ it('opens chat setup from the profile and restores that profile before returning
     expect(createConversation).not.toHaveBeenCalled();
     expect(within(setup).getByText(alternateTitle)).toBeVisible();
     expect(
-        within(setup).getByRole('radio', { name: new RegExp(t('uiPreview.chatMode')) }),
-    ).toBeVisible();
+        within(setup).getByRole('button', { name: t('uiPreview.conversationMode') }),
+    ).toHaveTextContent(t('uiPreview.chatMode'));
     await fireEvent.click(within(setup).getByRole('button', { name: t('uiPreview.back') }));
     await waitFor(() => expect(screen.getAllByRole('dialog')).toEqual([reader]));
     expect(reader).toHaveProperty('inert', false);

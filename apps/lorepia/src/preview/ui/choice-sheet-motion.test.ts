@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { choiceSheetDrag, choiceSheetTransition } from './choice-sheet-motion';
+import {
+    choiceSheetDrag,
+    choiceSheetTransition,
+    setSheetExpanded,
+} from '../../ui/workspace/choice-sheet-motion';
 
 const disposals: (() => void)[] = [];
 afterEach(() => {
@@ -35,9 +39,13 @@ function fixture(scale = 1) {
     layer.append(panel);
     document.body.append(layer);
     const offset = () => Number.parseFloat(panel.style.getPropertyValue('--ui-choice-drag')) || 0;
-    Object.defineProperty(panel, 'offsetHeight', { value: 560 });
+    const height = () => {
+        const value = panel.style.getPropertyValue('--ui-sheet-height');
+        return value.endsWith('%') ? Number.parseFloat(value) * 8 : Number.parseFloat(value) || 560;
+    };
+    Object.defineProperty(panel, 'offsetHeight', { get: height });
     panel.getBoundingClientRect = () =>
-        new DOMRect(0, (240 + offset()) * scale, 360 * scale, 560 * scale);
+        new DOMRect(0, (800 - height() + offset()) * scale, 360 * scale, height() * scale);
     layer.getBoundingClientRect = () => new DOMRect(0, 0, 360 * scale, 800 * scale);
     const captures = new Set<number>();
     handle.setPointerCapture = (id) => {
@@ -50,13 +58,60 @@ function fixture(scale = 1) {
     const onclose = vi.fn();
     const action = choiceSheetDrag(handle, { panel: () => panel, onclose });
     disposals.push(() => action.destroy());
-    return { panel, handle, option, onclose, captures, offset, action };
+    return { panel, handle, option, onclose, captures, offset, height, action };
 }
 
 describe('choice sheet handle', () => {
+    it.each([1, 0.5])(
+        'follows an upward pull at scale %s, then snaps full, medium, and closed in order',
+        (scale) => {
+            const { panel, handle, height, onclose, offset } = fixture(scale);
+            pointer(handle, 'pointerdown', 260 * scale, 0);
+            pointer(window, 'pointermove', 140 * scale, 300);
+            expect(height()).toBe(680);
+            expect(offset()).toBe(0);
+            expect(panel.getBoundingClientRect().bottom).toBe(800 * scale);
+            pointer(window, 'pointerup', 140 * scale, 500);
+            expect(height()).toBe(800);
+            expect(panel.dataset.sheetExpanded).toBe('true');
+            expect(onclose).not.toHaveBeenCalled();
+
+            pointer(handle, 'pointerdown', 20 * scale, 600);
+            pointer(window, 'pointermove', 140 * scale, 900);
+            expect(height()).toBe(680);
+            pointer(window, 'pointerup', 140 * scale, 1100);
+            expect(height()).toBe(560);
+            expect(panel.dataset.sheetExpanded).toBe('false');
+            expect(onclose).not.toHaveBeenCalled();
+
+            pointer(handle, 'pointerdown', 260 * scale, 1200);
+            pointer(window, 'pointermove', 460 * scale, 1500);
+            pointer(window, 'pointerup', 460 * scale, 1700);
+            expect(onclose).toHaveBeenCalledOnce();
+            expect(offset()).toBe(200);
+        },
+    );
+
+    it('restores the current detent on interrupted resizing and ignores a disabled handle', () => {
+        const { panel, handle, height, action, onclose } = fixture();
+        setSheetExpanded(panel, true);
+        pointer(handle, 'pointerdown', 20, 0);
+        pointer(window, 'pointermove', 140, 300);
+        expect(height()).toBe(680);
+        window.dispatchEvent(new Event('resize'));
+        expect(height()).toBe(800);
+        expect(panel.dataset.sheetExpanded).toBe('true');
+        action.update({ panel: () => panel, onclose, enabled: false });
+        pointer(handle, 'pointerdown', 20, 500);
+        pointer(window, 'pointermove', 240, 800);
+        pointer(window, 'pointerup', 240, 900);
+        expect(height()).toBe(800);
+        expect(onclose).not.toHaveBeenCalled();
+    });
+
     it('tracks the pointer at the UI scale, then keeps the released position for its exit', () => {
         const { panel, handle, onclose, captures, offset } = fixture(0.5);
-        pointer(handle, 'pointerdown', 150, 0);
+        expect(pointer(handle, 'pointerdown', 150, 0).defaultPrevented).toBe(false);
         pointer(window, 'pointermove', 240, 400);
         expect(offset()).toBe(180);
         expect(panel.dataset.choiceDragging).toBe('true');

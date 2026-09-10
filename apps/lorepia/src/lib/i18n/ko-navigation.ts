@@ -26,6 +26,7 @@ export const koNavigation = {
     'navigation.noResultsHint': '다른 이름으로 찾아보세요.',
     'navigation.noChats': '아직 대화가 없어요',
     'navigation.noChatsHint': '캐릭터를 선택하고 첫 대화를 시작해 보세요.',
+    'navigation.noCharacterChatsHint': '이 캐릭터와 첫 대화를 시작해 보세요.',
     'navigation.allCharacters': '모든 캐릭터',
     'navigation.recentChats': '최근 대화',
     'navigation.characterInfo': '캐릭터 정보',

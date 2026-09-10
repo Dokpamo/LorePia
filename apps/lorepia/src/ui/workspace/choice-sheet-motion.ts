@@ -1,7 +1,7 @@
 import { cubicOut } from 'svelte/easing';
 import { fly } from 'svelte/transition';
 
-function dragOffset(panel: HTMLElement) {
+export function dragOffset(panel: HTMLElement) {
     const translate = getComputedStyle(panel).translate.split(/\s+/);
     return (
         Number.parseFloat(translate[1] ?? '') ||
@@ -31,16 +31,28 @@ export function choiceSheetTransition(panel: HTMLElement, reduced: boolean) {
 interface DragOptions {
     panel: () => HTMLElement;
     onclose: () => void;
+    onexpanded?: (expanded: boolean) => void;
+    enabled?: boolean;
 }
 
-/** Only the handle owns the gesture; the choice list retains normal scrolling. */
-export function choiceSheetDrag(handle: HTMLElement, options: DragOptions) {
+export function setSheetExpanded(panel: HTMLElement, expanded: boolean) {
+    panel.dataset.sheetExpanded = String(expanded);
+    panel.style.setProperty('--ui-sheet-height', expanded ? '100%' : '70%');
+    panel.style.setProperty('--ui-choice-drag', '0px');
+}
+
+/** Only the handle owns the two detents; the body retains native scrolling. */
+export function choiceSheetDrag(handle: HTMLElement, initial: DragOptions) {
+    let options = initial;
     let pointer: {
         id: number;
         panel: HTMLElement;
         y: number;
         origin: number;
         height: number;
+        full: number;
+        minimum: number;
+        expanded: boolean;
         scale: number;
         lastY: number;
         lastTime: number;
@@ -57,19 +69,22 @@ export function choiceSheetDrag(handle: HTMLElement, options: DragOptions) {
     }
     function cancel() {
         if (!pointer) return;
-        const panel = pointer.panel;
+        const { panel, expanded } = pointer;
         release();
-        panel.style.setProperty('--ui-choice-drag', '0px');
+        setSheetExpanded(panel, expanded);
     }
     function down(event: PointerEvent) {
-        if (!event.isPrimary || event.button !== 0 || pointer) return;
+        if (!event.isPrimary || event.button !== 0 || pointer || options.enabled === false) return;
         const panel = options.panel();
         if (panel.dataset.choiceClosing === 'true') return;
         const bounds = panel.getBoundingClientRect();
         const height = panel.offsetHeight || bounds.height;
         if (!height) return;
         const origin = dragOffset(panel);
+        const scale = bounds.height / height;
+        const full = (panel.parentElement?.getBoundingClientRect().height ?? bounds.height) / scale;
         panel.dataset.choiceDragging = 'true';
+        panel.style.setProperty('--ui-sheet-height', `${String(height)}px`);
         panel.style.setProperty('--ui-choice-drag', `${String(origin)}px`);
         pointer = {
             id: event.pointerId,
@@ -77,21 +92,30 @@ export function choiceSheetDrag(handle: HTMLElement, options: DragOptions) {
             y: event.clientY,
             origin,
             height,
-            scale: bounds.height / height,
+            full,
+            minimum: full * 0.7,
+            expanded: panel.dataset.sheetExpanded === 'true',
+            scale,
             lastY: event.clientY,
             lastTime: event.timeStamp,
             velocity: 0,
         };
         suppressClick = false;
-        event.preventDefault();
+        // Preserve native focus/click activation. The handle's touch-action
+        // and user-select rules already reserve the drag without selection.
         handle.setPointerCapture(event.pointerId);
     }
     function distance(event: PointerEvent) {
         if (!pointer) return 0;
-        return Math.max(
-            0,
-            Math.min(pointer.height, pointer.origin + (event.clientY - pointer.y) / pointer.scale),
-        );
+        return pointer.origin + (event.clientY - pointer.y) / pointer.scale;
+    }
+    function render(distance: number) {
+        if (!pointer) return;
+        const { panel, height, full, minimum, expanded } = pointer;
+        const nextHeight = Math.max(expanded ? minimum : height, Math.min(full, height - distance));
+        const offset = Math.max(0, Math.min(minimum, distance - (height - nextHeight)));
+        panel.style.setProperty('--ui-sheet-height', `${String(nextHeight)}px`);
+        panel.style.setProperty('--ui-choice-drag', `${String(offset)}px`);
     }
     function move(event: PointerEvent) {
         if (event.pointerId !== pointer?.id) return;
@@ -102,18 +126,28 @@ export function choiceSheetDrag(handle: HTMLElement, options: DragOptions) {
         pointer.lastY = event.clientY;
         pointer.lastTime = event.timeStamp;
         if (Math.abs(event.clientY - pointer.y) > 4) suppressClick = true;
-        pointer.panel.style.setProperty('--ui-choice-drag', `${String(distance(event))}px`);
+        render(distance(event));
     }
     function up(event: PointerEvent) {
         if (event.pointerId !== pointer?.id) return;
         const offset = distance(event);
-        const commit =
-            offset >= Math.min(160, pointer.height * 0.25) ||
-            (offset > 24 && pointer.velocity > 0.55 && event.timeStamp - pointer.lastTime < 100);
-        const panel = pointer.panel;
+        const { panel, expanded, full, minimum } = pointer;
+        const velocity = event.timeStamp - pointer.lastTime < 100 ? pointer.velocity : 0;
+        const threshold = Math.min(96, (full - minimum) * 0.35);
+        const upward = offset < -threshold || (offset < -24 && velocity < -0.55);
+        const downward = offset > threshold || (offset > 24 && velocity > 0.55);
+        const dismiss =
+            !expanded &&
+            velocity >= -0.4 &&
+            (offset >= Math.min(160, minimum * 0.25) || (offset > 24 && velocity > 0.55));
+        render(offset);
         release();
-        panel.style.setProperty('--ui-choice-drag', `${String(commit ? offset : 0)}px`);
-        if (commit) options.onclose();
+        if (dismiss) options.onclose();
+        else {
+            const next = expanded ? !downward : upward;
+            setSheetExpanded(panel, next);
+            options.onexpanded?.(next);
+        }
     }
     function interrupted(event: PointerEvent) {
         if (event.pointerId === pointer?.id) cancel();
@@ -136,6 +170,10 @@ export function choiceSheetDrag(handle: HTMLElement, options: DragOptions) {
     window.addEventListener('pointercancel', interrupted);
     window.addEventListener('resize', cancel);
     return {
+        update(next: DragOptions) {
+            options = next;
+            if (next.enabled === false) cancel();
+        },
         destroy() {
             cancel();
             handle.removeEventListener('pointerdown', down);

@@ -84,9 +84,6 @@
     );
     pointer-events: none;
 }
-.seed-profile-summary > .seed-image-strip-fog {
-    margin: -12px calc(-1 * var(--profile-gutter)) 16px;
-}
 .seed-profile-copy h1 {
     display: -webkit-box;
     -webkit-box-orient: vertical;
@@ -139,38 +136,12 @@
 }
 .seed-app
     .ui-overlay:is([data-kind='character-profile'], [data-kind='profile-resource'])
-    > .ui-panel-footer {
-    position: relative;
-    flex: 0 0 auto;
-    background: var(--ui-paper);
-    width: min(100%, var(--profile-width));
-    align-self: center;
-    padding: 12px var(--profile-gutter) max(12px, env(safe-area-inset-bottom, 0px));
-}
-.seed-app
-    .ui-overlay:is([data-kind='character-profile'], [data-kind='profile-resource'])
     > .ui-panel-footer::before {
     content: '';
     position: absolute;
     inset: -20px 0 100%;
     background: linear-gradient(to bottom, transparent, var(--ui-paper));
     pointer-events: none;
-}
-.seed-app
-    .ui-overlay:is([data-kind='character-profile'], [data-kind='profile-resource'])
-    .ui-panel-footer
-    .seed-primary {
-    margin: 0;
-    min-height: 52px;
-    border-radius: 16px;
-}
-.seed-app
-    .ui-overlay:is([data-kind='character-profile'], [data-kind='profile-resource'])
-    .seed-primary
-    .ui-press-visual {
-    min-height: 52px;
-    border-radius: inherit;
-    font-size: var(--ui-body);
 }
 @media (prefers-reduced-motion: reduce) {
     .seed-app .ui-overlay[data-kind='character-profile'] > .ui-page-header {

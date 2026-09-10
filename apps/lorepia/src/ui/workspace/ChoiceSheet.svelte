@@ -5,7 +5,9 @@
     import { tr } from '../../lib/i18n';
     import IconButton from './IconButton.svelte';
     import { trapFocus } from './focus-trap';
-    import { choiceSheetDrag, choiceSheetTransition } from './choice-sheet-motion';
+    import { choiceSheetTransition } from './choice-sheet-motion';
+    import SheetHandle from './SheetHandle.svelte';
+    import { focusChoiceOption } from './choice-sheet-focus';
     import type { ChoiceRequest } from './settings-choice';
 
     let {
@@ -14,7 +16,7 @@
         onclosed,
     }: {
         request: ChoiceRequest;
-        onclose: () => void;
+        onclose: (afterClose?: () => void) => void;
         onclosed?: () => void;
     } = $props();
     const id = $props.id();
@@ -28,18 +30,17 @@
     );
     let panel: HTMLElement;
     let closing = $state(false);
+    let expanded = $state(false);
     const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
     onDestroy(() => onclosed?.());
     onMount(() =>
-        panel
-            .querySelector<HTMLElement>('[role="radio"][tabindex="0"]')
-            ?.focus({ preventScroll: true }),
+        focusChoiceOption(panel.querySelector<HTMLElement>('[role="radio"][tabindex="0"]')),
     );
-    function close() {
+    function close(afterClose?: () => void) {
         if (closing) return;
         closing = true;
         panel.dataset.choiceClosing = 'true';
-        onclose();
+        onclose(afterClose);
     }
     function move(event: KeyboardEvent) {
         const offset = ['ArrowDown', 'ArrowRight'].includes(event.key)
@@ -55,9 +56,7 @@
                 : event.key === 'End'
                   ? request.options.length - 1
                   : (focused + offset + request.options.length) % request.options.length;
-        panel
-            .querySelectorAll<HTMLElement>('[role="radio"]')
-            [focused]?.focus({ preventScroll: true });
+        focusChoiceOption(panel.querySelectorAll<HTMLElement>('[role="radio"]')[focused]);
     }
 </script>
 
@@ -67,10 +66,11 @@
         aria-hidden="true"
         tabindex="-1"
         transition:fade={{ duration: reduced ? 0 : 300 }}
-        onclick={close}
+        onclick={() => close()}
     ></button>
     <div
         class="ui-choice-sheet"
+        data-sheet-expanded={expanded}
         bind:this={panel}
         role="dialog"
         aria-modal="true"
@@ -86,23 +86,22 @@
             trapFocus(event);
         }}
     >
-        <button
-            type="button"
-            class="ui-choice-handle"
-            aria-label={$tr('uiPreview.dragChoicesToClose')}
-            tabindex="-1"
-            use:choiceSheetDrag={{ panel: () => panel, onclose: close }}
-            onclick={close}><span aria-hidden="true"></span></button
-        >
+        <SheetHandle panel={() => panel} onclose={close} bind:expanded />
         <header>
             <h2 {id}>{request.label}</h2>
-            <IconButton label={$tr('uiPreview.closeChoices')} onclick={close}><X /></IconButton>
+            <IconButton label={$tr('uiPreview.closeChoices')} onclick={() => close()}
+                ><X /></IconButton
+            >
         </header>
         <div role="radiogroup" aria-labelledby={id} tabindex="-1" onkeydown={move}>
             {#each request.options as item, index (item.value)}
                 <button
                     type="button"
                     role="radio"
+                    aria-label={item.label}
+                    aria-describedby={item.description
+                        ? `${id}-option-${String(index)}`
+                        : undefined}
                     aria-checked={request.value === item.value}
                     tabindex={focused === index ? 0 : -1}
                     class="ui-choice-option ui-pressable"
@@ -114,12 +113,29 @@
                     }}
                 >
                     <span class="ui-press-visual"
-                        ><span>{item.label}</span>{#if request.value === item.value}<Check
+                        ><span class="ui-choice-option-copy"
+                            ><span>{item.label}</span>
+                            {#if item.description}<span
+                                    class="ui-choice-option-description"
+                                    id={`${id}-option-${String(index)}`}>{item.description}</span
+                                >{/if}
+                        </span>{#if request.value === item.value}<Check
                                 aria-hidden="true"
                             />{/if}</span
                     >
                 </button>
             {/each}
         </div>
+        {#if request.action}
+            <footer class="ui-choice-footer">
+                <button
+                    type="button"
+                    class="ui-submit ui-pressable"
+                    onclick={() => close(request.action?.run)}
+                >
+                    <span class="ui-press-visual">{request.action.label}</span>
+                </button>
+            </footer>
+        {/if}
     </div>
 </div>

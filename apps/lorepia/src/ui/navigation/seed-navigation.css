@@ -42,6 +42,8 @@
     --seed-dock-width: 93.203883%;
     --seed-dock-max-width: 440px;
     --seed-dock-height: max(50px, calc(min(93.203883vw, 440px) * 97 / 576));
+    --seed-dock-radius: calc(var(--seed-dock-height) / 2);
+    --seed-dock-bottom: max(var(--seed-tab-bottom), env(safe-area-inset-bottom, 0px));
     width: 100%;
     height: 100dvh;
     min-width: 0;
@@ -152,7 +154,7 @@
 .seed-tab-container {
     position: absolute;
     inset: auto 0 0;
-    padding-bottom: max(var(--seed-tab-bottom), env(safe-area-inset-bottom, 0px));
+    padding-bottom: var(--seed-dock-bottom);
     z-index: 3;
     pointer-events: none;
 }
@@ -168,7 +170,7 @@
     min-height: 50px;
     aspect-ratio: 576 / 97;
     margin-inline: auto;
-    border-radius: 999px;
+    border-radius: var(--seed-dock-radius);
     border: 0;
     background: light-dark(rgb(255 255 255 / 96%), rgb(40 40 44 / 96%));
     -webkit-backdrop-filter: blur(12px) saturate(1.2);
@@ -182,12 +184,38 @@
 .seed-app.ui-preview .ui-chat > .ui-compose {
     display: flex;
     justify-content: center;
-    padding: 8px 0 max(var(--seed-tab-bottom), env(safe-area-inset-bottom, 0px));
+    padding: 8px 0 var(--seed-dock-bottom);
 }
 .seed-app.ui-preview .ui-compose-field {
     --ui-compose-row: var(--seed-dock-height);
     width: var(--seed-dock-width);
     max-width: var(--seed-dock-max-width);
+}
+/* Fixed page and sheet actions share the navigation and collapsed composer footprint. */
+.seed-app.ui-preview :is(.ui-panel-footer, .ui-choice-footer) {
+    position: relative;
+    display: flex;
+    justify-content: center;
+    flex: 0 0 auto;
+    align-self: center;
+    width: 100%;
+    padding: 8px 0 var(--seed-dock-bottom);
+    background: var(--ui-paper);
+}
+.seed-app.ui-preview .ui-choice-footer {
+    width: calc(100% + 2 * var(--ui-choice-inset));
+}
+.seed-app.ui-preview :is(.ui-panel-footer, .ui-choice-footer) > .ui-submit {
+    width: var(--seed-dock-width);
+    max-width: var(--seed-dock-max-width);
+    min-height: var(--seed-dock-height);
+    margin: 0;
+    border-radius: var(--seed-dock-radius);
+    font-size: var(--ui-type-body);
+    line-height: var(--ui-line-body);
+}
+.seed-app.ui-preview :is(.ui-panel-footer, .ui-choice-footer) > .ui-submit > .ui-press-visual {
+    min-height: var(--seed-dock-height);
 }
 .seed-app.ui-preview :is(.ui-compose-send, [data-editor-send]) .ui-icon-button > .ui-press-visual {
     /* Generic icon padding used to squeeze a 24px arrow into a 20px content box. */
@@ -239,19 +267,21 @@
     transform: scale(0.94);
 }
 .seed-tab .lucide-house {
-    transform: scale(0.87);
+    transform: scale(1);
 }
 .seed-app .seed-tab[aria-current='page'] {
     color: var(--seed-tab-selected);
 }
 .seed-tab[aria-current='page'] :is(.lucide-house, .lucide-message-circle) path,
-.seed-tab[aria-current='page'] .lucide-square-pen path:first-of-type,
+.seed-tab[aria-current='page'] .lucide-circle-plus circle,
 .seed-tab[aria-current='page'] .lucide-settings path {
     fill: currentColor;
 }
-.seed-tab[aria-current='page'] .lucide-square-pen path:last-of-type,
 .seed-tab[aria-current='page'] .lucide-settings circle {
     fill: var(--seed-tab-surface);
+}
+.seed-tab[aria-current='page'] .lucide-circle-plus path {
+    stroke: var(--seed-tab-surface);
 }
 .seed-app .seed-tab:is(:active, [data-ui-pressed='true']):not(:disabled) > .ui-press-visual {
     background-color: transparent;

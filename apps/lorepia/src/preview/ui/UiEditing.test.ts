@@ -71,7 +71,7 @@ describe('preview editor commit and validation', () => {
             await fireEvent.keyDown(dialog, { key: 'Escape' });
             await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
             expect(input).toHaveValue('저장하지 않을 수정');
-            expect(input).toHaveFocus();
+            await waitFor(() => expect(input).toHaveFocus());
             await back();
             await fireEvent.click(
                 screen.getByRole('button', { name: t('uiPreview.discardChanges') }),
@@ -79,7 +79,7 @@ describe('preview editor commit and validation', () => {
             await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
             expect(log.textContent).toBe(before);
             expect(container.querySelector('.ui-branch-select')).toBeNull();
-            expect(message).toHaveFocus();
+            await waitFor(() => expect(message).toHaveFocus());
         },
     );
 

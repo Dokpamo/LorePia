@@ -57,7 +57,7 @@
     z-index: 40;
     display: grid;
     align-items: end;
-    overflow: hidden;
+    overflow: clip;
     pointer-events: auto;
 }
 .ui-preview .ui-choice-backdrop {
@@ -71,19 +71,26 @@
     background: light-dark(rgb(25 31 40 / 28%), rgb(0 0 0 / 48%));
 }
 .ui-preview .ui-choice-sheet {
+    --ui-choice-inset: 16px;
     position: relative;
     display: flex;
     flex-direction: column;
     width: 100%;
-    height: 70%;
+    height: var(--ui-sheet-height, 70%);
+    min-height: 0;
     max-height: 100%;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    padding: 0 16px max(24px, env(safe-area-inset-bottom));
+    overflow: hidden;
+    padding: 0 var(--ui-choice-inset);
     border-radius: 24px 24px 0 0;
     background: var(--ui-paper);
     translate: 0 var(--ui-choice-drag, 0px);
-    transition: translate 240ms var(--ui-motion-ease);
+    transition:
+        translate 280ms var(--ui-motion-ease),
+        height 280ms var(--ui-motion-ease),
+        border-radius 280ms var(--ui-motion-ease);
+}
+.ui-preview .ui-choice-sheet[data-sheet-expanded='true'] {
+    border-radius: 0;
 }
 .ui-preview .ui-choice-sheet[data-choice-dragging='true'] {
     transition: none;
@@ -122,9 +129,23 @@
     padding-left: 8px;
 }
 .ui-preview .ui-choice-sheet > [role='radiogroup'] {
-    flex-shrink: 0;
+    position: relative;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
     margin: 0;
-    padding-block: 4px;
+    padding-block: 4px max(24px, env(safe-area-inset-bottom));
+    scroll-padding-block: 4px;
+}
+.ui-preview .ui-choice-footer {
+    flex: 0 0 auto;
+    padding: 12px 0 max(12px, env(safe-area-inset-bottom));
+}
+.ui-preview .ui-choice-footer .ui-submit {
+    margin: 0;
+    font-size: var(--ui-type-body);
+    line-height: var(--ui-line-body);
 }
 .ui-preview .ui-choice-sheet h2 {
     flex: 1;
@@ -165,14 +186,22 @@
     height: 24px;
     flex-shrink: 0;
 }
-.ui-preview:not([data-layout='mobile']) .ui-choice-layer {
-    place-items: center;
-    padding: 24px;
+.ui-preview .ui-choice-option-copy {
+    min-width: 0;
+    display: grid;
+    gap: var(--ui-space-1);
+    overflow-wrap: anywhere;
 }
-.ui-preview:not([data-layout='mobile']) .ui-choice-sheet {
-    width: min(100%, 440px);
-    height: auto;
-    border-radius: 24px;
+.ui-preview .ui-choice-option-description {
+    color: var(--ui-muted);
+    font-size: var(--ui-type-secondary);
+    line-height: var(--ui-line-secondary);
+    font-weight: 400;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
 }
 .ui-preview .ui-chat-mode-options input {
     appearance: none;

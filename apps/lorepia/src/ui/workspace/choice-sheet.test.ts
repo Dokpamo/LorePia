@@ -41,3 +41,19 @@ it('restores the selector after the covered page resumes, without stealing focus
     frames.shift()?.(0);
     expect(current).toHaveFocus();
 });
+
+it('opens a follow-up only after the sheet exits and does not restore focus over it', async () => {
+    const opener = document.createElement('button');
+    const next = document.createElement('button');
+    document.body.append(opener, next);
+    const choices = new ChoiceSheetState();
+    choices.open({ label: 'Personas', value: '', options: [], onselect: vi.fn() }, opener);
+    const followup = vi.fn(() => next.focus());
+    choices.close(followup);
+    expect(followup).not.toHaveBeenCalled();
+    expect(choices.present).toBe(true);
+    choices.finish();
+    await tick();
+    expect(followup).toHaveBeenCalledOnce();
+    expect(next).toHaveFocus();
+});

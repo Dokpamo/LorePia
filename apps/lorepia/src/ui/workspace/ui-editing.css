@@ -80,6 +80,20 @@
     flex-direction: column;
     touch-action: pan-y pinch-zoom;
 }
+.ui-preview .ui-editor-layer.ui-choice-layer {
+    z-index: 30;
+    pointer-events: auto;
+}
+.ui-preview .ui-text-editor.ui-choice-sheet {
+    position: relative;
+    inset: auto;
+}
+.ui-preview .ui-text-editor.ui-choice-sheet .ui-editor-text-region {
+    padding: 12px 8px;
+}
+.ui-preview .ui-text-editor.ui-choice-sheet .ui-editor-footer {
+    padding: 4px 8px;
+}
 .ui-preview :is(.ui-text-editor, .ui-overlay, .ui-rail-organizer) {
     transform: translate3d(var(--ui-back-offset, 0px), 0, 0);
 }

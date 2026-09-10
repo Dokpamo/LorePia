@@ -39,6 +39,7 @@
     let dx = $state(0);
     let dy = $state(0);
     let dragging = $state(false);
+    let browsing = $state(false);
     let departing = $state<ProfileImage | null>(null);
     let close: HTMLButtonElement;
     onMount(() => {
@@ -48,8 +49,10 @@
         );
         close.focus({ preventScroll: true });
     });
-    function select(position: number) {
+    function select(position: number, fromStrip = false) {
+        browsing = fromStrip;
         departing =
+            !fromStrip &&
             Math.abs(position - index) > 1 &&
             !matchMedia('(prefers-reduced-motion: reduce)').matches
                 ? (images[index] ?? null)
@@ -140,6 +143,7 @@
             <div
                 class="seed-image-viewer-track"
                 data-dragging={dragging}
+                data-browsing={browsing}
                 data-jumping={departing !== null}
                 style:transform={`translateX(calc(${String(-index * 100)}% + ${String(dx)}px))`}
             >

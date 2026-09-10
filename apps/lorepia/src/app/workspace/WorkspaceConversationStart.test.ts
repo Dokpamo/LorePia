@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import WorkspaceApp from './WorkspaceApp.svelte';
 import { createPreviewClient } from '../../preview/mock-client';
 import { t } from '../../lib/i18n';
+import type { PersonaDto } from '../../features/personas/persona-contracts';
 
 beforeEach(() =>
     vi.stubGlobal(
@@ -19,8 +20,7 @@ afterEach(() => {
     vi.unstubAllGlobals();
 });
 
-async function openSetup() {
-    const client = createPreviewClient();
+async function openSetup(client = createPreviewClient()) {
     const [character] = await client.listCharacters();
     if (!character) throw new Error('Missing demo character');
     const create = vi.spyOn(client, 'createConversation');
@@ -37,6 +37,16 @@ async function openSetup() {
     await fireEvent.click(start);
     const panel = await screen.findByRole('dialog', { name: t('uiPreview.newChat') });
     return { ...view, client, character, create, select, panel, profile };
+}
+
+async function chooseStory(panel: HTMLElement) {
+    const opener = within(panel).getByRole('button', { name: t('uiPreview.conversationMode') });
+    await fireEvent.click(opener);
+    const story = await screen.findByRole('radio', { name: t('uiPreview.storyMode') });
+    expect(story).toHaveAccessibleDescription(t('uiPreview.storyModeHint'));
+    await fireEvent.click(story);
+    await waitFor(() => expect(screen.getAllByRole('dialog')).toEqual([panel]));
+    expect(opener).toHaveTextContent(t('uiPreview.storyMode'));
 }
 
 it('keeps all start choices local until Start and applies them to the new conversation', async () => {
@@ -56,16 +66,16 @@ it('keeps all start choices local until Start and applies them to the new conver
     const personas = within(panel).getByRole('button', { name: t('persona.title') });
     await waitFor(() => expect(personas).toBeEnabled());
     await fireEvent.click(personas);
-    await fireEvent.click(await screen.findByRole('radio', { name: persona.value.name }));
+    const personaOption = await screen.findByRole('radio', { name: persona.value.name });
+    expect(personaOption).toHaveAccessibleDescription(persona.value.description);
+    await fireEvent.click(personaOption);
     await waitFor(() => expect(screen.getAllByRole('dialog')).toEqual([panel]));
     await fireEvent.click(
         within(panel).getByRole('button', { name: t('workspace.startingScene') }),
     );
     await fireEvent.click(await screen.findByRole('radio', { name: title }));
     await waitFor(() => expect(screen.getAllByRole('dialog')).toEqual([panel]));
-    await fireEvent.click(
-        within(panel).getByRole('radio', { name: new RegExp(t('uiPreview.storyMode')) }),
-    );
+    await chooseStory(panel);
     expect(create).not.toHaveBeenCalled();
     expect(select).not.toHaveBeenCalled();
     await fireEvent.click(within(panel).getByRole('button', { name: t('uiPreview.startChat') }));
@@ -80,9 +90,7 @@ it('keeps all start choices local until Start and applies them to the new conver
 
 it('shows the unsaved dialog after departure, returns with its choices, and discards without reopening', async () => {
     const { panel, profile, create } = await openSetup();
-    await fireEvent.click(
-        within(panel).getByRole('radio', { name: new RegExp(t('uiPreview.storyMode')) }),
-    );
+    await chooseStory(panel);
     await fireEvent.click(within(panel).getByRole('button', { name: t('uiPreview.back') }));
     const confirm = await screen.findByRole('alertdialog');
     expect(panel).toHaveAttribute('data-back-dismissed', 'true');
@@ -95,12 +103,79 @@ it('shows the unsaved dialog after departure, returns with its choices, and disc
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
     expect(panel).not.toHaveAttribute('data-back-dismissed');
     expect(
-        within(panel).getByRole('radio', { name: new RegExp(t('uiPreview.storyMode')) }),
-    ).toBeChecked();
+        within(panel).getByRole('button', { name: t('uiPreview.conversationMode') }),
+    ).toHaveTextContent(t('uiPreview.storyMode'));
     await fireEvent.click(within(panel).getByRole('button', { name: t('uiPreview.back') }));
     await fireEvent.click(
         await screen.findByRole('button', { name: t('uiPreview.discardChanges') }),
     );
     await waitFor(() => expect(screen.getAllByRole('dialog')).toEqual([profile]));
     expect(create).not.toHaveBeenCalled();
+});
+
+it('offers persona creation from an empty catalog while still allowing a start without one', async () => {
+    const client = createPreviewClient();
+    const catalog = await client.listPersonaPage({ limit: 100, after: null });
+    if (catalog.kind !== 'page') throw new Error('Missing persona catalog');
+    vi.spyOn(client, 'listPersonaPage').mockResolvedValue({
+        ...catalog,
+        items: [],
+        next_cursor: null,
+    });
+    const { panel, create, select } = await openSetup(client);
+    const persona = await within(panel).findByRole('button', { name: t('persona.title') });
+    await waitFor(() => expect(persona).toBeEnabled());
+    expect(persona).toHaveTextContent(t('workspace.noPersona'));
+    await fireEvent.click(persona);
+    expect(
+        await screen.findByRole('button', { name: t('persona.editor.create_button') }),
+    ).toBeEnabled();
+    await fireEvent.click(screen.getByRole('radio', { name: t('workspace.noPersona') }));
+    await waitFor(() => expect(screen.getAllByRole('dialog')).toEqual([panel]));
+    await fireEvent.click(within(panel).getByRole('button', { name: t('uiPreview.startChat') }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(select).not.toHaveBeenCalled();
+});
+
+it('creates a saved persona through the full-screen editor and carries its exact identity into Start', async () => {
+    const { client, panel, select, create } = await openSetup();
+    const add = vi.spyOn(client, 'createPersona');
+    const opener = within(panel).getByRole('button', { name: t('persona.title') });
+    await waitFor(() => expect(opener).toBeEnabled());
+    await fireEvent.click(opener);
+    await fireEvent.click(
+        await screen.findByRole('button', { name: t('persona.editor.create_button') }),
+    );
+    const creator = await screen.findByRole('dialog', { name: t('persona.editor.new') });
+    expect(panel).toHaveProperty('inert', true);
+    for (const [label, value] of [
+        [t('persona.editor.name'), 'Traveler'],
+        [t('persona.editor.description'), 'A traveler documenting unfamiliar cities'],
+    ]) {
+        await fireEvent.click(within(creator).getByRole('button', { name: label }));
+        await fireEvent.input(await screen.findByRole('textbox', { name: label }), {
+            target: { value },
+        });
+        await fireEvent.click(screen.getByRole('button', { name: t('uiPreview.editDone') }));
+        await waitFor(() => expect(screen.getAllByRole('dialog')).toEqual([creator]));
+    }
+    await fireEvent.click(
+        within(creator).getByRole('button', { name: t('persona.editor.submit_create') }),
+    );
+    await waitFor(() => expect(screen.getAllByRole('dialog')).toEqual([panel]));
+    expect(add).toHaveBeenCalledExactlyOnceWith({
+        name: 'Traveler',
+        description: 'A traveler documenting unfamiliar cities',
+    });
+    const created = (await add.mock.results[0]?.value) as PersonaDto | undefined;
+    expect(created).toBeDefined();
+    expect(opener).toHaveTextContent('Traveler');
+    expect(create).not.toHaveBeenCalled();
+    await fireEvent.click(within(panel).getByRole('button', { name: t('uiPreview.startChat') }));
+    await waitFor(() =>
+        expect(select).toHaveBeenCalledWith(
+            expect.objectContaining({ persona_id: created?.value.id }),
+        ),
+    );
 });

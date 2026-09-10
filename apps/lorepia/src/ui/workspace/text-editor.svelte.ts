@@ -46,7 +46,8 @@ export class TextEditorState {
         this.#afterClose = undefined;
         void tick().then(() => {
             if (afterClose) afterClose();
-            else this.restoreFocus();
+            // Covered pages may remove inert in their own next update.
+            else requestAnimationFrame(() => this.restoreFocus());
         });
     }
 

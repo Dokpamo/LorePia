@@ -15,6 +15,8 @@
         covered = false,
         root = false,
         showTitle = true,
+        inlineTitle = false,
+        collapsedTitle,
         footer,
         children,
     }: {
@@ -26,6 +28,8 @@
         covered?: boolean;
         root?: boolean;
         showTitle?: boolean;
+        inlineTitle?: boolean;
+        collapsedTitle?: string;
         footer?: Snippet;
         children: Snippet;
     } = $props();
@@ -84,15 +88,33 @@
                     onclick={() => requestBack(panel)}
                     ><span class="ui-press-visual"><ArrowLeft aria-hidden="true" /></span></button
                 >
+                {#if inlineTitle && showTitle}<h1 class="ui-navigation-title">{title}</h1>{/if}
+                {#if collapsedTitle}<span class="ui-collapsed-title" aria-hidden="true"
+                        >{collapsedTitle}</span
+                    >{/if}
             {/if}
         </header>
         <div
             class="ui-overlay-body"
             onscroll={(event) => (scrolled = event.currentTarget.scrollTop > 8)}
         >
-            {#if !root && showTitle}<h1 class="ui-detail-title">{title}</h1>{/if}
+            {#if !root && showTitle && !inlineTitle}<h1 class="ui-detail-title">{title}</h1>{/if}
             {@render children()}
         </div>
         {#if footer}<div class="ui-panel-footer">{@render footer()}</div>{/if}
     </div>
 </div>
+
+<style>
+    .ui-navigation-title {
+        margin: 0;
+        padding-inline: var(--ui-space-1);
+        color: var(--ui-heading);
+        font-size: var(--ui-type-nav);
+        line-height: 1.333333;
+        font-weight: 700;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+</style>

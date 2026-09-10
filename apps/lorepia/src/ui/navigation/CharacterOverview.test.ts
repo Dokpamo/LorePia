@@ -121,11 +121,8 @@ it('opens the complete description as a page and restores the original scroll an
 it('keeps the representative selection after browsing originals and focuses the newly selected hero image', async () => {
     const { dialog, client } = await setup();
     client.resolveAssetDelivery = vi.fn().mockRejectedValue(new Error('No test media'));
-    const navigation = await within(dialog).findByRole('toolbar', {
-        name: t('navigation.representativeImages'),
-    });
-    const thumbs = within(navigation).getAllByRole('button');
-    expect(thumbs.length).toBeGreaterThan(1);
+    expect(within(dialog).queryByRole('toolbar')).toBeNull();
+    expect(dialog.querySelectorAll('.seed-profile-slide').length).toBeGreaterThan(1);
     const opener = dialog.querySelector<HTMLButtonElement>(
         '.seed-profile-slide[aria-hidden="false"]',
     );
@@ -135,7 +132,6 @@ it('keeps the representative selection after browsing originals and focuses the 
     await fireEvent.keyDown(viewer, { key: 'ArrowRight' });
     await fireEvent.keyDown(viewer, { key: 'Escape' });
     await waitFor(() => expect(screen.getAllByRole('dialog')).toEqual([dialog]));
-    expect(thumbs[1]).toHaveAttribute('aria-pressed', 'true');
     const selected = dialog.querySelector<HTMLButtonElement>(
         '.seed-profile-slide[aria-hidden="false"]',
     );

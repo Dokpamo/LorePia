@@ -99,7 +99,9 @@ describe('settings, search and action feedback', () => {
         try {
             await changedSettings();
             expect(errors).toEqual([]);
-            expect(screen.getByRole('button', { name: t('uiPreview.cardName') })).toHaveFocus();
+            await waitFor(() =>
+                expect(screen.getByRole('button', { name: t('uiPreview.cardName') })).toHaveFocus(),
+            );
         } finally {
             window.removeEventListener('error', error);
         }
