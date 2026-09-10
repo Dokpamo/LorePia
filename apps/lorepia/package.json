@@ -16,7 +16,9 @@
     "format:check": "prettier --check .",
     "i18n:check": "python3 ../../scripts/check_i18n_literal_baseline.py",
     "lint": "eslint .",
-    "typecheck": "svelte-check --tsconfig ./tsconfig.json",
+    "typecheck": "npm run typecheck:native && npm run typecheck:svelte",
+    "typecheck:native": "tsc --project ./tsconfig.json",
+    "typecheck:svelte": "svelte-check --tsconfig ./tsconfig.json",
     "check": "npm run format:check && npm run i18n:check && npm run lint && npm run typecheck",
     "test": "vitest run",
     "posttest": "node ../../scripts/test_portable_lua_sandbox.mjs && node ../../scripts/test_portable_regex_worker.mjs",
@@ -35,6 +37,7 @@
     "@tauri-apps/cli": "2.11.4",
     "@testing-library/jest-dom": "7.0.1",
     "@testing-library/svelte": "5.4.2",
+    "@typescript/native": "npm:typescript@7.0.2",
     "eslint": "10.8.0",
     "eslint-config-prettier": "10.1.8",
     "eslint-plugin-svelte": "3.23.0",
@@ -43,9 +46,9 @@
     "prettier": "3.9.6",
     "prettier-plugin-svelte": "4.1.1",
     "svelte-check": "4.7.4",
-    "typescript": "6.0.3",
+    "typescript": "npm:@typescript/typescript6@6.0.2",
     "typescript-eslint": "8.68.0",
     "vite": "8.2.0",
-    "vitest": "4.1.10"
+    "vitest": "4.1.11"
   }
 }
