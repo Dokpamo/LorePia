@@ -425,7 +425,9 @@ describe('ContentModuleLifecyclePanel', () => {
         });
         const card = candidateButton.closest('article');
         if (card === null) throw new Error('candidate card is missing');
-        expect(within(card).getByText(t('content.capability.portable_runtime'))).toBeInTheDocument();
+        expect(
+            within(card).getByText(t('content.capability.portable_runtime')),
+        ).toBeInTheDocument();
     });
 
     it('pushes the module index into candidate and activation pages one level at a time', async () => {
