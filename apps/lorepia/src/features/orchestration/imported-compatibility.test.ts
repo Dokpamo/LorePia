@@ -14,6 +14,7 @@ function promptWithHints(
     kind: 'generation' | 'memory',
     hints: Record<string, boolean | number | string>,
 ): CreatorPromptPresetDocumentDto {
+    const values: Record<string, boolean | number | string> = { import_kind: kind, ...hints };
     return {
         id: 'imported-source',
         name: 'external source',
@@ -21,7 +22,7 @@ function promptWithHints(
         blocks: [],
         controls: [],
         default_values: {
-            values: Object.entries({ import_kind: kind, ...hints }).map(([id, value]) => ({
+            values: Object.entries(values).map(([id, value]) => ({
                 variable: { scope: 'app', namespace: null, id: `lorepia_imported_${id}` },
                 value:
                     typeof value === 'boolean'
