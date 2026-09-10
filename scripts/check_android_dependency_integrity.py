@@ -187,7 +187,6 @@ def main() -> int:
         "cmdline-tools-version: 14742923",
         "command -v sdkmanager",
         "sdkmanager --version",
-        "npm run tauri -- android init --ci --skip-targets-install",
         "python3 scripts/prepare_tauri_android_gradle.py",
         '"platforms;android-36"',
         '"build-tools;36.0.0"',
@@ -203,6 +202,13 @@ def main() -> int:
         "compileDebugAndroidTestKotlin testDebugUnitTest",
     ):
         require_text(workflow, expected, failures)
+    forbid_text(workflow, "npm run tauri -- android init", failures)
+    require_occurrences(
+        workflow,
+        "git diff --exit-code -- apps/lorepia/src-tauri/gen/android plugins/lorepia-platform/android",
+        2,
+        failures,
+    )
     forbid_text(workflow, "node-version-file: apps/lorepia/.node-version", failures)
     require_occurrences(workflow, "node-version-file: .node-version", 2, failures)
     require_occurrences(workflow, "persist-credentials: false", 3, failures)

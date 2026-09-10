@@ -77,12 +77,10 @@ jobs:
           "build-tools;36.0.0"
           "ndk;27.2.12479018"
 
-      - name: Initialize Tauri Android project
-        working-directory: apps/lorepia
-        run: npm run tauri -- android init --ci --skip-targets-install
-
       - name: Prepare ignored Tauri Android Gradle inputs
-        run: python3 scripts/prepare_tauri_android_gradle.py
+        run: |
+          python3 scripts/prepare_tauri_android_gradle.py
+          git diff --exit-code -- apps/lorepia/src-tauri/gen/android plugins/lorepia-platform/android
 
       - name: Resolve app buildscript and release dependencies with strict locks
         working-directory: apps/lorepia/src-tauri/gen/android
@@ -124,6 +122,9 @@ jobs:
           "$WRAPPER" -p "$PLUGIN_ROOT" --no-daemon --console=plain \
             --dependency-verification strict compileDebugKotlin \
             compileDebugAndroidTestKotlin testDebugUnitTest
+
+      - name: Verify the build preserved committed Android configuration
+        run: git diff --exit-code -- apps/lorepia/src-tauri/gen/android plugins/lorepia-platform/android
 
   ios-simulator:
     name: iOS simulator

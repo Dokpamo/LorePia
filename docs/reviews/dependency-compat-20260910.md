@@ -139,3 +139,9 @@ AGP 10 is outside this update and needs a separate upstream migration.
 Workspace formatting and warning-free Clippy passed. Full Rust workspace tests
 and the required cross-platform GitHub gates must pass before this follow-up is
 merged; the targeted group results above do not replace them.
+
+CI uses the committed Android project plus the existing path-safe ignored-input
+preparation script. Re-running `tauri android init` overwrites the reviewed
+BuildTask with its old `Project.exec` template, so the job no longer reinitializes
+an already tracked project. Before and after the build, Git verifies that no
+tracked Android configuration or lock/verification file changed.
