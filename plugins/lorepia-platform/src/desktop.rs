@@ -3028,7 +3028,7 @@ mod tests {
         path_digest.update((reference.len() as u64).to_be_bytes());
         path_digest.update(reference.as_bytes());
         assert_eq!(
-            encode(path_digest.finalize()),
+            hex::encode(path_digest.finalize()),
             recovery_vector_str(vector, "reference_digest_sha256")
         );
 
@@ -3046,7 +3046,7 @@ mod tests {
         }
         mutex_digest.update((reference.len() as u64).to_be_bytes());
         mutex_digest.update(reference.as_bytes());
-        let mutex_digest = encode(mutex_digest.finalize());
+        let mutex_digest = hex::encode(mutex_digest.finalize());
         assert_eq!(
             mutex_digest,
             recovery_vector_str(&vector["mutex"], "digest_sha256")
@@ -3115,7 +3115,7 @@ mod tests {
             ))
         );
         assert_eq!(
-            encode(Sha256::digest(plaintext.as_slice())),
+            hex::encode(Sha256::digest(plaintext.as_slice())),
             recovery_vector_str(&file_vector["plaintext"], "sha256")
         );
 
@@ -3215,7 +3215,7 @@ mod tests {
             decode_hex(recovery_vector_str(&file_vector["entropy"], "encoded_hex"))
         );
         assert_eq!(
-            encode(Sha256::digest(&entropy)),
+            hex::encode(Sha256::digest(&entropy)),
             recovery_vector_str(&file_vector["entropy"], "sha256")
         );
     }
