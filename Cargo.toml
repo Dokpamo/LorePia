@@ -21,7 +21,7 @@ rust-version = "1.96"
 
 [workspace.dependencies]
 async-trait = "0.1"
-base64 = "0.22"
+base64 = "0.23"
 chrono = { version = "0.4", features = ["serde"] }
 futures-util = "0.3"
 hex = "0.4"
