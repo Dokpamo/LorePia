@@ -46,21 +46,24 @@ fn is_png_signature(bytes: &[u8]) -> bool {
     bytes.len() >= PNG_SIGNATURE.len() && bytes[..PNG_SIGNATURE.len()] == PNG_SIGNATURE
 }
 
-/// Extracts the embedded card JSON, preferring the V3 keyword.
+/// Streams the embedded card JSON, preferring the V3 keyword.
 ///
 /// Returns the decoded metadata bytes. The caller parses and validates them
 /// with the ordinary card adapter, so a PNG card is held to exactly the same
 /// content rules as a bare JSON card.
-pub(crate) fn extract_card_metadata(bytes: &[u8]) -> CoreResult<Vec<u8>> {
-    if !is_png_signature(bytes) {
+pub(crate) fn extract_card_metadata(reader: &mut impl Read) -> CoreResult<Vec<u8>> {
+    let mut signature = [0_u8; PNG_SIGNATURE.len()];
+    reader
+        .read_exact(&mut signature)
+        .map_err(|_| unsupported("the import source has a truncated PNG signature"))?;
+    if !is_png_signature(&signature) {
         return Err(unsupported("the import source is not a PNG image"));
     }
 
-    let mut cursor = PNG_SIGNATURE.len();
     let mut chunks = 0_usize;
     let mut legacy: Option<Vec<u8>> = None;
 
-    while cursor < bytes.len() {
+    loop {
         chunks += 1;
         if chunks > MAX_CHUNKS {
             return Err(unsupported(format!(
@@ -68,44 +71,54 @@ pub(crate) fn extract_card_metadata(bytes: &[u8]) -> CoreResult<Vec<u8>> {
             )));
         }
 
-        // length(4) + type(4) must be readable before the payload.
-        let header_end = cursor
-            .checked_add(CHUNK_TYPE_LENGTH + 4)
-            .ok_or_else(|| unsupported("PNG chunk header overflows the file"))?;
-        if header_end > bytes.len() {
-            return Err(unsupported("PNG chunk header is truncated"));
-        }
-        let length = u32::from_be_bytes([
-            bytes[cursor],
-            bytes[cursor + 1],
-            bytes[cursor + 2],
-            bytes[cursor + 3],
-        ]) as usize;
+        let mut header = [0_u8; CHUNK_TYPE_LENGTH + 4];
+        reader
+            .read_exact(&mut header)
+            .map_err(|_| unsupported("PNG chunk header is truncated"))?;
+        let length = u32::from_be_bytes(header[..4].try_into().expect("four bytes")) as usize;
         if length > MAX_CHUNK_BYTES {
             return Err(unsupported(format!(
                 "PNG chunk is {length} bytes; maximum is {MAX_CHUNK_BYTES} bytes"
             )));
         }
-        let chunk_type = &bytes[cursor + 4..header_end];
-        let payload_end = header_end
-            .checked_add(length)
-            .ok_or_else(|| unsupported("PNG chunk payload overflows the file"))?;
-        let chunk_end = payload_end
-            .checked_add(CHUNK_CRC_LENGTH)
-            .ok_or_else(|| unsupported("PNG chunk CRC overflows the file"))?;
-        if chunk_end > bytes.len() {
-            return Err(unsupported("PNG chunk payload is truncated"));
-        }
-        let payload = &bytes[header_end..payload_end];
+        let chunk_type = &header[4..];
+        let keep_payload = chunk_type == TEXT_CHUNK || chunk_type == COMPRESSED_TEXT_CHUNK;
+        let payload = if keep_payload {
+            let mut payload = vec![0_u8; length];
+            reader
+                .read_exact(&mut payload)
+                .map_err(|_| unsupported("PNG chunk payload is truncated"))?;
+            Some(payload)
+        } else {
+            let copied = std::io::copy(
+                &mut reader
+                    .by_ref()
+                    .take(u64::try_from(length).unwrap_or(u64::MAX)),
+                &mut std::io::sink(),
+            )
+            .map_err(|_| unsupported("PNG chunk payload cannot be read"))?;
+            if copied != length as u64 {
+                return Err(unsupported("PNG chunk payload is truncated"));
+            }
+            None
+        };
+        let mut crc = [0_u8; CHUNK_CRC_LENGTH];
+        reader
+            .read_exact(&mut crc)
+            .map_err(|_| unsupported("PNG chunk CRC is truncated"))?;
 
         if chunk_type == END_CHUNK {
             break;
         }
 
         let decoded = if chunk_type == TEXT_CHUNK {
-            read_text_chunk(payload)
+            payload.as_deref().and_then(read_text_chunk)
         } else if chunk_type == COMPRESSED_TEXT_CHUNK {
-            read_compressed_text_chunk(payload)?
+            payload
+                .as_deref()
+                .map(read_compressed_text_chunk)
+                .transpose()?
+                .flatten()
         } else {
             None
         };
@@ -118,8 +131,6 @@ pub(crate) fn extract_card_metadata(bytes: &[u8]) -> CoreResult<Vec<u8>> {
                 legacy = Some(encoded);
             }
         }
-
-        cursor = chunk_end;
     }
 
     legacy.as_deref().map_or_else(

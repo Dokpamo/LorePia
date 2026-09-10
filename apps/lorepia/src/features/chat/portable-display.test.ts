@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { hasPortableDisplayTransform, renderPortableDisplay } from './portable-display';
+import {
+    hasPortableDisplayTransform,
+    mergePortableDisplayVariables,
+    renderPortableDisplay,
+} from './portable-display';
 
 describe('portable display transforms', () => {
     const context = {
@@ -72,5 +76,22 @@ describe('portable display transforms', () => {
                 context,
             ),
         ).resolves.toBe('yes / good');
+    });
+
+    it('renders external pure conditionals with line-based legacy variables', async () => {
+        const variables = mergePortableDisplayVariables({
+            source: JSON.stringify('lang=1\nstatus_type=0'),
+        });
+
+        await expect(
+            renderPortableDisplay(
+                [
+                    '{{#if_pure {{equal::{{getvar::lang}}::0}}}}English{{/if}}',
+                    '{{#if_pure {{equal::{{getvar::lang}}::1}}}}Korean {{user}}{{/if}}',
+                ].join(''),
+                [],
+                { variables, userName: 'Tester' },
+            ),
+        ).resolves.toBe('Korean Tester');
     });
 });

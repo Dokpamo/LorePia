@@ -16,6 +16,7 @@ fn runtime_evidence_module_snapshot(
             transform_set_ids: Vec::new(),
             interaction_rule_set_ids: Vec::new(),
             asset_ids: Vec::new(),
+            portable_runtime: None,
             imported_components_enabled: false,
             required_capabilities: Vec::new(),
             metadata: lorepia_domain::PackageMetadata {

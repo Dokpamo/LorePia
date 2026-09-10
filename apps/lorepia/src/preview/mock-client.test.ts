@@ -1,5 +1,6 @@
+import { t } from '../lib/i18n';
 import { get } from 'svelte/store';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import App from '../app/App.svelte';
@@ -11,11 +12,26 @@ import {
     DEMO_INITIAL_CHARACTER_ID,
     DEMO_INITIAL_CONVERSATION_ID,
 } from './demo-data';
-import { createPreviewClient } from './mock-client';
+import { createPreviewClient, createPreviewCharacterPresentations } from './mock-client';
 
 afterEach(() => cleanup());
 
 describe('preview demo client', () => {
+    it('keeps profile presentation examples isolated and keyed to real demo greetings', async () => {
+        const client = createPreviewClient();
+        const first = createPreviewCharacterPresentations();
+        const second = createPreviewCharacterPresentations();
+        for (const character of await client.listCharacters()) {
+            const profile = first[character.id];
+            expect(profile?.tags?.length).toBeGreaterThan(0);
+            const catalog = await client.getCharacterGreetingCatalog(character.id);
+            expect(Object.keys(profile?.introductions ?? {})).toEqual(
+                catalog.greetings.map((item) => item.id),
+            );
+            profile?.tags?.push('mutation');
+            expect(second[character.id]?.tags).not.toContain('mutation');
+        }
+    });
     it('connects home, chat, settings, studio, and persona fixtures', async () => {
         const client = createPreviewClient();
         const characters = await client.listCharacters();
@@ -42,6 +58,17 @@ describe('preview demo client', () => {
         expect(presets).toHaveLength(2);
         expect(workspace?.prompt_blocks).toHaveLength(4);
         expect(workspace?.memory_records).toHaveLength(2);
+        expect(workspace?.room_config.creativity).toBe(65);
+        expect(Number.isInteger(workspace?.room_config.creativity)).toBe(true);
+        if (!workspace || !client.saveRoomOrchestrationConfig)
+            throw new Error('Preview room config is missing');
+        await expect(
+            client.saveRoomOrchestrationConfig({
+                ...workspace.room_config,
+                expected_revision: null,
+                creativity: 0.65,
+            }),
+        ).rejects.toThrow('integer from 0 to 100');
         expect(personaPage.kind).toBe('page');
         if (personaPage.kind === 'page') expect(personaPage.items).toHaveLength(3);
     });
@@ -61,6 +88,33 @@ describe('preview demo client', () => {
         expect(await second.listPersonas({ limit: 100 })).toHaveLength(3);
     });
 
+    it('stores settings documents only inside one demo session', async () => {
+        const first = createPreviewClient();
+        const second = createPreviewClient();
+        if (
+            !first.listMemoryProfiles ||
+            !second.listMemoryProfiles ||
+            !first.upsertMemoryProfile ||
+            !first.getStorageOverview
+        )
+            throw new Error('Settings API missing');
+        const [item] = await first.listMemoryProfiles();
+        if (!item) throw new Error('Expected fixture');
+        const saved = await first.upsertMemoryProfile({
+            value: { ...item.value, name: 'Edited memory' },
+            expected_revision: item.revision,
+        });
+        expect(
+            (await first.listMemoryProfiles()).find((value) => value.value.id === saved.value.id)
+                ?.value.name,
+        ).toBe('Edited memory');
+        expect(
+            (await second.listMemoryProfiles()).find((value) => value.value.id === saved.value.id)
+                ?.value.name,
+        ).toBe(item.value.name);
+        expect(await first.getStorageOverview()).toMatchObject({ characters: 4 });
+    });
+
     it('boots the connected mobile demo and keeps chat input interactive', async () => {
         render(App, {
             client: createPreviewClient(),
@@ -73,9 +127,9 @@ describe('preview demo client', () => {
         const character = await screen.findByRole('button', {
             name: /아리아 오래된 항해 기록/,
         });
-        await waitFor(() => expect(character).toHaveAttribute('aria-pressed', 'true'));
+        expect(character).toBeEnabled();
 
-        await fireEvent.click(screen.getByRole('button', { name: '채팅' }));
+        await fireEvent.click(screen.getByRole('button', { name: t('mobile.nav.chat') }));
         const conversation = await screen.findByRole('button', {
             name: /잊혀진 서고/,
         });
@@ -137,4 +191,27 @@ describe('preview demo client', () => {
         studio.destroy();
         personas.destroy();
     });
+});
+
+it('returns independent character-specific plugin bindings from the preview client', async () => {
+    const client = createPreviewClient();
+    const [character] = await client.listCharacters();
+    if (!client.listContentModules || !client.listContentModuleBindings)
+        throw new Error('Missing plugin fixture API');
+    const [module] = await client.listContentModules();
+    if (!character || !module) throw new Error('Missing fixtures');
+    const bindings = await client.listContentModuleBindings({
+        content_module_id: module.value.id,
+    });
+    expect(bindings[0]?.value).toMatchObject({
+        scope: 'character',
+        target_id: character.id,
+        enabled: true,
+    });
+    const [binding] = bindings;
+    if (!binding) throw new Error('Missing binding fixture');
+    binding.value.enabled = false;
+    const again = await client.listContentModuleBindings({ content_module_id: module.value.id });
+    expect(again[0]?.value.enabled).toBe(true);
+    expect(await client.listContentModuleBindings({ content_module_id: 'unknown' })).toEqual([]);
 });

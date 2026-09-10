@@ -1,19 +1,26 @@
+mod appearance_commands;
 mod asset_protocol;
 mod channels;
+mod character_commands;
 mod chat_stream_registry;
 mod commands;
 pub mod contract;
 mod credential_operations;
 mod error;
+mod generation_messages_commands;
 mod module_lifecycle_commands;
 mod orchestration_commands;
 mod package_commands;
+mod pagination_commands;
 mod persona_commands;
 mod portable_runtime_state_commands;
 mod provider_commands;
 mod runtime_contract;
 mod runtime_generation_registry;
+mod settings_commands;
 mod state;
+#[cfg(target_os = "macos")]
+mod ui_preview_window;
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -46,6 +53,18 @@ static APPLIED_MIN_WIDTH: AtomicU32 = AtomicU32::new(0);
 /// Called on every resize, so dragging the window taller also raises the width
 /// it may be squeezed to.
 fn hold_phone_aspect(window: &tauri::Window) {
+    let configured_window = window
+        .app_handle()
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|config| config.label == window.label());
+    if configured_window.is_some_and(uses_fixed_preview_minimum) {
+        #[cfg(target_os = "macos")]
+        ui_preview_window::update(window);
+        return;
+    }
     let Ok(scale) = window.scale_factor() else {
         return;
     };
@@ -66,6 +85,13 @@ fn hold_phone_aspect(window: &tauri::Window) {
     let _ = window.set_min_size(Some(LogicalSize::new(target, MIN_WINDOW_HEIGHT)));
 }
 
+fn uses_fixed_preview_minimum(config: &tauri::utils::config::WindowConfig) -> bool {
+    matches!(
+        &config.url,
+        tauri::utils::config::WebviewUrl::App(path) if path == std::path::Path::new("ui-preview.html") || path == std::path::Path::new("workspace.html") || path == std::path::Path::new("index.html")
+    )
+}
+
 /// Starts the native `LorePia` shell and owns the process event loop.
 ///
 /// # Panics
@@ -84,25 +110,16 @@ pub fn run() {
         .register_asynchronous_uri_scheme_protocol(
             "lorepia-asset",
             move |context, request, responder| {
-                if let Some(response) = asset_protocol::preflight_response(&request) {
-                    responder.respond(response);
-                    return;
-                }
-                let Some(permit) = asset_admission.try_acquire(&request) else {
-                    responder.respond(asset_protocol::overloaded_response());
-                    return;
-                };
-                let app = context.app_handle().clone();
-                let _task = tauri::async_runtime::spawn_blocking(move || {
-                    let mut response = asset_protocol::handle(app.state(), request);
-                    asset_protocol::retain_permit_in_response(&mut response, permit);
-                    responder.respond(response);
-                });
+                asset_admission.respond(context.app_handle().clone(), request, responder);
             },
         )
         .on_window_event(|window, event| {
             if matches!(event, WindowEvent::Resized(_)) {
                 hold_phone_aspect(window);
+            }
+            #[cfg(target_os = "macos")]
+            if matches!(event, WindowEvent::Destroyed) {
+                ui_preview_window::forget(window.label());
             }
         })
         .setup(|app| {
@@ -118,10 +135,13 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::bootstrap,
+            appearance_commands::set_system_bar_style,
             commands::get_memory_supervisor_status,
             commands::list_characters,
+            settings_commands::get_storage_overview,
             commands::get_character,
             commands::get_character_greeting_catalog,
+            character_commands::get_character_greeting_detail,
             commands::get_character_render_profile,
             portable_runtime_state_commands::get_portable_runtime_state,
             portable_runtime_state_commands::put_portable_runtime_state,
@@ -135,10 +155,10 @@ pub fn run() {
             package_commands::approve_content_package_import,
             package_commands::commit_content_package_import,
             package_commands::discard_content_package_import,
-            commands::pick_import,
-            commands::inspect_import,
-            commands::commit_import,
-            commands::discard_import,
+            commands::imports::pick_import,
+            commands::imports::inspect_import,
+            commands::imports::commit_import,
+            commands::imports::discard_import,
             commands::create_conversation,
             commands::open_conversation,
             commands::open_existing_conversation,
@@ -159,8 +179,9 @@ pub fn run() {
             persona_commands::get_conversation_persona_selection,
             persona_commands::select_conversation_persona,
             persona_commands::clear_conversation_persona,
-            commands::list_branch_messages,
-            commands::list_messages,
+            generation_messages_commands::list_branch_messages,
+            generation_messages_commands::list_messages,
+            generation_messages_commands::list_generation_messages,
             commands::generate_runtime_text,
             commands::cancel_runtime_text,
             commands::send_message,
@@ -304,6 +325,8 @@ pub fn run() {
             orchestration_commands::delete_content_module,
             orchestration_commands::list_prompt_preset_bindings,
             orchestration_commands::list_memory_records,
+            pagination_commands::list_memory_records_page,
+            pagination_commands::list_creator_documents_page,
             orchestration_commands::retry_interrupted_memory_job,
             orchestration_commands::list_interrupted_memory_jobs,
             orchestration_commands::list_retryable_memory_query_embeddings,
@@ -327,4 +350,26 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("failed to run LorePia");
+}
+
+#[cfg(test)]
+mod window_size_tests {
+    use super::uses_fixed_preview_minimum;
+    use tauri::utils::config::{WebviewUrl, WindowConfig};
+
+    #[test]
+    fn workspace_and_ui_preview_keep_their_configured_fixed_minimum() {
+        for (entry, expected) in [
+            ("ui-preview.html", true),
+            ("workspace.html", true),
+            ("preview.html", false),
+            ("index.html", true),
+        ] {
+            let config = WindowConfig {
+                url: WebviewUrl::App(entry.into()),
+                ..WindowConfig::default()
+            };
+            assert_eq!(uses_fixed_preview_minimum(&config), expected);
+        }
+    }
 }

@@ -102,7 +102,7 @@ impl Core {
         import_id: &str,
         request: &ContentPackageCommitRequest,
     ) -> CoreResult<ContentPackageCommitReceipt> {
-        let loaded = load_durable_content_package(self, import_id, ImportLimits::default())?;
+        let loaded = load_durable_content_package(self, import_id)?;
         if !matches!(
             loaded.record.status,
             PackageImportStatus::Approved | PackageImportStatus::Completed
@@ -134,13 +134,8 @@ impl Core {
         }
         let replay_bindings = (loaded.record.status == PackageImportStatus::Completed)
             .then_some(approval.document_bindings.as_slice());
-        let prepared = prepare_package_commit(
-            self,
-            &loaded,
-            &import_plan,
-            ImportLimits::default(),
-            replay_bindings,
-        )?;
+        let prepared =
+            prepare_package_commit(self, &loaded, &import_plan, loaded.limits, replay_bindings)?;
         if approval.document_bindings != prepared.bindings
             || approval.plan.assets != prepared.assets
             || approval.normalization_evidence != prepared.normalization_evidence
@@ -191,7 +186,7 @@ fn persist_prepared_package_commit(
     } else {
         stage_selected_content_package_assets(
             &loaded.owned.path,
-            ImportLimits::default(),
+            loaded.limits,
             &prepared.content_selection,
             &core.storage().staging_dir(),
         )?
@@ -282,12 +277,20 @@ pub(super) fn prepare_package_commit(
     }
     let imported_provenance = loaded.owned.review.manifest.provenance.clone();
     let mut prepared_documents = prepared.documents;
+    let component_depths = selected_component_dependency_depths(
+        loaded.owned.inspection(),
+        &loaded.record.selected_component_ids,
+    )?;
     prepared_documents.sort_by(|left, right| {
-        matches!(&left.document, PreparedContentDocument::ContentModule(_))
-            .cmp(&matches!(
-                &right.document,
-                PreparedContentDocument::ContentModule(_)
-            ))
+        component_depths
+            .get(&left.source_component_id)
+            .cmp(&component_depths.get(&right.source_component_id))
+            .then_with(|| {
+                matches!(&left.document, PreparedContentDocument::ContentModule(_)).cmp(&matches!(
+                    &right.document,
+                    PreparedContentDocument::ContentModule(_)
+                ))
+            })
             .then_with(|| {
                 left.source_component_ordinal
                     .cmp(&right.source_component_ordinal)
@@ -312,6 +315,55 @@ pub(super) fn prepare_package_commit(
         bindings,
         normalization_evidence,
     })
+}
+
+fn selected_component_dependency_depths(
+    inspection: &lorepia_content::ContentPackageInspection,
+    selected_component_ids: &[String],
+) -> CoreResult<BTreeMap<String, usize>> {
+    let selected = selected_component_ids
+        .iter()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    let components = inspection
+        .components
+        .iter()
+        .filter(|component| selected.contains(component.id.as_str()))
+        .map(|component| (component.id.as_str(), component))
+        .collect::<BTreeMap<_, _>>();
+    let mut depths: BTreeMap<String, usize> = BTreeMap::new();
+    while depths.len() < components.len() {
+        let before = depths.len();
+        for component in components.values() {
+            if depths.contains_key(&component.id) {
+                continue;
+            }
+            let dependencies = component
+                .depends_on
+                .iter()
+                .filter(|dependency| selected.contains(dependency.as_str()))
+                .collect::<Vec<_>>();
+            if dependencies
+                .iter()
+                .all(|dependency| depths.contains_key(dependency.as_str()))
+            {
+                let depth = dependencies
+                    .iter()
+                    .filter_map(|dependency| depths.get(dependency.as_str()).copied())
+                    .max()
+                    .map_or(0, |depth| depth.saturating_add(1));
+                depths.insert(component.id.clone(), depth);
+            }
+        }
+        if depths.len() == before {
+            return Err(CoreError::new(
+                CoreErrorCode::StorageCorrupted,
+                "selected package dependency order cannot be reconstructed",
+                false,
+            ));
+        }
+    }
+    Ok(depths)
 }
 fn prepare_package_commit_documents(
     core: &Core,
@@ -605,6 +657,12 @@ fn validate_content_module_package_binding(
     required.extend(
         (!module.interaction_rule_set_ids.is_empty())
             .then_some(ContentCapability::DeclarativeInteractions),
+    );
+    required.extend(
+        module
+            .portable_runtime
+            .is_some()
+            .then_some(ContentCapability::PortableRuntime),
     );
     for asset_id in &module.asset_ids {
         let asset = assets_by_id.get(asset_id).ok_or_else(|| {

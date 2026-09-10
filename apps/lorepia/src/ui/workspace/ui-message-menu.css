@@ -1,0 +1,101 @@
+.ui-preview .ui-message-menu {
+    position: fixed;
+    inset: auto;
+    z-index: 80;
+    width: 240px;
+    margin: 0;
+    padding: 8px 0;
+    border: 0;
+    border-radius: 20px;
+    color: var(--ui-ink);
+    background: var(--ui-paper);
+    box-shadow: 0 8px 32px light-dark(rgb(0 0 0 / 14%), rgb(0 0 0 / 40%));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    visibility: hidden;
+    animation: ui-message-menu-enter 150ms cubic-bezier(0, 0, 0.15, 1);
+}
+.ui-preview .ui-message-menu[data-positioned='true'] {
+    visibility: visible;
+}
+.ui-preview .ui-message-menu-closing {
+    animation: none;
+    pointer-events: none;
+}
+.ui-message-menu::backdrop {
+    background: transparent;
+}
+.ui-preview .ui-menu-item {
+    display: block;
+    width: 100%;
+    min-height: 48px;
+    padding: 0 8px;
+    border: 0;
+    background: transparent;
+    color: var(--ui-ink);
+    text-align: start;
+    font: inherit;
+    font-size: var(--ui-type-body);
+}
+.ui-preview .ui-menu-item > .ui-press-visual {
+    display: flex;
+    align-items: center;
+    min-height: 48px;
+    padding: 12px 8px;
+    gap: 12px;
+    border-radius: 12px;
+    line-height: 1.5;
+}
+.ui-preview .ui-menu-item svg {
+    width: 22px;
+    height: 22px;
+    flex-shrink: 0;
+}
+.ui-preview .ui-menu-item .ui-press-visual > span {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+.ui-preview .ui-menu-item:not(:disabled):is(:hover, :focus-visible) > .ui-press-visual {
+    background: var(--ui-soft);
+}
+.ui-preview .ui-message-menu hr {
+    margin: 8px 16px;
+    border: 0;
+    height: 1px;
+    background: var(--ui-soft);
+}
+.ui-preview .ui-message-menu-confirm {
+    padding: 12px 16px 8px;
+}
+.ui-preview .ui-message-menu-confirm strong {
+    font-size: var(--ui-type-body);
+    line-height: 1.5;
+}
+.ui-preview .ui-message-menu-confirm p {
+    font-size: var(--ui-type-caption);
+    color: var(--ui-muted);
+    line-height: 1.5;
+    margin: 8px 0 16px;
+}
+.ui-preview .ui-message-menu-confirm .ui-confirm-actions {
+    margin: 0;
+}
+.ui-preview .ui-message-menu-confirm button {
+    font-size: var(--ui-type-secondary);
+}
+@keyframes ui-message-menu-enter {
+    from {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    .ui-preview .ui-message-menu {
+        animation: none;
+    }
+}

@@ -41,6 +41,7 @@ const MAX_RUNTIME_LORE_ENTRIES = 512;
 const MAX_RUNTIME_NOTICES_PER_REQUEST = 16;
 const MAX_RUNTIME_HOST_CALLS_PER_REQUEST = 8;
 const MAX_RUNTIME_HOST_MESSAGE_BYTES = 512 * 1024;
+const MAX_RUNTIME_SUBMITTED_USER_CHARS = 16_384;
 const TRIGGER_ID = 'character-runtime';
 // Capture the intrinsic before imported Lua runs so prototype substitution cannot replace it.
 // eslint-disable-next-line @typescript-eslint/unbound-method
@@ -166,6 +167,7 @@ export class PortableRuntimeKernel {
     private changedEventSent = false;
     private noticesSent = 0;
     private hostCallsStarted = 0;
+    private submittedUserText: string | null = null;
     private profile: CharacterRenderProfileDto | null = null;
     private capabilities: ReadonlySet<PortableRuntimeCapability> = new Set();
     private characterName = '';
@@ -223,6 +225,7 @@ export class PortableRuntimeKernel {
         this.changedEventSent = false;
         this.noticesSent = 0;
         this.hostCallsStarted = 0;
+        this.submittedUserText = null;
         try {
             const result = await this.execute(message.operation);
             this.postMessage({
@@ -269,9 +272,42 @@ export class PortableRuntimeKernel {
                     callback(TRIGGER_ID, typeof edited === 'string' ? edited : operation.text),
                 );
             }
+            const requestMessages = this.runtimeMessages().map((message) => ({
+                role: message.role,
+                content: message.data,
+            }));
+            requestMessages.push({ role: 'user', content: safePortableText(edited) });
+            let requestPayload: unknown = requestMessages;
+            for (const callback of this.editCallbacks.get('editRequest') ?? []) {
+                const callbackResult = await Promise.resolve(callback(TRIGGER_ID, requestPayload));
+                const clonedResult = clonePortableRuntimeMessageValue(
+                    callbackResult,
+                    MAX_RUNTIME_HOST_MESSAGE_BYTES,
+                );
+                if (clonedResult.ok && Array.isArray(clonedResult.value)) {
+                    requestPayload = clonedResult.value;
+                }
+            }
+            const requestEntries: unknown[] = Array.isArray(requestPayload)
+                ? (requestPayload as unknown[])
+                : requestMessages;
+            const lastRequest = requestEntries.at(-1);
+            const submitted =
+                typeof lastRequest === 'object' &&
+                lastRequest !== null &&
+                !Array.isArray(lastRequest) &&
+                typeof (lastRequest as Record<string, unknown>).content === 'string'
+                    ? (lastRequest as Record<string, unknown>).content
+                    : requestMessages.at(-1)?.content;
             return {
                 type: 'edited-input',
-                text: typeof edited === 'string' ? edited : operation.text,
+                text:
+                    typeof submitted === 'string' &&
+                    submitted.length <= MAX_RUNTIME_MESSAGE_OVERRIDE_CHARS
+                        ? submitted
+                        : typeof edited === 'string'
+                          ? edited
+                          : operation.text,
             };
         }
         if (operation.type === 'invoke') {
@@ -280,6 +316,14 @@ export class PortableRuntimeKernel {
                 value: safeWorkerResult(
                     await this.invokeGlobal(operation.name, ...operation.values),
                 ),
+                submittedUserText: this.submittedUserText,
+            };
+        }
+        if (operation.type === 'invoke-action') {
+            return {
+                type: 'invoked',
+                value: safeWorkerResult(await this.invokeAction(operation.action)),
+                submittedUserText: this.submittedUserText,
             };
         }
         return { type: 'display', entries: await this.renderDisplayEntries() };
@@ -345,9 +389,9 @@ export class PortableRuntimeKernel {
         if (this.capabilities.has('runtime:callbacks')) {
             set('listenEdit', (kind: unknown, callback: unknown) => {
                 if (typeof kind !== 'string' || typeof callback !== 'function') return;
-                if (!['editInput', 'editDisplay'].includes(kind)) return;
+                if (!['editInput', 'editRequest', 'editDisplay'].includes(kind)) return;
                 if (
-                    kind === 'editInput' &&
+                    (kind === 'editInput' || kind === 'editRequest') &&
                     (!this.capabilities.has('chat:read') || !this.capabilities.has('chat:write'))
                 ) {
                     return;
@@ -367,6 +411,7 @@ export class PortableRuntimeKernel {
                 this.expandMacros(typeof second === 'string' ? second : safePortableText(first)),
             );
             set('sleep', (first: unknown, second?: unknown) => this.sleep(Number(second ?? first)));
+            set('log', () => undefined);
         }
         if (this.capabilities.has('chat:read')) {
             set('getChatLength', () => this.runtimeMessages().length);
@@ -418,6 +463,19 @@ export class PortableRuntimeKernel {
             });
             set('stopChat', () => {
                 this.stopped = true;
+                return true;
+            });
+            set('addChat', (_triggerId: unknown, role: unknown, content: unknown) => {
+                if (
+                    role !== 'user' ||
+                    typeof content !== 'string' ||
+                    content.trim() === '' ||
+                    content.length > MAX_RUNTIME_SUBMITTED_USER_CHARS ||
+                    this.submittedUserText !== null
+                ) {
+                    return false;
+                }
+                this.submittedUserText = content;
                 return true;
             });
         }
@@ -485,7 +543,6 @@ export class PortableRuntimeKernel {
         if (this.capabilities.has('model:auxiliary')) {
             set('__hostAuxGeneration', (messages: unknown) => this.callHost('auxiliary', messages));
         }
-        if (this.capabilities.has('elevated')) set('log', () => undefined);
     }
 
     private async renderDisplayEntries(): Promise<[string, string][]> {
@@ -520,6 +577,18 @@ export class PortableRuntimeKernel {
         const callback = engine.global.get(name) as unknown;
         if (typeof callback !== 'function') return undefined;
         return await Promise.resolve((callback as EditCallback)(...values));
+    }
+
+    private async invokeAction(action: string): Promise<unknown> {
+        const engine = this.engine;
+        if (engine === null) return undefined;
+        const generic = engine.global.get('onButtonClick') as unknown;
+        if (typeof generic === 'function') {
+            return await Promise.resolve((generic as EditCallback)(TRIGGER_ID, action));
+        }
+        const callback = engine.global.get(action) as unknown;
+        if (typeof callback !== 'function') return undefined;
+        return await Promise.resolve((callback as EditCallback)(TRIGGER_ID));
     }
 
     private callHost(target: 'primary' | 'auxiliary', messages: unknown): Promise<unknown> {

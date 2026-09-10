@@ -11,16 +11,15 @@ use std::{
 };
 
 use lorepia_core::{
-    ContentCapability, ContentPackageApprovalRequest, ContentPackageCommitRequest,
-    ContentPackageDiscardRequest, ContentPackageImportInspection, ContentPackageImportReview,
-    ContentPackageSelectionRequest, ContentSourceExportDescriptor as CoreExportDescriptor,
+    ContentPackageApprovalRequest, ContentPackageCommitRequest, ContentPackageDiscardRequest,
+    ContentPackageImportInspection, ContentPackageImportReview, ContentPackageSelectionRequest,
+    ContentSourceExportDescriptor as CoreExportDescriptor,
     ContentSourceExportKind as CoreExportKind, ContentSourceExportSelector, CoreError,
     CoreErrorCode, MAX_COMPLETED_PACKAGE_EXPORTS, MAX_PACKAGE_TARGET_REVIEW_DOCUMENTS,
-    PackageCapability, PackageCapabilityDecision, PackageCapabilitySupport,
-    PackageComponentDisposition, PackageComponentKind, PackageDocumentTargetDisposition,
-    PackageDocumentTargetReview, PackageImportRecord, PackageImportStatus,
-    PackageImportTargetReview, PackageIssueSeverity, PackageManifest, PackageNormalizationEvidence,
-    PackageReview, PackageUpdateTargetConfirmation,
+    PackageCapabilityDecision, PackageCapabilitySupport, PackageComponentDisposition,
+    PackageComponentKind, PackageDocumentTargetDisposition, PackageDocumentTargetReview,
+    PackageImportRecord, PackageImportStatus, PackageImportTargetReview, PackageIssueSeverity,
+    PackageManifest, PackageNormalizationEvidence, PackageReview, PackageUpdateTargetConfirmation,
     PreparedContentSourceExport as CorePreparedContentSourceExport, RedistributionStatus,
     Sha256Digest,
 };
@@ -28,11 +27,16 @@ use serde::{Deserialize, Serialize};
 
 use crate::{ShellApi, ShellError, ShellResult, StagedImportFile, api::validate_identifier};
 
+mod capabilities;
+
+use capabilities::project_approved_capability;
+
 const MAX_PENDING_CONTENT_PACKAGE_IMPORTS: u32 = 100;
 const MAX_CONTENT_PACKAGE_COMPONENTS: usize = 4_096;
 const MAX_CONTENT_PACKAGE_TARGET_DOCUMENTS: usize = MAX_PACKAGE_TARGET_REVIEW_DOCUMENTS;
 const MAX_CONTENT_PACKAGE_NORMALIZATION_EVIDENCE: usize = 4_096;
 const MAX_CONTENT_PACKAGE_ISSUES: usize = 4_096;
+const CONTENT_PACKAGE_CAPABILITY_COUNT: usize = 19;
 const MAX_CONTENT_PACKAGE_IPC_BYTES: usize = 2 * 1_024 * 1_024;
 const MAX_JAVASCRIPT_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
@@ -217,6 +221,7 @@ pub enum ContentPackageCapabilityDto {
     Variables,
     Transforms,
     DeclarativeInteractions,
+    PortableRuntime,
     ImageAssets,
     AudioAssets,
     VideoAssets,
@@ -238,6 +243,7 @@ pub enum ContentPackageCapabilityDto {
 pub enum ApprovableContentPackageCapabilityDto {
     Transforms,
     DeclarativeInteractions,
+    PortableRuntime,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -746,7 +752,11 @@ impl ShellApi {
         let target_review =
             project_target_review(receipt.target_review, &input.selected_component_ids)?;
         let required_capabilities = receipt.import_plan.required_capabilities;
-        validate_unique_ordered_values("required_capabilities", &required_capabilities, 18)?;
+        validate_unique_ordered_values(
+            "required_capabilities",
+            &required_capabilities,
+            CONTENT_PACKAGE_CAPABILITY_COUNT,
+        )?;
         let projected = SelectContentPackageImportReceiptDto {
             import_id: receipt.import.id,
             status: receipt.import.status.into(),
@@ -1070,65 +1080,12 @@ impl From<RedistributionStatus> for ContentPackageRedistributionStatusDto {
     }
 }
 
-impl From<ContentCapability> for ContentPackageCapabilityDto {
-    fn from(value: ContentCapability) -> Self {
-        match value {
-            ContentCapability::PromptFragments => Self::PromptFragments,
-            ContentCapability::Knowledge => Self::Knowledge,
-            ContentCapability::Variables => Self::Variables,
-            ContentCapability::Transforms => Self::Transforms,
-            ContentCapability::DeclarativeInteractions => Self::DeclarativeInteractions,
-            ContentCapability::ImageAssets => Self::ImageAssets,
-            ContentCapability::AudioAssets => Self::AudioAssets,
-            ContentCapability::VideoAssets => Self::VideoAssets,
-            ContentCapability::AttachmentAssets => Self::AttachmentAssets,
-            ContentCapability::HighRiskAssets => Self::HighRiskAssets,
-        }
-    }
-}
-
-impl From<PackageCapability> for ContentPackageCapabilityDto {
-    fn from(value: PackageCapability) -> Self {
-        match value {
-            PackageCapability::PromptFragments => Self::PromptFragments,
-            PackageCapability::Knowledge => Self::Knowledge,
-            PackageCapability::Variables => Self::Variables,
-            PackageCapability::Transforms => Self::Transforms,
-            PackageCapability::DeclarativeInteractions => Self::DeclarativeInteractions,
-            PackageCapability::ImageAssets => Self::ImageAssets,
-            PackageCapability::AudioAssets => Self::AudioAssets,
-            PackageCapability::VideoAssets => Self::VideoAssets,
-            PackageCapability::AttachmentAssets => Self::AttachmentAssets,
-            PackageCapability::HighRiskAssets => Self::HighRiskAssets,
-            PackageCapability::ExternalUrls => Self::ExternalUrls,
-            PackageCapability::Html => Self::Html,
-            PackageCapability::Script => Self::Script,
-            PackageCapability::NativeCode => Self::NativeCode,
-            PackageCapability::Network => Self::Network,
-            PackageCapability::Filesystem => Self::Filesystem,
-            PackageCapability::Shell => Self::Shell,
-            PackageCapability::Credentials => Self::Credentials,
-        }
-    }
-}
-
 impl From<PackageCapabilitySupport> for ContentPackageCapabilitySupportDto {
     fn from(value: PackageCapabilitySupport) -> Self {
         match value {
             PackageCapabilitySupport::Supported => Self::Supported,
             PackageCapabilitySupport::Unsupported => Self::Unsupported,
             PackageCapabilitySupport::ApprovalRequired => Self::ApprovalRequired,
-        }
-    }
-}
-
-impl From<ApprovableContentPackageCapabilityDto> for PackageCapability {
-    fn from(value: ApprovableContentPackageCapabilityDto) -> Self {
-        match value {
-            ApprovableContentPackageCapabilityDto::Transforms => Self::Transforms,
-            ApprovableContentPackageCapabilityDto::DeclarativeInteractions => {
-                Self::DeclarativeInteractions
-            }
         }
     }
 }
@@ -1324,7 +1281,7 @@ fn project_inspection(
             .iter()
             .map(|decision| decision.capability)
             .collect::<Vec<_>>(),
-        18,
+        CONTENT_PACKAGE_CAPABILITY_COUNT,
     )?;
     let capability_decisions = value
         .capability_review
@@ -1614,20 +1571,6 @@ fn validate_projected_import_review_status(
         ));
     }
     Ok(())
-}
-
-fn project_approved_capability(
-    value: PackageCapability,
-) -> ShellResult<ApprovableContentPackageCapabilityDto> {
-    match value {
-        PackageCapability::Transforms => Ok(ApprovableContentPackageCapabilityDto::Transforms),
-        PackageCapability::DeclarativeInteractions => {
-            Ok(ApprovableContentPackageCapabilityDto::DeclarativeInteractions)
-        }
-        _ => Err(storage_corrupted(
-            "stored package approval contains a non-approvable capability",
-        )),
-    }
 }
 
 fn project_target_review(

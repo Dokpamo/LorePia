@@ -1919,7 +1919,7 @@ class SourceArchitectureTests(unittest.TestCase):
             self.assertTrue(any("growth" in failure and "beta" in failure for failure in failures))
             self.assertTrue(any("stale" in failure and "alpha" in failure for failure in failures))
 
-    def test_core_storage_public_api_baseline_only_shrinks_after_v2(self) -> None:
+    def test_core_storage_public_api_contract_can_be_updated_explicitly(self) -> None:
         base = core_storage_api_config(
             core=("export:A", "export:B"), storage=("export:Storage",)
         )
@@ -1931,9 +1931,7 @@ class SourceArchitectureTests(unittest.TestCase):
         )
 
         self.assertEqual(evaluate_core_storage_api_baseline_changes(smaller, base), [])
-        failures = evaluate_core_storage_api_baseline_changes(swapped, base)
-        self.assertEqual(len(failures), 1)
-        self.assertIn("export:C", failures[0])
+        self.assertEqual(evaluate_core_storage_api_baseline_changes(swapped, base), [])
 
         legacy = {"version": 1, "allowed_stored_reexports": []}
         self.assertEqual(evaluate_core_storage_api_baseline_changes(base, legacy), [])
@@ -1990,7 +1988,7 @@ class SourceArchitectureTests(unittest.TestCase):
                 any("orchestration may only depend" in failure for failure in failures)
             )
 
-    def test_dependency_config_and_base_policy_are_monotonic(self) -> None:
+    def test_dependency_contract_updates_preserve_validated_structure(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             base = dependency_policy(dependency_metadata(root), root)
@@ -2000,9 +1998,7 @@ class SourceArchitectureTests(unittest.TestCase):
 
             expanded = json.loads(json.dumps(base))
             expanded["package_features"]["lorepia-orchestration"]["new"] = []
-            failures = evaluate_dependency_policy_changes(expanded, base)
-            self.assertEqual(len(failures), 1)
-            self.assertIn("new package feature", failures[0])
+            self.assertEqual(evaluate_dependency_policy_changes(expanded, base), [])
 
             malformed = json.loads(json.dumps(base))
             malformed["workspace_packages"].reverse()
@@ -2367,6 +2363,48 @@ class SourceArchitectureTests(unittest.TestCase):
         self.assertIn("aggregate entry cannot be removed", entry_failures[0])
         self.assertEqual(len(group_failures), 1)
         self.assertIn("aggregate group cannot be removed", group_failures[0])
+
+    def test_removed_facade_can_retire_but_live_classification_cannot_escape(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            parent = "crates/sample/src/stable.rs"
+            child = "crates/sample/src/stable/child.rs"
+            base = source_config(baselines={}, facade_paths=[parent], parent_child_groups={parent: [child]})
+            current = source_config(baselines={})
+            for relative in (parent, child):
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("fn active() {}\n", encoding="utf-8")
+            self.assertEqual(len(evaluate_baseline_changes(current, base, root=root)), 2)
+            (root / parent).unlink()
+            self.assertEqual(len(evaluate_baseline_changes(current, base, root=root)), 1)
+            (root / child).unlink()
+            self.assertEqual(evaluate_baseline_changes(current, base, root=root), [])
+            current["limits"]["production"]["rust"]["lines"] += 1
+            self.assertTrue(any("limit increased" in item for item in evaluate_baseline_changes(current, base, root=root)))
+
+    def test_dependency_upgrade_requires_the_updated_exact_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            metadata = dependency_metadata(root)
+            old = dependency_policy(metadata, root)
+            orchestration = next(p for p in metadata["packages"] if p["name"] == "lorepia-orchestration")
+            serde = next(d for d in orchestration["dependencies"] if d["name"] == "serde")
+            serde["req"] = "^2"
+            self.assertTrue(evaluate_dependency_architecture(metadata, old, root))
+            updated = dependency_policy(metadata, root)
+            self.assertEqual(evaluate_dependency_policy_changes(updated, old), [])
+            self.assertEqual(evaluate_dependency_architecture(metadata, updated, root), [])
+
+    def test_updated_dependency_manifest_does_not_approve_an_io_boundary(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            metadata = dependency_metadata(root)
+            package = next(p for p in metadata["packages"] if p["name"] == "lorepia-orchestration")
+            package["dependencies"][0]["path"] = str(root / "crates/storage")
+            policy = dependency_policy(metadata, root)
+            failures = evaluate_dependency_architecture(metadata, policy, root)
+            self.assertTrue(any("orchestration may only depend" in item for item in failures))
 
     def test_v1_to_v2_bootstrap_may_capture_existing_files_without_raising_caps(self) -> None:
         base = {

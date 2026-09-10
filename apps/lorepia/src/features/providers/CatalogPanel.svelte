@@ -1,4 +1,6 @@
 <script lang="ts">
+    import ProviderDiagnostics from './ProviderDiagnostics.svelte';
+    import { changeCount, securityChanges, reviewJson } from './catalog-review-values';
     import { tick } from 'svelte';
     import { tr } from '../../lib/i18n';
     import DetailActionBar from '../../components/detail/DetailActionBar.svelte';
@@ -25,20 +27,6 @@
             (revision) => detailPage === `revision:${String(revision.revision)}`,
         ) ?? null,
     );
-
-    function changeCount(diff: ProviderCatalogDiffDto): number {
-        return diff.manifest_changes.length + diff.model_changes.length;
-    }
-
-    function securityChanges(
-        diff: ProviderCatalogDiffDto,
-    ): ProviderCatalogDiffDto['manifest_changes'] {
-        return diff.manifest_changes.filter((change) => change.security_review != null);
-    }
-
-    function reviewJson(value: unknown): string {
-        return value === undefined ? '—' : JSON.stringify(value);
-    }
 
     async function run(action: () => Promise<void>): Promise<void> {
         if (busy) return;
@@ -503,6 +491,8 @@
         </DetailActionBar>
     {/if}
 {/snippet}
+
+<ProviderDiagnostics {controller} kind="catalog" label={$tr('catalog.title')} />
 
 <DetailPage
     className="catalog-panel"

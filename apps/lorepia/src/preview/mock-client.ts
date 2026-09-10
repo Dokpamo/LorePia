@@ -6,6 +6,7 @@
  */
 
 import type {
+    CharacterGreetingSelectionInput,
     ChatEventDto,
     ChatStreamItemDto,
     ConversationBranchDto,
@@ -32,14 +33,14 @@ import {
     DEMO_CATALOG_HISTORY,
     DEMO_CATALOG_STATUS,
     DEMO_CHARACTERS,
+    DEMO_CHARACTER_PRESENTATIONS,
     DEMO_CONTENT_MODULE_DOCUMENTS,
+    DEMO_CONTENT_MODULE_BINDINGS,
     DEMO_CONVERSATIONS,
-    DEMO_EDITABLE_PROMPT_PRESET,
     DEMO_GENERATION_PRESETS,
     DEMO_GREETINGS,
     DEMO_INTERACTION_RULE_DOCUMENTS,
     DEMO_KNOWLEDGE_BOOK_DOCUMENTS,
-    DEMO_MEMORY_PROFILE_DOCUMENTS,
     DEMO_MEMORY_SUPERVISOR,
     DEMO_MESSAGES,
     DEMO_MODEL_ROUTES,
@@ -47,11 +48,14 @@ import {
     DEMO_PROVIDER_CONNECTIONS,
     DEMO_PROVIDER_TEMPLATES,
     DEMO_SETTINGS,
-    DEMO_TASK_PROFILE_DOCUMENTS,
     DEMO_TRANSFORM_SET_DOCUMENTS,
     createDemoOrchestrationWorkspace,
     demoConversationState,
 } from './demo-data';
+
+import { createDemoSettingsDocuments } from './settings-documents';
+import { demoOpening, demoReply } from './profile-chat';
+import { demoRenderProfile } from './profile-resources';
 
 export type PreviewClient = LorepiaClient &
     PersonaClientApi &
@@ -62,6 +66,10 @@ const DEMO_NOW = '2026-08-24T13:00:00.000Z';
 
 function clone<Value>(value: Value): Value {
     return structuredClone(value);
+}
+
+export function createPreviewCharacterPresentations() {
+    return clone(DEMO_CHARACTER_PRESENTATIONS);
 }
 
 function selectedPersonaSnapshot(persona: PersonaDto | null) {
@@ -176,6 +184,8 @@ export function createPreviewClient(): PreviewClient {
             templates: clone(DEMO_PROVIDER_TEMPLATES),
             connections: clone(connections),
             legacy_profiles: [],
+            routes: clone(routes),
+            presets: clone(presets),
         };
     }
 
@@ -189,9 +199,16 @@ export function createPreviewClient(): PreviewClient {
         };
     }
 
-    function createConversation(characterId: string, title: string, mode: ConversationMode) {
+    function createConversation(
+        characterId: string,
+        title: string,
+        mode: ConversationMode,
+        greeting?: CharacterGreetingSelectionInput,
+    ) {
         characterById(characterId);
+        const opening = demoOpening(characterId, greeting);
         const suffix = String(nextConversation++);
+        const openingId = opening === null ? null : `message-demo-opening-${suffix}`;
         const conversation = {
             id: `conversation-demo-${suffix}`,
             character_id: characterId,
@@ -204,7 +221,7 @@ export function createPreviewClient(): PreviewClient {
             conversation_id: conversation.id,
             title: null,
             fork_message_id: null,
-            head_message_id: null,
+            head_message_id: openingId,
             created_at: DEMO_NOW,
             updated_at: DEMO_NOW,
         };
@@ -212,7 +229,18 @@ export function createPreviewClient(): PreviewClient {
         branches = [branch, ...branches];
         selectedBranchIds.set(conversation.id, branch.id);
         conversationModes.set(conversation.id, mode);
-        branchMessageIds.set(branch.id, []);
+        branchMessageIds.set(branch.id, openingId === null ? [] : [openingId]);
+        if (openingId !== null && opening !== null)
+            messages.push({
+                id: openingId,
+                conversation_id: conversation.id,
+                parent_id: null,
+                role: 'assistant',
+                content: opening,
+                status: 'complete',
+                generation_id: null,
+                created_at: DEMO_NOW,
+            });
         return conversation;
     }
 
@@ -224,8 +252,10 @@ export function createPreviewClient(): PreviewClient {
         const generationId = `generation-demo-${String(nextGeneration++)}`;
         const userMessageId = `message-demo-user-${String(nextMessage++)}`;
         const assistantMessageId = `message-demo-assistant-${String(nextMessage++)}`;
-        const reply =
-            '좋아요. 이 대화는 데모 모드에서 로컬로만 추가됐어요. 새로고침하면 원래 테스트 데이터로 돌아갑니다.';
+        const reply = demoReply(
+            conversationById(input.conversation_id).character_id,
+            messagesForBranch(branch.id).filter((message) => message.role === 'user').length,
+        );
 
         messages.push(
             {
@@ -298,6 +328,22 @@ export function createPreviewClient(): PreviewClient {
             if (!catalog) throw new Error(`Unknown demo greeting catalog: ${characterId}`);
             return Promise.resolve(clone(catalog));
         },
+        getCharacterGreetingDetail: (input) =>
+            Promise.resolve().then(() => ({
+                ...input,
+                text: demoOpening(input.character_id, input) ?? '',
+            })),
+        getCharacterRenderProfile: (characterId, scope) =>
+            Promise.resolve().then(() => {
+                characterById(characterId);
+                if (
+                    scope &&
+                    (conversationById(scope.conversation_id).character_id !== characterId ||
+                        branchById(scope.branch_id).conversation_id !== scope.conversation_id)
+                )
+                    throw new Error('Demo render profile scope mismatch');
+                return demoRenderProfile(characterId, scope !== undefined);
+            }),
         selectImportSource: () => Promise.resolve(null),
         discardImport: () => Promise.resolve(),
 
@@ -312,8 +358,10 @@ export function createPreviewClient(): PreviewClient {
                         .sort((left, right) => right.updated_at.localeCompare(left.updated_at)),
                 ),
             ),
-        createConversation: (characterId, title, mode) =>
-            Promise.resolve(clone(createConversation(characterId, title, mode))),
+        createConversation: (characterId, title, mode, greeting) =>
+            Promise.resolve().then(() =>
+                clone(createConversation(characterId, title, mode, greeting)),
+            ),
         openConversation: (characterId) => {
             const existing = conversations.find(
                 (conversation) => conversation.character_id === characterId,
@@ -427,6 +475,13 @@ export function createPreviewClient(): PreviewClient {
         getOrchestrationWorkspace: (conversationId, branchId) =>
             Promise.resolve(clone(createDemoOrchestrationWorkspace(conversationId, branchId))),
         saveRoomOrchestrationConfig: (input) => {
+            if (
+                !Number.isInteger(input.creativity) ||
+                input.creativity < 0 ||
+                input.creativity > 100
+            ) {
+                return Promise.reject(new Error('Creativity must be an integer from 0 to 100.'));
+            }
             const workspace = createDemoOrchestrationWorkspace(
                 input.conversation_id,
                 input.branch_id,
@@ -440,30 +495,26 @@ export function createPreviewClient(): PreviewClient {
                 generation_target: workspace.generation_target,
             });
         },
-        getEditablePromptPreset: () => Promise.resolve(clone(DEMO_EDITABLE_PROMPT_PRESET)),
-        listTaskProfiles: () => Promise.resolve(clone(DEMO_TASK_PROFILE_DOCUMENTS)),
-        listMemoryProfiles: () => Promise.resolve(clone(DEMO_MEMORY_PROFILE_DOCUMENTS)),
+        ...createDemoSettingsDocuments(),
+        getStorageOverview: () =>
+            Promise.resolve({
+                characters: characters.length,
+                conversations: conversations.length,
+                messages: messages.length,
+                import_jobs: 0,
+            }),
         listKnowledgeBooks: () => Promise.resolve(clone(DEMO_KNOWLEDGE_BOOK_DOCUMENTS)),
         listTransformSets: () => Promise.resolve(clone(DEMO_TRANSFORM_SET_DOCUMENTS)),
         listInteractionRuleSets: () => Promise.resolve(clone(DEMO_INTERACTION_RULE_DOCUMENTS)),
         listContentModules: () => Promise.resolve(clone(DEMO_CONTENT_MODULE_DOCUMENTS)),
-        upsertPromptPreset: (input) =>
+        listContentModuleBindings: ({ content_module_id }) =>
             Promise.resolve(
-                revisioned(
-                    {
-                        id: input.value.id,
-                        name: input.value.name,
-                        schema_version: input.value.schema_version,
-                        block_count: input.value.blocks.length,
-                        default_generation_preset_id: input.value.default_generation_preset_id,
-                    },
-                    (input.expected_revision ?? 0) + 1,
+                clone(
+                    DEMO_CONTENT_MODULE_BINDINGS.filter(
+                        (item) => item.value.module_id === content_module_id,
+                    ),
                 ),
             ),
-        upsertTaskProfile: (input) =>
-            Promise.resolve(revisioned(input.value, (input.expected_revision ?? 0) + 1)),
-        upsertMemoryProfile: (input) =>
-            Promise.resolve(revisioned(input.value, (input.expected_revision ?? 0) + 1)),
         upsertKnowledgeBook: (input) =>
             Promise.resolve(revisioned(input.value, (input.expected_revision ?? 0) + 1)),
         upsertTransformSet: (input) =>

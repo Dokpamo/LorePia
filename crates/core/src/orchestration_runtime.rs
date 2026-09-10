@@ -33,7 +33,9 @@ pub use self::auxiliary_tasks::{
 };
 use self::auxiliary_tasks::{MemorySummaryHeadAuthority, ResolvedPromptRuntimePolicy};
 #[cfg(test)]
-use self::auxiliary_tasks::{memory_summary_system_instruction, next_memory_summary_turn_window};
+use self::auxiliary_tasks::{
+    memory_summary_system_instruction, memory_summary_task_input, next_memory_summary_turn_window,
+};
 use self::derived::{
     prepare_generation_attempt_derived_closure,
     remap_generation_attempt_derived_closure_existing_proposals,

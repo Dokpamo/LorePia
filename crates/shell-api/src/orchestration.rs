@@ -6,6 +6,12 @@
 //! script payloads. Every mutation retains Core's optimistic-concurrency
 //! revision instead of inventing a shell-owned write model.
 
+mod pagination;
+pub use pagination::{
+    CreatorDocumentDto, CreatorDocumentsPageDto, ListCreatorDocumentsPageInput,
+    ListMemoryRecordsPageInput, MemoryRecordsPageDto,
+};
+
 use std::{collections::BTreeMap, future::Future, pin::Pin};
 
 use chrono::{DateTime, Utc};
@@ -37,7 +43,6 @@ use lorepia_core::{
     SummarySchemaId, TaskCredentialBroker, TaskProfile, TaskProfileId, TemplateSlot, TokenBudget,
     TokenPolicy, TransformDiff, TransformFailure, TransformPhase, TransformPreviewRequest,
     TransformRule, TransformRuleId, TransformRuleReport, TransformSet, TransformSetId, VariableMap,
-    VariableValue,
 };
 use serde::{Deserialize, Serialize};
 
@@ -48,14 +53,16 @@ use crate::{
     sensitive::GenerationCredentialKind,
 };
 
+mod creator_controls;
+
+use creator_controls::project_creator_controls;
+
 const MAX_DOCUMENT_BYTES: usize = 2 * 1024 * 1024;
 const MAX_DOCUMENT_STRING_CHARS: usize = 1_000_000;
 const MAX_DOCUMENT_DEPTH: usize = 32;
 const MAX_DOCUMENT_NODES: usize = 100_000;
 const MAX_COLLECTION_ITEMS: usize = 4_096;
 const MAX_PREVIEW_TEXT_BYTES: usize = 16 * 1024;
-const MAX_MEMORY_LIST_ITEMS: usize = 250;
-const MAX_CREATOR_DOCUMENTS: usize = 100;
 const MAX_SELECTION_ITEMS: usize = 300;
 const MAX_MODULE_REVISIONS: usize = 64;
 const MAX_PROMPT_PRESET_REVISIONS: usize = 100;
@@ -427,6 +434,8 @@ pub struct CreatorMemoryProfileDocumentDto {
     pub importance_weight: f32,
     pub preserve_invalidated_records: bool,
     pub summary_schema: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary_template: Option<SafeTemplate>,
 }
 
 impl From<CreatorMemoryProfileDocumentDto> for MemoryProfile {
@@ -447,6 +456,7 @@ impl From<CreatorMemoryProfileDocumentDto> for MemoryProfile {
             importance_weight: value.importance_weight,
             preserve_invalidated_records: value.preserve_invalidated_records,
             summary_schema: SummarySchemaId::from(value.summary_schema),
+            summary_template: value.summary_template,
             provenance: user_created_provenance(),
         }
     }
@@ -472,6 +482,7 @@ impl TryFrom<MemoryProfile> for CreatorMemoryProfileDocumentDto {
             importance_weight: value.importance_weight,
             preserve_invalidated_records: value.preserve_invalidated_records,
             summary_schema: value.summary_schema.0,
+            summary_template: value.summary_template,
         })
     }
 }
@@ -872,6 +883,7 @@ impl From<CreatorContentModuleDocumentDto> for ContentModule {
                 .map(InteractionRuleSetId::from)
                 .collect(),
             asset_ids: value.asset_ids.into_iter().map(AssetId::from).collect(),
+            portable_runtime: None,
             imported_components_enabled: false,
             required_capabilities: value.required_capabilities,
             metadata: PackageMetadata {
@@ -892,6 +904,12 @@ impl TryFrom<ContentModule> for CreatorContentModuleDocumentDto {
 
     fn try_from(value: ContentModule) -> Result<Self, Self::Error> {
         require_user_created_provenance(&value.metadata.provenance, "content module")?;
+        if value.portable_runtime.is_some() {
+            return Err(CoreError::invalid(
+                "creator content modules cannot directly author portable runtime code",
+            )
+            .into());
+        }
         Ok(Self {
             id: value.id.0,
             name: value.name,
@@ -1382,6 +1400,10 @@ pub struct CreatorControlProjectionDto {
     pub kind: ControlKind,
     pub value: CoreCreatorControlValue,
     pub choices: Vec<String>,
+    /// Human-readable labels parallel to `choices`. Kept separate so existing
+    /// creator-value DTOs remain stable while imported enumerations can retain
+    /// their original labels and canonical machine values.
+    pub choice_labels: Vec<String>,
     pub minimum: Option<f64>,
     pub maximum: Option<f64>,
     pub step: Option<f64>,
@@ -1406,6 +1428,8 @@ pub struct OrchestrationWorkspaceSnapshotDto {
     pub creator_controls: Vec<CreatorControlProjectionDto>,
     pub knowledge_book_ids: Vec<String>,
     pub memory_records: Vec<MemoryRecordProjectionDto>,
+    #[serde(default)]
+    pub memory_records_next_cursor: Option<lorepia_core::ReadPageCursor>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -3097,15 +3121,13 @@ impl ShellApi {
             .map_err(ShellError::from)?
             .last()
             .map(|message| message.id.0.clone());
-        let memory_records = self
-            .core
-            .list_memory_records(&conversation_id, &branch_id, false)
-            .map_err(ShellError::from)?
-            .into_iter()
-            .take(MAX_MEMORY_LIST_ITEMS.saturating_add(1))
-            .map(RevisionedDto::from)
-            .map(Into::into)
-            .collect();
+        let memory_page = self.list_memory_records_page(ListMemoryRecordsPageInput {
+            conversation_id: conversation_id.0.clone(),
+            branch_id: branch_id.0.clone(),
+            include_invalidated: false,
+            after: None,
+            limit: 100,
+        })?;
         let interaction_state_revision = self
             .core
             .get_interaction_state_revision(&conversation_id, &branch_id)
@@ -3122,7 +3144,8 @@ impl ShellApi {
             prompt_blocks,
             creator_controls,
             knowledge_book_ids,
-            memory_records,
+            memory_records: memory_page.records,
+            memory_records_next_cursor: memory_page.next_cursor,
         };
         validate_document(&result)?;
         Ok(result)
@@ -3465,19 +3488,6 @@ impl ShellApi {
             .and_then(validated_output)
     }
 
-    pub fn list_memory_profiles(&self) -> ShellResult<Vec<RevisionedDto<MemoryProfileDto>>> {
-        let values = self
-            .core
-            .list_memory_profiles()
-            .and_then(bound_core_collection)
-            .map_err(ShellError::from)?;
-        project_creator_revisions(
-            values,
-            |value| &value.provenance,
-            CreatorMemoryProfileDocumentDto::try_from,
-        )
-    }
-
     pub fn delete_memory_profile(
         &self,
         input: DeleteMemoryProfileInput,
@@ -3731,19 +3741,6 @@ impl ShellApi {
             .and_then(validated_output)
     }
 
-    pub fn list_knowledge_books(&self) -> ShellResult<Vec<RevisionedDto<KnowledgeBookDto>>> {
-        let values = self
-            .core
-            .list_knowledge_books()
-            .and_then(bound_core_collection)
-            .map_err(ShellError::from)?;
-        project_creator_revisions(
-            values,
-            |value| &value.provenance,
-            CreatorKnowledgeBookDocumentDto::try_from,
-        )
-    }
-
     pub fn delete_knowledge_book(
         &self,
         input: DeleteKnowledgeBookInput,
@@ -3810,19 +3807,6 @@ impl ShellApi {
             .and_then(validated_output)
     }
 
-    pub fn list_transform_sets(&self) -> ShellResult<Vec<RevisionedDto<TransformSetDto>>> {
-        let values = self
-            .core
-            .list_transform_sets()
-            .and_then(bound_core_collection)
-            .map_err(ShellError::from)?;
-        project_creator_revisions(
-            values,
-            |value| &value.provenance,
-            CreatorTransformSetDocumentDto::try_from,
-        )
-    }
-
     pub fn delete_transform_set(
         &self,
         input: DeleteTransformSetInput,
@@ -3887,21 +3871,6 @@ impl ShellApi {
             .map_err(ShellError::from)
             .and_then(|value| value.try_project(TryInto::try_into))
             .and_then(validated_output)
-    }
-
-    pub fn list_interaction_rule_sets(
-        &self,
-    ) -> ShellResult<Vec<RevisionedDto<InteractionRuleSetDto>>> {
-        let values = self
-            .core
-            .list_interaction_rule_sets()
-            .and_then(bound_core_collection)
-            .map_err(ShellError::from)?;
-        project_creator_revisions(
-            values,
-            |value| &value.provenance,
-            CreatorInteractionRuleSetDocumentDto::try_from,
-        )
     }
 
     pub fn delete_interaction_rule_set(
@@ -3973,19 +3942,6 @@ impl ShellApi {
             .and_then(validated_output)
     }
 
-    pub fn list_content_modules(&self) -> ShellResult<Vec<RevisionedDto<ContentModuleDto>>> {
-        let values = self
-            .core
-            .list_content_modules()
-            .and_then(bound_core_collection)
-            .map_err(ShellError::from)?;
-        project_creator_revisions(
-            values,
-            |value| &value.metadata.provenance,
-            CreatorContentModuleDocumentDto::try_from,
-        )
-    }
-
     pub fn delete_content_module(
         &self,
         input: DeleteContentModuleInput,
@@ -4031,23 +3987,16 @@ impl ShellApi {
     ) -> ShellResult<MemoryRecordListDto> {
         validate_identifier("conversation_id", &input.conversation_id)?;
         validate_identifier("branch_id", &input.branch_id)?;
-        let values = self
-            .core
-            .list_memory_records(
-                &lorepia_core::ConversationId(input.conversation_id),
-                &lorepia_core::ConversationBranchId(input.branch_id),
-                input.include_invalidated,
-            )
-            .map_err(ShellError::from)?;
-        let truncated = values.len() > MAX_MEMORY_LIST_ITEMS;
+        let page = self.list_memory_records_page(ListMemoryRecordsPageInput {
+            conversation_id: input.conversation_id,
+            branch_id: input.branch_id,
+            include_invalidated: input.include_invalidated,
+            after: None,
+            limit: 100,
+        })?;
         let result = MemoryRecordListDto {
-            records: values
-                .into_iter()
-                .take(MAX_MEMORY_LIST_ITEMS)
-                .map(RevisionedDto::from)
-                .map(Into::into)
-                .collect(),
-            truncated,
+            records: page.records,
+            truncated: page.next_cursor.is_some(),
         };
         validate_document(&result)?;
         Ok(result)
@@ -4281,27 +4230,6 @@ fn require_creator_revision(
             "{document_label} changed before the requested mutation"
         )))
     }
-}
-
-fn project_creator_revisions<T, U>(
-    values: Vec<Revisioned<T>>,
-    provenance: impl Fn(&T) -> &Provenance,
-    project: impl Fn(T) -> ShellResult<U>,
-) -> ShellResult<Vec<RevisionedDto<U>>>
-where
-    U: Serialize,
-{
-    let mut projected = Vec::new();
-    for value in values {
-        if provenance(&value.value).source_kind != SourceKind::UserCreated {
-            continue;
-        }
-        if projected.len() == MAX_CREATOR_DOCUMENTS {
-            break;
-        }
-        projected.push(RevisionedDto::from(value).try_project(&project)?);
-    }
-    validated_output(projected)
 }
 
 fn validate_creator_content_module_input(
@@ -4773,77 +4701,6 @@ fn project_room_orchestration_config(room: RoomOrchestrationConfig) -> RoomOrche
             group_context: RoomOrchestrationFieldSupportDto::SUPPORTED,
             template_slots: RoomOrchestrationFieldSupportDto::SUPPORTED,
         },
-    }
-}
-
-fn project_creator_controls(
-    controls: &[ControlSpec],
-    values: &BTreeMap<String, CoreCreatorControlValue>,
-) -> ShellResult<Vec<CreatorControlProjectionDto>> {
-    if controls.len() > MAX_SELECTION_ITEMS {
-        return Err(shell_invalid(
-            "prompt preset exceeds the creator control projection limit",
-        ));
-    }
-    controls
-        .iter()
-        .filter(|control| {
-            !control.sensitive
-                && !matches!(
-                    control.kind,
-                    ControlKind::Section | ControlKind::Caption | ControlKind::Divider
-                )
-        })
-        .map(|control| {
-            let value = values
-                .get(control.id.as_str())
-                .cloned()
-                .or_else(|| {
-                    control
-                        .default_value
-                        .as_ref()
-                        .and_then(variable_to_creator_control_value)
-                })
-                .ok_or_else(|| shell_invalid("interactive creator control has no safe value"))?;
-            let choices = control
-                .options
-                .iter()
-                .map(|option| match &option.value {
-                    VariableValue::Text(value) | VariableValue::Enum(value) => Ok(value.clone()),
-                    _ => Err(shell_invalid(
-                        "select creator control has a non-text option value",
-                    )),
-                })
-                .collect::<ShellResult<Vec<_>>>()?;
-            Ok(CreatorControlProjectionDto {
-                id: control.id.as_str().to_owned(),
-                label: control.label.clone(),
-                description: (!control.description.is_empty()).then(|| control.description.clone()),
-                kind: control.kind,
-                value,
-                choices,
-                minimum: control.minimum,
-                maximum: control.maximum,
-                step: control.step,
-            })
-        })
-        .collect()
-}
-
-fn variable_to_creator_control_value(value: &VariableValue) -> Option<CoreCreatorControlValue> {
-    match value {
-        VariableValue::Bool(value) => Some(CoreCreatorControlValue::Bool(*value)),
-        VariableValue::Integer(value) => Some(CoreCreatorControlValue::Integer(*value)),
-        VariableValue::Decimal(value) if value.is_finite() => {
-            Some(CoreCreatorControlValue::Decimal(*value))
-        }
-        VariableValue::Text(value) | VariableValue::Enum(value) => {
-            Some(CoreCreatorControlValue::Text(value.clone()))
-        }
-        VariableValue::StringList(values) => {
-            Some(CoreCreatorControlValue::StringList(values.clone()))
-        }
-        VariableValue::Decimal(_) => None,
     }
 }
 

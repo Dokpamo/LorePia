@@ -55,9 +55,8 @@ pub struct MemorySemanticScore {
 pub struct MemorySelectionContext<'a> {
     pub conversation_id: &'a ConversationId,
     pub branch_id: &'a ConversationBranchId,
-    /// Immutable message ids on the active branch, oldest to newest. A record
-    /// from another branch is shareable only when its complete source range is
-    /// present in this lineage.
+    /// Immutable active-branch message ids, oldest to newest. Another branch's record is
+    /// shareable only when its complete source range is present in this lineage.
     pub visible_message_ids: &'a [MessageId],
     /// Scores supplied by the embedding/search subsystem.
     pub semantic_scores: &'a [MemorySemanticScore],
@@ -920,7 +919,7 @@ mod tests {
         }
     }
 
-    fn timestamp() -> serde_json::Value {
+    fn ts() -> serde_json::Value {
         serde_json::json!("2026-08-03T00:00:00Z")
     }
 
@@ -944,8 +943,8 @@ mod tests {
             pinned: false,
             excluded_from_conversation: false,
             excluded_from_character: false,
-            created_at: serde_json::from_value(timestamp()).expect("timestamp"),
-            updated_at: serde_json::from_value(timestamp()).expect("timestamp"),
+            created_at: serde_json::from_value(ts()).expect("timestamp"),
+            updated_at: serde_json::from_value(ts()).expect("timestamp"),
             invalidated_at: None,
             provenance: provenance(),
         }
@@ -968,6 +967,7 @@ mod tests {
             importance_weight: 1.0,
             preserve_invalidated_records: true,
             summary_schema: SummarySchemaId::from("schema"),
+            summary_template: None,
             provenance: provenance(),
         }
     }
@@ -1039,7 +1039,7 @@ mod tests {
     #[test]
     fn invalidated_and_user_excluded_records_never_rank() {
         let mut invalidated = record("invalidated", "current", "m1", "m1", 100);
-        invalidated.invalidated_at = Some(serde_json::from_value(timestamp()).expect("timestamp"));
+        invalidated.invalidated_at = Some(serde_json::from_value(ts()).expect("timestamp"));
         let mut excluded = record("excluded", "current", "m1", "m1", 100);
         excluded.excluded_from_conversation = true;
         let visible = vec![MessageId("m1".to_owned())];
@@ -1234,8 +1234,8 @@ mod tests {
             source_end_message_id: MessageId("m2".to_owned()),
             status: MemoryJobStatus::Succeeded,
             attempt: 1,
-            created_at: serde_json::from_value(timestamp()).expect("timestamp"),
-            updated_at: serde_json::from_value(timestamp()).expect("timestamp"),
+            created_at: serde_json::from_value(ts()).expect("timestamp"),
+            updated_at: serde_json::from_value(ts()).expect("timestamp"),
             error_code: None,
         }
     }

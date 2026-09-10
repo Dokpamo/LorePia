@@ -1,0 +1,16 @@
+/* App-owned Lucide geometry shares one paint policy, including embedded features.
+   Set it on the shapes so legacy SVG-container declarations cannot diverge. */
+.ui-preview svg.lucide,
+.ui-preview svg.lucide > :is(path, circle, ellipse, line, polyline, polygon, rect) {
+    color: var(--ui-icon-ink);
+    stroke: var(--ui-icon-ink);
+    stroke-width: var(--ui-icon-stroke);
+}
+.ui-preview svg.lucide > :is(path, circle, ellipse, line, polyline, polygon, rect) {
+    /* Responsive CSS sizes must not multiply the actual line thickness. */
+    vector-effect: non-scaling-stroke;
+}
+.ui-preview :is(.seed-primary, .ui-submit, .ui-compose-send, [data-editor-send]) {
+    /* These primary surfaces stay pale pistachio in both themes. */
+    --ui-icon-ink: #000000;
+}

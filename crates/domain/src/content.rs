@@ -153,6 +153,9 @@ pub enum ContentKind {
     CharacterCardV3,
     CharacterCardPng,
     CharxPackage,
+    RisuModule,
+    RisuPreset,
+    RisuMemoryPreset,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

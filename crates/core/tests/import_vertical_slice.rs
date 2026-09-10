@@ -275,14 +275,15 @@ fn import_review_reports_only_unknown_fields_and_persists_normalized_content() {
             "personality":"Consumed fallback",
             "description":null,
             "scenario":"Persisted scenario",
-            "creator":"Synthetic"
+            "creator":"Synthetic",
+            "unsupported_field":"Opaque value"
         }}}}"#
     )
     .expect("write source");
 
     let review = core.inspect_import(source.path()).expect("inspect source");
     assert_eq!(review.description, "Consumed fallback");
-    assert_eq!(review.unsupported_optional_fields, ["creator"]);
+    assert_eq!(review.unsupported_optional_fields, ["unsupported_field"]);
     assert!(review.representative_image.is_none());
     let character = core.commit_import(&review.id).expect("commit");
     assert_eq!(character.description, "Consumed fallback");
@@ -291,6 +292,7 @@ fn import_review_reports_only_unknown_fields_and_persists_normalized_content() {
         .expect("load normalized character content");
     assert_eq!(content.value.personality, "Consumed fallback");
     assert_eq!(content.value.scenario, "Persisted scenario");
+    assert_eq!(content.value.creator, "Synthetic");
 }
 
 #[test]

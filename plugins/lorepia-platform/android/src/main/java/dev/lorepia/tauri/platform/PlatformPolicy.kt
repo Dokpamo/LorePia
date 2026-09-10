@@ -14,11 +14,19 @@ internal object PlatformPolicy {
     const val MAXIMUM_CREDENTIAL_WRITE_BYTES = 16 * 1024
     const val MAXIMUM_SENSITIVE_CAPTURE_BYTES = 1024 * 1024
     const val MAXIMUM_IMPORT_BYTES = 256L * 1024L * 1024L
+    const val MAXIMUM_USER_APPROVED_IMPORT_BYTES = 16L * 1024L * 1024L * 1024L
     const val COPY_BUFFER_BYTES = 64 * 1024
     const val MAXIMUM_DISPLAY_NAME_CHARACTERS = 255
     const val MAXIMUM_EXPORT_NAME_BYTES = 128
     const val OWNED_STAGING_PREFIX = "lorepia-tauri-"
     const val ABANDONED_STAGING_AGE_MILLIS = 24L * 60L * 60L * 1_000L
+
+    fun validateImportMaximum(maximumBytes: Long) {
+        require(
+            maximumBytes == MAXIMUM_IMPORT_BYTES ||
+                maximumBytes == MAXIMUM_USER_APPROVED_IMPORT_BYTES,
+        ) { "invalid import limit" }
+    }
 
     fun validateReference(reference: String) {
         require(reference.isNotBlank()) { "invalid reference" }
@@ -238,7 +246,12 @@ internal object PlatformPolicy {
     fun stagingSuffix(displayName: String): String =
         when (displayName.substringAfterLast('.', "").lowercase()) {
             "charx" -> ".charx"
+            "jpeg" -> ".jpeg"
+            "jpg" -> ".jpg"
             "json" -> ".json"
+            "png" -> ".png"
+            "risum" -> ".risum"
+            "risup" -> ".risup"
             "zip" -> ".zip"
             else -> ".pending"
         }

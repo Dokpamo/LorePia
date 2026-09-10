@@ -442,6 +442,7 @@ fn legacy_noncanonical_memory_schema_can_be_tombstoned_without_revalidation() {
         importance_weight: 0.0,
         preserve_invalidated_records: false,
         summary_schema: SummarySchemaId::from("storage.legacy/schema"),
+        summary_template: None,
         provenance,
     };
     let stored = seed_legacy_memory_profile(&storage, &legacy);
@@ -585,6 +586,7 @@ fn storage_save_boundaries_reject_noncanonical_knowledge_and_memory() {
         importance_weight: 1.0,
         preserve_invalidated_records: false,
         summary_schema: SummarySchemaId::from("storage.creator.memory-schema"),
+        summary_template: None,
         provenance,
     };
     let mut invalid_profiles = Vec::new();

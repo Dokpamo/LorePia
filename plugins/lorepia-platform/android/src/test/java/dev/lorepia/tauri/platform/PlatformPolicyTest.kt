@@ -11,6 +11,16 @@ import org.junit.Test
 
 class PlatformPolicyTest {
     @Test
+    fun importMaximumRequiresOneOfTheTwoReviewedResourceEnvelopes() {
+        PlatformPolicy.validateImportMaximum(PlatformPolicy.MAXIMUM_IMPORT_BYTES)
+        PlatformPolicy.validateImportMaximum(PlatformPolicy.MAXIMUM_USER_APPROVED_IMPORT_BYTES)
+        assertTrue(PlatformPolicy.MAXIMUM_USER_APPROVED_IMPORT_BYTES >= 10L * 1024L * 1024L * 1024L)
+        assertThrows(IllegalArgumentException::class.java) {
+            PlatformPolicy.validateImportMaximum(PlatformPolicy.MAXIMUM_IMPORT_BYTES + 1L)
+        }
+    }
+
+    @Test
     fun credentialConfirmationTextRejectsPromptSpoofingControls() {
         for (
             invalid in listOf(
@@ -96,6 +106,11 @@ class PlatformPolicyTest {
         assertFalse(sanitized.contains('\u0000'))
         assertEquals(PlatformPolicy.MAXIMUM_DISPLAY_NAME_CHARACTERS, sanitized.length)
         assertEquals(".charx", PlatformPolicy.stagingSuffix("card.CHARX"))
+        assertEquals(".jpeg", PlatformPolicy.stagingSuffix("card.JPEG"))
+        assertEquals(".jpg", PlatformPolicy.stagingSuffix("card.jpg"))
+        assertEquals(".png", PlatformPolicy.stagingSuffix("card.png"))
+        assertEquals(".risum", PlatformPolicy.stagingSuffix("module.RISUM"))
+        assertEquals(".risup", PlatformPolicy.stagingSuffix("preset.risup"))
         assertEquals(".pending", PlatformPolicy.stagingSuffix("card.html"))
     }
 

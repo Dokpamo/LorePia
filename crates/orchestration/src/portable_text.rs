@@ -14,7 +14,7 @@ pub fn render_portable_text(source: &str, context: &PromptResolutionContext) -> 
     if !source.contains("{{") {
         return source.to_owned();
     }
-    let mut output = source.to_owned();
+    let mut output = render_each_blocks(source, context);
     for pass in 0..MAX_RENDER_PASSES {
         let Some((start, end, token)) = next_evaluable_token(&output) else {
             break;
@@ -117,6 +117,8 @@ fn token_is_known(token: &str) -> bool {
             | "lessequal"
             | "and"
             | "or"
+            | "all"
+            | "any"
             | "not"
             | "contains"
             | "startswith"
@@ -158,8 +160,8 @@ fn evaluate_token(
         }
         "less" => bool_text(compare_values(args.first()?, args.get(1)?) < 0),
         "less_equal" | "lessequal" => bool_text(compare_values(args.first()?, args.get(1)?) <= 0),
-        "and" => bool_text(args.iter().all(|value| truthy(value))),
-        "or" => bool_text(args.iter().any(|value| truthy(value))),
+        "and" | "all" => bool_text(args.iter().all(|value| truthy(value))),
+        "or" | "any" => bool_text(args.iter().any(|value| truthy(value))),
         "not" => bool_text(!args.first().is_some_and(|value| truthy(value))),
         "contains" => bool_text(
             args.first()
@@ -271,6 +273,20 @@ fn compare_values(left: &str, right: &str) -> i8 {
 
 fn evaluate_arithmetic(expression: &str) -> String {
     let expression = expression.trim().replace(' ', "");
+    for operator in [">=", "<=", "!=", "==", "=", ">", "<"] {
+        if let Some((left, right)) = expression.split_once(operator) {
+            let comparison = compare_values(left, right);
+            return bool_text(match operator {
+                ">=" => comparison >= 0,
+                "<=" => comparison <= 0,
+                "!=" => comparison != 0,
+                "==" | "=" => comparison == 0,
+                ">" => comparison > 0,
+                "<" => comparison < 0,
+                _ => false,
+            });
+        }
+    }
     for (index, character) in expression.char_indices().skip(1) {
         if matches!(character, '+' | '-') {
             let (left, right) = expression.split_at(index);
@@ -286,6 +302,80 @@ fn evaluate_arithmetic(expression: &str) -> String {
         }
     }
     expression
+}
+
+fn render_each_blocks(source: &str, _context: &PromptResolutionContext) -> String {
+    let mut output = source.to_owned();
+    for _ in 0..MAX_RENDER_PASSES {
+        let Some(start) = output.rfind("{{#each") else {
+            break;
+        };
+        let Some(open_end) = nested_token_end(&output, start) else {
+            break;
+        };
+        let Some(relative_close) = output[open_end..].find("{{/each}}") else {
+            break;
+        };
+        let close_start = open_end + relative_close;
+        let close_end = close_start + "{{/each}}".len();
+        let token = output[start + 2..open_end - 2].trim();
+        let Some(specification) = token.strip_prefix("#each") else {
+            break;
+        };
+        let specification = specification.trim();
+        let Some(array_start) = specification.find("{{array::") else {
+            break;
+        };
+        let Some(array_end) = nested_token_end(specification, array_start) else {
+            break;
+        };
+        let array = &specification[array_start + 2..array_end - 2];
+        let variable = specification[array_end..].trim();
+        if variable.is_empty() || variable.chars().any(char::is_control) {
+            break;
+        }
+        let values = array
+            .strip_prefix("array::")
+            .map(|values| values.split("::").take(128).collect::<Vec<_>>())
+            .unwrap_or_default();
+        let body = &output[open_end..close_start];
+        let slot = format!("{{{{slot::{variable}}}}}");
+        let replacement = values
+            .into_iter()
+            .map(|value| body.replace(&slot, value))
+            .collect::<String>();
+        if replacement_would_exceed(&output, start, close_end, &replacement) {
+            return source.to_owned();
+        }
+        output.replace_range(start..close_end, &replacement);
+    }
+    output
+}
+
+fn nested_token_end(source: &str, start: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    if bytes.get(start..start + 2)? != b"{{" {
+        return None;
+    }
+    let mut depth = 0_usize;
+    let mut cursor = start;
+    while cursor + 1 < bytes.len() {
+        match &bytes[cursor..cursor + 2] {
+            b"{{" => {
+                depth = depth.checked_add(1)?;
+                cursor += 2;
+            }
+            b"}}" => {
+                depth = depth.checked_sub(1)?;
+                cursor += 2;
+                if depth == 0 {
+                    return Some(cursor);
+                }
+            }
+            _ => cursor += 1,
+        }
+    }
+    None
 }
 
 fn deterministic_number(seed: Option<u64>, source: &str, token: &str, pass: usize) -> u64 {
@@ -367,7 +457,10 @@ fn evaluate_block_condition(
     pass: usize,
 ) -> bool {
     let token = token.trim();
-    if let Some(condition) = token.strip_prefix("#if") {
+    if let Some(condition) = token
+        .strip_prefix("#if_pure")
+        .or_else(|| token.strip_prefix("#if"))
+    {
         return truthy(condition.trim_start_matches("::").trim());
     }
     let Some(condition) = token.strip_prefix("#when") else {
@@ -523,6 +616,43 @@ mod tests {
             &context(),
         );
         assert_eq!(rendered, "Hi Player from Guide");
+    }
+
+    #[test]
+    fn renders_imported_comparisons_any_and_if_pure() {
+        let mut context = context();
+        context.variables.insert(
+            lorepia_domain::VariableRef {
+                scope: lorepia_domain::VariableScope::Conversation,
+                namespace: None,
+                id: lorepia_domain::VariableId::from("mode"),
+            },
+            lorepia_domain::VariableValue::Integer(2),
+        );
+        let source = "{{#if_pure {{any::{{? {{getglobalvar::toggle_mode}}=1}}::{{? {{getglobalvar::toggle_mode}}=2}}}}}}kept{{/if}}";
+        assert_eq!(render_portable_text(source, &context), "kept");
+        assert_eq!(render_portable_text("{{? 2>=3}}", &context), "0");
+        assert_eq!(render_portable_text("{{? 2<3}}", &context), "1");
+    }
+
+    #[test]
+    fn renders_bounded_imported_each_arrays_with_dynamic_variable_names() {
+        let mut context = context();
+        for (id, value) in [("genre1", 20), ("genre2", 0)] {
+            context.variables.insert(
+                lorepia_domain::VariableRef {
+                    scope: lorepia_domain::VariableScope::Conversation,
+                    namespace: None,
+                    id: lorepia_domain::VariableId::from(id),
+                },
+                lorepia_domain::VariableValue::Integer(value),
+            );
+        }
+        let source = "{{#each {{array::toggle_genre1::toggle_genre2}} genreVar}}{{#if {{equal::{{getglobalvar::{{slot::genreVar}}}}::20}}}}selected {{slot::genreVar}};{{/if}}{{/each}}";
+        assert_eq!(
+            render_portable_text(source, &context),
+            "selected toggle_genre1;"
+        );
     }
 
     #[test]

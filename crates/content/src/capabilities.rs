@@ -76,7 +76,7 @@ pub(crate) fn normalize_runtime_profile_capabilities(
     Ok(())
 }
 
-pub(crate) fn intersect_runtime_profile_capabilities(
+pub(crate) fn merge_runtime_profile_capabilities(
     target: &mut CharacterRuntimeProfile,
     incoming: &mut CharacterRuntimeProfile,
 ) -> CoreResult<()> {
@@ -87,7 +87,9 @@ pub(crate) fn intersect_runtime_profile_capabilities(
         incoming.required_capabilities.take(),
     ) {
         (Some(mut target), Some(incoming)) => {
-            target.retain(|capability| incoming.binary_search(capability).is_ok());
+            target.extend(incoming);
+            target.sort_unstable();
+            target.dedup();
             Some(target)
         }
         (Some(target), None) => Some(target),
@@ -156,7 +158,7 @@ mod tests {
     use serde_json::{Map, Value, json};
 
     use super::{
-        intersect_runtime_profile_capabilities, legacy_runtime_capabilities,
+        legacy_runtime_capabilities, merge_runtime_profile_capabilities,
         normalize_runtime_profile_capabilities, parse_runtime_capabilities,
     };
 
@@ -277,7 +279,7 @@ mod tests {
             ]),
             false,
         );
-        intersect_runtime_profile_capabilities(&mut target, &mut incoming)
+        merge_runtime_profile_capabilities(&mut target, &mut incoming)
             .expect("merge declared profile");
         assert_eq!(
             target.required_capabilities,
@@ -289,7 +291,7 @@ mod tests {
     }
 
     #[test]
-    fn undeclared_script_intersects_instead_of_downgrading_declared_authority() {
+    fn independent_contributors_union_their_reviewable_authority() {
         let mut target = profile(
             "declared",
             Some(vec![
@@ -300,20 +302,21 @@ mod tests {
             false,
         );
         let mut incoming = profile("legacy", None, false);
-        intersect_runtime_profile_capabilities(&mut target, &mut incoming)
+        merge_runtime_profile_capabilities(&mut target, &mut incoming)
             .expect("merge legacy profile");
         assert_eq!(
             target.required_capabilities,
             Some(vec![
                 PortableRuntimeCapability::RuntimeCallbacks,
                 PortableRuntimeCapability::UiWrite,
+                PortableRuntimeCapability::ModelPrimary,
             ]),
-            "legacy authority must be a fixed ceiling, never a wildcard or None"
+            "independent contributors request the union, which still requires a user grant"
         );
     }
 
     #[test]
-    fn runtime_capability_intersection_is_archive_order_independent() {
+    fn runtime_capability_merge_is_archive_order_independent() {
         let declared = profile(
             "declared",
             Some(vec![
@@ -327,18 +330,18 @@ mod tests {
 
         let mut declared_first = CharacterRuntimeProfile::default();
         let mut declared_incoming = declared.clone();
-        intersect_runtime_profile_capabilities(&mut declared_first, &mut declared_incoming)
+        merge_runtime_profile_capabilities(&mut declared_first, &mut declared_incoming)
             .expect("first declaration");
         let mut legacy_incoming = legacy.clone();
-        intersect_runtime_profile_capabilities(&mut declared_first, &mut legacy_incoming)
+        merge_runtime_profile_capabilities(&mut declared_first, &mut legacy_incoming)
             .expect("then legacy");
 
         let mut legacy_first = CharacterRuntimeProfile::default();
         let mut legacy_incoming = legacy;
-        intersect_runtime_profile_capabilities(&mut legacy_first, &mut legacy_incoming)
+        merge_runtime_profile_capabilities(&mut legacy_first, &mut legacy_incoming)
             .expect("first legacy");
         let mut declared_incoming = declared;
-        intersect_runtime_profile_capabilities(&mut legacy_first, &mut declared_incoming)
+        merge_runtime_profile_capabilities(&mut legacy_first, &mut declared_incoming)
             .expect("then declaration");
 
         assert_eq!(
@@ -350,12 +353,13 @@ mod tests {
             Some(vec![
                 PortableRuntimeCapability::RuntimeCallbacks,
                 PortableRuntimeCapability::UiWrite,
+                PortableRuntimeCapability::ModelPrimary,
             ])
         );
     }
 
     #[test]
-    fn merged_elevated_script_cannot_outlive_the_capability_intersection() {
+    fn explicit_elevated_contributor_remains_explicit_after_merge() {
         let mut target = profile(
             "elevated",
             Some(vec![
@@ -365,12 +369,14 @@ mod tests {
             true,
         );
         let mut incoming = profile("legacy", None, false);
-        intersect_runtime_profile_capabilities(&mut target, &mut incoming)
+        merge_runtime_profile_capabilities(&mut target, &mut incoming)
             .expect("both contributors are independently valid");
         target.scripts.append(&mut incoming.scripts);
+        normalize_runtime_profile_capabilities(&mut target).expect("merged authority stays valid");
         assert!(
-            normalize_runtime_profile_capabilities(&mut target).is_err(),
-            "a contributor without elevated authority must clamp the merged profile"
+            target.required_capabilities.as_deref().is_some_and(
+                |capabilities| capabilities.contains(&PortableRuntimeCapability::Elevated)
+            )
         );
     }
 }

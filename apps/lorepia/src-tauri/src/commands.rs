@@ -4,11 +4,10 @@ use lorepia_shell_api::{
     AssetDeliveryDto, BootstrapDto, CharacterDto, CharacterGreetingCatalogDto, ChatStreamItem,
     ConversationBranchDto, ConversationDto, ConversationStateDto, CreateConversationBranchInput,
     CreateConversationInput, EditUserMessageInput, GenerateRuntimeTextInput, GenerationCredential,
-    GenerationPresetDto, GenerationSelectionInput, GenerationStartedDto, ImportInspectionDto,
-    MessageActionGenerationDto, MessageDto, ModelRouteDto, RegenerateAssistantMessageInput,
-    RemoveMessageInput, RequestPreviewDto, ResolveAssetDeliveryInput, RuntimeTextGenerationDto,
-    SecretCredential, SelectConversationBranchInput, SendMessageInput, SetConversationModeInput,
-    StagedImportFile,
+    GenerationPresetDto, GenerationSelectionInput, GenerationStartedDto,
+    MessageActionGenerationDto, ModelRouteDto, RegenerateAssistantMessageInput, RemoveMessageInput,
+    RequestPreviewDto, ResolveAssetDeliveryInput, RuntimeTextGenerationDto, SecretCredential,
+    SelectConversationBranchInput, SendMessageInput, SetConversationModeInput,
 };
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, State, ipc::Channel};
@@ -18,21 +17,22 @@ use tauri_plugin_lorepia_platform::{
     NativeCredentialEffectConfirmation, NativeCredentialEffectContext, PlatformErrorCode,
     PlatformResult,
 };
-use uuid::Uuid;
 
 use crate::runtime_contract::RuntimeGenerationRequest;
 use crate::{
     channels::forward_chat_stream,
     contract::{
-        BranchMessagesRequest, CharacterConversationsRequest, CharacterRequest, ChatStreamRequest,
-        CredentialStatusDto, CredentialStatusRequest, CredentialTarget, DiscardImportRequest,
-        GenerationPresetsRequest, GenerationRequest, ImportTicketDto, InspectionRequest,
-        MemorySupervisorStatusDto, ModelRoutesRequest, NativeCaptureStatusDto,
-        PreviewProviderRequest, ProviderOverviewDto, SubscribeGenerationRequest, TicketRequest,
+        CharacterConversationsRequest, CharacterRenderProfileRequest, CharacterRequest,
+        ChatStreamRequest, CredentialStatusDto, CredentialStatusRequest, CredentialTarget,
+        GenerationPresetsRequest, GenerationRequest, MemorySupervisorStatusDto, ModelRoutesRequest,
+        NativeCaptureStatusDto, PreviewProviderRequest, ProviderOverviewDto,
+        SubscribeGenerationRequest,
     },
     error::{CommandError, CommandResult},
     state::AppState,
 };
+
+pub(crate) mod imports;
 
 type LegacyGenerationCredentialReadFuture<'a> =
     Pin<Box<dyn Future<Output = CommandResult<Option<NativeCredential>>> + Send + 'a>>;
@@ -108,12 +108,9 @@ pub fn get_character_greeting_catalog(
 #[tauri::command]
 pub fn get_character_render_profile(
     state: State<'_, AppState>,
-    request: CharacterRequest,
+    request: CharacterRenderProfileRequest,
 ) -> CommandResult<lorepia_shell_api::CharacterRenderProfileDto> {
-    state
-        .shell()?
-        .get_character_render_profile(&request.character_id)
-        .map_err(Into::into)
+    crate::character_commands::get_character_render_profile(&state.shell()?, request)
 }
 
 #[tauri::command]
@@ -131,88 +128,6 @@ pub(crate) fn execute_resolve_asset_delivery(
     shell_api
         .resolve_asset_delivery(request)
         .map_err(Into::into)
-}
-
-#[tauri::command]
-pub async fn pick_import(
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> CommandResult<Option<ImportTicketDto>> {
-    state.ensure_ready()?;
-    let Some(staged) = app.lorepia_platform().pick_import().await? else {
-        return Ok(None);
-    };
-    let ticket_id = Uuid::new_v4().to_string();
-    let response = ImportTicketDto {
-        ticket_id: ticket_id.clone(),
-        display_name: staged.display_name().to_owned(),
-        size_bytes: staged.size_bytes(),
-    };
-    state.insert_import_ticket(ticket_id, staged)?;
-    Ok(Some(response))
-}
-
-#[tauri::command]
-pub async fn inspect_import(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    request: TicketRequest,
-) -> CommandResult<ImportInspectionDto> {
-    let staged = state.take_import_ticket(&request.ticket_id)?;
-    let shell = state.shell()?;
-    let inspection = shell
-        .inspect_import(&StagedImportFile::new(staged.path()))
-        .map_err(CommandError::from);
-    let cleanup = app
-        .lorepia_platform()
-        .discard_staged_import(&staged)
-        .await
-        .map_err(CommandError::from);
-
-    match (inspection, cleanup) {
-        (Ok(inspection), Ok(())) => Ok(inspection),
-        (Ok(inspection), Err(cleanup_error)) => {
-            let _ = shell.discard_import(&inspection.inspection_id);
-            Err(cleanup_error)
-        }
-        (Err(error), _) => Err(error),
-    }
-}
-
-#[tauri::command]
-pub fn commit_import(
-    state: State<'_, AppState>,
-    request: InspectionRequest,
-) -> CommandResult<CharacterDto> {
-    state
-        .shell()?
-        .commit_import(&request.inspection_id)
-        .map_err(Into::into)
-}
-
-#[tauri::command]
-pub async fn discard_import(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    request: DiscardImportRequest,
-) -> CommandResult<()> {
-    match request {
-        DiscardImportRequest::Inspection { inspection_id } => state
-            .shell()?
-            .discard_import(&inspection_id)
-            .map_err(Into::into),
-        DiscardImportRequest::Ticket { ticket_id } => {
-            let reservation = state.reserve_import_ticket(&ticket_id)?;
-            match app
-                .lorepia_platform()
-                .discard_staged_import(reservation.value())
-                .await
-            {
-                Ok(()) => reservation.complete(),
-                Err(error) => Err(error.into()),
-            }
-        }
-    }
 }
 
 #[tauri::command]
@@ -327,28 +242,6 @@ pub fn set_conversation_mode(
     state
         .shell()?
         .set_conversation_mode(input)
-        .map_err(Into::into)
-}
-
-#[tauri::command]
-pub fn list_branch_messages(
-    state: State<'_, AppState>,
-    request: BranchMessagesRequest,
-) -> CommandResult<Vec<MessageDto>> {
-    state
-        .shell()?
-        .list_branch_messages(&request.branch_id)
-        .map_err(Into::into)
-}
-
-#[tauri::command]
-pub fn list_messages(
-    state: State<'_, AppState>,
-    request: crate::contract::ConversationRequest,
-) -> CommandResult<Vec<MessageDto>> {
-    state
-        .shell()?
-        .list_messages(&request.conversation_id)
         .map_err(Into::into)
 }
 
@@ -610,13 +503,8 @@ enum StatusOnlyConnectionAccess {
     Unreadable,
 }
 
-/// Resolves only non-secret authority for a status projection.
-///
-/// `InvalidInput` from the settled-access guard is intentionally not enough
-/// to call a slot missing: a prepared or otherwise unresolved install has no
-/// prior authority either. The durable unresolved list distinguishes that
-/// state from a genuinely fresh or removed connection before the raw native
-/// slot is observed.
+/// Resolves status authority. Invalid input alone cannot mean a missing slot;
+/// the durable unresolved list separates pending installs from new or removed connections.
 fn status_only_connection_access(
     shell: &lorepia_shell_api::ShellApi,
     connection_id: &str,
@@ -1197,11 +1085,14 @@ fn consume_discovery_capture_confirmation(
 #[tauri::command]
 pub fn get_provider_overview(state: State<'_, AppState>) -> CommandResult<ProviderOverviewDto> {
     let shell = state.shell()?;
+    let (routes, presets) = shell.provider_generation_catalog()?;
     Ok(ProviderOverviewDto {
         settings: shell.get_settings()?,
         templates: shell.list_provider_templates()?,
         connections: shell.list_provider_connections()?,
         legacy_profiles: shell.list_provider_profiles()?,
+        routes,
+        presets,
     })
 }
 

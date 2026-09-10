@@ -11,6 +11,7 @@ pub type ShellResult<T> = Result<T, ShellError>;
 pub enum ShellErrorCode {
     InvalidInput,
     UnsupportedContent,
+    ResourceLimitExceeded,
     UnsafeArchive,
     NotFound,
     PermissionDenied,
@@ -29,6 +30,7 @@ impl ShellErrorCode {
         match self {
             Self::InvalidInput => "invalid_input",
             Self::UnsupportedContent => "unsupported_content",
+            Self::ResourceLimitExceeded => "resource_limit_exceeded",
             Self::UnsafeArchive => "unsafe_archive",
             Self::NotFound => "not_found",
             Self::PermissionDenied => "permission_denied",
@@ -47,6 +49,7 @@ impl ShellErrorCode {
         match self {
             Self::InvalidInput => "error.invalid_input",
             Self::UnsupportedContent => "error.unsupported_content",
+            Self::ResourceLimitExceeded => "error.resource_limit_exceeded",
             Self::UnsafeArchive => "error.unsafe_archive",
             Self::NotFound => "error.not_found",
             Self::PermissionDenied => "error.permission_denied",
@@ -99,7 +102,11 @@ pub struct ShellError {
 
 impl From<CoreError> for ShellError {
     fn from(value: CoreError) -> Self {
-        let code = ShellErrorCode::from(value.code);
+        let code = if value.code == CoreErrorCode::UnsupportedContent && value.recoverable {
+            ShellErrorCode::ResourceLimitExceeded
+        } else {
+            ShellErrorCode::from(value.code)
+        };
         Self {
             code,
             message_key: code.message_key().to_owned(),
@@ -143,5 +150,18 @@ mod tests {
         assert!(!json.contains(raw_path));
         assert!(!debug.contains(secret));
         assert!(!debug.contains(raw_path));
+    }
+
+    #[test]
+    fn resource_limit_error_is_recoverable_and_has_a_stable_message_key() {
+        let shell_error = ShellError::from(CoreError::new(
+            CoreErrorCode::UnsupportedContent,
+            "entry exceeds 128 MiB",
+            true,
+        ));
+
+        assert_eq!(shell_error.code, ShellErrorCode::ResourceLimitExceeded);
+        assert_eq!(shell_error.message_key, "error.resource_limit_exceeded");
+        assert!(shell_error.recoverable);
     }
 }

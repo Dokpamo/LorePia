@@ -69,4 +69,5 @@ mod tests {
     include!("content_package/tests/canonical_and_module_authority.rs");
     include!("content_package/tests/durability_and_atomicity.rs");
     include!("content_package/tests/prompt_and_snapshot_security.rs");
+    include!("content_package/tests/review_regressions.rs");
 }

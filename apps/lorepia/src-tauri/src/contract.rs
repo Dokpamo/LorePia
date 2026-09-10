@@ -30,58 +30,20 @@ use lorepia_shell_api::{
     SetMemoryRecordExclusionInput, TaskProfileDto, TransformSetDto,
 };
 use serde::{Deserialize, Serialize};
+
+mod character;
+mod import;
+
+pub use character::{
+    CharacterConversationsRequest, CharacterRenderProfileRequest, CharacterRequest,
+};
+pub use import::{
+    DiscardImportRequest, ImportResourcePolicyDto, ImportTicketDto, InspectionRequest,
+    PickImportRequest, TicketRequest,
+};
 use tauri_plugin_lorepia_platform::{CredentialStatus, NativeCaptureStatus};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct ImportTicketDto {
-    pub ticket_id: String,
-    pub display_name: String,
-    pub size_bytes: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct TicketRequest {
-    pub ticket_id: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct InspectionRequest {
-    pub inspection_id: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum DiscardImportRequest {
-    Ticket { ticket_id: String },
-    Inspection { inspection_id: String },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CharacterRequest {
-    pub character_id: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ConversationRequest {
-    pub conversation_id: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CharacterConversationsRequest {
-    pub character_id: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct BranchMessagesRequest {
-    pub branch_id: String,
-}
+pub use crate::generation_messages_commands::{BranchMessagesRequest, ConversationRequest};
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -219,6 +181,8 @@ pub struct ProviderOverviewDto {
     pub templates: Vec<ProviderTemplateDto>,
     pub connections: Vec<ProviderConnectionDto>,
     pub legacy_profiles: Vec<ProviderProfileDto>,
+    pub routes: Vec<ModelRouteDto>,
+    pub presets: Vec<GenerationPresetDto>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]

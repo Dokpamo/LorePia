@@ -164,6 +164,25 @@ export function liveStudioClient(
             ) {
                 return Promise.resolve([]);
             }
+            if (commandName === 'list_creator_documents_page') {
+                const request = args?.request as { kind: string };
+                return Promise.resolve({
+                    kind: request.kind,
+                    documents:
+                        request.kind === 'transform_set'
+                            ? [
+                                  {
+                                      value: structuredClone(LIVE_STUDIO_TRANSFORM_SET),
+                                      revision: 3,
+                                      created_at: '2026-08-03T00:00:00Z',
+                                      updated_at: '2026-08-03T00:00:00Z',
+                                      deleted_at: null,
+                                  },
+                              ]
+                            : [],
+                    next_cursor: null,
+                });
+            }
             if (commandName === 'list_transform_sets') {
                 return Promise.resolve([
                     {

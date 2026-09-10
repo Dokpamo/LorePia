@@ -3,6 +3,7 @@ import type {
     OrchestrationVariableMapDto,
     PromptTokenPolicyDto,
     SafeRegexDto,
+    SafePromptTemplateDto,
 } from './common';
 
 import type { CapabilityKeyInput } from './provider';
@@ -29,6 +30,7 @@ export interface CreatorMemoryProfileDocumentDto {
     importance_weight: number;
     preserve_invalidated_records: boolean;
     summary_schema: string;
+    summary_template?: SafePromptTemplateDto | null;
 }
 
 export type KnowledgePlacementDto =

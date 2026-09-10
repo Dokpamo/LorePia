@@ -7,6 +7,88 @@ fn import_and_restart_restore_library() {
 }
 
 #[test]
+fn compatible_import_commits_an_imported_memory_preset_through_the_package_boundary() {
+    let root = tempdir().expect("temp root");
+    let core = Core::open(CoreConfig::new(root.path())).expect("open core");
+    let before = core.list_prompt_presets().expect("prompt presets").len();
+    let mut source = tempfile::Builder::new()
+        .suffix(".json")
+        .tempfile_in(root.path())
+        .expect("memory preset");
+    source
+        .write_all(
+            br#"{"type":"risu","ver":1,"data":{"name":"Hypa import fixture","settings":{"summarizationPrompt":"Keep durable facts and decisions.\n{{slot}}","chunkSize":1200}}}"#,
+        )
+        .expect("write memory preset");
+    source.flush().expect("flush memory preset");
+
+    let inspection = core.inspect_import(source.path()).expect("inspect external JSON");
+    assert_eq!(
+        inspection.kind,
+        lorepia_domain::ContentKind::RisuMemoryPreset
+    );
+    assert!(inspection.is_allowed());
+    let result = core
+        .commit_compatible_import(&inspection.id)
+        .expect("commit compatible import");
+    let crate::ImportCommitResult::Content(summary) = result else {
+        panic!("external memory preset must commit as content");
+    };
+    assert_eq!(summary.document_count, 1);
+    assert_eq!(summary.asset_count, 0);
+    assert_eq!(
+        core.get_content_package_import(&summary.import_id)
+            .expect("package import")
+            .status,
+        crate::PackageImportStatus::Completed
+    );
+    let presets = core.list_prompt_presets().expect("prompt presets");
+    assert_eq!(presets.len(), before + 1);
+    assert!(
+        presets
+            .iter()
+            .any(|preset| preset.value.name == "Hypa import fixture · 요약 프롬프트")
+    );
+    let first_revision = presets
+        .iter()
+        .find(|preset| preset.value.name == "Hypa import fixture · 요약 프롬프트")
+        .expect("imported prompt preset")
+        .revision;
+
+    let reinspection = core.inspect_import(source.path()).expect("reinspect external JSON");
+    let reimport = core
+        .commit_compatible_import(&reinspection.id)
+        .expect("reimport compatible content");
+    let crate::ImportCommitResult::Content(reimported) = reimport else {
+        panic!("reimported external memory preset must remain content");
+    };
+    assert_eq!(reimported.document_count, 1);
+    assert_eq!(
+        core.get_content_package_import(&reimported.import_id)
+            .expect("updated package import")
+            .status,
+        crate::PackageImportStatus::Completed
+    );
+    let updated_presets = core.list_prompt_presets().expect("updated prompt presets");
+    assert_eq!(updated_presets.len(), before + 1);
+    assert_eq!(
+        updated_presets
+            .iter()
+            .find(|preset| preset.value.name == "Hypa import fixture · 요약 프롬프트")
+            .expect("updated prompt preset")
+            .revision,
+        first_revision + 1
+    );
+    assert!(
+        fs::read_dir(core.inner.storage.staging_dir())
+            .expect("staging directory")
+            .next()
+            .is_none(),
+        "compatible import snapshots must be removed after commit"
+    );
+}
+
+#[test]
 fn import_uses_an_owned_snapshot_and_cleans_it_after_commit() {
     let root = tempdir().expect("temp root");
     let core = Core::open(CoreConfig::new(root.path())).expect("open core");

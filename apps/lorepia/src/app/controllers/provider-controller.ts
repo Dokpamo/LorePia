@@ -15,8 +15,9 @@ import type {
 import { t } from '../../lib/i18n';
 import { EpochGuard } from '../operations/epoch-guard';
 import { SerializedMutation } from '../operations/serialized-mutation';
-import { credentialKey, discoveryCredentialTarget } from '../provider-credential';
+import { credentialKey } from '../provider-credential';
 import type { AppControllerContext } from './controller-context';
+import { ProviderWorkspaceLoader, type ProviderDiagnosticsKind } from './provider-workspace-loader';
 
 interface ProviderControllerHooks {
     captureAnnouncement(status: NativeCaptureStatusDto, success: string): string;
@@ -26,152 +27,33 @@ interface ProviderControllerHooks {
 }
 
 export class ProviderController {
-    private readonly providerEpoch = new EpochGuard();
     private readonly providerSettingsEpoch = new EpochGuard();
     private readonly providerSettingsMutations = new SerializedMutation();
+
+    private readonly loader: ProviderWorkspaceLoader;
 
     constructor(
         private readonly context: AppControllerContext,
         private readonly hooks: ProviderControllerHooks,
-    ) {}
+    ) {
+        this.loader = new ProviderWorkspaceLoader(context, this.providerSettingsEpoch);
+    }
 
-    async loadProviders(): Promise<void> {
-        const epoch = this.providerEpoch.advance();
-        const settingsEpoch = this.providerSettingsEpoch.current();
-        this.context.update((state) => ({
-            ...state,
-            providers: { ...state.providers, phase: 'loading', error: null },
-        }));
-        try {
-            const [overview, discoveries, catalogStatus, catalogHistory] = await Promise.all([
-                this.context.client.getProviderOverview(),
-                this.context.client.listProviderDiscoveries(50),
-                this.context.client.providerCatalogStatus(),
-                this.context.client.providerCatalogHistory(50, null, null),
-            ]);
-            const routeGroups = await Promise.all(
-                overview.connections.map((connection) =>
-                    this.context.client.listModelRoutes(connection.id),
-                ),
-            );
-            const routes = routeGroups.flat();
-            const presetGroups = await Promise.all(
-                routes.map((route) => this.context.client.listGenerationPresets(route.id)),
-            );
-            const retainedLegacyProfileIds = new Set(
-                overview.legacy_profiles.map((profile) => profile.id),
-            );
-            const credentialTargets: CredentialTargetDto[] = [
-                ...overview.connections
-                    .filter(
-                        (connection) =>
-                            connection.credential_binding_required &&
-                            !retainedLegacyProfileIds.has(connection.id),
-                    )
-                    .map((connection): CredentialTargetDto => ({
-                        kind: 'connection',
-                        connection_id: connection.id,
-                    })),
-                ...overview.legacy_profiles.map((profile): CredentialTargetDto => ({
-                    kind: 'legacy_profile',
-                    provider_profile_id: profile.id,
-                })),
-                ...discoveries.flatMap((session): CredentialTargetDto[] => {
-                    const target = discoveryCredentialTarget(session);
-                    return target === null ? [] : [target];
-                }),
-            ];
-            const credentialStates = await Promise.all(
-                credentialTargets.map(async (target) => ({
-                    target,
-                    status: (await this.context.client.credentialStatus(target)).status,
-                })),
-            );
-            const modelSyncGroups = await Promise.all(
-                overview.connections.map((connection) =>
-                    this.context.client.listProviderModelSyncs(connection.id, 20),
-                ),
-            );
-            if (!this.providerEpoch.isCurrent(epoch)) return;
-            this.context.update((state) => ({
-                ...state,
-                providers: {
-                    phase: 'ready',
-                    error: null,
-                    workspace: {
-                        templates: overview.templates,
-                        connections: overview.connections,
-                        legacy_profiles: overview.legacy_profiles,
-                        routes,
-                        presets: presetGroups.flat(),
-                        settings: this.providerSettingsEpoch.isCurrent(settingsEpoch)
-                            ? overview.settings
-                            : state.providers.workspace.settings,
-                        credential_statuses: Object.fromEntries(
-                            credentialStates.map(({ target, status }) => [
-                                credentialKey(target),
-                                status,
-                            ]),
-                        ),
-                        request_preview: state.providers.workspace.request_preview,
-                        selected_capability_model_route_id:
-                            state.providers.workspace.selected_capability_model_route_id,
-                        capability_observations: state.providers.workspace.capability_observations,
-                        capability_parameter_specs:
-                            state.providers.workspace.capability_parameter_specs,
-                        effective_capability: state.providers.workspace.effective_capability,
-                        model_sync_jobs: modelSyncGroups
-                            .flat()
-                            .sort((left, right) => right.updated_at.localeCompare(left.updated_at)),
-                        selected_model_sync_job_id:
-                            state.providers.workspace.selected_model_sync_job_id,
-                        model_sync_event: state.providers.workspace.model_sync_event,
-                        discoveries,
-                        selected_discovery_id: state.providers.workspace.selected_discovery_id,
-                        discovery_candidates: state.providers.workspace.discovery_candidates,
-                        discovery_evidence: state.providers.workspace.discovery_evidence,
-                        discovery_approvals: state.providers.workspace.discovery_approvals,
-                        discovery_review: state.providers.workspace.discovery_review,
-                        discovery_approval_proposal:
-                            state.providers.workspace.discovery_approval_proposal,
-                        discovery_review_proposal:
-                            state.providers.workspace.discovery_review_proposal,
-                        discovery_assistant_resume_boundary:
-                            state.providers.workspace.discovery_assistant_resume_boundary,
-                        discovery_assistant_host_action:
-                            state.providers.workspace.discovery_assistant_host_action,
-                        discovery_event: state.providers.workspace.discovery_event,
-                        discovery_compensation_steps:
-                            state.providers.workspace.discovery_compensation_steps,
-                        discovery_recovery_results:
-                            state.providers.workspace.discovery_recovery_results,
-                        catalog_status: catalogStatus,
-                        catalog_history: catalogHistory,
-                        pending_catalog_import: state.providers.workspace.pending_catalog_import,
-                        pending_catalog_rollback:
-                            state.providers.workspace.pending_catalog_rollback,
-                        catalog_diff: state.providers.workspace.catalog_diff,
-                    },
-                },
-            }));
-        } catch (error: unknown) {
-            if (!this.providerEpoch.isCurrent(epoch)) return;
-            this.context.update((state) => ({
-                ...state,
-                providers: {
-                    ...state.providers,
-                    phase: 'error',
-                    error: this.context.errorLabel(error),
-                },
-            }));
-        }
+    loadProviders(): Promise<void> {
+        return this.loader.load();
+    }
+
+    loadProviderDiagnostics(kind: ProviderDiagnosticsKind): Promise<string | null> {
+        return this.loader.loadDiagnostics(kind);
     }
 
     async captureProviderCredential(target: CredentialTargetDto): Promise<boolean> {
         if (this.isRetainedLegacyConnectionCredentialTarget(target)) return false;
+        this.loader.invalidateCredential(target);
         try {
             const capture = await this.context.client.captureCredential(target);
             const status = await this.context.client.credentialStatus(target);
+            this.loader.invalidateCredential(target);
             this.context.update((state) => ({
                 ...state,
                 providers: {
@@ -197,8 +79,10 @@ export class ProviderController {
 
     async deleteProviderCredential(target: CredentialTargetDto): Promise<void> {
         if (this.isRetainedLegacyConnectionCredentialTarget(target)) return;
+        this.loader.invalidateCredential(target);
         try {
             await this.context.client.deleteCredential(target);
+            this.loader.invalidateCredential(target);
             this.context.update((state) => ({
                 ...state,
                 providers: {
@@ -232,7 +116,7 @@ export class ProviderController {
     async createProviderConnection(input: CreateProviderConnectionInput): Promise<boolean> {
         try {
             await this.context.client.createProviderConnection(input);
-            await this.hooks.loadProviders();
+            await this.loader.load(false);
             this.context.announce(t('provider.notice.connection_created'));
             return true;
         } catch (error: unknown) {
@@ -244,7 +128,7 @@ export class ProviderController {
     async updateProviderConnection(input: UpdateProviderConnectionInput): Promise<boolean> {
         try {
             await this.context.client.upsertProviderConnection(input);
-            await this.hooks.loadProviders();
+            await this.loader.load(false);
             this.context.announce(t('provider.notice.connection_updated'));
             return true;
         } catch (error: unknown) {
@@ -256,7 +140,7 @@ export class ProviderController {
     async deleteProviderConnection(connectionId: string): Promise<boolean> {
         try {
             await this.context.client.deleteProviderConnection(connectionId);
-            await this.hooks.loadProviders();
+            await this.loader.load(false);
             this.context.announce(t('provider.notice.connection_deleted'));
             return true;
         } catch (error: unknown) {
@@ -268,7 +152,7 @@ export class ProviderController {
     async upsertProviderModelRoute(input: UpsertModelRouteInput): Promise<boolean> {
         try {
             await this.context.client.upsertModelRoute(input);
-            await this.hooks.loadProviders();
+            await this.loader.load(false);
             this.context.announce(t('provider.notice.route_saved'));
             return true;
         } catch (error: unknown) {
@@ -280,7 +164,7 @@ export class ProviderController {
     async deleteProviderModelRoute(modelRouteId: string): Promise<boolean> {
         try {
             await this.context.client.deleteModelRoute(modelRouteId);
-            await this.hooks.loadProviders();
+            await this.loader.load(false);
             this.context.announce(t('provider.notice.route_deleted'));
             return true;
         } catch (error: unknown) {
@@ -292,7 +176,7 @@ export class ProviderController {
     async upsertProviderGenerationPreset(input: GenerationPresetInput): Promise<boolean> {
         try {
             await this.context.client.upsertGenerationPreset(input);
-            await this.hooks.loadProviders();
+            await this.loader.load(false);
             this.context.announce(t('provider.notice.preset_saved'));
             return true;
         } catch (error: unknown) {
@@ -304,7 +188,7 @@ export class ProviderController {
     async deleteProviderGenerationPreset(generationPresetId: string): Promise<boolean> {
         try {
             await this.context.client.deleteGenerationPreset(generationPresetId);
-            await this.hooks.loadProviders();
+            await this.loader.load(false);
             this.context.announce(t('provider.notice.preset_deleted'));
             return true;
         } catch (error: unknown) {
@@ -565,7 +449,7 @@ export class ProviderController {
             this.storeModelSyncJob(
                 await this.context.client.approveProviderModelSync(jobId, job.review.sha256),
             );
-            await this.hooks.loadProviders();
+            await this.loader.load(false);
             this.context.announce(t('provider.notice.sync_applied'));
         } catch (error: unknown) {
             this.context.announce(this.context.errorLabel(error));
@@ -598,6 +482,7 @@ export class ProviderController {
     async activateProviderCatalogImport(): Promise<void> {
         const ticket = this.context.readState().providers.workspace.pending_catalog_import;
         if (ticket === null) return;
+        this.loader.invalidateDiagnostics('catalog');
         try {
             const result = await this.context.client.activateProviderCatalogImport(
                 ticket.ticket_id,
@@ -608,8 +493,11 @@ export class ProviderController {
                 pending_catalog_import: null,
                 catalog_diff: result.diff,
             }));
-            await this.hooks.loadProviders();
-            this.context.announce(t('provider.notice.catalog_applied'));
+            await this.loader.load(false);
+            const refreshError = await this.loader.loadDiagnostics('catalog');
+            this.context.announce(
+                [t('provider.notice.catalog_applied'), refreshError].filter(Boolean).join(' '),
+            );
         } catch (error: unknown) {
             this.context.announce(this.context.errorLabel(error));
         }
@@ -663,6 +551,7 @@ export class ProviderController {
         const exactPlan =
             plan ?? this.context.readState().providers.workspace.pending_catalog_rollback;
         if (exactPlan === null) return;
+        this.loader.invalidateDiagnostics('catalog');
         try {
             const result = await this.context.client.activateProviderCatalogRollback(exactPlan);
             this.updateProviderWorkspace((workspace) => ({
@@ -671,14 +560,17 @@ export class ProviderController {
                 pending_catalog_rollback: null,
                 catalog_diff: exactPlan.catalog_plan.diff,
             }));
-            await this.hooks.loadProviders();
-            this.context.announce(t('provider.notice.rolled_back'));
+            await this.loader.load(false);
+            const refreshError = await this.loader.loadDiagnostics('catalog');
+            this.context.announce(
+                [t('provider.notice.rolled_back'), refreshError].filter(Boolean).join(' '),
+            );
         } catch (error: unknown) {
             this.context.announce(this.context.errorLabel(error));
         }
     }
 
     destroy(): void {
-        this.providerEpoch.advance();
+        this.loader.destroy();
     }
 }

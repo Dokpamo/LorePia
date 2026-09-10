@@ -90,7 +90,7 @@ impl Core {
     ) -> CoreResult<ContentPackageImportInspection> {
         self.inspect_content_package_import_with_limits(source_path, ImportLimits::default())
     }
-    fn inspect_content_package_import_with_limits(
+    pub(crate) fn inspect_content_package_import_with_limits(
         &self,
         source_path: &Path,
         limits: ImportLimits,
@@ -222,100 +222,106 @@ fn package_source_record(
         created_at,
     })
 }
+const SUPPORTED_CAPABILITY_REASON: &str =
+    "declarative capability is supported behind the Rust package boundary";
+const APPROVAL_CAPABILITY_REASON: &str =
+    "declarative behavior remains inactive until this capability is explicitly approved";
+const UNSUPPORTED_CAPABILITY_REASON: &str =
+    "executable, external, privileged, or high-risk package capability is unsupported";
+const PACKAGE_CAPABILITY_SUPPORT: [(PackageCapability, PackageCapabilitySupport); 19] = [
+    (
+        PackageCapability::PromptFragments,
+        PackageCapabilitySupport::Supported,
+    ),
+    (
+        PackageCapability::Knowledge,
+        PackageCapabilitySupport::Supported,
+    ),
+    (
+        PackageCapability::Variables,
+        PackageCapabilitySupport::Supported,
+    ),
+    (
+        PackageCapability::Transforms,
+        PackageCapabilitySupport::ApprovalRequired,
+    ),
+    (
+        PackageCapability::DeclarativeInteractions,
+        PackageCapabilitySupport::ApprovalRequired,
+    ),
+    (
+        PackageCapability::PortableRuntime,
+        PackageCapabilitySupport::ApprovalRequired,
+    ),
+    (
+        PackageCapability::ImageAssets,
+        PackageCapabilitySupport::Supported,
+    ),
+    (
+        PackageCapability::AudioAssets,
+        PackageCapabilitySupport::Supported,
+    ),
+    (
+        PackageCapability::VideoAssets,
+        PackageCapabilitySupport::Supported,
+    ),
+    (
+        PackageCapability::AttachmentAssets,
+        PackageCapabilitySupport::Supported,
+    ),
+    (
+        PackageCapability::HighRiskAssets,
+        PackageCapabilitySupport::Unsupported,
+    ),
+    (
+        PackageCapability::ExternalUrls,
+        PackageCapabilitySupport::Unsupported,
+    ),
+    (
+        PackageCapability::Html,
+        PackageCapabilitySupport::Unsupported,
+    ),
+    (
+        PackageCapability::Script,
+        PackageCapabilitySupport::Unsupported,
+    ),
+    (
+        PackageCapability::NativeCode,
+        PackageCapabilitySupport::Unsupported,
+    ),
+    (
+        PackageCapability::Network,
+        PackageCapabilitySupport::Unsupported,
+    ),
+    (
+        PackageCapability::Filesystem,
+        PackageCapabilitySupport::Unsupported,
+    ),
+    (
+        PackageCapability::Shell,
+        PackageCapabilitySupport::Unsupported,
+    ),
+    (
+        PackageCapability::Credentials,
+        PackageCapabilitySupport::Unsupported,
+    ),
+];
+
 pub(super) fn package_capability_review(_review: &PackageReview) -> PackageCapabilityReview {
-    const SUPPORTED_REASON: &str =
-        "declarative capability is supported behind the Rust package boundary";
-    const APPROVAL_REASON: &str =
-        "declarative behavior remains inactive until this capability is explicitly approved";
-    const UNSUPPORTED_REASON: &str =
-        "executable, external, privileged, or high-risk package capability is unsupported";
-    let decisions = [
-        (
-            PackageCapability::PromptFragments,
-            PackageCapabilitySupport::Supported,
-        ),
-        (
-            PackageCapability::Knowledge,
-            PackageCapabilitySupport::Supported,
-        ),
-        (
-            PackageCapability::Variables,
-            PackageCapabilitySupport::Supported,
-        ),
-        (
-            PackageCapability::Transforms,
-            PackageCapabilitySupport::ApprovalRequired,
-        ),
-        (
-            PackageCapability::DeclarativeInteractions,
-            PackageCapabilitySupport::ApprovalRequired,
-        ),
-        (
-            PackageCapability::ImageAssets,
-            PackageCapabilitySupport::Supported,
-        ),
-        (
-            PackageCapability::AudioAssets,
-            PackageCapabilitySupport::Supported,
-        ),
-        (
-            PackageCapability::VideoAssets,
-            PackageCapabilitySupport::Supported,
-        ),
-        (
-            PackageCapability::AttachmentAssets,
-            PackageCapabilitySupport::Supported,
-        ),
-        (
-            PackageCapability::HighRiskAssets,
-            PackageCapabilitySupport::Unsupported,
-        ),
-        (
-            PackageCapability::ExternalUrls,
-            PackageCapabilitySupport::Unsupported,
-        ),
-        (
-            PackageCapability::Html,
-            PackageCapabilitySupport::Unsupported,
-        ),
-        (
-            PackageCapability::Script,
-            PackageCapabilitySupport::Unsupported,
-        ),
-        (
-            PackageCapability::NativeCode,
-            PackageCapabilitySupport::Unsupported,
-        ),
-        (
-            PackageCapability::Network,
-            PackageCapabilitySupport::Unsupported,
-        ),
-        (
-            PackageCapability::Filesystem,
-            PackageCapabilitySupport::Unsupported,
-        ),
-        (
-            PackageCapability::Shell,
-            PackageCapabilitySupport::Unsupported,
-        ),
-        (
-            PackageCapability::Credentials,
-            PackageCapabilitySupport::Unsupported,
-        ),
-    ]
-    .into_iter()
-    .map(|(capability, support)| PackageCapabilityDecision {
-        capability,
-        support,
-        approved: false,
-        reason: match support {
-            PackageCapabilitySupport::Supported => SUPPORTED_REASON,
-            PackageCapabilitySupport::ApprovalRequired => APPROVAL_REASON,
-            PackageCapabilitySupport::Unsupported => UNSUPPORTED_REASON,
-        }
-        .to_owned(),
-    })
-    .collect();
+    let decisions = PACKAGE_CAPABILITY_SUPPORT
+        .into_iter()
+        .map(|(capability, support)| PackageCapabilityDecision {
+            capability,
+            support,
+            approved: false,
+            reason: match support {
+                PackageCapabilitySupport::Supported => SUPPORTED_CAPABILITY_REASON,
+                PackageCapabilitySupport::ApprovalRequired => APPROVAL_CAPABILITY_REASON,
+                PackageCapabilitySupport::Unsupported => UNSUPPORTED_CAPABILITY_REASON,
+            }
+            .to_owned(),
+        })
+        .collect();
     PackageCapabilityReview {
         schema_version: 1,
         decisions,
@@ -627,6 +633,7 @@ fn map_content_capability(capability: &InspectedContentCapability) -> Option<Con
         "knowledge_books" => Some(ContentCapability::Knowledge),
         "safe_transforms" => Some(ContentCapability::Transforms),
         "declarative_interactions" => Some(ContentCapability::DeclarativeInteractions),
+        "portable_runtime" => Some(ContentCapability::PortableRuntime),
         "variables" => Some(ContentCapability::Variables),
         "image_assets" => Some(ContentCapability::ImageAssets),
         "audio_assets" => Some(ContentCapability::AudioAssets),
@@ -805,7 +812,7 @@ fn package_too_large(maximum_bytes: u64) -> CoreError {
     CoreError::new(
         CoreErrorCode::UnsupportedContent,
         format!("content package exceeds the {maximum_bytes}-byte source limit"),
-        false,
+        true,
     )
 }
 fn package_io_error(error: std::io::Error) -> CoreError {

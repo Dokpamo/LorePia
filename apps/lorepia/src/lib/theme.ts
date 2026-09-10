@@ -1,4 +1,7 @@
+import { isTauri } from '@tauri-apps/api/core';
 import { writable } from 'svelte/store';
+
+import { syncNativeSystemBarStyle } from './ipc/client';
 
 /**
  * `system` follows the operating system. An explicit choice stamps
@@ -11,6 +14,11 @@ export const THEME_PREFERENCES: readonly ThemePreference[] = ['system', 'light',
 
 const STORAGE_KEY = 'lorepia.theme';
 const DEFAULT_THEME_PREFERENCE: ThemePreference = 'light';
+const SYSTEM_DARK_QUERY = '(prefers-color-scheme: dark)';
+
+let currentPreference: ThemePreference = readStoredPreference();
+let systemThemeQuery: MediaQueryList | null = null;
+let systemThemeListenerInstalled = false;
 
 function isThemePreference(value: unknown): value is ThemePreference {
     return value === 'system' || value === 'light' || value === 'dark';
@@ -26,18 +34,50 @@ function readStoredPreference(): ThemePreference {
     }
 }
 
+function getSystemThemeQuery(): MediaQueryList | null {
+    if (systemThemeQuery !== null) return systemThemeQuery;
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return null;
+    systemThemeQuery = window.matchMedia(SYSTEM_DARK_QUERY);
+    return systemThemeQuery;
+}
+
+function resolvesToDark(preference: ThemePreference): boolean {
+    return (
+        preference === 'dark' ||
+        (preference === 'system' && getSystemThemeQuery()?.matches === true)
+    );
+}
+
+function syncNativeAppearance(preference: ThemePreference): void {
+    if (!isTauri()) return;
+    void syncNativeSystemBarStyle(resolvesToDark(preference)).catch(() => {
+        // Native chrome is best-effort; a platform failure must not block the renderer theme.
+    });
+}
+
 function applyPreference(preference: ThemePreference): void {
     const root = document.documentElement;
     if (preference === 'system') {
         root.removeAttribute('data-theme');
-        return;
+    } else {
+        root.setAttribute('data-theme', preference);
     }
-    root.setAttribute('data-theme', preference);
+    syncNativeAppearance(preference);
 }
 
-export const themePreference = writable<ThemePreference>(readStoredPreference());
+function observeSystemTheme(): void {
+    const query = getSystemThemeQuery();
+    if (query === null || systemThemeListenerInstalled) return;
+    query.addEventListener('change', () => {
+        if (currentPreference === 'system') syncNativeAppearance('system');
+    });
+    systemThemeListenerInstalled = true;
+}
+
+export const themePreference = writable<ThemePreference>(currentPreference);
 
 export function setThemePreference(preference: ThemePreference): void {
+    currentPreference = preference;
     themePreference.set(preference);
     applyPreference(preference);
     try {
@@ -49,5 +89,8 @@ export function setThemePreference(preference: ThemePreference): void {
 
 /** Called once at startup, before the app mounts, so there is no flash. */
 export function initTheme(): void {
-    applyPreference(readStoredPreference());
+    currentPreference = readStoredPreference();
+    themePreference.set(currentPreference);
+    observeSystemTheme();
+    applyPreference(currentPreference);
 }

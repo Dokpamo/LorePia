@@ -43,13 +43,14 @@ internal class AndroidImportStager(
         }
     }
 
-    fun stage(uri: Uri): NativeStagedImport {
+    fun stage(uri: Uri, maximumBytes: Long): NativeStagedImport {
+        PlatformPolicy.validateImportMaximum(maximumBytes)
         check(stagingDirectory.mkdirs() || stagingDirectory.isDirectory) {
             "staging unavailable"
         }
         val metadata = queryMetadata(uri)
         if (metadata.sizeBytes != null &&
-            metadata.sizeBytes > PlatformPolicy.MAXIMUM_IMPORT_BYTES
+            metadata.sizeBytes > maximumBytes
         ) {
             throw SelectedImportTooLarge()
         }
@@ -76,7 +77,7 @@ internal class AndroidImportStager(
                                 break
                             }
                             copied = Math.addExact(copied, count.toLong())
-                            if (copied > PlatformPolicy.MAXIMUM_IMPORT_BYTES) {
+                            if (copied > maximumBytes) {
                                 throw SelectedImportTooLarge()
                             }
                             output.write(buffer, 0, count)

@@ -1,3 +1,8 @@
+mod greeting_boundary;
+mod initial_boundary;
+use greeting_boundary::read_character_greeting_interaction_boundary;
+use initial_boundary::read_pre_first_message_interaction_boundary;
+
 use chrono::{DateTime, Utc};
 use lorepia_domain::{
     ConversationBranchId, ConversationId, CoreError, CoreResult, GenerationId,
@@ -311,6 +316,14 @@ fn read_generation_user_interaction_boundary(
     source_branch_id: &ConversationBranchId,
     user_message_id: &MessageId,
 ) -> CoreResult<(InteractionState, Vec<InteractionKnowledgeBinding>, String)> {
+    if let Some(boundary) = read_character_greeting_interaction_boundary(
+        connection,
+        conversation_id,
+        source_branch_id,
+        user_message_id,
+    )? {
+        return Ok(boundary);
+    }
     let (generation_id, matching_count) = connection
         .query_row(
             "SELECT MIN(generation.id), COUNT(*)
@@ -568,78 +581,6 @@ pub(super) fn read_generation_attempt_authority(
         .ok_or_else(|| not_found("generation attempt"))
 }
 
-fn read_pre_first_message_interaction_boundary(
-    connection: &Connection,
-    conversation_id: &ConversationId,
-    source_branch_id: &ConversationBranchId,
-) -> CoreResult<(InteractionState, Vec<InteractionKnowledgeBinding>, String)> {
-    let historical = connection
-        .query_row(
-            "SELECT snapshot.previous_state_json,
-                    snapshot.previous_knowledge_json,
-                    snapshot.previous_state_snapshot_sha256,
-                    snapshot.context_checkpoint_sha256
-             FROM generations AS generation
-             JOIN messages AS user_message
-               ON user_message.id = generation.user_message_id
-              AND user_message.conversation_id = generation.conversation_id
-             JOIN generation_attempt_before_event_snapshots AS snapshot
-               ON snapshot.generation_id = generation.id
-              AND snapshot.context_head_message_id IS NULL
-             WHERE generation.conversation_id = ?1
-               AND generation.branch_id = ?2
-               AND user_message.parent_id IS NULL
-             ORDER BY generation.started_at, generation.id
-             LIMIT 1",
-            params![conversation_id.0.as_str(), source_branch_id.0.as_str()],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                ))
-            },
-        )
-        .optional()
-        .map_err(storage_db_error)?
-        .ok_or_else(|| {
-            revision_conflict(
-                "pre-first-message interaction boundary has no generation attempt snapshot",
-            )
-        })?;
-    let state: InteractionState = decode_json(
-        "historical pre-first-message interaction state",
-        &historical.0,
-        MAX_STATE_JSON_BYTES,
-    )?;
-    let knowledge: Vec<InteractionKnowledgeBinding> = decode_json(
-        "historical pre-first-message interaction knowledge",
-        &historical.1,
-        MAX_STATE_JSON_BYTES,
-    )?;
-    validate_state(&state)?;
-    validate_knowledge_bindings(&state, &knowledge)?;
-    if encode_json(
-        "historical pre-first-message interaction state",
-        &state,
-        MAX_STATE_JSON_BYTES,
-    )? != historical.0
-        || encode_json(
-            "historical pre-first-message interaction knowledge",
-            &knowledge,
-            MAX_STATE_JSON_BYTES,
-        )? != historical.1
-        || interaction_state_snapshot_sha256(&state, &knowledge)? != historical.2
-        || !is_sha256(&historical.3)
-    {
-        return Err(storage_corrupted(
-            "historical pre-first-message interaction snapshot is invalid",
-        ));
-    }
-    Ok((state, knowledge, historical.3))
-}
-
 pub(super) fn read_generation_attempt_review_boundary(
     connection: &Connection,
     authority: &GenerationAttemptAuthority,
@@ -687,10 +628,23 @@ pub(super) fn read_generation_attempt_review_boundary(
             &authority.conversation_id,
             &authority.source_branch_id,
             context_head_message_id,
-        )?
-        .ok_or_else(|| not_found("generation attempt interaction checkpoint"))?;
-        if checkpoint
-            .state
+        )?;
+        let (mut state, knowledge, checkpoint_sha256) = if let Some(checkpoint) = checkpoint {
+            (
+                checkpoint.state,
+                checkpoint.knowledge,
+                checkpoint.checkpoint_sha256,
+            )
+        } else {
+            read_character_greeting_interaction_boundary(
+                connection,
+                &authority.conversation_id,
+                &authority.source_branch_id,
+                context_head_message_id,
+            )?
+            .ok_or_else(|| not_found("generation attempt interaction checkpoint"))?
+        };
+        if state
             .proposals
             .iter()
             .any(|proposal| proposal.status == InteractionProposalStatus::Pending)
@@ -699,11 +653,10 @@ pub(super) fn read_generation_attempt_review_boundary(
                 "cannot stage generation from a checkpoint with a pending proposal",
             ));
         }
-        let mut state = checkpoint.state;
         state.proposals.clear();
         validate_state(&state)?;
-        validate_knowledge_bindings(&state, &checkpoint.knowledge)?;
-        return Ok((state, checkpoint.knowledge, checkpoint.checkpoint_sha256));
+        validate_knowledge_bindings(&state, &knowledge)?;
+        return Ok((state, knowledge, checkpoint_sha256));
     }
 
     let source_head = connection

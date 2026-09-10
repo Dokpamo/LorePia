@@ -1,0 +1,32 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "LorePia UI",
+  "identifier": "dev.lorepia.mac.dev",
+  "build": {
+    "beforeDevCommand": "npm run dev:ui",
+    "beforeBuildCommand": "npm run build:ui",
+    "devUrl": "http://127.0.0.1:5176"
+  },
+  "bundle": { "active": true },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "url": "workspace.html",
+        "title": "LorePia · UI",
+        "width": 393,
+        "height": 851.5,
+        "minWidth": 320,
+        "minHeight": 552,
+        "center": true,
+        "resizable": true,
+        "decorations": true,
+        "titleBarStyle": "Visible",
+        "hiddenTitle": false,
+        "transparent": false,
+        "visible": true,
+        "devtools": false
+      }
+    ]
+  }
+}

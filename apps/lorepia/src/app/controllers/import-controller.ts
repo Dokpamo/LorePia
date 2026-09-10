@@ -1,27 +1,73 @@
 import { t } from '../../lib/i18n';
+import type { ImportCommitResultDto } from '../../lib/ipc/contracts';
+import { normalizeClientError } from '../../lib/ipc/errors';
 import type { AppControllerContext } from './controller-context';
+
+function importErrorLabel(error: unknown, fallback: string): string {
+    const normalized = normalizeClientError(error);
+    const messageKey = normalized.messageKey;
+    if (normalized.code === 'selected_file_too_large') {
+        return t('import.error.resource_limit');
+    }
+    if (normalized.code === 'resource_limit_exceeded') {
+        return t('import.error.resource_limit');
+    }
+    if (messageKey === 'error.unsupported_content') {
+        return `${t('import.blocked')}: ${t('error.invalid_input')}`;
+    }
+    if (messageKey === 'error.storage_unavailable') {
+        return t('import.error.storage_unavailable');
+    }
+    return fallback;
+}
+
+function canRetryWithLargeResources(error: unknown): boolean {
+    const code = normalizeClientError(error).code;
+    return code === 'selected_file_too_large' || code === 'resource_limit_exceeded';
+}
 
 export class ImportController {
     constructor(private readonly context: AppControllerContext) {}
 
     async begin(): Promise<void> {
+        const userApprovedLarge = this.context.readState().import_flow.resource_override_available;
         this.context.update((state) => ({
             ...state,
-            import_flow: { phase: 'loading', error: null, inspection: null },
+            import_flow: {
+                phase: 'loading',
+                error: null,
+                inspection: null,
+                resource_override_active: userApprovedLarge,
+                resource_override_available: false,
+            },
         }));
         try {
-            const ticket = await this.context.client.selectImportSource();
+            const ticket = await this.context.client.selectImportSource(
+                userApprovedLarge ? 'user_approved_large' : 'standard',
+            );
             if (ticket === null) {
                 this.context.update((state) => ({
                     ...state,
-                    import_flow: { phase: 'idle', error: null, inspection: null },
+                    import_flow: {
+                        phase: 'idle',
+                        error: null,
+                        inspection: null,
+                        resource_override_active: false,
+                        resource_override_available: false,
+                    },
                 }));
                 return;
             }
             const inspection = await this.context.client.inspectImport(ticket.ticket_id);
             this.context.update((state) => ({
                 ...state,
-                import_flow: { phase: 'ready', error: null, inspection },
+                import_flow: {
+                    phase: 'ready',
+                    error: null,
+                    inspection,
+                    resource_override_active: userApprovedLarge,
+                    resource_override_available: false,
+                },
             }));
             this.context.announce(t('import.notice.review', { name: inspection.display_name }));
         } catch (error: unknown) {
@@ -29,44 +75,76 @@ export class ImportController {
                 ...state,
                 import_flow: {
                     phase: 'error',
-                    error: this.context.errorLabel(error),
+                    error: importErrorLabel(error, this.context.errorLabel(error)),
                     inspection: null,
+                    resource_override_active: userApprovedLarge,
+                    resource_override_available:
+                        !userApprovedLarge && canRetryWithLargeResources(error),
                 },
             }));
         }
     }
 
-    async commit(): Promise<void> {
+    async commit(): Promise<ImportCommitResultDto | null> {
         const inspection = this.context.readState().import_flow.inspection;
-        if (inspection?.allowed !== true) return;
+        if (inspection?.allowed !== true) return null;
         this.context.update((state) => ({
             ...state,
             import_flow: { ...state.import_flow, phase: 'loading', error: null },
         }));
         try {
-            const character = await this.context.client.commitImport(inspection.inspection_id);
-            this.context.update((state) => ({
-                ...state,
-                library: {
-                    phase: 'ready',
-                    error: null,
-                    characters: [
-                        character,
-                        ...state.library.characters.filter((item) => item.id !== character.id),
-                    ],
-                },
-                import_flow: { phase: 'idle', error: null, inspection: null },
-            }));
-            this.context.announce(t('import.notice.added', { name: character.name }));
+            const result = await this.context.client.commitImport(inspection.inspection_id);
+            if (result.kind === 'character') {
+                const { character } = result;
+                this.context.update((state) => ({
+                    ...state,
+                    library: {
+                        phase: 'ready',
+                        error: null,
+                        characters: [
+                            character,
+                            ...state.library.characters.filter((item) => item.id !== character.id),
+                        ],
+                    },
+                    import_flow: {
+                        phase: 'idle',
+                        error: null,
+                        inspection: null,
+                        resource_override_active: false,
+                        resource_override_available: false,
+                    },
+                }));
+                this.context.announce(t('import.notice.added', { name: character.name }));
+            } else {
+                this.context.update((state) => ({
+                    ...state,
+                    import_flow: {
+                        phase: 'idle',
+                        error: null,
+                        inspection: null,
+                        resource_override_active: false,
+                        resource_override_available: false,
+                    },
+                }));
+                this.context.announce(
+                    t('import.notice.content_added', {
+                        name: result.content.display_name,
+                        documents: result.content.document_count,
+                        assets: result.content.asset_count,
+                    }),
+                );
+            }
+            return result;
         } catch (error: unknown) {
             this.context.update((state) => ({
                 ...state,
                 import_flow: {
                     ...state.import_flow,
                     phase: 'error',
-                    error: this.context.errorLabel(error),
+                    error: importErrorLabel(error, this.context.errorLabel(error)),
                 },
             }));
+            return null;
         }
     }
 
@@ -74,7 +152,13 @@ export class ImportController {
         const inspection = this.context.readState().import_flow.inspection;
         this.context.update((state) => ({
             ...state,
-            import_flow: { phase: 'idle', error: null, inspection: null },
+            import_flow: {
+                phase: 'idle',
+                error: null,
+                inspection: null,
+                resource_override_active: false,
+                resource_override_available: false,
+            },
         }));
         if (inspection === null) return;
         try {

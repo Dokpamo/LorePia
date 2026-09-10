@@ -2,6 +2,8 @@
     import { onMount, untrack } from 'svelte';
 
     import DetailActionBar from '../../components/detail/DetailActionBar.svelte';
+    import { tr } from '../../lib/i18n';
+    import { importedText } from '../../lib/import-display';
     import type {
         LorepiaClient,
         PromptPresetHistoryClientApi,
@@ -197,7 +199,12 @@
                         >
                             <span class="setting-content">
                                 <span class="setting-copy revision-copy">
-                                    <strong>리비전 {revision.revision} · {revision.name}</strong>
+                                    <strong>
+                                        {$tr('preset_history.item', {
+                                            revision: revision.revision,
+                                            name: importedText(revision.name),
+                                        })}
+                                    </strong>
                                     <small>
                                         {new Date(revision.created_at).toLocaleString()} ·
                                         {shortHash(revision.sha256)}

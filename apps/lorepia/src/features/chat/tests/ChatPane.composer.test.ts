@@ -10,6 +10,7 @@ import {
 } from '../../orchestration/orchestration-controller';
 import '../../../styles/app.css';
 import ChatPane from '../ChatPane.svelte';
+import { t } from '../../../lib/i18n';
 import { chatReadyState } from './chat-pane-state-builder';
 
 class ControlledResizeObserver implements ResizeObserver {
@@ -120,7 +121,7 @@ describe('ChatPane transcript chrome', () => {
         expect(textRegion).not.toBeNull();
         expect(actionRow).not.toBeNull();
         expect(textRegion).toContainElement(textbox);
-        expect(textbox).not.toHaveAttribute('placeholder');
+        expect(textbox).toHaveAttribute('placeholder', t('mobile.chat.message'));
         expect(screen.queryByRole('button', { name: '메시지 보내기' })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '전체화면으로 작성' })).not.toBeInTheDocument();
         const dormantExpand = composer.querySelector<HTMLButtonElement>('.composer-expand-action');
@@ -638,6 +639,9 @@ describe('ChatPane composer', () => {
         expect(screen.queryByRole('button', { name: '새 생성 작업' })).not.toBeInTheDocument();
         await fireEvent.click(screen.getByRole('button', { name: '대화 설정' }));
         const settings = screen.getByRole('dialog', { name: '대화 설정' });
+        await fireEvent.click(
+            within(settings).getByRole('button', { name: t('mobile.room.room') }),
+        );
         await fireEvent.click(within(settings).getByRole('button', { name: '새 생성 작업' }));
         expect(beginNewGenerationOperation).toHaveBeenCalledOnce();
         await waitFor(() => expect(composer).toHaveFocus());

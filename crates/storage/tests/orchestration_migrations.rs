@@ -1,14 +1,16 @@
 //! End-to-end invariants for the complete current migration chain.
 
-use std::{
-    fs,
-    path::{Path, PathBuf},
-};
+#[path = "support/migrations.rs"]
+mod migrations;
+
+use std::{fs, path::Path};
 
 use lorepia_domain::CoreErrorCode;
 use lorepia_storage::Storage;
 use rusqlite::{Connection, OptionalExtension, params};
 use tempfile::tempdir;
+
+use migrations::{active_database_path, apply_range, apply_through, expected_schema_version};
 
 const NOW: &str = "2026-08-03T00:00:00Z";
 const HASH_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -16,79 +18,6 @@ const HASH_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 const LEGACY_CHAT_SOURCE_BYTES: &[u8] = b"synthetic legacy source bytes";
 const LEGACY_CHAT_SOURCE_SHA256: &str =
     "32cfecba8b4ae0eb1e4e6ee98580532df17c27e26f5901c100f538c83d8cf502";
-
-const MIGRATIONS: &[&str] = &[
-    include_str!("../migrations/0001_initial.sql"),
-    include_str!("../migrations/0002_import_asset_recovery.sql"),
-    include_str!("../migrations/0003_conversation_branches.sql"),
-    include_str!("../migrations/0004_provider_catalog.sql"),
-    include_str!("../migrations/0005_discovery_state_machine.sql"),
-    include_str!("../migrations/0006_generation_provider_provenance.sql"),
-    include_str!("../migrations/0007_signed_catalog_history.sql"),
-    include_str!("../migrations/0008_generation_protocol_state.sql"),
-    include_str!("../migrations/0009_model_sync_jobs.sql"),
-    include_str!("../migrations/0010_provider_connection_tombstones.sql"),
-    include_str!("../migrations/0011_provider_local_network_approvals.sql"),
-    include_str!("../migrations/0012_content_package_foundation.sql"),
-    include_str!("../migrations/0013_prompt_pipeline.sql"),
-    include_str!("../migrations/0014_knowledge.sql"),
-    include_str!("../migrations/0015_memory.sql"),
-    include_str!("../migrations/0016_transforms.sql"),
-    include_str!("../migrations/0017_interactions_modules.sql"),
-    include_str!("../migrations/0018_persona_selection.sql"),
-    include_str!("../migrations/0019_lifecycle_outbox.sql"),
-    include_str!("../migrations/0020_package_cas_promotion_journal.sql"),
-    include_str!("../migrations/0021_interaction_checkpoints.sql"),
-    include_str!("../migrations/0022_memory_vector_space.sql"),
-    include_str!("../migrations/0023_applied_module_runtime_plans.sql"),
-    include_str!("../migrations/0024_generation_attempt_proposals.sql"),
-    include_str!("../migrations/0025_conversation_greeting_bindings.sql"),
-    include_str!("../migrations/0026_provider_discovery_native_no_effect.sql"),
-    include_str!("../migrations/0027_provider_discovery_native_attestations.sql"),
-    include_str!("../migrations/0028_generation_attempt_storage_identities.sql"),
-    include_str!("../migrations/0029_generation_attempt_decision_handshake.sql"),
-    include_str!("../migrations/0030_package_document_target_reviews.sql"),
-    include_str!("../migrations/0031_message_display_projections.sql"),
-    include_str!("../migrations/0032_knowledge_vector_space.sql"),
-    include_str!("../migrations/0033_interaction_derived_event_outbox.sql"),
-    include_str!("../migrations/0034_generation_attempt_derived_event_authority.sql"),
-    include_str!("../migrations/0035_interaction_derived_event_quarantine.sql"),
-    include_str!("../migrations/0036_generation_attempt_derived_closure.sql"),
-    include_str!("../migrations/0037_provider_credential_operations.sql"),
-    include_str!("../migrations/0038_conversation_speakers.sql"),
-    include_str!("../migrations/0039_runtime_model_audit.sql"),
-    include_str!("../migrations/0040_portable_runtime_state.sql"),
-];
-
-fn expected_schema_version() -> u32 {
-    u32::try_from(MIGRATIONS.len()).expect("migration count fits u32")
-}
-
-fn active_database_path(root: &Path) -> PathBuf {
-    let cutover = root.join("db/schema-cutover");
-    let (_, relative) = fs::read_dir(cutover)
-        .expect("read committed database generations")
-        .filter_map(Result::ok)
-        .filter(|entry| entry.path().join("generation-committed.json").is_file())
-        .map(|entry| {
-            let manifest = serde_json::from_slice::<serde_json::Value>(
-                &fs::read(entry.path().join("generation-manifest.json"))
-                    .expect("read generation manifest"),
-            )
-            .expect("parse generation manifest");
-            let sequence = manifest["activation_sequence"]
-                .as_u64()
-                .expect("generation activation sequence");
-            let relative = manifest["active_database_relative_path"]
-                .as_str()
-                .expect("active database relative path")
-                .to_owned();
-            (sequence, relative)
-        })
-        .max_by_key(|(sequence, _)| *sequence)
-        .expect("at least one committed database generation");
-    root.join(relative)
-}
 
 #[test]
 fn fresh_database_reaches_current_contiguous_schema_and_reopens_idempotently() {
@@ -984,6 +913,88 @@ fn migration_forty_is_atomic_and_can_resume_after_object_conflict() {
 }
 
 #[test]
+fn migration_forty_one_is_atomic_and_expands_the_portable_runtime_capability_contracts() {
+    let root = tempdir().expect("temporary data root");
+    let database_dir = root.path().join("db");
+    fs::create_dir_all(&database_dir).expect("create database directory");
+    let database_path = database_dir.join("lorepia.sqlite3");
+    {
+        let mut connection = Connection::open(&database_path).expect("open fixture database");
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .expect("enable foreign keys");
+        apply_through(&mut connection, 40);
+        connection
+            .execute_batch("CREATE TABLE package_capability_requests_v41 (conflict INTEGER);")
+            .expect("create migration conflict");
+    }
+
+    assert!(
+        Storage::open(root.path()).is_err(),
+        "a conflicting replacement table must fail migration forty one"
+    );
+    {
+        let connection = Connection::open(&database_path).expect("inspect failed migration");
+        assert_eq!(
+            connection
+                .query_row("SELECT MAX(version) FROM schema_migrations", [], |row| {
+                    row.get::<_, u32>(0)
+                })
+                .expect("schema version"),
+            40
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_schema
+                     WHERE type = 'trigger'
+                       AND name IN (
+                           'package_capability_requests_no_update',
+                           'package_capability_requests_no_delete'
+                       )",
+                    [],
+                    |row| row.get::<_, u32>(0),
+                )
+                .expect("rolled-back immutability trigger count"),
+            2,
+            "the failed table replacement must restore both immutability triggers"
+        );
+        connection
+            .execute("DROP TABLE package_capability_requests_v41", [])
+            .expect("remove deliberate conflict");
+    }
+
+    let reopened = Storage::open(root.path()).expect("resume repaired migration");
+    assert_eq!(
+        reopened
+            .schema_version()
+            .expect("read durable schema version"),
+        expected_schema_version()
+    );
+    let connection =
+        Connection::open(active_database_path(root.path())).expect("open migrated active database");
+    let definition = connection
+        .query_row(
+            "SELECT sql FROM sqlite_schema
+             WHERE type = 'table' AND name = 'package_capability_requests'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .expect("read package capability table definition");
+    assert!(definition.contains("'portable_runtime'"));
+    let module_definition = connection
+        .query_row(
+            "SELECT sql FROM sqlite_schema
+             WHERE type = 'table'
+               AND name = 'content_module_required_capabilities'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .expect("read content-module capability table definition");
+    assert!(module_definition.contains("'portable_runtime'"));
+}
+
+#[test]
 fn version_twenty_five_upgrade_requires_typed_atomic_commit_attestation() {
     let root = tempdir().expect("temporary data root");
     let database_dir = root.path().join("db");
@@ -1401,41 +1412,6 @@ fn governance_checks_fail_closed_and_revision_evidence_is_immutable() {
             .is_err(),
         "imported transform sets must remain inactive before local review"
     );
-}
-
-fn apply_through(connection: &mut Connection, target: usize) {
-    apply_range(connection, 0, target);
-}
-
-fn apply_range(connection: &mut Connection, start_exclusive: usize, target: usize) {
-    for (index, migration) in MIGRATIONS
-        .iter()
-        .enumerate()
-        .take(target)
-        .skip(start_exclusive)
-    {
-        let version = u32::try_from(index + 1).expect("schema version");
-        let transaction = connection.transaction().expect("migration transaction");
-        transaction
-            .execute_batch(migration)
-            .unwrap_or_else(|error| panic!("apply migration {version}: {error}"));
-        transaction
-            .execute(
-                "INSERT OR IGNORE INTO schema_migrations(version, applied_at)
-                 VALUES (?1, ?2)",
-                params![version, NOW],
-            )
-            .unwrap_or_else(|error| panic!("record migration {version}: {error}"));
-        let violation = transaction
-            .query_row("PRAGMA foreign_key_check", [], |_| Ok(()))
-            .optional()
-            .expect("foreign key check");
-        assert!(
-            violation.is_none(),
-            "migration {version} produced a foreign-key violation"
-        );
-        transaction.commit().expect("commit migration");
-    }
 }
 
 fn seed_legacy_generation_attempt_review(connection: &Connection) {

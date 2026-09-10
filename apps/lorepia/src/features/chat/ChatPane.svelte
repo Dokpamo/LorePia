@@ -13,6 +13,7 @@
     import ChatErrorRegion from './ChatErrorRegion.svelte';
     import ChatFullscreenComposer from './ChatFullscreenComposer.svelte';
     import ChatRoomControls from './ChatRoomControls.svelte';
+    import MobileChatIdentity from '../../components/mobile/MobileChatIdentity.svelte';
     import ChatUtilityDrawer from './ChatUtilityDrawer.svelte';
     import ChatViewport from './ChatViewport.svelte';
     import {
@@ -61,6 +62,7 @@
         displayMessages: () => displayMessageItems,
         providerWorkspace: () => appState.providers.workspace,
         primarySelection: () => controller.runtimeGenerationSelection(),
+        sendMessage: controller.sendMessage.bind(controller),
         onNotice: (message) => {
             copyNotice = message;
         },
@@ -175,22 +177,7 @@
     });
     const reasoningEffortLabel = $derived.by(() => {
         const effort = orchestrationState?.workspace.room_config.reasoning_effort;
-        switch (effort) {
-            case 'minimal':
-                return '최소';
-            case 'low':
-                return '낮음';
-            case 'medium':
-                return '중간';
-            case 'high':
-                return '높음';
-            case 'extra_high':
-                return '매우 높음';
-            case 'maximum':
-                return '최대';
-            default:
-                return '';
-        }
+        return effort === undefined ? '' : t(`quick.reasoning.${effort}`);
     });
     const composerConfigurationLabel = $derived(
         [selectedModelLabel, reasoningEffortLabel].filter((value) => value !== '').join(' · '),
@@ -318,7 +305,9 @@
 
     $effect(() => {
         const characterId = appState.selected_character?.id ?? null;
-        return portableRuntimeLifecycle.loadProfile(client, characterId);
+        const conversationId = appState.selected_conversation?.id ?? null;
+        const branchId = appState.conversation_state?.active_branch_id ?? null;
+        return portableRuntimeLifecycle.loadProfile(client, characterId, conversationId, branchId);
     });
 
     $effect(() => {
@@ -449,10 +438,15 @@
 >
     {#if appState.selected_conversation === null}
         <header
-            class="mobile-top-frame chat-header empty-chat-header"
+            class={desktop
+                ? 'mobile-top-frame chat-header empty-chat-header'
+                : 'chat-header mobile-chat-header empty-chat-header'}
             data-tauri-drag-region={titlebarOverlay ? '' : undefined}
         >
-            <div class="chat-identity" data-tauri-drag-region={titlebarOverlay ? '' : undefined}>
+            <div
+                class={desktop ? 'chat-identity' : 'mobile-chat-identity'}
+                data-tauri-drag-region={titlebarOverlay ? '' : undefined}
+            >
                 <h2 id="chat-title" data-tauri-drag-region={titlebarOverlay ? '' : undefined}>
                     채팅
                 </h2>
@@ -467,18 +461,25 @@
         </div>
     {:else}
         <header
-            class="mobile-top-frame mobile-top-frame-leading chat-header"
+            class={desktop
+                ? 'mobile-top-frame mobile-top-frame-leading chat-header'
+                : 'chat-header mobile-chat-header'}
             data-tauri-drag-region={titlebarOverlay ? '' : undefined}
         >
             <button
-                class="icon-button ghost mobile-top-action mobile-top-action-left back-button"
+                class={desktop
+                    ? 'icon-button ghost mobile-top-action mobile-top-action-left back-button'
+                    : 'mobile-icon-button back-button'}
                 type="button"
                 aria-label="대화 목록으로"
                 onclick={onOpenHome}
             >
                 <ArrowLeft class="chat-back-icon" aria-hidden="true" />
             </button>
-            <div class="chat-identity" data-tauri-drag-region={titlebarOverlay ? '' : undefined}>
+            <div
+                class={desktop ? 'chat-identity' : 'mobile-chat-identity'}
+                data-tauri-drag-region={titlebarOverlay ? '' : undefined}
+            >
                 {#if desktop}
                     <button
                         class="chat-title-context"
@@ -492,26 +493,11 @@
                         <ChevronDown aria-hidden="true" />
                     </button>
                 {:else}
-                    <span
-                        class="avatar"
-                        aria-hidden="true"
-                        data-tauri-drag-region={titlebarOverlay ? '' : undefined}
-                        >{(appState.selected_character?.name ?? '?').slice(0, 1)}</span
-                    >
-                    <div data-tauri-drag-region={titlebarOverlay ? '' : undefined}>
-                        <h2
-                            id="chat-title"
-                            data-tauri-drag-region={titlebarOverlay ? '' : undefined}
-                        >
-                            {appState.selected_conversation.title}
-                        </h2>
-                        <p
-                            class="chat-subtitle"
-                            data-tauri-drag-region={titlebarOverlay ? '' : undefined}
-                        >
-                            {appState.selected_character?.name ?? 'Character'}
-                        </p>
-                    </div>
+                    <MobileChatIdentity
+                        characterName={appState.selected_character?.name}
+                        title={appState.selected_conversation.title}
+                        {titlebarOverlay}
+                    />
                 {/if}
             </div>
             <div class="chat-controls">

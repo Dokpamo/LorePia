@@ -33,7 +33,9 @@ private struct StagedPathArgs: Decodable, RedactedDescription {
 private struct SensitiveCaptureArgs: Decodable, RedactedDescription {
   let maximumBytes: UInt64
 }
-
+private struct ImportLimitArgs: Decodable, RedactedDescription {
+  let maximumBytes: UInt64
+}
 private struct CredentialEffectConfirmationArgs: Decodable,
   RedactedDescription
 {
@@ -150,7 +152,7 @@ func purgeLegacySensitiveCaptureFiles(dataRoot: URL) {
 }
 
 private enum PendingPickerOperation {
-  case importing(Invoke)
+  case importing(Invoke, UInt64)
   case preparingExport(Invoke)
   case exporting(Invoke, NativeContentSourceExport)
 }
@@ -468,13 +470,23 @@ final class LorepiaPlatformPlugin: Plugin, UIDocumentPickerDelegate {
         return
       }
 
+      let maximumBytes: UInt64
+      do {
+        let args = try invoke.parseArgs(ImportLimitArgs.self)
+        try PlatformPolicy.validateImportMaximum(args.maximumBytes)
+        maximumBytes = args.maximumBytes
+      } catch {
+        invoke.reject("invalid import limit", code: "invalid_input")
+        return
+      }
+
       let picker = UIDocumentPickerViewController(
         forOpeningContentTypes: [.data],
         asCopy: false
       )
       picker.allowsMultipleSelection = false
       picker.delegate = self
-      self.pendingPickerOperation = .importing(invoke)
+      self.pendingPickerOperation = .importing(invoke, maximumBytes)
       viewController.present(picker, animated: true)
     }
   }
@@ -578,8 +590,8 @@ final class LorepiaPlatformPlugin: Plugin, UIDocumentPickerDelegate {
     }
 
     switch operation {
-    case .importing(let invoke):
-      finishImport(invoke, selectedURL: selectedURL)
+    case .importing(let invoke, let maximumBytes):
+      finishImport(invoke, selectedURL: selectedURL, maximumBytes: maximumBytes)
     case .exporting(let invoke, let export):
       finishContentSourceExport(
         invoke,
@@ -690,7 +702,7 @@ final class LorepiaPlatformPlugin: Plugin, UIDocumentPickerDelegate {
     _ operation: PendingPickerOperation
   ) {
     switch operation {
-    case .importing(let invoke):
+    case .importing(let invoke, _):
       invoke.resolve(
         PickResponse(
           selected: false,
@@ -727,12 +739,17 @@ final class LorepiaPlatformPlugin: Plugin, UIDocumentPickerDelegate {
     }
   }
 
-  private func finishImport(_ invoke: Invoke, selectedURL: URL) {
+  private func finishImport(
+    _ invoke: Invoke,
+    selectedURL: URL,
+    maximumBytes: UInt64
+  ) {
     workQueues.scheduleStaging {
       do {
         let storage = try self.storage.get()
         let staged = try storage.stager.stage(
-          securityScopedURL: selectedURL
+          securityScopedURL: selectedURL,
+          maximumBytes: maximumBytes
         )
         invoke.resolve(
           PickResponse(

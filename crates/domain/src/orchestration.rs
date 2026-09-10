@@ -5,10 +5,12 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    CapabilityKey, ConversationBranchId, ConversationId, GenerationPresetId, MessageId,
-    ModelRouteId, content::Sha256Digest,
+    CapabilityKey, CharacterRuntimeProfile, ConversationBranchId, ConversationId,
+    GenerationPresetId, MessageId, ModelRouteId, content::Sha256Digest,
 };
 use uuid::Uuid;
+
+mod compatibility_validation;
 
 macro_rules! string_id {
     ($($name:ident),+ $(,)?) => {$(
@@ -332,11 +334,30 @@ pub enum PlacementZone {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum HistorySelector {
     All,
-    BeforeRecentTurns { recent_turns: u32 },
-    RecentTurns { count: u32 },
-    ExcludingLatestUser { count: u32 },
-    MessageRange { start: MessageId, end: MessageId },
-    SinceSummary { summary_id: MemoryRecordId },
+    BeforeRecentTurns {
+        recent_turns: u32,
+    },
+    RecentTurns {
+        count: u32,
+    },
+    ExcludingLatestUser {
+        count: u32,
+    },
+    /// Half-open message offsets used by imported prompt formats. Negative
+    /// values are resolved from the end of the current branch snapshot and a
+    /// missing end means the current end. This remains deterministic because
+    /// the resolver applies it only after stable branch/message ordering.
+    RelativeMessageRange {
+        start: i32,
+        end: Option<i32>,
+    },
+    MessageRange {
+        start: MessageId,
+        end: MessageId,
+    },
+    SinceSummary {
+        summary_id: MemoryRecordId,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -624,6 +645,12 @@ pub struct MemoryProfile {
     pub importance_weight: f32,
     pub preserve_invalidated_records: bool,
     pub summary_schema: SummarySchemaId,
+    /// Optional imported/user-authored wrapper for the already-inspected
+    /// memory source. Only literal text and one `memory_source` slot are
+    /// accepted, so this can customize the auxiliary user input without
+    /// replacing Core's trusted summary system instruction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary_template: Option<SafeTemplate>,
     pub provenance: Provenance,
 }
 
@@ -1051,6 +1078,7 @@ pub enum ContentCapability {
     Variables,
     Transforms,
     DeclarativeInteractions,
+    PortableRuntime,
     ImageAssets,
     AudioAssets,
     VideoAssets,
@@ -1083,6 +1111,11 @@ pub struct ContentModule {
     pub transform_set_ids: Vec<TransformSetId>,
     pub interaction_rule_set_ids: Vec<InteractionRuleSetId>,
     pub asset_ids: Vec<AssetId>,
+    /// Portable scripts, display transforms, and controls preserved for an
+    /// explicitly approved module binding. Host authority is granted again by
+    /// the renderer against the exact effective profile hash.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub portable_runtime: Option<CharacterRuntimeProfile>,
     /// Author intent for selected declarative transform/interaction
     /// components. This is inert until a full-context module plan explicitly
     /// approves the corresponding runtime overlay.
@@ -3568,58 +3601,6 @@ fn validate_activation_rule(
     }
 }
 
-impl ValidateOrchestration for MemoryProfile {
-    fn validate(&self) -> Result<(), OrchestrationValidationError> {
-        validate_id("id", self.id.as_str())?;
-        validate_text("name", &self.name, 1, MAX_NAME_CHARS)?;
-        validate_id("summary_task", self.summary_task.as_str())?;
-        validate_id("summary_schema", self.summary_schema.as_str())?;
-        if !self
-            .summary_schema
-            .as_str()
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-' | b':'))
-        {
-            return Err(OrchestrationValidationError::new(
-                "summary_schema",
-                "must contain only canonical ASCII identifier characters",
-            ));
-        }
-        if let Some(embedding_task) = &self.embedding_task {
-            validate_id("embedding_task", embedding_task.as_str())?;
-        }
-        let retrieval_weights = [
-            self.recency_weight,
-            self.similarity_weight,
-            self.importance_weight,
-        ];
-        if self.schema_version == 0
-            || self.turns_per_summary == 0
-            || self.turns_per_summary > 10_000
-            || self.retrieval_count == 0
-            || self.retrieval_count > 10_000
-            || self.recent_raw_budget.max_tokens > 10_000_000
-            || self.episodic_budget.max_tokens > 10_000_000
-            || self.semantic_budget.max_tokens > 10_000_000
-            || retrieval_weights
-                .iter()
-                .any(|weight| !weight.is_finite() || *weight < 0.0)
-        {
-            return Err(OrchestrationValidationError::new(
-                "memory_profile",
-                "schema, counts, and finite non-negative weights are required",
-            ));
-        }
-        if !retrieval_weights.iter().any(|weight| *weight > 0.0) {
-            return Err(OrchestrationValidationError::new(
-                "retrieval_weights",
-                "at least one retrieval weight must be positive",
-            ));
-        }
-        validate_provenance(&self.provenance, "provenance")
-    }
-}
-
 impl ValidateOrchestration for InteractionRuleSet {
     fn validate(&self) -> Result<(), OrchestrationValidationError> {
         validate_id("id", self.id.as_str())?;
@@ -3784,77 +3765,6 @@ fn validate_interaction_proposal(
             format!("{path}.decided_at_epoch_seconds"),
             "approved and rejected proposals require a timestamp within their valid lifetime",
         )),
-    }
-}
-
-impl ValidateOrchestration for ContentModule {
-    fn validate(&self) -> Result<(), OrchestrationValidationError> {
-        validate_id("id", self.id.as_str())?;
-        validate_text("name", &self.name, 1, MAX_NAME_CHARS)?;
-        validate_text("version", &self.version, 1, MAX_IDENTIFIER_CHARS)?;
-        if self.schema_version == 0 {
-            return Err(OrchestrationValidationError::new(
-                "schema_version",
-                "must be positive",
-            ));
-        }
-        let component_count = self.prompt_fragments.len()
-            + self.knowledge_book_ids.len()
-            + self.control_specs.len()
-            + self.transform_set_ids.len()
-            + self.interaction_rule_set_ids.len()
-            + self.asset_ids.len();
-        if component_count > MAX_MODULE_COMPONENTS {
-            return Err(OrchestrationValidationError::new(
-                "components",
-                format!("must contain at most {MAX_MODULE_COMPONENTS} components"),
-            ));
-        }
-        validate_text(
-            "metadata.license",
-            &self.metadata.license,
-            1,
-            MAX_NAME_CHARS,
-        )?;
-        validate_text(
-            "metadata.description",
-            &self.metadata.description,
-            0,
-            16_384,
-        )?;
-        validate_provenance(&self.metadata.provenance, "metadata.provenance")?;
-        let mut block_ids = Vec::with_capacity(self.prompt_fragments.len());
-        for (index, block) in self.prompt_fragments.iter().enumerate() {
-            validate_prompt_block(block, &format!("prompt_fragments[{index}]"))?;
-            if block.kind == PromptBlockKind::LatestUserTurn
-                || block.placement_zone == PlacementZone::ApplicationPolicy
-            {
-                return Err(OrchestrationValidationError::new(
-                    format!("prompt_fragments[{index}]"),
-                    "modules cannot replace fixed application or latest-user blocks",
-                ));
-            }
-            block_ids.push(&block.id);
-        }
-        block_ids.sort();
-        if block_ids.windows(2).any(|pair| pair[0] == pair[1]) {
-            return Err(OrchestrationValidationError::new(
-                "prompt_fragments",
-                "block identifiers must be unique",
-            ));
-        }
-        for (index, control) in self.control_specs.iter().enumerate() {
-            validate_control(control, &format!("control_specs[{index}]"))?;
-        }
-        let mut capabilities = self.required_capabilities.clone();
-        capabilities.sort();
-        if capabilities.windows(2).any(|pair| pair[0] == pair[1]) {
-            return Err(OrchestrationValidationError::new(
-                "required_capabilities",
-                "capabilities must be unique",
-            ));
-        }
-        Ok(())
     }
 }
 
@@ -4478,7 +4388,7 @@ mod tests {
         KnowledgeEntryId, KnowledgePlacement, MemoryProfile, MemoryProfileId, MergePolicy,
         ModelRouteId, OverflowPolicy, Persona, PersonaId, PlacementZone, PromptBlock,
         PromptBlockId, PromptBlockKind, Provenance, RateLimit, RoleHint, SafeTemplate, SourceKind,
-        SummarySchemaId, TaskProfile, TaskProfileId, TokenBudget, TokenPolicy,
+        SummarySchemaId, TaskProfile, TaskProfileId, TemplatePart, TokenBudget, TokenPolicy,
         ValidateOrchestration, VariableBinding, VariableId, VariableMap, VariableRef,
         VariableScope, VariableValue, knowledge_parent_edge_visits,
         reset_knowledge_parent_edge_visits, validate_prompt_block,
@@ -4547,6 +4457,7 @@ mod tests {
             importance_weight: 0.0,
             preserve_invalidated_records: false,
             summary_schema: SummarySchemaId::from("memory-summary-schema"),
+            summary_template: None,
             provenance: Provenance {
                 source_kind: SourceKind::UserCreated,
                 source_id: None,
@@ -4572,6 +4483,34 @@ mod tests {
             .validate()
             .expect_err("an all-zero retrieval policy must be rejected");
         assert_eq!(error.path, "retrieval_weights");
+    }
+
+    #[test]
+    fn memory_summary_template_accepts_only_one_memory_source_slot() {
+        let mut profile = valid_memory_profile();
+        profile.summary_template = Some(SafeTemplate {
+            parts: vec![
+                TemplatePart::Text {
+                    value: "Summarize:\n".to_owned(),
+                },
+                TemplatePart::Slot {
+                    name: "memory_source".to_owned(),
+                },
+            ],
+            max_output_chars: 1_024,
+        });
+        profile.validate().expect("bounded summary template");
+
+        let Some(template) = profile.summary_template.as_mut() else {
+            panic!("summary template");
+        };
+        template.parts.push(TemplatePart::Slot {
+            name: "memory_source".to_owned(),
+        });
+        let error = profile
+            .validate()
+            .expect_err("duplicated memory source must be rejected");
+        assert_eq!(error.path, "summary_template");
     }
 
     #[test]

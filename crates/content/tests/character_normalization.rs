@@ -50,6 +50,8 @@ fn normalizes_all_public_character_fields_and_indexes_unknown_extensions() {
                     {"type":"icon","uri":"https://invalid.example/avatar.png","name":"avatar"}
                 ],
                 "creator":"LorePia synthetic fixture",
+                "creator_notes":"A note, not a prompt.",
+                "tags":["library","guide"],
                 "z_unknown":{"safe":true},
                 "extensions":{
                     "script":"alert(1)",
@@ -68,6 +70,9 @@ fn normalizes_all_public_character_fields_and_indexes_unknown_extensions() {
 
     assert_eq!(first.plan_hash, second.plan_hash);
     assert_eq!(content.personality, "Warm and precise");
+    assert_eq!(content.creator, "LorePia synthetic fixture");
+    assert_eq!(content.creator_notes, "A note, not a prompt.");
+    assert_eq!(content.tags, ["library", "guide"]);
     assert_eq!(content.scenario, "A local library");
     assert_eq!(content.first_message, "Welcome.");
     assert_eq!(content.example_dialogs, ["User: Hello\nSegu: Welcome."]);
@@ -90,10 +95,7 @@ fn normalizes_all_public_character_fields_and_indexes_unknown_extensions() {
             .as_str(),
         first.inspection.source_sha256
     );
-    assert_eq!(
-        first.inspection.unsupported_optional_fields,
-        ["creator", "z_unknown"]
-    );
+    assert_eq!(first.inspection.unsupported_optional_fields, ["z_unknown"]);
 
     let quarantines = content
         .unknown_extensions
@@ -117,6 +119,34 @@ fn normalizes_all_public_character_fields_and_indexes_unknown_extensions() {
             .any(|value| value.kind == ExtensionQuarantineKind::ExternalUrl)
     );
     assert!(quarantines.iter().all(|value| !value.active));
+}
+
+#[test]
+fn parses_imported_line_based_default_variables() {
+    let fixture = json_fixture(
+        br#"{
+            "spec":"chara_card_v3",
+            "data":{
+                "name":"Portable variables",
+                "extensions":{
+                    "risuai":{
+                        "defaultVariables":"lang=1\nstatus_type=0\ncharacter with space=enabled=value"
+                    }
+                }
+            }
+        }"#,
+    );
+
+    let plan = inspect_character_file(fixture.path(), ImportLimits::default()).expect("inspection");
+    let variables = &plan.character_content.runtime.initial_variables;
+
+    assert_eq!(variables.get("lang").map(String::as_str), Some("1"));
+    assert_eq!(variables.get("status_type").map(String::as_str), Some("0"));
+    assert_eq!(
+        variables.get("character with space").map(String::as_str),
+        Some("enabled=value")
+    );
+    assert!(!variables.contains_key("source"));
 }
 
 #[test]

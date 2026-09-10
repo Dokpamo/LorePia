@@ -5,11 +5,13 @@
     import { tr } from '../../lib/i18n';
     import type { LorepiaAppState, LorepiaAppController } from '../../app/app-controller';
     import type { CharacterDto, ConversationDto, LorepiaClient } from '../../lib/ipc/contracts';
+    import CharacterAvatar from '../assets/CharacterAvatar.svelte';
+    import { safeConversationPreview } from './conversation-preview';
 
     interface Props {
         state: LorepiaAppState;
         controller: LorepiaAppController;
-        client?: Pick<LorepiaClient, 'listConversations'>;
+        client?: Partial<Pick<LorepiaClient, 'listConversations' | 'resolveAssetDelivery'>>;
         onOpenChat: () => void;
         rootView?: boolean;
     }
@@ -160,16 +162,11 @@
     }
 
     function conversationPreview(conversation: ConversationDto): string {
-        if (
-            appState.selected_conversation?.id === conversation.id &&
-            appState.messages.phase === 'ready'
-        ) {
-            const lastMessage = appState.messages.items.at(-1)?.content.trim();
-            if (lastMessage) return lastMessage.replace(/\s+/g, ' ');
-        }
-        return $tr('conversation.list.preview', {
-            name: characterFor(conversation)?.name ?? '',
-        });
+        return safeConversationPreview(
+            conversation,
+            appState,
+            $tr('conversation.list.preview', { name: characterFor(conversation)?.name ?? '' }),
+        );
     }
 </script>
 
@@ -363,9 +360,9 @@
                         onclick={() => void selectConversation(conversation)}
                     >
                         {#if rootView}
-                            <span class="avatar" aria-hidden="true"
-                                >{conversationCharacter?.name.slice(0, 1) ?? '?'}</span
-                            >
+                            <span class="avatar">
+                                <CharacterAvatar {client} character={conversationCharacter} />
+                            </span>
                             <span class="entity-copy conversation-copy">
                                 <span class="conversation-line">
                                     <strong

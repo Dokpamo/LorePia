@@ -26,7 +26,7 @@ pub(super) fn snapshot_import_source(
                 source_metadata.len(),
                 max_source_bytes
             ),
-            false,
+            true,
         ));
     }
 
@@ -75,7 +75,7 @@ pub(super) fn snapshot_import_source(
                 return Err(CoreError::new(
                     CoreErrorCode::UnsupportedContent,
                     format!("source exceeds the {max_source_bytes} byte import limit"),
-                    false,
+                    true,
                 ));
             }
             destination

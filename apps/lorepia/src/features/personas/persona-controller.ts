@@ -209,24 +209,31 @@ export class PersonaController {
     }
 
     async create(name: string, description: string): Promise<boolean> {
-        if (!this.available || !hasPersonaApi(this.client)) return false;
+        return (await this.createWithResult(name, description)) !== null;
+    }
+
+    async createWithResult(name: string, description: string): Promise<PersonaDto | null> {
+        if (!this.available || !hasPersonaApi(this.client)) return null;
         const epoch = ++this.operationEpoch;
         this.update((state) => ({ ...state, phase: 'saving', error: null }));
         try {
             const created = await this.client.createPersona({ name, description });
             const refreshed = await this.loadFirstPage();
-            if (epoch !== this.operationEpoch) return false;
+            if (epoch !== this.operationEpoch) return null;
             this.update((state) => ({
                 ...state,
                 phase: 'ready',
-                personas: refreshed.items,
+                personas: refreshed.items.some((item) => item.value.id === created.value.id)
+                    ? refreshed.items
+                    : [...refreshed.items, created],
                 next_cursor: refreshed.next_cursor,
                 error: null,
                 announcement: t('persona.notice.created', { name: created.value.name }),
             }));
-            return true;
+            return created;
         } catch (error: unknown) {
-            return this.markError(epoch, error);
+            this.markError(epoch, error);
+            return null;
         }
     }
 

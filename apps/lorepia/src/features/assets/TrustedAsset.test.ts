@@ -28,6 +28,7 @@ beforeEach(() => {
 
 afterEach(() => {
     cleanup();
+    vi.useRealTimers();
     vi.restoreAllMocks();
 });
 
@@ -250,13 +251,48 @@ describe('TrustedAsset', () => {
         expect(document.querySelector('img, audio, video')).toBeNull();
     });
 
-    it('removes a media element after native loading fails', async () => {
+    it('retries a transient native load failure with the same approved URL', async () => {
+        renderAsset(descriptor('image'));
+        const original = await screen.findByRole('img');
+        vi.useFakeTimers();
+        await fireEvent.error(original);
+        expect(screen.queryByRole('img')).toBeNull();
+        expect(screen.queryByRole('alert')).toBeNull();
+        await vi.advanceTimersByTimeAsync(1000);
+        const retried = screen.getByRole('img');
+        expect(retried).not.toBe(original);
+        expect(retried).toHaveAttribute('src', WINDOWS_ASSET_URL);
+        await fireEvent.load(retried);
+        expect(document.querySelector('.trusted-asset')).toHaveAttribute(
+            'data-asset-phase',
+            'ready',
+        );
+    });
+
+    it('stops after two retries when native media loading keeps failing', async () => {
         renderAsset(descriptor('video'));
-        const video = await screen.findByLabelText('<img src=x onerror=alert(1)>');
-
+        let video = await screen.findByLabelText('<img src=x onerror=alert(1)>');
+        vi.useFakeTimers();
+        for (const delay of [1000, 2000]) {
+            await fireEvent.error(video);
+            expect(screen.queryByRole('alert')).toBeNull();
+            await vi.advanceTimersByTimeAsync(delay);
+            video = screen.getByLabelText('<img src=x onerror=alert(1)>');
+        }
         await fireEvent.error(video);
-
         expect(await screen.findByRole('alert')).toHaveTextContent('미디어를 표시하지 못했습니다.');
         expect(document.querySelector('video')).toBeNull();
+        expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('cancels a pending media retry when the component is destroyed', async () => {
+        renderAsset(descriptor('image'));
+        const image = await screen.findByRole('img');
+        vi.useFakeTimers();
+        await fireEvent.error(image);
+        cleanup();
+        expect(vi.getTimerCount()).toBe(0);
+        await vi.advanceTimersByTimeAsync(3000);
+        expect(document.querySelector('img')).toBeNull();
     });
 });

@@ -183,6 +183,42 @@ describe('ConversationPane greeting selector', () => {
         );
     });
 
+    it('does not expose portable template source in the conversation preview', () => {
+        const state = readyState();
+        state.selected_conversation = conversation;
+        state.messages = {
+            phase: 'ready',
+            error: null,
+            items: [
+                {
+                    id: 'message-template',
+                    conversation_id: conversation.id,
+                    parent_id: null,
+                    role: 'assistant',
+                    content: '{{#if_pure 1}}Hidden template source{{/if}}',
+                    status: 'complete',
+                    generation_id: null,
+                    created_at: '2026-08-03T00:00:00Z',
+                },
+            ],
+        };
+        const controller = {
+            selectConversation: vi.fn(() => Promise.resolve(false)),
+            openNewConversation: vi.fn(() => Promise.resolve(false)),
+        } as unknown as LorepiaAppController;
+
+        const rendered = render(ConversationPane, {
+            state,
+            controller,
+            onOpenChat: vi.fn(),
+            rootView: true,
+        });
+
+        const preview = rendered.container.querySelector('.conversation-preview');
+        expect(preview).not.toHaveTextContent('{{');
+        expect(preview).not.toHaveTextContent('Hidden template source');
+    });
+
     it('finishes the animated search collapse before restoring the header controls', async () => {
         vi.useFakeTimers();
         const getAnimationsDescriptor = Object.getOwnPropertyDescriptor(

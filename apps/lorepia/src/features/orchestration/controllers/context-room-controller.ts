@@ -65,6 +65,8 @@ export class ContextRoomController {
             editable_task_profiles: [],
             editable_task_profiles_loading: false,
             editable_task_profiles_error: null,
+            creator_document_cursors: {},
+            memory_page_loading: false,
             editable_memory_profiles: [],
             editable_knowledge_books: [],
             editable_transform_sets: [],

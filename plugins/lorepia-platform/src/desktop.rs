@@ -2170,7 +2170,10 @@ impl<R: Runtime> DesktopPlatform<R> {
     }
 
     #[cfg(any(target_os = "macos", windows))]
-    pub(crate) async fn pick_import(&self) -> PlatformResult<Option<StagedImport>> {
+    pub(crate) async fn pick_import(
+        &self,
+        maximum_bytes: u64,
+    ) -> PlatformResult<Option<StagedImport>> {
         #[cfg(target_os = "macos")]
         let selection = macos::pick_file(&self.app).await?;
         #[cfg(windows)]
@@ -2179,11 +2182,15 @@ impl<R: Runtime> DesktopPlatform<R> {
         let Some(selection) = selection else {
             return Ok(None);
         };
-        stage_selected_file(selection, self.staging_root.clone()).await
+        crate::staging::stage_selected_file(selection, self.staging_root.clone(), maximum_bytes)
+            .await
     }
 
     #[cfg(not(any(target_os = "macos", windows)))]
-    pub(crate) fn pick_import(&self) -> std::future::Ready<PlatformResult<Option<StagedImport>>> {
+    pub(crate) fn pick_import(
+        &self,
+        _maximum_bytes: u64,
+    ) -> std::future::Ready<PlatformResult<Option<StagedImport>>> {
         std::future::ready(self.unsupported())
     }
 
@@ -2771,18 +2778,6 @@ fn windows_policy_from_local_app_data(
 #[cfg(not(any(target_os = "macos", windows)))]
 fn unsupported_platform<T>() -> PlatformResult<T> {
     Err(PlatformError::new(PlatformErrorCode::UnsupportedPlatform))
-}
-
-#[cfg(any(target_os = "macos", windows))]
-async fn stage_selected_file(
-    selection: PathBuf,
-    staging_root: PathBuf,
-) -> PlatformResult<Option<StagedImport>> {
-    tokio::task::spawn_blocking(move || {
-        crate::staging::stage_file(&selection, &staging_root, 256 * 1024 * 1024).map(Some)
-    })
-    .await
-    .map_err(|_| PlatformError::new(PlatformErrorCode::Internal))?
 }
 
 #[cfg(test)]

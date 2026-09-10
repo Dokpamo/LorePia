@@ -1,0 +1,21 @@
+/* SEED List: one value alignment, shared gutters and full-row press targets. */
+.seed-app .ui-overlay:is([data-kind='new-chat'], [data-kind='persona-create']) {
+    --start-width: 640px;
+}
+.seed-app .ui-overlay:is([data-kind='new-chat'], [data-kind='persona-create']) > .ui-page-header,
+.seed-app .ui-overlay:is([data-kind='new-chat'], [data-kind='persona-create']) > .ui-overlay-body {
+    width: min(100%, var(--start-width));
+    align-self: center;
+}
+.seed-app .ui-overlay:is([data-kind='new-chat'], [data-kind='persona-create']) > .ui-overlay-body {
+    padding: var(--ui-space-3) 0 var(--ui-space-6);
+}
+.seed-app .ui-overlay:is([data-kind='new-chat'], [data-kind='persona-create']) .ui-edit-form {
+    gap: var(--ui-space-3);
+}
+.seed-app
+    .ui-overlay:is([data-kind='new-chat'], [data-kind='persona-create'])
+    .ui-edit-form
+    > .ui-field-error {
+    margin: 0 var(--ui-inset);
+}

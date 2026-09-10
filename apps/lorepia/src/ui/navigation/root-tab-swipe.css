@@ -1,0 +1,25 @@
+.seed-roots > .seed-root {
+    transform: translate3d(
+        calc((var(--seed-tab-index) - var(--seed-active-tab)) * 100% + var(--seed-tab-drag, 0px)),
+        0,
+        0
+    );
+    background: var(--ui-paper);
+}
+.seed-roots[data-root-swipe-enabled='true'] {
+    touch-action: pan-y pinch-zoom;
+}
+.seed-roots[data-root-dragging='true'] > .seed-root {
+    user-select: none;
+    -webkit-user-select: none;
+    will-change: transform;
+}
+.seed-roots[data-root-settling='true'] > .seed-root {
+    transition: transform 300ms cubic-bezier(0, 0, 0.15, 1);
+    will-change: transform;
+}
+@media (prefers-reduced-motion: reduce) {
+    .seed-roots[data-root-settling='true'] > .seed-root {
+        transition: none;
+    }
+}

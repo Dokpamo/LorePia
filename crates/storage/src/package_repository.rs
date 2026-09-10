@@ -26,8 +26,9 @@ use lorepia_domain::{
     Sha256Digest, SourceKind, ValidateOrchestration, VersionedJson,
 };
 use lorepia_orchestration::{
-    ApprovedPackageImportPlan, ModuleImportApprovalEvidence, ModuleImportComponentAuthority,
-    PackageComponentDisposition, PackageComponentKind, PackageReview, SelectiveImportPlan,
+    ApprovedPackageImportPlan, ImportPlanState, ModuleImportApprovalEvidence,
+    ModuleImportComponentAuthority, PackageComponentDisposition, PackageComponentKind,
+    PackageReview, SelectiveImportPlan,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
@@ -43,8 +44,8 @@ use crate::orchestration::{
     append_package_commit_document,
 };
 
-use approval::PackageApprovalPayload;
 pub use approval::package_normalization_evidence_sha256;
+use approval::{CompactPackageApprovalPayload, PackageApprovalPayload};
 use approval_validation::{
     assert_expectation, read_approval_payload, validate_approval_replay, validate_audit_replay,
     validate_capability_approval_snapshot, validate_document_normalization_evidence,
@@ -108,6 +109,9 @@ const MAX_PACKAGE_JSON_BYTES: usize = 16 * 1024 * 1024;
 const MAX_PACKAGE_JSON_DEPTH: usize = 40;
 const MAX_PACKAGE_JSON_NODES: usize = 200_000;
 const MAX_CAPABILITY_REASON_BYTES: usize = 4 * 1024;
+// Frozen migration 0012 enforces this immutable approval envelope. New
+// approvals store only decisions and reconstruct reviewed descriptors from the
+// separately hashed selection snapshot.
 const MAX_PACKAGE_APPROVAL_BYTES: usize = 256 * 1024;
 const MAX_NORMALIZATION_REASON_BYTES: usize = 512;
 const MAX_COMPLETED_MODULE_AUTHORITIES: usize = 64;

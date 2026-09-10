@@ -3,10 +3,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use chrono::{DateTime, Utc};
 use lorepia_core::{
     AssetDescriptor, Character, CharacterContentV1, CharacterGreetingCatalog,
-    CharacterGreetingKind, CharacterGreetingOption, ContentKind, ImportImagePreview,
-    ImportInspection, ImportWarning,
+    CharacterGreetingKind, CharacterGreetingOption, ContentKind, ImportCommitResult,
+    ImportImagePreview, ImportInspection, ImportWarning, ImportedContentSummary,
 };
 use serde::{Deserialize, Serialize};
+
+use super::greeting_preview::{CharacterGreetingPreviewDto, greeting_previews};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -38,6 +40,7 @@ impl From<Character> for CharacterDto {
 pub struct CharacterRenderAssetDto {
     pub asset_id: String,
     pub aliases: Vec<String>,
+    pub media_type: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -82,6 +85,16 @@ pub struct CharacterRuntimeKnowledgeDto {
 #[serde(deny_unknown_fields)]
 pub struct CharacterRenderProfileDto {
     pub character_id: String,
+    #[serde(default)]
+    pub creator: String,
+    #[serde(default)]
+    pub creator_notes: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub recommended_language: Option<String>,
+    #[serde(default)]
+    pub greeting_previews: Vec<CharacterGreetingPreviewDto>,
     pub character_content_revision_id: Option<String>,
     pub assets: Vec<CharacterRenderAssetDto>,
     pub background_markup: String,
@@ -103,6 +116,7 @@ impl CharacterRenderProfileDto {
         content: CharacterContentV1,
     ) -> Self {
         let assets = render_assets(&content);
+        let greeting_previews = greeting_previews(&content);
         let output_transforms = display_transforms(
             &content,
             lorepia_core::PortableTransformPhase::ProviderOutput,
@@ -123,6 +137,11 @@ impl CharacterRenderProfileDto {
         let runtime_script_count = u32::try_from(content.runtime.scripts.len()).unwrap_or(u32::MAX);
         Self {
             character_id,
+            creator: content.creator,
+            creator_notes: content.creator_notes,
+            tags: content.tags,
+            recommended_language: content.recommended_language,
+            greeting_previews,
             character_content_revision_id,
             assets,
             background_markup: content.runtime.background_markup,
@@ -146,6 +165,7 @@ fn render_assets(content: &CharacterContentV1) -> Vec<CharacterRenderAssetDto> {
         .map(|asset| CharacterRenderAssetDto {
             asset_id: asset.id.as_str().to_owned(),
             aliases: character_asset_aliases(asset),
+            media_type: asset.media_type.clone(),
         })
         .collect()
 }
@@ -345,6 +365,12 @@ pub enum ContentKindDto {
     CharacterCardV3,
     CharacterCardPng,
     CharxPackage,
+    #[serde(alias = "risu_module")]
+    ImportedModule,
+    #[serde(alias = "risu_preset")]
+    ImportedPreset,
+    #[serde(alias = "risu_memory_preset")]
+    ImportedMemoryPreset,
 }
 
 impl From<ContentKind> for ContentKindDto {
@@ -353,6 +379,51 @@ impl From<ContentKind> for ContentKindDto {
             ContentKind::CharacterCardV3 => Self::CharacterCardV3,
             ContentKind::CharacterCardPng => Self::CharacterCardPng,
             ContentKind::CharxPackage => Self::CharxPackage,
+            ContentKind::RisuModule => Self::ImportedModule,
+            ContentKind::RisuPreset => Self::ImportedPreset,
+            ContentKind::RisuMemoryPreset => Self::ImportedMemoryPreset,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImportedContentSummaryDto {
+    pub kind: ContentKindDto,
+    pub import_id: String,
+    pub display_name: String,
+    pub document_count: u32,
+    pub asset_count: u32,
+}
+
+impl From<ImportedContentSummary> for ImportedContentSummaryDto {
+    fn from(value: ImportedContentSummary) -> Self {
+        Self {
+            kind: value.kind.into(),
+            import_id: value.import_id,
+            display_name: value.display_name,
+            document_count: value.document_count,
+            asset_count: value.asset_count,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ImportCommitResultDto {
+    Character { character: CharacterDto },
+    Content { content: ImportedContentSummaryDto },
+}
+
+impl From<ImportCommitResult> for ImportCommitResultDto {
+    fn from(value: ImportCommitResult) -> Self {
+        match value {
+            ImportCommitResult::Character(character) => Self::Character {
+                character: character.into(),
+            },
+            ImportCommitResult::Content(content) => Self::Content {
+                content: content.into(),
+            },
         }
     }
 }

@@ -27,6 +27,7 @@ pub enum PackageCapability {
     Variables,
     Transforms,
     DeclarativeInteractions,
+    PortableRuntime,
     ImageAssets,
     AudioAssets,
     VideoAssets,
@@ -43,12 +44,13 @@ pub enum PackageCapability {
 }
 
 impl PackageCapability {
-    pub(super) const ALL: [Self; 18] = [
+    pub(super) const ALL: [Self; 19] = [
         Self::PromptFragments,
         Self::Knowledge,
         Self::Variables,
         Self::Transforms,
         Self::DeclarativeInteractions,
+        Self::PortableRuntime,
         Self::ImageAssets,
         Self::AudioAssets,
         Self::VideoAssets,
@@ -71,6 +73,7 @@ impl PackageCapability {
             Self::Variables => "variables",
             Self::Transforms => "transforms",
             Self::DeclarativeInteractions => "declarative_interactions",
+            Self::PortableRuntime => "portable_runtime",
             Self::ImageAssets => "image_assets",
             Self::AudioAssets => "audio_assets",
             Self::VideoAssets => "video_assets",
@@ -103,7 +106,7 @@ impl PackageCapability {
 
     pub(super) const fn required_support(self) -> PackageCapabilitySupport {
         match self {
-            Self::Transforms | Self::DeclarativeInteractions => {
+            Self::Transforms | Self::DeclarativeInteractions | Self::PortableRuntime => {
                 PackageCapabilitySupport::ApprovalRequired
             }
             Self::HighRiskAssets
@@ -134,6 +137,7 @@ impl From<ContentCapability> for PackageCapability {
             ContentCapability::Variables => Self::Variables,
             ContentCapability::Transforms => Self::Transforms,
             ContentCapability::DeclarativeInteractions => Self::DeclarativeInteractions,
+            ContentCapability::PortableRuntime => Self::PortableRuntime,
             ContentCapability::ImageAssets => Self::ImageAssets,
             ContentCapability::AudioAssets => Self::AudioAssets,
             ContentCapability::VideoAssets => Self::VideoAssets,

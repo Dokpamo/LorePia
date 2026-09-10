@@ -1,4 +1,8 @@
 import type {
+    CharacterGreetingDetailDto,
+    CharacterGreetingDetailInput,
+} from '../contracts/character';
+import type {
     ClearConversationPersonaInput,
     ConversationPersonaSelectionDto,
     CreatePersonaInput,
@@ -19,9 +23,11 @@ import type {
     ResolveAssetDeliveryInput,
     MemorySupervisorStatusDto,
     BootstrapDto,
+    StorageOverviewDto,
     CharacterDto,
     CharacterGreetingCatalogDto,
     CharacterRenderProfileDto,
+    CharacterRenderProfileScopeInput,
 } from '../contracts';
 
 import { isMemorySupervisorStatus } from '../client-payload-guards';
@@ -31,6 +37,9 @@ import { LOREPIA_COMMANDS, LOREPIA_EVENTS } from '../commands';
 import { ClientTransportBase } from './transport';
 
 export abstract class LibraryClient extends ClientTransportBase {
+    getStorageOverview(): Promise<StorageOverviewDto> {
+        return this.call(LOREPIA_COMMANDS.getStorageOverview);
+    }
     bootstrapSnapshot(): Promise<BootstrapDto> {
         return this.call(LOREPIA_COMMANDS.bootstrap);
     }
@@ -63,9 +72,18 @@ export abstract class LibraryClient extends ClientTransportBase {
         });
     }
 
-    getCharacterRenderProfile(characterId: string): Promise<CharacterRenderProfileDto> {
+    getCharacterGreetingDetail(
+        input: CharacterGreetingDetailInput,
+    ): Promise<CharacterGreetingDetailDto> {
+        return this.call(LOREPIA_COMMANDS.getCharacterGreetingDetail, { request: input });
+    }
+
+    getCharacterRenderProfile(
+        characterId: string,
+        scope?: CharacterRenderProfileScopeInput,
+    ): Promise<CharacterRenderProfileDto> {
         return this.call(LOREPIA_COMMANDS.getCharacterRenderProfile, {
-            request: { character_id: characterId },
+            request: { character_id: characterId, ...scope },
         });
     }
 

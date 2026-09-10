@@ -1,0 +1,166 @@
+.ui-preview .ui-edit-field-group {
+    margin-bottom: var(--ui-space-3);
+}
+.ui-preview .ui-edit-field {
+    display: block;
+    width: 100%;
+    border: 0;
+    border-radius: var(--ui-radius);
+    background: transparent;
+    padding: 0;
+    text-align: left;
+}
+.ui-preview .ui-edit-field > .ui-press-visual {
+    display: flex;
+    min-height: var(--ui-row);
+    align-items: center;
+    gap: var(--ui-space-4);
+    background: var(--ui-paper);
+    padding: var(--ui-space-4);
+}
+.ui-preview .ui-field-requirement {
+    margin-inline-start: 8px;
+    font-size: var(--ui-type-caption);
+    font-weight: 600;
+}
+.ui-preview .ui-field-error {
+    color: var(--ui-critical);
+    font-size: var(--ui-type-secondary);
+    font-weight: 500;
+    line-height: 1.5;
+    text-align: left;
+}
+.ui-preview .ui-edit-field-group > .ui-field-error {
+    margin: 8px 16px 0;
+}
+.ui-preview .ui-editor-footer > .ui-field-error {
+    flex: 1;
+}
+.ui-preview .ui-edit-field-copy {
+    min-width: 0;
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 8px;
+}
+.ui-preview .ui-edit-field-copy > span {
+    color: var(--ui-muted);
+    font-size: var(--ui-type-secondary);
+}
+.ui-preview .ui-edit-field-copy > strong {
+    font-weight: 500;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    overflow: hidden;
+}
+.ui-preview .ui-edit-field > .ui-press-visual > svg {
+    color: var(--ui-muted);
+    width: 20px;
+    height: 20px;
+    flex-basis: 20px;
+}
+.ui-preview .ui-field-empty {
+    color: var(--ui-hint);
+}
+.ui-preview .ui-editor-layer {
+    position: absolute;
+    inset: 0;
+    z-index: 30;
+    pointer-events: none;
+}
+.ui-preview .ui-text-editor {
+    pointer-events: auto;
+    position: absolute;
+    inset: 0;
+    background: var(--ui-paper);
+    display: flex;
+    flex-direction: column;
+    touch-action: pan-y pinch-zoom;
+}
+.ui-preview .ui-editor-layer.ui-choice-layer {
+    z-index: 30;
+    pointer-events: auto;
+}
+.ui-preview .ui-text-editor.ui-choice-sheet {
+    position: relative;
+    inset: auto;
+}
+.ui-preview .ui-text-editor.ui-choice-sheet .ui-editor-text-region {
+    padding: 12px 8px;
+}
+.ui-preview .ui-text-editor.ui-choice-sheet .ui-editor-footer {
+    padding: 4px 8px;
+}
+.ui-preview :is(.ui-text-editor, .ui-overlay, .ui-rail-organizer) {
+    transform: translate3d(var(--ui-back-offset, 0px), 0, 0);
+}
+.ui-preview [data-back-dragging='true'] {
+    user-select: none;
+    -webkit-user-select: none;
+}
+.ui-preview:has([data-back-dragging='true'], [data-back-settling='true'])
+    [data-ui-editor-origin='true'] {
+    opacity: 1;
+}
+.ui-preview .ui-text-editor .ui-title-group strong {
+    font-size: var(--ui-type-nav);
+}
+.ui-preview .ui-editor-text-region {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    padding: var(--ui-space-6) max(var(--ui-space-6), calc((100% - 760px) / 2)) var(--ui-space-4);
+}
+.ui-preview .ui-editor-text-region textarea {
+    flex: 1;
+    min-width: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    resize: none;
+    border-radius: 0;
+    background: transparent;
+    color: var(--ui-ink);
+    font-size: var(--ui-type-input);
+    line-height: 1.7;
+    padding: 0;
+    outline: none;
+    overscroll-behavior: contain;
+}
+.ui-preview .ui-editor-text-region textarea::placeholder {
+    color: var(--ui-hint);
+}
+.ui-preview .ui-editor-footer {
+    min-height: 32px;
+    flex-shrink: 0;
+    color: var(--ui-muted);
+    font-size: var(--ui-type-caption);
+    padding: 4px 24px max(12px, env(safe-area-inset-bottom));
+    text-align: right;
+}
+@media (pointer: coarse) {
+    .ui-preview .ui-editor-key-hint {
+        display: none;
+    }
+}
+.ui-preview .ui-overlay {
+    touch-action: pan-y pinch-zoom;
+}
+
+.ui-preview .ui-overlay-layer,
+.ui-preview .ui-rail-organizer-layer {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    pointer-events: none;
+}
+.ui-preview .ui-rail-organizer-layer {
+    z-index: 8;
+}
+.ui-preview .ui-overlay,
+.ui-preview .ui-rail-organizer {
+    pointer-events: auto;
+}

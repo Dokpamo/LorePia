@@ -54,7 +54,7 @@
         />
     </div>
 
-    {#if runtime.profile !== null && (runtime.profile.runtime_scripts.length > 0 || runtime.profile.output_transforms.length > 0 || runtime.profile.display_transforms.length > 0 || runtime.profile.background_markup.trim().length > 0)}
+    {#if runtime.profile !== null && (runtime.requiresRuntimeWorker || runtime.profile.output_transforms.length > 0 || runtime.profile.display_transforms.length > 0 || runtime.profile.background_markup.trim().length > 0)}
         <PortableRuntimeControls
             phase={runtime.phase}
             grant={runtime.activeGrant}

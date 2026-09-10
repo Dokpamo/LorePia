@@ -103,3 +103,11 @@ reachability의 child-module extraction은 공개 계약이 같으면 기준선�
 
 따라서 기준선은 완전한 ABI 증명이 아니라 review ratchet이다. 항목 추가나 교체는
 허용하지 않고, 실제 공개 surface 제거와 함께 기준선을 줄이는 것만 허용한다.
+
+## 2026-09-08 계약 갱신 정책
+
+ADR 0006 이후 공개 API inventory와 Cargo 선언 manifest는 현재 계약을 명시하는
+검토 자료다. 코드와 함께 명시적으로 갱신할 수 있으며 실제 코드와의 exact-match
+검사는 유지한다. 위 ENF-002의 영구 감소-only 정책은 완료된 리팩터링 campaign의
+기록이다. 새 Stored* Core 재노출, wildcard 예외, 계층/I/O 경계 위반은 여전히
+별도로 거부한다.

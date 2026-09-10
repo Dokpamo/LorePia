@@ -53,8 +53,16 @@ import {
     boundedPortableRuntimeChatContext,
     portableRuntimeChatContextSource,
 } from './portable-runtime-context';
+import {
+    parsePortableRuntimeToggles,
+    type PortableRuntimeToggle,
+} from './portable-runtime-toggles';
 
 export type { PortableRuntimeCapability, PortableRuntimeGrant } from './portable-runtime-protocol';
+export {
+    parsePortableRuntimeToggles,
+    type PortableRuntimeToggle,
+} from './portable-runtime-toggles';
 
 const MAX_RUNTIME_MODEL_PROMPT_CHARS = 64 * 1024;
 const MAX_RUNTIME_EVENT_MS = 30_000;
@@ -80,7 +88,14 @@ export function requiredPortableRuntimeCapabilities(
     profile: CharacterRenderProfileDto,
 ): PortableRuntimeCapability[] {
     if (profile.runtime_capabilities_declared) {
-        return canonicalCapabilities(profile.required_runtime_capabilities);
+        const declared = canonicalCapabilities(profile.required_runtime_capabilities);
+        if (profile.runtime_scripts.length > 0) return declared;
+        return declared.filter(
+            (capability) =>
+                capability === 'chat:read' ||
+                capability === 'profile:read' ||
+                capability === 'ui:write',
+        );
     }
     const capabilities: PortableRuntimeCapability[] = [];
     if (profile.runtime_scripts.length > 0) {
@@ -88,10 +103,14 @@ export function requiredPortableRuntimeCapabilities(
     }
     if (
         profile.background_markup.trim() !== '' ||
+        parsePortableRuntimeToggles(profile.toggle_schema).length > 0 ||
         profile.output_transforms.length > 0 ||
         profile.display_transforms.length > 0
     ) {
-        capabilities.push('chat:read', 'profile:read', 'ui:write');
+        capabilities.push('ui:write');
+    }
+    if (profile.output_transforms.length > 0 || profile.display_transforms.length > 0) {
+        capabilities.push('chat:read', 'profile:read');
     }
     return canonicalCapabilities(capabilities);
 }
@@ -159,13 +178,6 @@ function canonicalCapabilities(
         'elevated',
     ]);
     return [...new Set(capabilities.filter((capability) => allowed.has(capability)))].sort();
-}
-
-export interface PortableRuntimeToggle {
-    key: string;
-    label: string;
-    kind: 'select' | 'toggle' | 'text';
-    choices: string[];
 }
 
 export interface PortableRuntimeOptions {
@@ -470,10 +482,11 @@ export class PortableCharacterRuntime {
                 time: Math.floor(Date.now() / 1_000),
                 virtual: true,
             };
-            let result: PortableRuntimeWorkerValue;
+            let startResult: PortableRuntimeWorkerValue;
+            let inputResult: PortableRuntimeWorkerValue;
             try {
                 await this.refreshActiveLore();
-                const invoked = await this.requestWorker(
+                const started = await this.requestWorker(
                     {
                         type: 'invoke',
                         name: 'onStart',
@@ -482,12 +495,23 @@ export class PortableCharacterRuntime {
                     },
                     workerVersion,
                 );
-                if (invoked.type !== 'invoked') throw protocolResultError();
-                result = invoked.value;
+                if (started.type !== 'invoked') throw protocolResultError();
+                startResult = started.value;
+                const input = await this.requestWorker(
+                    {
+                        type: 'invoke',
+                        name: 'onInput',
+                        values: ['character-runtime'],
+                        context: this.workerContext(),
+                    },
+                    workerVersion,
+                );
+                if (input.type !== 'invoked') throw protocolResultError();
+                inputResult = input.value;
             } finally {
                 this.virtualMessage = null;
             }
-            const startAllowed = result !== false;
+            const startAllowed = startResult !== false && inputResult !== false;
             const shouldSend = this.canSendPreparedInput(startAllowed, prepared);
             await this.refreshDisplayInWorker(workerVersion);
             this.notifyChanged();
@@ -515,16 +539,15 @@ export class PortableCharacterRuntime {
         });
     }
 
-    async handleAction(action: string): Promise<void> {
-        if (action.length === 0 || action.length > 512) return;
+    async handleAction(action: string): Promise<string | null> {
+        if (!/^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,511}$/.test(action)) return null;
         this.assertOpen();
-        await this.runWithEventDeadline(async (workerVersion) => {
+        return await this.runWithEventDeadline(async (workerVersion) => {
             await this.refreshActiveLore();
             const result = await this.requestWorker(
                 {
-                    type: 'invoke',
-                    name: 'onButtonClick',
-                    values: ['character-runtime', action],
+                    type: 'invoke-action',
+                    action,
                     context: this.workerContext(),
                 },
                 workerVersion,
@@ -532,6 +555,7 @@ export class PortableCharacterRuntime {
             if (result.type !== 'invoked') throw protocolResultError();
             await this.refreshDisplayInWorker(workerVersion);
             this.notifyChanged();
+            return result.submittedUserText;
         });
     }
 
@@ -1369,43 +1393,6 @@ export class PortableCharacterRuntime {
     private assertNotClosed(): void {
         if (this.closed) throw new Error(t('chat.runtime.not_ready'));
     }
-}
-
-export function parsePortableRuntimeToggles(schema: string): PortableRuntimeToggle[] {
-    const toggles: PortableRuntimeToggle[] = [];
-    for (const sourceLine of schema.split(/\r?\n/)) {
-        const line = sourceLine.trim();
-        if (line === '' || line.startsWith('=')) continue;
-        const [key = '', label = '', rawKind = '', rawChoices = ''] = line.split('=');
-        const kind = rawKind.trim().toLowerCase();
-        if (
-            key.trim() === '' ||
-            label.trim() === '' ||
-            !['select', 'toggle', 'checkbox', 'text', 'textarea'].includes(kind)
-        ) {
-            continue;
-        }
-        toggles.push({
-            key: key.trim(),
-            label: label.trim(),
-            kind:
-                kind === 'select'
-                    ? 'select'
-                    : kind === 'toggle' || kind === 'checkbox'
-                      ? 'toggle'
-                      : 'text',
-            choices:
-                kind === 'select'
-                    ? rawChoices
-                          .split(',')
-                          .map((choice) => choice.trim())
-                          .filter(Boolean)
-                          .slice(0, 128)
-                    : [],
-        });
-        if (toggles.length >= MAX_RUNTIME_RECORD_KEYS) break;
-    }
-    return toggles;
 }
 
 function runtimePromptMessages(value: unknown): RuntimePromptMessageInput[] {

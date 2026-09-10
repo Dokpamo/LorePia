@@ -1,0 +1,45 @@
+.ui-preview {
+    --ui-scroll-thumb: color-mix(in srgb, var(--ui-muted) 45%, transparent);
+    --ui-scroll-thumb-hover: color-mix(in srgb, var(--ui-muted) 75%, transparent);
+}
+.ui-preview,
+.ui-preview * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--ui-scroll-thumb) transparent;
+}
+.ui-preview ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+.ui-preview ::-webkit-scrollbar-track,
+.ui-preview ::-webkit-scrollbar-corner {
+    background: transparent;
+}
+.ui-preview ::-webkit-scrollbar-thumb {
+    min-height: 32px;
+    border: 2px solid transparent;
+    border-radius: 999px;
+    background: var(--ui-scroll-thumb);
+    background-clip: content-box;
+}
+.ui-preview ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--ui-scroll-thumb-hover);
+}
+@media (max-width: 767px) {
+    .ui-preview,
+    .ui-preview * {
+        scrollbar-width: none !important;
+    }
+    .ui-preview::-webkit-scrollbar,
+    .ui-preview ::-webkit-scrollbar {
+        display: none;
+        width: 0;
+        height: 0;
+    }
+}
+@media (forced-colors: active) {
+    .ui-preview,
+    .ui-preview * {
+        scrollbar-color: auto;
+    }
+}

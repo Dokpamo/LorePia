@@ -73,6 +73,8 @@ export function createAppControllerProviderFixture() {
                     templates: [],
                     connections: [],
                     legacy_profiles: [legacyProfile],
+                    routes: [],
+                    presets: [],
                     settings: modernSettings,
                 }),
             listProviderDiscoveries: () => Promise.resolve([]),

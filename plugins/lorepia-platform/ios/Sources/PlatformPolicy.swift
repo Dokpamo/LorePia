@@ -12,11 +12,21 @@ enum PlatformPolicy {
   static let maximumCredentialWriteBytes = 16 * 1_024
   static let maximumSensitiveCaptureBytes: UInt64 = 1_024 * 1_024
   static let maximumImportBytes: UInt64 = 256 * 1_024 * 1_024
+  static let maximumUserApprovedImportBytes: UInt64 = 16 * 1_024 * 1_024 * 1_024
   static let copyBufferBytes = 64 * 1_024
   static let maximumDisplayNameCharacters = 255
   static let maximumExportNameBytes = 128
   static let ownedStagingPrefix = "lorepia-tauri-"
   static let abandonedStagingAge: TimeInterval = 24 * 60 * 60
+
+  static func validateImportMaximum(_ maximumBytes: UInt64) throws {
+    guard
+      maximumBytes == maximumImportBytes
+        || maximumBytes == maximumUserApprovedImportBytes
+    else {
+      throw PlatformPolicyError.invalidExport
+    }
+  }
 
   static func validateReference(_ reference: String) throws {
     guard

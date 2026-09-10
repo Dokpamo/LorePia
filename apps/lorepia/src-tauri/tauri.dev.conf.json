@@ -9,20 +9,16 @@
         "title": "LorePia Dev",
         "width": 1180,
         "height": 760,
-        "minWidth": 880,
-        "minHeight": 560,
+        "minWidth": 320,
+        "minHeight": 552,
         "center": true,
         "resizable": true,
         "maximizable": true,
         "minimizable": true,
         "closable": true,
         "decorations": true,
-        "titleBarStyle": "Overlay",
-        "hiddenTitle": true,
-        "trafficLightPosition": {
-          "x": 15,
-          "y": 25
-        },
+        "titleBarStyle": "Visible",
+        "hiddenTitle": false,
         "transparent": false,
         "fullscreen": false,
         "visible": true,
@@ -30,7 +26,9 @@
       }
     ],
     "security": {
-      "capabilities": ["main-development"],
+      "capabilities": [
+        "main-development"
+      ],
       "csp": {
         "connect-src": "'self' ipc: http://ipc.localhost http://localhost:5173 ws://localhost:5173"
       }

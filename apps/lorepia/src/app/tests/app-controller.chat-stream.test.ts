@@ -147,6 +147,8 @@ describe('LorepiaAppController stream lifecycle', () => {
                         templates: [],
                         connections: [],
                         legacy_profiles: [retainedProfile],
+                        routes: [],
+                        presets: [],
                         settings: {
                             preserve_partial_generations: true,
                             selected_provider_profile_id: null,

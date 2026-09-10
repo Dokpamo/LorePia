@@ -157,6 +157,41 @@ export function renderPortableMacros(
     return output;
 }
 
+export function mergePortableDisplayVariables(
+    initial: Readonly<Record<string, string>>,
+    current: Readonly<Record<string, string>> = {},
+): Record<string, string> {
+    const merged = { ...initial };
+    if (Object.keys(initial).length === 1 && typeof initial.source === 'string') {
+        const assignments = parsePortableVariableAssignments(initial.source);
+        if (assignments !== null) {
+            delete merged.source;
+            Object.assign(merged, assignments);
+        }
+    }
+    return { ...merged, ...current };
+}
+
+function parsePortableVariableAssignments(source: string): Record<string, string> | null {
+    let decoded = source;
+    try {
+        const parsed: unknown = JSON.parse(source);
+        if (typeof parsed === 'string') decoded = parsed;
+    } catch {
+        // New imports already carry decoded variables; this branch only supports
+        // the legacy single-source representation.
+    }
+    const assignments: Record<string, string> = {};
+    for (const line of decoded.split(/\r?\n/).filter((candidate) => candidate.trim() !== '')) {
+        const separator = line.indexOf('=');
+        if (separator < 1) return null;
+        const name = line.slice(0, separator).trim();
+        if (name === '') return null;
+        assignments[name] = line.slice(separator + 1).trim();
+    }
+    return Object.keys(assignments).length === 0 ? null : assignments;
+}
+
 function replaceBounded(
     source: string,
     start: number,
@@ -389,7 +424,10 @@ function innermostBlock(source: string): BlockMatch | null {
 }
 
 function evaluateBlock(token: string, context: PortableDisplayContext): boolean {
-    if (token.startsWith('#if')) return truthy(token.slice(3).replace(/^::/, '').trim());
+    if (token.startsWith('#if_pure')) {
+        return truthy(token.slice('#if_pure'.length).replace(/^::/, '').trim());
+    }
+    if (token.startsWith('#if')) return truthy(token.slice('#if'.length).replace(/^::/, '').trim());
     if (!token.startsWith('#when')) return false;
     const args = token
         .slice(5)

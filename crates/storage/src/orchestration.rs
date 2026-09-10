@@ -45,6 +45,10 @@ mod module_activation;
 mod module_bindings;
 mod module_runtime;
 mod package_commit_bridge;
+mod pagination;
+mod revision;
+pub use pagination::{CreatorDocumentKind, ReadPageCursor, StoredReadPage};
+pub use revision::StoredRevision;
 mod prompt_bindings;
 mod prompt_preset_projection;
 mod prompt_preset_rollback;
@@ -128,9 +132,7 @@ pub(crate) use module_authority::{
 pub use prompt_bindings::{PromptPresetBinding, PromptResponseLength};
 
 /// Largest canonical JSON document accepted by the orchestration repository.
-///
-/// Large content payloads and assets remain in content-addressed storage. The
-/// relational layer stores bounded metadata and declarative configuration.
+/// Large payloads remain in CAS; relational storage keeps bounded metadata.
 pub const MAX_ORCHESTRATION_JSON_BYTES: usize = 2 * 1024 * 1024;
 pub const MAX_ORCHESTRATION_JSON_CHARS: usize = 1_000_000;
 pub const MAX_ORCHESTRATION_JSON_DEPTH: usize = 32;
@@ -142,22 +144,6 @@ pub const MAX_MEMORY_EMBEDDING_DIMENSIONS: usize = 32_768;
 
 const BUILTIN_CHAT_PRESET_ID: &str = "lorepia.builtin.chat-compatible.v1";
 const BUILTIN_STORY_PRESET_ID: &str = "lorepia.builtin.story-compatible.v1";
-
-/// A typed object together with its compare-and-swap storage revision.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct StoredRevision<T> {
-    pub value: T,
-    pub revision: u64,
-    /// Exact immutable content revision when the value is backed by the
-    /// generic content registry. Mutable binding/job records have no immutable
-    /// content revision and return `None`.
-    #[serde(default)]
-    pub revision_id: Option<String>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-    pub deleted_at: Option<DateTime<Utc>>,
-}
 
 /// One read of the mutable persona catalog, guarded by its exact active-state
 /// digest. A stale continuation never returns a partial page; callers must
@@ -474,6 +460,7 @@ pub struct PackageImportRecord {
 }
 
 /// Domain-only content document accepted by an atomic package commit.
+#[allow(clippy::large_enum_variant)] // Keeps the cross-crate API stable.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "document", rename_all = "snake_case")]
 pub enum PackageCommitDocument {

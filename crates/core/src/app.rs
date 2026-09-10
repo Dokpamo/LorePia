@@ -116,9 +116,7 @@ use generation_workflow::{
     apply_generation_output_transforms, apply_generation_result, partial_checkpoint_due,
     transform_content_sha256,
 };
-use imports::PendingImportRegistry;
-use runtime_control::RuntimeControl;
-
+pub use imports::{ImportCommitResult, ImportedContentSummary};
 #[allow(
     unused_imports,
     reason = "preserve the existing crate::app type path for in-crate callers"
@@ -143,6 +141,7 @@ pub(crate) use providers::{
     initial_generation_preset, provider_api_capability_observations, reconcile_input_routes,
     template_accepts_empty_preset,
 };
+use runtime_control::RuntimeControl;
 
 pub use portable_runtime_state::{
     PortableRuntimeStatePayload, PortableRuntimeStateRecord, PortableRuntimeStateSaveResult,
@@ -196,7 +195,7 @@ struct CoreInner {
     storage: Arc<Storage>,
     discovery_recovery_owner: DiscoveryRecoveryOwner,
     runtime: RuntimeControl,
-    pending_imports: PendingImportRegistry,
+    pending_imports: imports::PendingImportRegistry,
     pending_catalog_import_plans: Mutex<HashMap<String, PendingProviderCatalogImportPlan>>,
     pending_discovery_credential_reservations: Mutex<HashSet<String>>,
     active_generations: Arc<GenerationRegistry>,
@@ -270,7 +269,7 @@ impl Core {
                 storage,
                 discovery_recovery_owner: recovery_owner,
                 runtime,
-                pending_imports: PendingImportRegistry::new(HashMap::new()),
+                pending_imports: imports::PendingImportRegistry::new(HashMap::new()),
                 pending_catalog_import_plans: Mutex::new(HashMap::new()),
                 pending_discovery_credential_reservations: Mutex::new(HashSet::new()),
                 active_generations: Arc::new(GenerationRegistry::default()),

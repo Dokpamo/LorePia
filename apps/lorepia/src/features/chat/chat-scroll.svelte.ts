@@ -169,6 +169,7 @@ export class ChatScrollLifecycle {
         const firstRenderedDay = this.options.messageDayKey(firstRenderedMessage.created_at);
         let dayStart = window.start;
         while (dayStart > 0) {
+            if (window.end - dayStart >= VIRTUAL_MESSAGE_DOM_LIMIT) return window;
             const previous = messageCollection.items[dayStart - 1];
             if (
                 previous === undefined ||
@@ -348,6 +349,13 @@ export class ChatScrollLifecycle {
         };
     }
 
+    #domScale(): number {
+        const scroller = this.scroller;
+        if (scroller === null || scroller.offsetWidth === 0) return 1;
+        const scale = scroller.getBoundingClientRect().width / scroller.offsetWidth;
+        return Number.isFinite(scale) && scale > 0 ? scale : 1;
+    }
+
     #captureScrollAnchor(): ScrollAnchorSnapshot | null {
         if (this.scroller === null) return null;
         const scrollerTop = this.scroller.getBoundingClientRect().top;
@@ -364,7 +372,7 @@ export class ChatScrollLifecycle {
         if (messageIndex === undefined) return null;
         return {
             messageId,
-            relativeTop: anchor.getBoundingClientRect().top - scrollerTop,
+            relativeTop: (anchor.getBoundingClientRect().top - scrollerTop) / this.#domScale(),
             scrollTop: this.scroller.scrollTop,
             virtualTop:
                 VIRTUAL_MESSAGE_BLOCK_PADDING +
@@ -481,7 +489,8 @@ export class ChatScrollLifecycle {
             return;
         }
         const relativeTopAfter =
-            target.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+            (target.getBoundingClientRect().top - scroller.getBoundingClientRect().top) /
+            this.#domScale();
         const anchoredScrollTop = computeAnchoredScrollTop(
             anchorScrollTop,
             anchor.relativeTop,
@@ -521,12 +530,13 @@ export class ChatScrollLifecycle {
             observer = new ResizeObserver((entries) => {
                 const nodeEntry = entries.find((entry) => entry.target === node);
                 const borderBoxHeight = nodeEntry?.borderBoxSize[0]?.blockSize;
-                const rectHeight = node.getBoundingClientRect().height;
+                const rectHeight = node.getBoundingClientRect().height / this.#domScale();
                 const messageHeight =
                     rectHeight > 0
                         ? rectHeight
                         : (borderBoxHeight ?? nodeEntry?.contentRect.height ?? 0);
-                const dividerHeight = dayDivider?.getBoundingClientRect().height ?? 0;
+                const dividerHeight =
+                    (dayDivider?.getBoundingClientRect().height ?? 0) / this.#domScale();
                 this.#recordMessageMeasurement(epoch, messageId, messageHeight + dividerHeight);
             });
             observer.observe(node);

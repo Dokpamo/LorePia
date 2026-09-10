@@ -19,7 +19,8 @@ import type {
     LorepiaClient,
 } from '../../lib/ipc/contracts';
 import { t } from '../../lib/i18n';
-import { normalizeClientError } from '../../lib/ipc/errors';
+import { isApprovableContentPackageCapability } from './content-package-capabilities';
+import { contentPackageErrorLabel as errorLabel } from './content-package-error';
 
 export type ContentPackagePhase =
     | 'idle'
@@ -101,11 +102,6 @@ function retainedCompletedExportCatalog(
     };
 }
 
-const APPROVABLE_CAPABILITIES = new Set<ContentPackageCapabilityDto>([
-    'transforms',
-    'declarative_interactions',
-]);
-
 const TARGET_DOCUMENT_KINDS = new Set<ContentPackageTargetDocumentKindDto>([
     'prompt_preset',
     'knowledge_book',
@@ -116,13 +112,6 @@ const TARGET_DOCUMENT_KINDS = new Set<ContentPackageTargetDocumentKindDto>([
     'character_content',
 ]);
 const MAX_U32 = 0xffff_ffff;
-
-function errorLabel(error: unknown): string {
-    const normalized = normalizeClientError(error);
-    return normalized.messageKey === 'error.unexpected'
-        ? t('content_package.error.generic')
-        : normalized.messageKey;
-}
 
 function sortedUnique<Value extends string>(values: readonly Value[]): Value[] {
     return [...new Set(values)].sort();
@@ -398,8 +387,8 @@ function requiredApprovals(
     capabilities: readonly ContentPackageCapabilityDto[],
 ): ApprovableContentPackageCapabilityDto[] {
     return sortedUnique(
-        capabilities.filter((capability) =>
-            APPROVABLE_CAPABILITIES.has(capability),
+        capabilities.filter(
+            isApprovableContentPackageCapability,
         ) as ApprovableContentPackageCapabilityDto[],
     );
 }

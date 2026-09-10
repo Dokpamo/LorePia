@@ -79,12 +79,20 @@
             ? [...new Set([...selectedCapabilities, capability])]
             : selectedCapabilities.filter((candidate) => candidate !== capability);
     }
+
+    function selectAllCompatibilityCapabilities(): void {
+        selectedCapabilities = [...capabilities];
+    }
 </script>
 
-<section class="portable-runtime-controls" aria-label="캐릭터 기능 설정">
+<section
+    class="portable-runtime-controls"
+    data-phase={phase}
+    aria-label={$tr('chat.runtime.controls.label')}
+>
     <header>
         <span class="portable-runtime-label">캐릭터 기능</span>
-        <small
+        <small class="portable-runtime-phase"
             >{phase === 'loading'
                 ? '준비 중'
                 : phase === 'blocked'
@@ -103,7 +111,10 @@
             <p class="portable-runtime-sensitive-note">
                 {$tr('chat.runtime.permissions.sensitive')}
             </p>
-            <ul aria-label="요청한 캐릭터 기능 권한">
+            <ul
+                class="portable-runtime-capabilities"
+                aria-label={$tr('chat.runtime.permissions.requested')}
+            >
                 {#each capabilities as capability (capability)}
                     <li>
                         <label>
@@ -118,9 +129,14 @@
                     </li>
                 {/each}
             </ul>
-            <button type="button" onclick={() => void onApprove()}>
-                {$tr('chat.runtime.permissions.approve_selected')}
-            </button>
+            <div class="portable-runtime-approval-actions">
+                <button type="button" onclick={selectAllCompatibilityCapabilities}>
+                    {$tr('chat.runtime.permissions.select_all')}
+                </button>
+                <button class="primary" type="button" onclick={() => void onApprove()}>
+                    {$tr('chat.runtime.permissions.approve_selected')}
+                </button>
+            </div>
         </div>
     {:else}
         <button class="portable-runtime-revoke" type="button" onclick={onRevoke}>
@@ -213,11 +229,12 @@
 <style>
     .portable-runtime-controls {
         display: grid;
-        gap: 10px;
-        padding: 10px;
+        gap: 12px;
+        padding: 12px;
         border: 1px solid var(--line);
-        border-radius: var(--radius-md);
-        background: var(--surface-sunken);
+        border-radius: var(--radius-lg);
+        background: color-mix(in srgb, var(--surface-sunken) 58%, var(--surface-raised));
+        box-shadow: var(--shadow-1);
     }
 
     header {
@@ -228,18 +245,43 @@
     }
 
     .portable-runtime-label {
-        color: var(--ink-muted);
-        font-size: 0.75rem;
-        font-weight: 650;
+        color: var(--ink);
+        font-size: 0.8125rem;
+        font-weight: 700;
     }
 
-    header small,
     .portable-runtime-field > span,
     .portable-runtime-sensitive-note,
     .portable-runtime-budget,
     .portable-runtime-persistence-warning {
         color: var(--ink-muted);
         font-size: 0.72rem;
+    }
+
+    .portable-runtime-phase {
+        display: inline-flex;
+        min-height: 24px;
+        align-items: center;
+        padding: 0 9px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-pill);
+        background: var(--surface-raised);
+        color: var(--ink-muted);
+        font-size: 0.7rem;
+        font-weight: 700;
+    }
+
+    [data-phase='blocked'] .portable-runtime-phase,
+    [data-phase='busy'] .portable-runtime-phase {
+        border-color: var(--status-warning-border);
+        background: var(--status-warning-bg);
+        color: var(--status-warning-fg);
+    }
+
+    [data-phase='error'] .portable-runtime-phase {
+        border-color: var(--status-error-border);
+        background: var(--status-error-bg);
+        color: var(--status-error-fg);
     }
 
     .portable-runtime-persistence-warning {
@@ -259,11 +301,11 @@
 
     .portable-runtime-approval {
         display: grid;
-        gap: 8px;
-        padding: 10px;
-        border: 1px solid var(--status-warning-border);
+        gap: 12px;
+        padding: 12px;
+        border: 1px solid var(--line);
         border-radius: var(--radius-md);
-        background: var(--status-warning-bg);
+        background: var(--surface-raised);
         color: var(--ink);
         font-size: 0.78rem;
         line-height: 1.45;
@@ -274,8 +316,9 @@
         margin: 0;
     }
 
-    .portable-runtime-approval ul {
+    .portable-runtime-capabilities {
         display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 6px;
         padding: 0;
         color: var(--ink-muted);
@@ -285,8 +328,12 @@
     .portable-runtime-approval li label {
         display: flex;
         align-items: center;
-        gap: 8px;
-        min-height: 28px;
+        gap: 9px;
+        min-height: 40px;
+        padding: 6px 8px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-sm);
+        background: var(--surface-sunken);
         cursor: pointer;
     }
 
@@ -298,13 +345,25 @@
 
     .portable-runtime-approval button,
     .portable-runtime-revoke {
-        min-height: 36px;
+        min-height: 40px;
         border: 1px solid var(--line-strong);
-        border-radius: 9px;
+        border-radius: var(--radius-pill);
         background: var(--surface);
         color: var(--ink);
         font: inherit;
         cursor: pointer;
+    }
+
+    .portable-runtime-approval button.primary {
+        border-color: transparent;
+        background: var(--primary-bg);
+        color: var(--primary-ink);
+    }
+
+    .portable-runtime-approval-actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
     }
 
     .portable-runtime-field {
@@ -321,6 +380,13 @@
         background: var(--surface);
         color: var(--ink);
         font: inherit;
+    }
+
+    @container view (max-width: 420px) {
+        .portable-runtime-capabilities,
+        .portable-runtime-approval-actions {
+            grid-template-columns: 1fr;
+        }
     }
 
     .portable-runtime-model-call {

@@ -1,7 +1,11 @@
 mod bootstrap;
 mod conversation;
 mod generation;
+mod greeting_preview;
+mod greeting_variants;
 mod library;
+
+pub use greeting_preview::CharacterGreetingPreviewDto;
 
 pub use bootstrap::{BootstrapDto, HealthDto};
 pub use conversation::{
@@ -23,7 +27,8 @@ pub use library::{
     CharacterDisplayTransformDto, CharacterDto, CharacterGreetingCatalogDto,
     CharacterGreetingKindDto, CharacterGreetingOptionDto, CharacterRenderAssetDto,
     CharacterRenderProfileDto, CharacterRuntimeKnowledgeDto, CharacterRuntimeScriptDto,
-    ContentKindDto, ImportImagePreviewDto, ImportInspectionDto, ImportWarningDto,
+    ContentKindDto, ImportCommitResultDto, ImportImagePreviewDto, ImportInspectionDto,
+    ImportWarningDto, ImportedContentSummaryDto,
 };
 
 #[allow(unused_imports)]

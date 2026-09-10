@@ -10,6 +10,12 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use crate::capabilities::{normalize_runtime_profile_capabilities, parse_runtime_capabilities};
+use crate::knowledge_ids::{KnowledgeEntryIds, normalized_knowledge_entry_id};
+
+mod profile;
+mod runtime_variables;
+
+use runtime_variables::parse_runtime_variables;
 
 pub(crate) const MAX_METADATA_BYTES: usize = 4 * 1024 * 1024;
 pub(crate) const MAX_CHARACTER_NAME_BYTES: usize = 1_024;
@@ -43,7 +49,7 @@ pub(crate) struct CardMetadata {
     pub(crate) preferred_image_path: Option<String>,
     pub(crate) len_bytes: u64,
     /// True when the source declared the V2 spec and was promoted to the
-    /// canonical V3 shape. The reviewer is told before anything is committed.
+    /// V3 shape. The reviewer is told before anything is committed.
     pub(crate) promoted_from_v2: bool,
 }
 
@@ -199,6 +205,10 @@ fn parse_character_content(
     };
 
     Ok(CharacterContentV1 {
+        creator: profile::creator(data)?,
+        creator_notes: optional_text(data, "creator_notes")?,
+        tags: profile::tags(data)?,
+        recommended_language: profile::recommended_language(data)?,
         personality,
         scenario,
         first_message,
@@ -363,12 +373,11 @@ fn parse_portable_knowledge_book(
     }
     let book_name = name.unwrap_or_else(|| "Embedded knowledge".to_owned());
     let mut normalized_entries = Vec::with_capacity(entries.len());
+    let mut entry_ids = KnowledgeEntryIds::default();
     for (index, entry) in entries.iter().enumerate() {
-        normalized_entries.push(parse_portable_knowledge_entry(
-            entry,
-            index,
-            card_source_sha256,
-        )?);
+        let mut normalized = parse_portable_knowledge_entry(entry, index, card_source_sha256)?;
+        entry_ids.make_unique(&mut normalized.id, card_source_sha256, index);
+        normalized_entries.push(normalized);
     }
     let recursive = optional_bool(object, "recursive_scanning", false)?;
     let mut metadata = BTreeMap::new();
@@ -445,14 +454,7 @@ fn parse_portable_knowledge_entry(
             Value::Number(value) => Some(value.to_string()),
             _ => None,
         });
-    let id = raw_id.unwrap_or_else(|| {
-        let mut digest = Sha256::new();
-        digest.update(b"portable-knowledge-entry-v1\0");
-        digest.update(card_source_sha256.as_bytes());
-        digest.update([0]);
-        digest.update(index.to_le_bytes());
-        format!("card-entry:{}", hex::encode(digest.finalize()))
-    });
+    let id = normalized_knowledge_entry_id(raw_id, card_source_sha256, index);
     let mode = object
         .get("mode")
         .and_then(Value::as_str)
@@ -605,34 +607,6 @@ fn parse_runtime_extensions(
     Ok(CharacterRuntimeProfile::default())
 }
 
-fn parse_runtime_variables(value: Option<&Value>) -> CoreResult<BTreeMap<String, String>> {
-    let Some(value) = value else {
-        return Ok(BTreeMap::new());
-    };
-    match value {
-        Value::Null => Ok(BTreeMap::new()),
-        Value::String(value) if value.is_empty() => Ok(BTreeMap::new()),
-        Value::Object(values) => values
-            .iter()
-            .map(|(key, value)| Ok((key.clone(), runtime_variable_text(value)?)))
-            .collect(),
-        _ => Ok(BTreeMap::from([(
-            "source".to_owned(),
-            canonical_json(value)?,
-        )])),
-    }
-}
-
-fn runtime_variable_text(value: &Value) -> CoreResult<String> {
-    match value {
-        Value::Null => Ok(String::new()),
-        Value::Bool(value) => Ok(u8::from(*value).to_string()),
-        Value::Number(value) => Ok(value.to_string()),
-        Value::String(value) => Ok(value.clone()),
-        Value::Array(_) | Value::Object(_) => canonical_json(value),
-    }
-}
-
 fn parse_toggle_defaults(schema: &str) -> BTreeMap<String, String> {
     schema
         .lines()
@@ -689,14 +663,16 @@ fn value_string_array(value: &Value) -> CoreResult<Vec<String>> {
 }
 
 fn comma_separated_keys(value: &Value) -> CoreResult<Vec<String>> {
-    let value = value
-        .as_str()
-        .ok_or_else(|| unsupported("knowledge keys must be strings"))?;
-    Ok(value
-        .split(',')
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_owned)
+    Ok(value_string_array(value)?
+        .into_iter()
+        .flat_map(|value| {
+            value
+                .split(',')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
         .collect())
 }
 
@@ -1004,6 +980,9 @@ fn is_supported_character_field(key: &str) -> bool {
     matches!(
         key,
         "name"
+            | "creator"
+            | "creator_notes"
+            | "tags"
             | "description"
             | "personality"
             | "scenario"
@@ -1055,232 +1034,4 @@ fn unsupported(message: impl Into<String>) -> CoreError {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn assert_unsupported(bytes: &[u8]) {
-        let error = parse_card_json(bytes).expect_err("metadata must be rejected");
-        assert_eq!(error.code, CoreErrorCode::UnsupportedContent);
-        assert!(!error.recoverable);
-    }
-
-    #[test]
-    fn requires_an_object_with_v3_spec_data_and_name() {
-        for bytes in [
-            b"".as_slice(),
-            b"null".as_slice(),
-            br"[]".as_slice(),
-            br"{}".as_slice(),
-            br#"{"spec":3,"data":{"name":"Segu"}}"#.as_slice(),
-            br#"{"spec":"chara_card_v3"}"#.as_slice(),
-            br#"{"spec":"chara_card_v3","data":[]}"#.as_slice(),
-            br#"{"spec":"chara_card_v3","data":{}}"#.as_slice(),
-            br#"{"spec":"chara_card_v3","data":{"name":3}}"#.as_slice(),
-            br#"{"spec":"chara_card_v3","data":{"name":"  "}}"#.as_slice(),
-        ] {
-            assert_unsupported(bytes);
-        }
-    }
-
-    #[test]
-    fn parses_required_and_optional_fields() {
-        let metadata = parse_card_json(
-            br#"{"spec":"chara_card_v3","data":{"name":" Segu ","description":" Guide "}}"#,
-        )
-        .expect("valid CCv3 metadata");
-
-        assert_eq!(metadata.name, "Segu");
-        assert_eq!(metadata.description, "Guide");
-        assert!(metadata.unsupported_optional_fields.is_empty());
-    }
-
-    #[test]
-    fn reports_sorted_unsupported_fields_and_excludes_only_consumed_text() {
-        let description = parse_card_json(
-            br#"{
-                "spec":"chara_card_v3",
-                "data":{
-                    "name":"Segu",
-                    "description":"Guide",
-                    "personality":"Unused fallback",
-                    "z_unknown":true,
-                    "alternate_greetings":[],
-                    "creator":"Synthetic"
-                }
-            }"#,
-        )
-        .expect("valid CCv3 metadata");
-        assert_eq!(
-            description.unsupported_optional_fields,
-            ["creator", "z_unknown"]
-        );
-
-        let fallback = parse_card_json(
-            br#"{
-                "spec":"chara_card_v3",
-                "data":{
-                    "name":"Segu",
-                    "description":null,
-                    "personality":"Fallback",
-                    "scenario":"Synthetic"
-                }
-            }"#,
-        )
-        .expect("valid fallback metadata");
-        assert_eq!(fallback.description, "Fallback");
-        assert!(fallback.unsupported_optional_fields.is_empty());
-
-        let duplicate = parse_card_json(
-            br#"{
-                "spec":"chara_card_v3",
-                "data":{
-                    "name":"Segu",
-                    "creator":"First",
-                    "creator":"Last"
-                }
-            }"#,
-        )
-        .expect("duplicate optional keys remain bounded");
-        assert_eq!(duplicate.unsupported_optional_fields, ["creator"]);
-    }
-
-    #[test]
-    fn bounds_optional_field_names_and_count() {
-        let oversized_key = "k".repeat(MAX_OPTIONAL_FIELD_KEY_BYTES + 1);
-        let oversized = serde_json::json!({
-            "spec": CHARACTER_CARD_V3_SPEC,
-            "data": {
-                "name": "Segu",
-                oversized_key: true,
-            }
-        });
-        assert_unsupported(&serde_json::to_vec(&oversized).expect("encode"));
-
-        let mut data = serde_json::Map::new();
-        data.insert("name".to_owned(), Value::String("Segu".to_owned()));
-        for index in 0..=MAX_UNSUPPORTED_OPTIONAL_FIELDS {
-            data.insert(format!("optional_{index:03}"), Value::Bool(true));
-        }
-        let too_many = serde_json::json!({
-            "spec": CHARACTER_CARD_V3_SPEC,
-            "data": data,
-        });
-        assert_unsupported(&serde_json::to_vec(&too_many).expect("encode"));
-
-        let control_key = serde_json::json!({
-            "spec": CHARACTER_CARD_V3_SPEC,
-            "data": {
-                "name": "Segu",
-                "unsafe\nlabel": true,
-            }
-        });
-        assert_unsupported(&serde_json::to_vec(&control_key).expect("encode"));
-    }
-
-    #[test]
-    fn metadata_limits_are_inclusive_at_multibyte_utf8_boundaries() {
-        let name = "😀".repeat(MAX_CHARACTER_NAME_CHARS);
-        assert_eq!(name.len(), MAX_CHARACTER_NAME_BYTES);
-        let description = "😀".repeat(MAX_CHARACTER_DESCRIPTION_CHARS);
-        assert_eq!(description.len(), MAX_CHARACTER_DESCRIPTION_BYTES);
-        let json = serde_json::json!({
-            "spec": CHARACTER_CARD_V3_SPEC,
-            "data": {
-                "name": name,
-                "description": description,
-            }
-        });
-
-        let metadata =
-            parse_card_json(&serde_json::to_vec(&json).expect("encode")).expect("exact limits");
-        assert_eq!(metadata.name.chars().count(), MAX_CHARACTER_NAME_CHARS);
-        assert_eq!(
-            metadata.description.chars().count(),
-            MAX_CHARACTER_DESCRIPTION_CHARS
-        );
-    }
-
-    #[test]
-    fn metadata_limits_reject_one_complete_multibyte_scalar_over_the_boundary() {
-        let oversized_name = "😀".repeat(MAX_CHARACTER_NAME_CHARS + 1);
-        let name_json = serde_json::json!({
-            "spec": CHARACTER_CARD_V3_SPEC,
-            "data": {"name": oversized_name}
-        });
-        let name_error =
-            parse_card_json(&serde_json::to_vec(&name_json).expect("encode")).expect_err("name");
-        assert_eq!(name_error.code, CoreErrorCode::UnsupportedContent);
-        assert_eq!(
-            name_error.message,
-            "CCv3 data.name exceeds the 1024-byte or 256-character limit"
-        );
-
-        let oversized_description = "😀".repeat(MAX_CHARACTER_DESCRIPTION_CHARS + 1);
-        let description_json = serde_json::json!({
-            "spec": CHARACTER_CARD_V3_SPEC,
-            "data": {
-                "name": "Segu",
-                "description": oversized_description,
-            }
-        });
-        let description_error =
-            parse_card_json(&serde_json::to_vec(&description_json).expect("encode"))
-                .expect_err("description");
-        assert_eq!(description_error.code, CoreErrorCode::UnsupportedContent);
-        assert_eq!(
-            description_error.message,
-            "CCv3 data.description exceeds the 262144-byte or 65536-character limit"
-        );
-    }
-
-    #[test]
-    fn card_runtime_capabilities_normalize_legacy_and_reject_null_or_implicit_elevation() {
-        let card = |runtime: Value| {
-            serde_json::to_vec(&serde_json::json!({
-                "spec": CHARACTER_CARD_V3_SPEC,
-                "data": {
-                    "name": "Segu",
-                    "extensions": { "runtime": runtime }
-                }
-            }))
-            .expect("encode card")
-        };
-
-        let legacy = parse_card_json(&card(serde_json::json!({
-            "virtualscript": "return true"
-        })))
-        .expect("safe legacy runtime");
-        assert_eq!(
-            legacy.content.runtime.required_capabilities,
-            Some(vec![
-                lorepia_domain::PortableRuntimeCapability::RuntimeCallbacks,
-                lorepia_domain::PortableRuntimeCapability::UiWrite,
-            ])
-        );
-
-        for field in ["requiredCapabilities", "required_capabilities"] {
-            assert_unsupported(&card(serde_json::json!({
-                "virtualscript": "return true",
-                (field): null
-            })));
-        }
-        assert_unsupported(&card(serde_json::json!({
-            "virtualscript": "return true",
-            "lowLevelAccess": true
-        })));
-
-        let declared = parse_card_json(&card(serde_json::json!({
-            "virtualscript": "return true",
-            "lowLevelAccess": true,
-            "required_capabilities": ["runtime:callbacks", "elevated"]
-        })))
-        .expect("explicit elevated runtime");
-        assert_eq!(
-            declared.content.runtime.required_capabilities,
-            Some(vec![
-                lorepia_domain::PortableRuntimeCapability::RuntimeCallbacks,
-                lorepia_domain::PortableRuntimeCapability::Elevated,
-            ])
-        );
-    }
-}
+mod tests;

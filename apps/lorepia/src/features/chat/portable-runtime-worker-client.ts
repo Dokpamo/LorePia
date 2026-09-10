@@ -1,5 +1,7 @@
 import {
     MAX_PORTABLE_RUNTIME_WORKER_MESSAGE_BYTES,
+    clonePortableRuntimeMessageValue,
+    isPortableRuntimeMainMessage,
     isPortableRuntimeWorkerMessage,
     portableRuntimeMessageByteLength,
     portableRuntimeMessageWithinLimit,
@@ -136,12 +138,21 @@ export class PortableRuntimeWorkerClient {
                 ),
             );
         }
+        const outbound = clonePortableRuntimeMessageValue(message);
+        if (!outbound.ok || !isPortableRuntimeMainMessage(outbound.value)) {
+            return Promise.reject(
+                new PortableRuntimeWorkerError(
+                    'protocol-error',
+                    'portable runtime worker request could not be normalized',
+                ),
+            );
+        }
         this.inboundMessages = 0;
         this.inboundBytes = 0;
         return new Promise((resolve, reject) => {
             this.pending.set(requestId, { resolve, reject });
             try {
-                this.worker.postMessage(message);
+                this.worker.postMessage(outbound.value);
             } catch (error) {
                 this.pending.delete(requestId);
                 reject(
@@ -234,8 +245,18 @@ export class PortableRuntimeWorkerClient {
             );
             return;
         }
+        const outbound = clonePortableRuntimeMessageValue(message);
+        if (!outbound.ok || !isPortableRuntimeMainMessage(outbound.value)) {
+            this.close(
+                new PortableRuntimeWorkerError(
+                    'protocol-error',
+                    'portable runtime host response could not be normalized',
+                ),
+            );
+            return;
+        }
         try {
-            this.worker.postMessage(message);
+            this.worker.postMessage(outbound.value);
         } catch {
             this.close(
                 new PortableRuntimeWorkerError(

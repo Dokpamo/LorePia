@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-memory-records-page"
+description = "Enables the list_memory_records_page command without any pre-configured scope."
+commands.allow = ["list_memory_records_page"]
+
+[[permission]]
+identifier = "deny-list-memory-records-page"
+description = "Denies the list_memory_records_page command without any pre-configured scope."
+commands.deny = ["list_memory_records_page"]

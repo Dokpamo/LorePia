@@ -24,7 +24,6 @@ import {
     type InterruptedMemoryJobDto,
     type MemoryQueryEmbeddingRetryCandidateDto,
     type ModelRouteDto,
-    type NativeCaptureStatusDto,
     type OrchestrationVariableMapDto,
     type ProviderCatalogRollbackPlanDto,
     type ProviderConnectionDto,
@@ -58,6 +57,7 @@ export {
     type MemoryQueryRetryState,
     type SectionState,
 } from './app-state';
+import { captureAnnouncement } from './provider-credential';
 export { discoveryCredentialTarget } from './provider-credential';
 
 export interface RemoveMessageResult {
@@ -94,17 +94,6 @@ function ensureCompatible(snapshot: BootstrapDto): void {
             operation_id: null,
             field_errors: [],
         });
-    }
-}
-
-function captureAnnouncement(status: NativeCaptureStatusDto, success: string): string {
-    switch (status.clipboard_cleanup) {
-        case 'cleared':
-            return success;
-        case 'already_replaced':
-            return t('app.capture.clipboard_changed', { success });
-        case 'clear_failed':
-            return t('app.capture.clipboard_kept', { success });
     }
 }
 
@@ -150,7 +139,10 @@ export class LorepiaAppController {
                         workspace: updater(state.providers.workspace),
                     },
                 })),
-            loadProviders: () => this.loadProviders(),
+            loadProviders: async () => {
+                await this.loadProviders();
+                await this.loadProviderDiagnostics('discovery');
+            },
             refreshProviderDiscovery: (sessionId) => this.refreshProviderDiscovery(sessionId),
             pollSelectedProviderDiscoveryEvents: () => this.pollSelectedProviderDiscoveryEvents(),
         });
@@ -234,7 +226,7 @@ export class LorepiaAppController {
         return this.importController.begin();
     }
 
-    commitImport(): Promise<void> {
+    commitImport() {
         return this.importController.commit();
     }
 
@@ -242,19 +234,19 @@ export class LorepiaAppController {
         return this.importController.discard();
     }
 
-    selectCharacter(character: CharacterDto): Promise<void> {
-        return this.conversationController.selectCharacter(character);
+    selectCharacter(card: CharacterDto, latest = false) {
+        return this.conversationController.selectCharacter(card, latest);
     }
 
-    selectGreeting(greetingId: string): boolean {
+    selectGreeting(greetingId: string) {
         return this.conversationController.selectGreeting(greetingId);
     }
 
-    openNewConversation(): Promise<boolean> {
-        return this.conversationController.openNewConversation();
+    openNewConversation(...args: Parameters<ConversationController['openNewConversation']>) {
+        return this.conversationController.openNewConversation(...args);
     }
 
-    selectConversation(conversation: ConversationDto): Promise<boolean> {
+    selectConversation(conversation: ConversationDto) {
         return this.conversationController.selectConversation(conversation);
     }
 
@@ -266,7 +258,7 @@ export class LorepiaAppController {
         return this.conversationController.createBranch(fromMessageId);
     }
 
-    setConversationMode(mode: ConversationMode): Promise<void> {
+    setConversationMode(mode: ConversationMode) {
         return this.conversationController.setConversationMode(mode);
     }
 
@@ -337,6 +329,10 @@ export class LorepiaAppController {
 
     cancelGeneration(): Promise<void> {
         return this.generationController.cancelGeneration();
+    }
+
+    loadProviderDiagnostics(kind: 'catalog' | 'discovery' | 'sync'): Promise<string | null> {
+        return this.providerController.loadProviderDiagnostics(kind);
     }
 
     loadProviders(): Promise<void> {

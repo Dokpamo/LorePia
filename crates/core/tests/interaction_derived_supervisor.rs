@@ -160,6 +160,7 @@ fn interaction_module(rule_set_id: &InteractionRuleSetId) -> ContentModule {
         transform_set_ids: Vec::new(),
         interaction_rule_set_ids: vec![rule_set_id.clone()],
         asset_ids: Vec::new(),
+        portable_runtime: None,
         imported_components_enabled: true,
         required_capabilities: vec![ContentCapability::DeclarativeInteractions],
         metadata: PackageMetadata {

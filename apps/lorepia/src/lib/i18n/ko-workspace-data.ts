@@ -1,0 +1,17 @@
+export const koWorkspaceData = {
+    'workspaceData.scope': '적용 범위',
+    'workspaceData.priority': '우선순위',
+    'workspaceData.importApproval': '가져오기 승인',
+    'workspaceData.approveActivation': '활성화 승인',
+    'workspaceData.resolve': '적용 계획 검토',
+    'workspaceData.deactivate': '비활성화 승인',
+    'workspaceData.pickPackage': '패키지 가져오기',
+    'workspaceData.reviewPackage': '선택 및 정규화 검토',
+    'workspaceData.approvePackage': '표시된 대상과 기능 승인',
+    'workspaceData.commitPackage': '승인된 가져오기 확정',
+    'workspaceData.discardPackage': '검토 폐기',
+    'workspaceData.runtimeEnable': '런타임 활성화',
+    'workspaceData.approveCapability': '{capability} 기능 승인',
+    'workspaceData.rollback': '이전 리비전으로 되돌리기',
+    'workspaceData.approveRollback': '롤백 승인',
+} as const;

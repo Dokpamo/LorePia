@@ -5,11 +5,13 @@
 
 mod credential_envelope;
 mod error;
+mod import_policy;
 mod model;
 mod staging;
 mod validation;
 
 pub use credential_envelope::MAXIMUM_BOUND_CREDENTIAL_SECRET_BYTES;
+pub use import_policy::{MAXIMUM_STANDARD_IMPORT_BYTES, MAXIMUM_USER_APPROVED_IMPORT_BYTES};
 /// Maximum size of a legacy raw credential accepted by the native vault.
 ///
 /// Bound credentials use a smaller limit so their authority envelope still
@@ -68,10 +70,6 @@ fn prepare_bound_credential_store_with(
 impl<R: Runtime> LorepiaPlatform<R> {
     pub fn data_root(&self) -> &Path {
         self.inner.data_root()
-    }
-
-    pub async fn pick_import(&self) -> PlatformResult<Option<StagedImport>> {
-        self.inner.pick_import().await
     }
 
     /// Save one Rust-owned, verified CAS content source through a scoped native
@@ -488,7 +486,7 @@ mod tests {
         assert!(!format!("{:?}", NativeCredential::new(secret.to_owned())).contains(secret));
         let staged = format!(
             "{:?}",
-            StagedImport::new(PathBuf::from(path), display_name.to_owned(), 4)
+            StagedImport::new(PathBuf::from(path), display_name.to_owned(), 4, 256)
         );
         assert!(!staged.contains(path));
         assert!(!staged.contains(display_name));

@@ -1,0 +1,46 @@
+.seed-app [data-scroll-header-frame] {
+    /* Keep a parent page's header below a newly opened search or detail page. */
+    isolation: isolate;
+}
+.seed-app [data-scroll-header] {
+    translate: 0 calc(-1 * var(--ui-scroll-header-offset, 0px));
+    will-change: translate;
+}
+.seed-app [data-scroll-header-settling='true'] {
+    transition: translate 180ms cubic-bezier(0.35, 0, 0.35, 1);
+}
+.seed-app [data-scroll-header-floating] {
+    position: absolute;
+    inset: 0 0 auto;
+    z-index: 4;
+    background: var(--ui-paper);
+}
+.seed-app .ui-collapsed-title {
+    position: absolute;
+    left: 64px;
+    right: 64px;
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--ui-type-nav);
+    line-height: 1.333333;
+    font-weight: 700;
+    color: var(--ui-heading);
+    opacity: 0;
+    transition: opacity 150ms cubic-bezier(0.35, 0, 0.35, 1);
+}
+.seed-app [data-title-collapsed='true'] .ui-collapsed-title {
+    opacity: 1;
+}
+.seed-app .ui-overlay[data-kind='character-profile'] > [data-title-collapsed='true'] {
+    background: color-mix(in srgb, var(--ui-paper) 94%, transparent);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+}
+@media (prefers-reduced-motion: reduce) {
+    .seed-app [data-scroll-header],
+    .seed-app .ui-collapsed-title {
+        transition: none;
+    }
+}

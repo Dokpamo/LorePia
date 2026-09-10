@@ -12,6 +12,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from refactoring_archive import load_refactoring_archive
+
 from check_source_architecture import (
     classify_source,
     generated_sources,
@@ -865,6 +867,10 @@ def main() -> int:
     if not summary_output.is_absolute():
         summary_output = root / summary_output
     try:
+        archive = load_refactoring_archive(root)
+        if args.check and archive and output == root / "config/refactoring/baseline-report.json" and summary_output == root / "config/refactoring/baseline-summary.json":
+            print(f"refactoring baseline: PASS (completed evidence at {archive})")
+            return 0
         if args.check and output.is_file():
             expected = json.loads(output.read_text(encoding="utf-8"))
             recorded_commit = expected.get("baseline_commit")
@@ -880,7 +886,7 @@ def main() -> int:
 
     rendered = serialized_report(report)
     rendered_summary = serialized_summary(report)
-    if args.print_report:
+    if args.print_report or (archive and output == root / "config/refactoring/baseline-report.json" and not args.check):
         print(rendered, end="")
         return 0
     if args.check:

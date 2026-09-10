@@ -5,6 +5,7 @@ import type {
     CharacterGreetingCatalogDto,
     ConversationBranchDto,
     ConversationDto,
+    ConversationMode,
     ConversationStateDto,
     ImportInspectionDto,
     InterruptedMemoryJobDto,
@@ -22,6 +23,8 @@ export interface SectionState {
 
 export interface ImportFlowState extends SectionState {
     inspection: ImportInspectionDto | null;
+    resource_override_active: boolean;
+    resource_override_available: boolean;
 }
 
 export interface ChatState extends SectionState {
@@ -54,6 +57,12 @@ export interface LorepiaAppState {
     conversations: SectionState & { items: ConversationDto[] };
     greeting_catalog: GreetingCatalogState;
     selected_conversation: ConversationDto | null;
+    pending_conversation_start: {
+        conversation: ConversationDto;
+        personaId?: string;
+        mode: ConversationMode;
+        greetingId: string | null;
+    } | null;
     conversation_state: ConversationStateDto | null;
     branches: ConversationBranchDto[];
     messages: SectionState & { items: MessageDto[] };
@@ -110,7 +119,13 @@ export const INITIAL_APP_STATE: LorepiaAppState = {
     bootstrap: { phase: 'idle', error: null, value: null },
     memory_supervisor: { phase: 'idle', error: null, status: null },
     library: { phase: 'idle', error: null, characters: [] },
-    import_flow: { phase: 'idle', error: null, inspection: null },
+    import_flow: {
+        phase: 'idle',
+        error: null,
+        inspection: null,
+        resource_override_active: false,
+        resource_override_available: false,
+    },
     selected_character: null,
     conversations: { phase: 'idle', error: null, items: [] },
     greeting_catalog: {
@@ -120,6 +135,7 @@ export const INITIAL_APP_STATE: LorepiaAppState = {
         selected_greeting_id: null,
     },
     selected_conversation: null,
+    pending_conversation_start: null,
     conversation_state: null,
     branches: [],
     messages: { phase: 'idle', error: null, items: [] },

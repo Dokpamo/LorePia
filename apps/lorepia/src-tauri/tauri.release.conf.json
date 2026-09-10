@@ -12,7 +12,7 @@
         "title": "LorePia",
         "width": 1180,
         "height": 760,
-        "minWidth": 248,
+        "minWidth": 320,
         "minHeight": 552,
         "center": true,
         "resizable": true,
@@ -20,12 +20,8 @@
         "minimizable": true,
         "closable": true,
         "decorations": true,
-        "titleBarStyle": "Overlay",
-        "hiddenTitle": true,
-        "trafficLightPosition": {
-          "x": 15,
-          "y": 25
-        },
+        "titleBarStyle": "Visible",
+        "hiddenTitle": false,
         "transparent": false,
         "fullscreen": false,
         "visible": true,
@@ -33,7 +29,9 @@
       }
     ],
     "security": {
-      "capabilities": ["main-release"]
+      "capabilities": [
+        "main-release"
+      ]
     }
   }
 }

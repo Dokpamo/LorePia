@@ -1,0 +1,2 @@
+/* Existing feature panels keep their styles; the shared workspace wins the cascade. */
+@import '../../styles/app.css' layer(legacy);

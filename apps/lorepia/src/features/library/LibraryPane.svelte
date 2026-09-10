@@ -7,37 +7,24 @@
         CharacterDto,
         ContentPackageClientApi,
         ContentSourceExportReceiptDto,
-        AssetDeliverySelector,
         LorepiaClient,
     } from '../../lib/ipc/contracts';
     import { normalizeClientError } from '../../lib/ipc/errors';
-    import TrustedAsset from '../assets/TrustedAsset.svelte';
+    import CharacterAvatar from '../assets/CharacterAvatar.svelte';
+    import { characterDescriptionPreview } from './character-preview';
+    import { enterCharacter } from './character-entry';
 
-    type ExportCapableClient = LorepiaClient & Partial<ContentPackageClientApi>;
-
-    const SHA256_PATTERN = /^[0-9a-f]{64}$/;
-
-    function avatarSelector(assetReference: string): AssetDeliverySelector {
-        return SHA256_PATTERN.test(assetReference)
-            ? { kind: 'sha256', sha256: assetReference }
-            : { kind: 'asset_id', asset_id: assetReference };
-    }
+    type ExportClient = LorepiaClient & Partial<ContentPackageClientApi>;
 
     interface Props {
         state: LorepiaAppState;
         controller: LorepiaAppController;
-        client: ExportCapableClient;
-        onOpenConversations: () => void;
+        client: ExportClient;
+        onOpenChat: (opened: boolean) => void;
         rootView?: boolean;
     }
 
-    let {
-        state: appState,
-        controller,
-        client,
-        onOpenConversations,
-        rootView = false,
-    }: Props = $props();
+    let { state: appState, controller, client, onOpenChat, rootView = false }: Props = $props();
     let exportingCharacterId = $state<string | null>(null);
     let exportReceipt = $state<ContentSourceExportReceiptDto | null>(null);
     let exportError = $state<string | null>(null);
@@ -48,7 +35,7 @@
     let searchInput = $state<HTMLInputElement | null>(null);
     let searchContainer = $state<HTMLDivElement | null>(null);
     let characterFilter = $state('all');
-    const visibleCharacters = $derived.by(() => {
+    const visible = $derived.by(() => {
         const filteredCharacters =
             characterFilter === 'all'
                 ? appState.library.characters
@@ -62,8 +49,8 @@
         );
     });
 
-    function selectCharacter(character: CharacterDto): void {
-        void controller.selectCharacter(character).then(onOpenConversations);
+    function openCharacter(character: CharacterDto): void {
+        void enterCharacter(controller, character).then(onOpenChat);
     }
 
     async function openSearch(): Promise<void> {
@@ -288,7 +275,7 @@
                 <span class="import-character-label">{$tr('library.import')}</span>
             </button>
         {/if}
-        {#if !rootView && appState.selected_character !== null && visibleCharacters.some((character) => character.id === appState.selected_character?.id)}
+        {#if !rootView && appState.selected_character !== null && visible.some((character) => character.id === appState.selected_character?.id)}
             {@const selected = appState.selected_character}
             <button
                 class="compact export-character-button"
@@ -348,7 +335,7 @@
             >
         </div>
     {:else if appState.library.characters.length > 0}
-        {#if visibleCharacters.length === 0}
+        {#if visible.length === 0}
             <div class="state-panel empty search-empty">
                 <strong>{$tr('library.search.empty')}</strong>
                 <button type="button" onclick={() => (searchQuery = '')}>
@@ -362,7 +349,7 @@
                 role={rootView ? 'tabpanel' : undefined}
                 aria-label={$tr('library.list.label')}
             >
-                {#each visibleCharacters as character (character.id)}
+                {#each visible as character (character.id)}
                     <li>
                         <button
                             type="button"
@@ -370,26 +357,21 @@
                             class="entity-row"
                             class:mobile-root-row={rootView}
                             aria-pressed={appState.selected_character?.id === character.id}
-                            onclick={() => selectCharacter(character)}
+                            onclick={() => openCharacter(character)}
                         >
                             <span class="avatar">
-                                {#if character.avatar_asset_id === null}
-                                    <span aria-hidden="true">{character.name.slice(0, 1)}</span>
-                                {:else}
-                                    <TrustedAsset
-                                        {client}
-                                        selector={avatarSelector(character.avatar_asset_id)}
-                                        expectedKind="image"
-                                        alt={$tr('library.character.image', {
-                                            name: character.name.slice(0, 256),
-                                        })}
-                                    />
-                                {/if}
+                                <CharacterAvatar
+                                    {client}
+                                    {character}
+                                    alt={$tr('library.character.image', {
+                                        name: character.name.slice(0, 256),
+                                    })}
+                                />
                             </span>
                             <span class="entity-copy">
                                 <strong>{character.name}</strong>
                                 <span
-                                    >{character.description ||
+                                    >{characterDescriptionPreview(character.description) ||
                                         $tr('library.description.empty')}</span
                                 >
                             </span>

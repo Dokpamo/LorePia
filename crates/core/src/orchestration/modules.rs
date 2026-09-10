@@ -297,8 +297,7 @@ impl Core {
             character_id: Some(input.character.id.clone()),
             conversation_id: Some(input.conversation_id.0.clone()),
             branch_id: Some(input.branch_id.0.clone()),
-            supported_capabilities: crate::module_orchestration::SUPPORTED_CONTENT_CAPABILITIES
-                .to_vec(),
+            supported_capabilities: crate::module_orchestration::CAPABILITIES.to_vec(),
         };
         if let Some(applied) = input.applied_plan_override {
             if applied.review.context != context {

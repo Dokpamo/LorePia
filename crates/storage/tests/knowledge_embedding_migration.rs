@@ -24,7 +24,7 @@ const EXACT_PROVIDER_VECTOR_SPACE: &str =
 const MODEL_ROUTE_ID: &str = "route:legacy-knowledge";
 const GENERATION_PRESET_ID: &str = "preset:legacy-knowledge";
 const ENTRY_ID: &str = "entry:legacy-knowledge";
-const LAST_INVERTED_SCHEMA_VERSION: u32 = 40;
+const LAST_INVERTED_SCHEMA_VERSION: u32 = 41;
 const MIGRATION_0019: &str = include_str!("../migrations/0019_lifecycle_outbox.sql");
 const MIGRATION_0024: &str = include_str!("../migrations/0024_generation_attempt_proposals.sql");
 const MIGRATION_0027: &str =
@@ -336,6 +336,7 @@ fn downgrade_and_seed_populated_v31(fixture: &FixtureIds, vector_blob: &[u8], ve
     let transaction = connection
         .transaction()
         .expect("schema downgrade transaction");
+    restore_schema40_package_capability_requests(&transaction);
     remove_schema40_objects(&transaction);
     remove_schema39_objects(&transaction);
     remove_schema38_objects(&transaction);
@@ -346,6 +347,14 @@ fn downgrade_and_seed_populated_v31(fixture: &FixtureIds, vector_blob: &[u8], ve
     insert_populated_v31_embedding(&transaction, fixture, vector_blob, vector_sha256);
     assert_schema31_fixture(&transaction);
     transaction.commit().expect("commit populated schema 31");
+}
+
+fn restore_schema40_package_capability_requests(transaction: &Transaction<'_>) {
+    transaction
+        .execute_batch(include_str!(
+            "../../../testdata/tauri-upgrade/schema-40-package-capability-requests.sql"
+        ))
+        .expect("restore schema-40 package capability table");
 }
 
 fn remove_schema40_objects(transaction: &Transaction<'_>) {

@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { ko } from '../../lib/i18n/ko';
 import OrchestrationStudio from './OrchestrationStudio.svelte';
 import { appState, controller, orchestrationState } from './tests/fixtures';
 
@@ -10,6 +11,92 @@ afterEach(() => {
 });
 
 describe('OrchestrationStudio', () => {
+    it('shows route-aware compatibility setup for an imported external preset', () => {
+        const readyState = orchestrationState();
+        readyState.editable_prompt_preset = {
+            value: {
+                id: 'imported-prompt',
+                name: 'external generation preset',
+                schema_version: 1,
+                blocks: [],
+                controls: [],
+                default_values: {
+                    values: [
+                        {
+                            variable: {
+                                scope: 'app',
+                                namespace: null,
+                                id: 'lorepia_imported_import_kind',
+                            },
+                            value: { type: 'enum', value: 'generation' },
+                        },
+                        {
+                            variable: {
+                                scope: 'app',
+                                namespace: null,
+                                id: 'lorepia_imported_model_hint',
+                            },
+                            value: { type: 'text', value: 'synthetic-model-1' },
+                        },
+                    ],
+                },
+                default_generation_preset_id: null,
+                memory_profile_id: null,
+                knowledge_book_ids: [],
+                transform_set_ids: [],
+                module_ids: [],
+                cache_boundaries: [],
+                metadata: {
+                    description: 'Imported external setup',
+                    tags: ['compatibility'],
+                    provenance: {
+                        source_kind: 'imported_package',
+                        source_id: 'fixture',
+                        source_hash:
+                            'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                        author: null,
+                        license: null,
+                        imported_at: '2026-08-03T00:00:00Z',
+                    },
+                    created_at: '2026-08-03T00:00:00Z',
+                    updated_at: '2026-08-03T00:00:00Z',
+                    local_override_of: null,
+                },
+            },
+            revision: 1,
+            created_at: '2026-08-03T00:00:00Z',
+            updated_at: '2026-08-03T00:00:00Z',
+            deleted_at: null,
+        };
+
+        render(OrchestrationStudio, {
+            section: 'prompt',
+            detailPage: 'profiles',
+            appState: appState(),
+            orchestrationState: readyState,
+            controller: controller(),
+        });
+
+        expect(
+            screen.getByRole('region', { name: ko['orchestration.imported_compatibility.label'] }),
+        ).toBeInTheDocument();
+        expect(
+            screen.getByRole('heading', {
+                name: ko['orchestration.imported_compatibility.title.generation'],
+            }),
+        ).toBeInTheDocument();
+        expect(
+            screen.getByRole('combobox', {
+                name: new RegExp(ko['orchestration.imported_compatibility.route.generation']),
+            }),
+        ).toHaveAttribute('data-value', 'route-1');
+        expect(
+            screen.getByRole('button', {
+                name: ko['orchestration.imported_compatibility.action.generation'],
+            }),
+        ).toBeEnabled();
+    });
+
     it('renders imported markup only as text and keeps Core policy blocks read-only', async () => {
         const orchestrationController = controller();
         const move = vi.spyOn(orchestrationController, 'movePromptBlock').mockResolvedValue(true);

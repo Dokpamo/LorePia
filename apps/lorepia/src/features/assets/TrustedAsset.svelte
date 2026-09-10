@@ -19,18 +19,28 @@
     };
 
     interface Props {
-        client: LorepiaClient;
+        client: Pick<LorepiaClient, 'resolveAssetDelivery'>;
         selector: AssetDeliverySelector;
         alt: string;
         showMetadata?: boolean;
         expectedKind?: AssetDeliveryDto['kind'];
+        statusPresentation?: 'overlay' | 'placeholder';
     }
 
-    let { client, selector, alt, showMetadata = false, expectedKind }: Props = $props();
+    let {
+        client,
+        selector,
+        alt,
+        showMetadata = false,
+        expectedKind,
+        statusPresentation = 'overlay',
+    }: Props = $props();
     let descriptor = $state<AssetDeliveryDto | null>(null);
     let rendererUrl = $state<string | null>(null);
     let phase = $state<'loading' | 'media_loading' | 'ready' | 'error'>('loading');
     let error = $state<string | null>(null);
+    let mediaRetryCount = 0;
+    let mediaRetryTimer: ReturnType<typeof setTimeout> | null = null;
     const safeAlt = $derived(alt.slice(0, 512));
     const selectorKind = $derived(selector.kind);
     const selectorValue = $derived(
@@ -45,6 +55,7 @@
                 : { kind: 'sha256', sha256: selectorValue };
         const activeExpectedKind = expectedKind;
         let cancelled = false;
+        mediaRetryCount = 0;
         descriptor = null;
         rendererUrl = null;
         error = null;
@@ -80,6 +91,8 @@
 
         return () => {
             cancelled = true;
+            if (mediaRetryTimer !== null) clearTimeout(mediaRetryTimer);
+            mediaRetryTimer = null;
         };
     });
 
@@ -194,6 +207,18 @@
     }
 
     function mediaFailed(): void {
+        if (descriptor !== null && rendererUrl !== null && mediaRetryCount < 2) {
+            const retryDescriptor = descriptor;
+            const retryUrl = rendererUrl;
+            mediaRetryCount += 1;
+            rendererUrl = null;
+            phase = 'media_loading';
+            mediaRetryTimer = setTimeout(() => {
+                mediaRetryTimer = null;
+                if (descriptor === retryDescriptor) rendererUrl = retryUrl;
+            }, mediaRetryCount * 1000);
+            return;
+        }
         descriptor = null;
         rendererUrl = null;
         phase = 'error';
@@ -210,6 +235,7 @@
     class="trusted-asset"
     aria-busy={phase === 'loading' || phase === 'media_loading'}
     data-asset-phase={phase}
+    data-status-presentation={statusPresentation}
 >
     {#if descriptor !== null && rendererUrl !== null}
         {#if descriptor.kind === 'image'}
@@ -316,5 +342,19 @@
         color: var(--ink-inverse);
         background: color-mix(in srgb, var(--brand-ink) 68%, transparent);
         font-size: 0.7rem;
+    }
+    /* An avatar keeps its neutral initial until a decoded image is ready. */
+    [data-status-presentation='placeholder']:not([data-asset-phase='ready']) img {
+        visibility: hidden;
+    }
+
+    [data-status-presentation='placeholder'] :is(.asset-status, .asset-error) {
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        border: 0;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
     }
 </style>

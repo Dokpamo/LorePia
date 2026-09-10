@@ -15,9 +15,18 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-use crate::render_portable_text;
 use crate::template::{
     TemplateEnvironment, TemplateError, evaluate_condition, render_safe_template,
+};
+
+mod compat;
+mod history_budget;
+
+use history_budget::keep_latest_items;
+
+use crate::render_portable_text;
+use compat::{
+    is_compat_block, merge_same_role_messages, render_compat_text, select_relative_message_range,
 };
 
 const MESSAGE_OVERHEAD_TOKENS: u32 = 4;
@@ -553,6 +562,9 @@ where
             materialized.explanation = "block source produced no content".into();
             return Ok(materialized);
         }
+        if is_compat_block(block) && block.template.is_some() {
+            merge_same_role_messages(&mut materialized.messages);
+        }
         Self::apply_block_template(request, block, &mut materialized.messages)?;
         materialized
             .messages
@@ -599,7 +611,8 @@ where
                             reason: "template source requires a template".into(),
                         })?;
                 let environment = template_environment(context, &context.slots);
-                Ok(default(render_safe_template(template, &environment)?))
+                let rendered = render_safe_template(template, &environment)?;
+                Ok(default(render_compat_text(block, &rendered, context)))
             }
             BlockSource::CharacterField { field } => Ok(default(render_portable_text(
                 &character_field(context, *field),
@@ -752,13 +765,17 @@ where
                     block_id: block.id.0.clone(),
                     reason: "history source requires a history selector".into(),
                 })?;
+        let include_latest_user = matches!(
+            block.history_selector.as_ref(),
+            Some(HistorySelector::RelativeMessageRange { .. })
+        );
         let mut messages = request
             .context
             .messages
             .iter()
             .filter(|message| {
                 message.branch_id == request.context.branch_id
-                    && message.id != request.context.latest_user_message_id
+                    && (include_latest_user || message.id != request.context.latest_user_message_id)
             })
             .collect::<Vec<_>>();
         messages.sort_by(|left, right| {
@@ -812,7 +829,8 @@ where
                 value: message.content.clone(),
             });
             let environment = template_environment(&request.context, &slots);
-            message.content = render_safe_template(template, &environment)?;
+            let rendered = render_safe_template(template, &environment)?;
+            message.content = render_compat_text(block, &rendered, &request.context);
         }
         Ok(())
     }
@@ -1152,6 +1170,9 @@ fn select_history<'a>(
                 .filter(|message| message.turn_index >= minimum)
                 .collect())
         }
+        HistorySelector::RelativeMessageRange { start, end } => {
+            select_relative_message_range(messages, *start, *end)
+        }
         HistorySelector::MessageRange { start, end } => {
             let start_index = messages
                 .iter()
@@ -1178,29 +1199,6 @@ fn select_history<'a>(
             Ok(messages.into_iter().skip(end_index + 1).collect())
         }
     }
-}
-
-fn merge_same_role_messages(messages: &mut Vec<DraftMessage>) {
-    let mut merged: Vec<DraftMessage> = Vec::with_capacity(messages.len());
-    for message in messages.drain(..) {
-        if let Some(previous) = merged.last_mut()
-            && previous.requested_role == message.requested_role
-            && previous.authority == message.authority
-            && previous.provenance == message.provenance
-        {
-            previous.content.push_str("\n\n");
-            previous.content.push_str(&message.content);
-            previous
-                .source_message_ids
-                .extend(message.source_message_ids);
-            previous
-                .source_memory_record_ids
-                .extend(message.source_memory_record_ids);
-            continue;
-        }
-        merged.push(message);
-    }
-    *messages = merged;
 }
 
 fn map_role(
@@ -1491,26 +1489,6 @@ fn trim_messages<E: TokenEstimator>(
         retained.reverse();
     }
     *messages = retained;
-}
-
-fn keep_latest_items<E: TokenEstimator>(
-    messages: &mut Vec<DraftMessage>,
-    target_tokens: u32,
-    estimator: &E,
-) {
-    while !messages.is_empty()
-        && messages
-            .iter()
-            .map(|message| {
-                estimator
-                    .estimate_text(&message.content)
-                    .saturating_add(MESSAGE_OVERHEAD_TOKENS)
-            })
-            .sum::<u32>()
-            > target_tokens
-    {
-        messages.remove(0);
-    }
 }
 
 fn canonical_plan_hash(plan: &ResolvedPromptPlan) -> Result<String, OrchestrationError> {

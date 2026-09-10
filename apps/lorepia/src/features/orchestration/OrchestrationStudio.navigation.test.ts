@@ -43,14 +43,13 @@ describe('OrchestrationStudio', () => {
         expect(screen.queryByRole('button', { name: '새로고침' })).not.toBeInTheDocument();
 
         const feature = screen.getByRole('button', { name: /프롬프트 설계/ });
-        expect(feature).toHaveClass('setting-row', 'studio-destination-row');
-        const destinationList = rendered.container.querySelector<HTMLElement>(
-            '.setting-list.studio-destination-list',
-        );
+        expect(feature).toHaveClass('mobile-menu-row');
+        const destinationList =
+            rendered.container.querySelector<HTMLElement>('.mobile-studio-index');
         if (destinationList === null) throw new Error('studio destination list is missing');
         expect(destinationList).toContainElement(feature);
         expect(within(destinationList).getAllByRole('button')).toHaveLength(4);
-        expect(destinationList.querySelectorAll('.setting-icon')).toHaveLength(4);
+        expect(destinationList.querySelectorAll('.mobile-chevron')).toHaveLength(4);
         expect(destinationList.querySelector('.setting-chevron')).not.toBeInTheDocument();
 
         await fireEvent.click(feature);
@@ -127,10 +126,10 @@ describe('OrchestrationStudio', () => {
                 contentPackageController: new ContentPackageController({} as LorepiaClient),
             });
             const subtools = screen.getByRole('list', { name: '세부 도구' });
-            expect(subtools).toHaveClass('setting-list', 'studio-detail-list');
+            expect(subtools).toHaveClass('mobile-flat-list');
             const rows = within(subtools).getAllByRole('button');
             expect(rows).toHaveLength(sectionCase.count);
-            expect(rows.every((row) => row.classList.contains('studio-detail-row'))).toBe(true);
+            expect(rows.every((row) => row.classList.contains('mobile-menu-row'))).toBe(true);
             expect(subtools.querySelector('.setting-chevron')).not.toBeInTheDocument();
 
             await fireEvent.click(

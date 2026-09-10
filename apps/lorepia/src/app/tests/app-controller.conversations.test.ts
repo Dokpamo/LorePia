@@ -7,6 +7,7 @@ import type {
     ConversationStateDto,
     MessageDto,
 } from '../../lib/ipc/contracts';
+import { t } from '../../lib/i18n';
 import { LorepiaAppController } from '../app-controller';
 import { createAppControllerFixture, deferred } from './app-controller-test-support';
 
@@ -40,7 +41,7 @@ describe('LorepiaAppController greeting-bound conversation entry', () => {
         const createdConversation: ConversationDto = {
             ...conversation,
             id: 'conversation-created',
-            title: character.name,
+            title: t('uiPreview.newChat'),
         };
         const createdState: ConversationStateDto = {
             ...conversationState,
@@ -67,10 +68,15 @@ describe('LorepiaAppController greeting-bound conversation entry', () => {
         expect(controller.selectGreeting('default-disabled')).toBe(false);
         await expect(controller.openNewConversation()).resolves.toBe(true);
 
-        expect(createConversation).toHaveBeenCalledWith(character.id, character.name, 'chat', {
-            character_content_revision_id: greetingCatalog.character_content_revision_id,
-            greeting_id: 'alternate-second',
-        });
+        expect(createConversation).toHaveBeenCalledWith(
+            character.id,
+            t('uiPreview.newChat'),
+            'chat',
+            {
+                character_content_revision_id: greetingCatalog.character_content_revision_id,
+                greeting_id: 'alternate-second',
+            },
+        );
         expect(openExistingConversation).not.toHaveBeenCalled();
         expect(get(controller.state)).toMatchObject({
             selected_conversation: createdConversation,

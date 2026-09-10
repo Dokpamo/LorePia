@@ -40,8 +40,8 @@ REQUIRED_WORKFLOW_MARKERS = {
     ],
     ".github/workflows/security.yml": [
         "actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294",
-        "github/codeql-action/init@6f5948dfacef28e207b48d0905cf90c03365536d",
-        "github/codeql-action/analyze@6f5948dfacef28e207b48d0905cf90c03365536d",
+        "github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938",
+        "github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938",
         "rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998",
     ],
     ".github/workflows/release.yml": [

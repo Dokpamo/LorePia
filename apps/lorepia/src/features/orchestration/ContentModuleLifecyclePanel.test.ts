@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { t } from '../../lib/i18n';
 
 import ContentModuleLifecyclePanel from './ContentModuleLifecyclePanel.svelte';
 import type {
@@ -395,6 +396,40 @@ function client(
 afterEach(cleanup);
 
 describe('ContentModuleLifecyclePanel', () => {
+    it('labels portable runtime capability chips from imported modules', async () => {
+        const proposedRevision = activationReview().proposed_revision;
+        render(ContentModuleLifecyclePanel, {
+            props: {
+                client: client({
+                    listContentModuleLifecycleCandidates: vi.fn().mockResolvedValue({
+                        scope_targets: [],
+                        items: [
+                            {
+                                ...proposedRevision,
+                                required_capabilities: ['portable_runtime'],
+                                component_count: 1,
+                                completed_package_approvals: [completedPackageApproval()],
+                            },
+                        ],
+                        truncated: false,
+                    }),
+                }),
+                conversationId: 'conversation-1',
+                branchId: 'branch-1',
+                detailPage: 'modules:candidates',
+            },
+        });
+
+        const candidateButton = await screen.findByRole('button', {
+            name: t('content.module.activation_review'),
+        });
+        const card = candidateButton.closest('article');
+        if (card === null) throw new Error('candidate card is missing');
+        expect(
+            within(card).getByText(t('content.capability.portable_runtime')),
+        ).toBeInTheDocument();
+    });
+
     it('pushes the module index into candidate and activation pages one level at a time', async () => {
         vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue(BINDING_ID);
         render(ContentModuleLifecyclePanel, {

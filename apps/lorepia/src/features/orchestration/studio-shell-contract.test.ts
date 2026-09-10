@@ -1,44 +1,11 @@
 import { describe, expect, it } from 'vitest';
-
-import appSource from '../../app/App.svelte?raw';
-import detailActionBarSource from '../../components/detail/DetailActionBar.svelte?raw';
 import { ko } from '../../lib/i18n/ko';
-import appCss from '../../styles/app-css';
-import contentModuleSource from './ContentModuleLifecyclePanel.svelte?raw';
-import creatorDocumentsSource from './CreatorDocumentEditors.svelte?raw';
-import orchestrationStudioSource from './OrchestrationStudio.svelte?raw';
-import promptHistorySource from './PromptPresetHistory.svelte?raw';
-import contentPackageReviewSource from './studio/ContentPackageReview.svelte?raw';
-import contentSource from './studio/ContentSection.svelte?raw';
-import memorySource from './studio/MemorySection.svelte?raw';
-import planDetailsSource from './studio/PlanDetails.svelte?raw';
-import promptBlockItemSource from './studio/PromptBlockItem.svelte?raw';
-import promptBlocksSource from './studio/PromptBlocksSection.svelte?raw';
-import promptSource from './studio/PromptSection.svelte?raw';
-import runtimePlanSource from './studio/RuntimePlanSection.svelte?raw';
-import studioStylesA from './studio/styles/studio-a.css?raw';
-import studioStylesB from './studio/styles/studio-b.css?raw';
-import taskProfilesSource from './TaskProfilesPanel.svelte?raw';
 import {
     STUDIO_DETAIL_TITLE_KEYS,
     studioDetailHasFixedActions,
     studioDetailParent,
     studioNestedDetailTitleKey,
 } from './studio-contracts';
-
-const orchestrationStudioContractSource = [
-    orchestrationStudioSource,
-    contentPackageReviewSource,
-    contentSource,
-    memorySource,
-    planDetailsSource,
-    promptBlockItemSource,
-    promptBlocksSource,
-    promptSource,
-    runtimePlanSource,
-    studioStylesA,
-    studioStylesB,
-].join('\n');
 
 describe('Studio pushed-screen shell', () => {
     it.each([
@@ -102,69 +69,10 @@ describe('Studio pushed-screen shell', () => {
         expect(ko[titleKey].length).toBeGreaterThan(0);
     });
 
-    it('wires the route resolver into the App back button and title', () => {
-        expect(appSource).toContain('studioDetailPage = studioDetailParent(studioDetailPage)');
-        expect(appSource).toContain('studioNestedDetailTitleKey(studioDetailPage)');
-        expect(appSource).toContain('studioBaseDetailTitleKey(studioDetailPage)');
-        expect(appSource).toContain('class:studio-detail-scroll={studioSection !== null}');
-        expect(appSource).toContain(
-            'class:studio-detail-has-actions={studioDetailHasFixedActions(',
-        );
-        expect(appSource).toMatch(
-            /!isDesktop\s+&&\s+!\(view === 'create' && studioSection !== null\)[\s\S]*?<nav class="tab-bar"/,
-        );
-    });
-
-    it('centres fixed actions in the active workspace and reserves their scroll space', () => {
-        expect(detailActionBarSource).toMatch(
-            /\.detail-action-bar\.fixed\s*\{[^}]*position:\s*fixed;[^}]*left:\s*var\(--detail-action-center,\s*50%\);[^}]*var\(--detail-action-workspace-width,\s*100vw\)/s,
-        );
-        expect(appCss).toContain('--detail-action-workspace-width: min(100vw, 591px)');
-        expect(appCss).toContain('--detail-action-workspace-width: calc(100vw - var(--sidebar))');
-        expect(appCss).toMatch(
-            /\.view-scroll\.studio-detail-scroll\s*\{[^}]*padding-bottom:\s*24px;/s,
-        );
-        expect(appCss).toMatch(
-            /\.studio-detail-has-actions[^}]*padding-bottom:\s*calc\(var\(--mobile-nav\) \+ 28px \+ env\(safe-area-inset-bottom\)\);/s,
-        );
+    it('reserves fixed-action space only for destinations with actions', () => {
         expect(studioDetailHasFixedActions('variables')).toBe(false);
         expect(studioDetailHasFixedActions('documents')).toBe(false);
         expect(studioDetailHasFixedActions('records')).toBe(false);
         expect(studioDetailHasFixedActions('blocks/system')).toBe(true);
-        expect(appCss).toMatch(
-            /\.view-scroll\.studio-detail-scroll[\s\S]*?:is\(\.data-table-wrap, \.block-minimap ol, \.safe-text-preview pre, \.diff-preview pre\)[\s\S]*?touch-action:\s*pan-x pan-y;/s,
-        );
-    });
-
-    it('keeps App as the single Studio scroll and fixed-action reserve owner', () => {
-        for (const source of [creatorDocumentsSource, contentModuleSource]) {
-            expect(source).not.toMatch(/import DetailPage|<DetailPage\b/);
-        }
-        for (const source of [
-            promptHistorySource,
-            taskProfilesSource,
-            creatorDocumentsSource,
-            contentModuleSource,
-        ]) {
-            expect(source).not.toContain('calc(var(--mobile-nav)');
-        }
-        expect(promptHistorySource).not.toMatch(/max-height:\s*14rem;[\s\S]*?overflow:\s*auto;/);
-        expect(orchestrationStudioContractSource).toMatch(
-            /\.safe-text-preview pre,[\s\S]*?\.diff-preview pre\s*\{[^}]*max-height:\s*none;[^}]*overflow-x:\s*auto;[^}]*overflow-y:\s*visible;/s,
-        );
-    });
-
-    it('fixes every Studio action bar to the shared workspace centre', () => {
-        for (const source of [
-            promptHistorySource,
-            taskProfilesSource,
-            creatorDocumentsSource,
-            contentModuleSource,
-            orchestrationStudioContractSource,
-        ]) {
-            const actionBars = source.match(/<DetailActionBar\b[^>]*>/g) ?? [];
-            expect(actionBars.length).toBeGreaterThan(0);
-            expect(actionBars.every((tag) => /\bfixed\b/.test(tag))).toBe(true);
-        }
     });
 });

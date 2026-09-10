@@ -15,12 +15,13 @@ use zip::{ZipArchive, read::ZipFile};
 
 use crate::{
     StagedAsset, adapters,
-    capabilities::{
-        intersect_runtime_profile_capabilities, normalize_runtime_profile_capabilities,
-    },
+    capabilities::{merge_runtime_profile_capabilities, normalize_runtime_profile_capabilities},
     path::validate_archive_path,
     runtime,
 };
+
+mod limits;
+use limits::{checked_entry_size, checked_total_size, resource_limit};
 
 const CARD_METADATA_PATH: &str = "card.json";
 const ASSET_HEADER_BYTES: usize = 16;
@@ -248,7 +249,9 @@ fn merge_runtime_documents(
             profile,
             knowledge_entries,
             embedded_assets,
+            warnings,
         } = document;
+        state.warnings.extend(warnings);
         if metadata.content.knowledge_book.is_none()
             && let Some(entries) = knowledge_entries
         {
@@ -289,9 +292,12 @@ fn project_runtime_asset(
 ) -> CoreResult<()> {
     let size_bytes = u64::try_from(asset.bytes.len())
         .map_err(|_| unsafe_archive("runtime asset is too large for this device".to_owned()))?;
-    if size_bytes == 0 || size_bytes > limits.max_entry_bytes {
-        return Err(unsafe_archive(
-            "runtime asset is empty or exceeds the per-entry size limit".to_owned(),
+    if size_bytes == 0 {
+        return Err(unsafe_archive("runtime asset is empty".to_owned()));
+    }
+    if size_bytes > limits.max_entry_bytes {
+        return Err(resource_limit(
+            "runtime asset exceeds the per-entry size limit".to_owned(),
         ));
     }
     if state.asset_descriptors.len().saturating_add(1) > limits.max_entries {
@@ -364,7 +370,7 @@ fn merge_runtime_profile(
     target: &mut lorepia_domain::CharacterRuntimeProfile,
     mut incoming: lorepia_domain::CharacterRuntimeProfile,
 ) -> CoreResult<()> {
-    intersect_runtime_profile_capabilities(target, &mut incoming)?;
+    merge_runtime_profile_capabilities(target, &mut incoming)?;
     target.transforms.append(&mut incoming.transforms);
     target.scripts.append(&mut incoming.scripts);
     if target.background_markup.is_empty() {
@@ -507,11 +513,8 @@ fn append_archive_summary_warnings(
     ));
 }
 
-/// Detects a valid character-card ZIP that starts after another file payload.
-///
-/// The probe is based on the ZIP end record and a root `card.json`, not the
-/// selected filename. It reads directory metadata only and never executes or
-/// renders archive content.
+/// Detects a character-card ZIP appended to another payload by its end record
+/// and root `card.json`; archive content is never executed or rendered.
 pub(crate) fn has_embedded_character_archive(
     path: &Path,
     limits: ImportLimits,
@@ -619,8 +622,13 @@ pub(crate) fn preflight_zip_archive(file: &mut File, limits: ImportLimits) -> Co
             limits.max_entries
         )));
     }
-    if raw_central_size > limits.max_source_bytes || raw_central_size > file_len {
+    if raw_central_size > file_len {
         return Err(unsafe_archive(
+            "archive central directory extends beyond the file".to_owned(),
+        ));
+    }
+    if raw_central_size > limits.max_source_bytes {
+        return Err(resource_limit(
             "archive central directory exceeds the configured source limit".to_owned(),
         ));
     }
@@ -1108,7 +1116,7 @@ fn validate_entry_type_and_size<R: Read>(
         )));
     }
     if entry.size() > limits.max_entry_bytes {
-        return Err(unsafe_archive(format!(
+        return Err(resource_limit(format!(
             "archive entry exceeds size limit: {name}"
         )));
     }
@@ -1117,7 +1125,7 @@ fn validate_entry_type_and_size<R: Read>(
         .checked_add(entry.size())
         .ok_or_else(|| unsafe_archive("archive size overflow".to_owned()))?;
     if state.declared_total > limits.max_total_uncompressed_bytes {
-        return Err(unsafe_archive(
+        return Err(resource_limit(
             "archive exceeds total uncompressed size limit".to_owned(),
         ));
     }
@@ -1231,35 +1239,6 @@ fn read_entry_inner<R: Read>(
         });
     }
     Ok(result)
-}
-
-fn checked_entry_size(
-    current: u64,
-    read: usize,
-    name: &str,
-    limits: ImportLimits,
-) -> CoreResult<u64> {
-    let updated = current
-        .checked_add(read as u64)
-        .ok_or_else(|| unsafe_archive("archive entry size overflow".to_owned()))?;
-    if updated > limits.max_entry_bytes {
-        return Err(unsafe_archive(format!(
-            "archive entry exceeds size limit while decoding: {name}"
-        )));
-    }
-    Ok(updated)
-}
-
-fn checked_total_size(current: u64, read: usize, limits: ImportLimits) -> CoreResult<u64> {
-    let updated = current
-        .checked_add(read as u64)
-        .ok_or_else(|| unsafe_archive("archive size overflow".to_owned()))?;
-    if updated > limits.max_total_uncompressed_bytes {
-        return Err(unsafe_archive(
-            "archive exceeds total uncompressed size limit while decoding".to_owned(),
-        ));
-    }
-    Ok(updated)
 }
 
 fn collect_entry_bytes(result: &mut EntryRead, plan: &EntryPlan, bytes: &[u8]) -> CoreResult<()> {

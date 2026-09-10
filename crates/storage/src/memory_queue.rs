@@ -1,11 +1,9 @@
 //! Durable memory-work queue operations.
 //!
-//! The queue is deliberately separate from memory-record persistence.  A job
-//! binds to immutable memory/task-profile revisions and to a caller-reviewed
-//! input fingerprint before it can be claimed.  Claiming and all state
-//! transitions use `SQLite` compare-and-swap updates inside `BEGIN IMMEDIATE`
-//! transactions, so multiple local workers cannot exceed the persisted task
-//! limits.
+//! The queue is separate from memory-record persistence. Jobs bind immutable
+//! memory/task revisions and a reviewed fingerprint before claim. All state
+//! transitions use `SQLite` compare-and-swap inside `BEGIN IMMEDIATE`, so local
+//! workers cannot exceed persisted task limits.
 
 use std::collections::BTreeSet;
 
@@ -4365,6 +4363,7 @@ mod tests {
             importance_weight: 0.0,
             preserve_invalidated_records: true,
             summary_schema: SummarySchemaId::from("summary-schema:test"),
+            summary_template: None,
             provenance: Provenance {
                 source_kind: SourceKind::UserCreated,
                 source_id: None,

@@ -144,6 +144,18 @@
     },
     {
       "default_features": true,
+      "features": [],
+      "from": "lorepia-content",
+      "kind": "normal",
+      "optional": false,
+      "package": "ring",
+      "rename": null,
+      "requirement": "^0.17",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": true,
       "features": [
         "fs"
       ],

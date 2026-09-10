@@ -1,3 +1,5 @@
+mod overview;
+
 use super::{
     ApiFamily, BoundedJson, CapabilityObservation, Connection, CoreError, CoreResult, DateTime,
     GenerationPreset, LEGACY_PROVIDER_TEMPLATE_ID, LEGACY_PROVIDER_TEMPLATE_VERSION,

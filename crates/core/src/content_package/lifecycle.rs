@@ -42,6 +42,7 @@ pub(super) struct DurableContentPackageImport {
     pub(super) source: PackageSourceRecord,
     pub(super) record: PackageImportRecord,
     pub(super) owned: OwnedContentPackageSnapshot,
+    pub(super) limits: ImportLimits,
 }
 impl Core {
     /// Reopens an existing durable inspection without consulting the original
@@ -50,7 +51,7 @@ impl Core {
         &self,
         import_id: &str,
     ) -> CoreResult<ContentPackageImportInspection> {
-        let loaded = load_durable_content_package(self, import_id, ImportLimits::default())?;
+        let loaded = load_durable_content_package(self, import_id)?;
         let capability_review = self.storage().get_package_capability_review(import_id)?;
         loaded
             .owned
@@ -118,7 +119,6 @@ impl Core {
 pub(super) fn load_durable_content_package(
     core: &Core,
     import_id: &str,
-    limits: ImportLimits,
 ) -> CoreResult<DurableContentPackageImport> {
     validate_import_id(import_id)?;
     let record = core.storage().get_package_import(import_id)?;
@@ -157,11 +157,34 @@ pub(super) fn load_durable_content_package(
     let source_path = core
         .storage()
         .package_source_path(&source.source_sha256, source.source_size_bytes)?;
+    // Admission already inspected these exact CAS bytes. Reconstruct only the byte
+    // envelope required by its durable, verified review, including after restart.
+    // Entry-count, compression-ratio and the independent package policy stay fixed.
+    let defaults = ImportLimits::default();
+    let asset_bytes = review.assets.iter().try_fold(0_u64, |total, asset| {
+        total
+            .checked_add(asset.descriptor.size_bytes)
+            .ok_or_else(|| CoreError::invalid("reviewed package asset sizes overflow"))
+    })?;
+    let limits = ImportLimits {
+        max_source_bytes: defaults.max_source_bytes.max(source.source_size_bytes),
+        max_entry_bytes: review
+            .assets
+            .iter()
+            .map(|asset| asset.descriptor.size_bytes)
+            .fold(defaults.max_entry_bytes, u64::max),
+        max_total_uncompressed_bytes: defaults
+            .max_total_uncompressed_bytes
+            .saturating_add(asset_bytes)
+            .min(lorepia_orchestration::MAX_PACKAGE_TOTAL_OBSERVED_BYTES),
+        ..defaults
+    };
     let owned = reopen_content_package(import_id, &source_path, &review, limits)?;
     Ok(DurableContentPackageImport {
         source,
         record,
         owned,
+        limits,
     })
 }
 pub(super) fn stored_import_plan(record: &PackageImportRecord) -> CoreResult<SelectiveImportPlan> {
@@ -277,6 +300,7 @@ pub(super) fn required_capability_approvals(plan: &SelectiveImportPlan) -> Vec<P
             ContentCapability::DeclarativeInteractions => {
                 Some(PackageCapability::DeclarativeInteractions)
             }
+            ContentCapability::PortableRuntime => Some(PackageCapability::PortableRuntime),
             _ => None,
         })
         .collect::<Vec<_>>();

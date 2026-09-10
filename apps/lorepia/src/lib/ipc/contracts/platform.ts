@@ -2,6 +2,8 @@ import type {
     AssetDeliveryDto,
     CharacterDto,
     CharacterGreetingCatalogDto,
+    CharacterGreetingDetailDto,
+    CharacterGreetingDetailInput,
     CharacterGreetingSelectionInput,
     ResolveAssetDeliveryInput,
 } from './character';
@@ -39,7 +41,12 @@ import type {
     SendMessageInput,
 } from './generation';
 
-import type { ImportInspectionDto, ImportTicketDto } from './import';
+import type {
+    ImportCommitResultDto,
+    ImportInspectionDto,
+    ImportResourcePolicyDto,
+    ImportTicketDto,
+} from './import';
 
 import type {
     InterruptedMemoryJobDto,
@@ -186,7 +193,15 @@ export interface ProviderWorkspaceDto {
     catalog_diff: ProviderCatalogDiffDto | null;
 }
 
+export interface StorageOverviewDto {
+    characters: number;
+    conversations: number;
+    messages: number;
+    import_jobs: number;
+}
+
 export interface LorepiaClient {
+    getStorageOverview?(): Promise<StorageOverviewDto>;
     bootstrapSnapshot(): Promise<BootstrapDto>;
     getMemorySupervisorStatus(): Promise<MemorySupervisorStatusDto>;
     subscribeMemorySupervisorStatus(
@@ -196,7 +211,13 @@ export interface LorepiaClient {
     listCharacters(): Promise<CharacterDto[]>;
     getCharacter(characterId: string): Promise<CharacterDto>;
     getCharacterGreetingCatalog(characterId: string): Promise<CharacterGreetingCatalogDto>;
-    getCharacterRenderProfile?(characterId: string): Promise<CharacterRenderProfileDto>;
+    getCharacterGreetingDetail?(
+        input: CharacterGreetingDetailInput,
+    ): Promise<CharacterGreetingDetailDto>;
+    getCharacterRenderProfile?(
+        characterId: string,
+        scope?: { conversation_id: string; branch_id: string },
+    ): Promise<CharacterRenderProfileDto>;
     resolveAssetDelivery(input: ResolveAssetDeliveryInput): Promise<AssetDeliveryDto>;
     listInteractionEffects(): Promise<InteractionEffectEventDto[]>;
     acknowledgeInteractionEffect(deliveryId: string): Promise<void>;
@@ -219,9 +240,9 @@ export interface LorepiaClient {
     subscribeInteractionEffects(
         onEffect: (effect: InteractionEffectEventDto) => void,
     ): Promise<() => void>;
-    selectImportSource(): Promise<ImportTicketDto | null>;
+    selectImportSource(resourcePolicy?: ImportResourcePolicyDto): Promise<ImportTicketDto | null>;
     inspectImport(ticketId: string): Promise<ImportInspectionDto>;
-    commitImport(inspectionId: string): Promise<CharacterDto>;
+    commitImport(inspectionId: string): Promise<ImportCommitResultDto>;
     discardImport(inspectionId: string): Promise<void>;
 
     listConversations(characterId: string | null): Promise<ConversationDto[]>;
@@ -247,6 +268,11 @@ export interface LorepiaClient {
         mode: ConversationMode,
     ): Promise<ConversationStateDto>;
     listBranchMessages(branchId: string): Promise<MessageDto[]>;
+    listGenerationMessages?(
+        conversationId: string,
+        branchId: string,
+        generationId: string,
+    ): Promise<MessageDto[]>;
     listMessages(conversationId: string): Promise<MessageDto[]>;
     generateRuntimeText?(input: GenerateRuntimeTextInput): Promise<RuntimeTextGenerationDto>;
     cancelRuntimeText?(requestId: string): Promise<boolean>;

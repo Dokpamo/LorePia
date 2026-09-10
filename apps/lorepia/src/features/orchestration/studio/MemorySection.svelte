@@ -1,23 +1,8 @@
 <script lang="ts">
-    import type { LorepiaAppState } from '../../../app/app-controller';
+    import { t } from '../../../lib/i18n';
+    import type { MemorySectionProps } from './memory-section-props';
     import DetailActionBar from '../../../components/detail/DetailActionBar.svelte';
-    import type {
-        MemoryRecordDto,
-        MemoryRecordSourceNavigationDto,
-    } from '../../../lib/ipc/contracts';
-    import type { OrchestrationController, OrchestrationState } from '../orchestration-controller';
-    interface Props {
-        appState: LorepiaAppState;
-        orchestrationState: OrchestrationState;
-        controller: OrchestrationController;
-        detailPage?: string | null;
-        onNavigateToMemorySource?: (source: MemoryRecordSourceNavigationDto) => void;
-        memoryDrafts?: Record<string, string>;
-        pendingMemoryDeleteId?: string | null;
-        knowledgeSample?: string;
-        transformRuleId?: string;
-        transformSample?: string;
-    }
+    import type { MemoryRecordDto } from '../../../lib/ipc/contracts';
     let {
         appState,
         orchestrationState,
@@ -29,7 +14,7 @@
         knowledgeSample = $bindable(''),
         transformRuleId = $bindable(''),
         transformSample = $bindable(''),
-    }: Props = $props();
+    }: MemorySectionProps = $props();
 
     const MAX_INLINE_ITEMS = 100;
     const MAX_PLAN_DETAILS = 300;
@@ -152,6 +137,10 @@
                 {/each}
             </ul>
         {/if}
+        {#if orchestrationState.workspace.memory_records_next_cursor}
+            <button class="secondary" type="button" disabled={orchestrationState.memory_page_loading} onclick={() => void controller.loadMoreMemoryRecords()}>{t('pagination.more')}</button>
+        {/if}
+        <button class="secondary" type="button" disabled={orchestrationState.memory_page_loading} onclick={() => void controller.loadMoreMemoryRecords(true)}>{t('pagination.refresh')}</button>
     </section>
 {:else if selectedMemoryRecord !== null}
     <section

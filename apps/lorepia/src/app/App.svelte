@@ -1,17 +1,16 @@
 <script lang="ts">
-    import {
-        ArrowLeft,
-        CircleAlert,
-        CirclePlus,
-        House,
-        MessageCircleMore,
-        Settings,
-        SlidersHorizontal,
-        Sparkles,
-    } from '@lucide/svelte';
+    import { CircleAlert, SlidersHorizontal, Sparkles } from '@lucide/svelte';
     import { isTauri } from '@tauri-apps/api/core';
     import { tr } from '../lib/i18n';
+    import MobileHome from '../features/library/MobileHome.svelte';
+    import MobileConversations from '../features/conversations/MobileConversations.svelte';
+    import MobileNavigation from '../components/mobile/MobileNavigation.svelte';
+    import MobileAll from '../components/mobile/MobileAll.svelte';
+    import AppDetailHeader from './AppDetailHeader.svelte';
+    import { isEditingGestureTarget } from '../components/mobile/gesture-target';
     import { onMount, untrack } from 'svelte';
+    import { installAndroidBack } from './android-back-navigation';
+    import { snapshotClone } from './mobile-route-snapshot';
     import {
         INITIAL_APP_STATE,
         LorepiaAppController,
@@ -53,13 +52,12 @@
     } from '../features/personas/persona-controller';
     import type { PersonaClientApi } from '../features/personas/persona-contracts';
     import { createLiveLorepiaClient } from '../lib/ipc/client';
-    import type { LorepiaClient, MemoryRecordSourceNavigationDto } from '../lib/ipc/contracts';
+    import type {
+        ImportCommitResultDto,
+        LorepiaClient,
+        MemoryRecordSourceNavigationDto,
+    } from '../lib/ipc/contracts';
 
-    /*
-     * Phones and wide handhelds divide destinations in time under a bottom
-     * bar. Desktop windows have enough room to keep the character/conversation
-     * hierarchy beside the active workspace instead.
-     */
     const DESKTOP_LAYOUT = '(min-width: 900px)';
     const DESKTOP_UTILITY_DOCK = '(min-width: 1280px)';
     const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
@@ -78,7 +76,6 @@
     type MainView = 'home' | 'chat' | 'create' | 'settings';
     type HomeSection = 'characters' | 'conversations';
     type BackSwipePhase = 'idle' | 'tracking' | 'dragging' | 'settling' | 'committing';
-
     interface BackSwipePointer {
         pointerId: number;
         startX: number;
@@ -136,7 +133,6 @@
     let chatThreadOpen = $state(false);
     let chatUtilityOpen = $state(false);
     let chatUtilityAutoCollapsed = $state(false);
-    /* Settings and studio entries open as dedicated screens inside the handheld shell. */
     let settingsSection = $state<SettingsSection | null>(null);
     let settingsDetailPage = $state<SettingsDetailPage>(null);
     let settingsEditorMode = $state<string | null>(null);
@@ -216,7 +212,7 @@
             const section = studioSection ?? 'root';
             return {
                 key: `create:${section}:${studioDetailPage ?? ''}`,
-                view,
+                view: 'settings',
                 pushed: studioSection !== null,
             };
         }
@@ -231,46 +227,6 @@
         return { key: 'home:root', view, pushed: false };
     }
 
-    function copySnapshotElementState(source: HTMLElement, clone: HTMLElement): void {
-        const sources = [source, ...source.querySelectorAll<HTMLElement>('*')];
-        const clones = [clone, ...clone.querySelectorAll<HTMLElement>('*')];
-        const count = Math.min(sources.length, clones.length);
-        for (let index = 0; index < count; index += 1) {
-            const sourceElement = sources[index];
-            const cloneElement = clones[index];
-            if (!sourceElement || !cloneElement) continue;
-            if (sourceElement.scrollTop !== 0) {
-                cloneElement.dataset.snapshotScrollTop = String(sourceElement.scrollTop);
-            }
-            if (sourceElement.scrollLeft !== 0) {
-                cloneElement.dataset.snapshotScrollLeft = String(sourceElement.scrollLeft);
-            }
-            if (
-                sourceElement instanceof HTMLInputElement &&
-                cloneElement instanceof HTMLInputElement
-            ) {
-                cloneElement.value = sourceElement.value;
-                cloneElement.checked = sourceElement.checked;
-            } else if (
-                sourceElement instanceof HTMLTextAreaElement &&
-                cloneElement instanceof HTMLTextAreaElement
-            ) {
-                cloneElement.value = sourceElement.value;
-            } else if (
-                sourceElement instanceof HTMLSelectElement &&
-                cloneElement instanceof HTMLSelectElement
-            ) {
-                cloneElement.value = sourceElement.value;
-            }
-        }
-    }
-
-    function snapshotClone(source: HTMLElement): HTMLElement {
-        const clone = source.cloneNode(true) as HTMLElement;
-        copySnapshotElementState(source, clone);
-        return clone;
-    }
-
     function captureBackSwipeSnapshot(routeKey: string): BackSwipeSnapshot | null {
         const currentMain = mainElement;
         if (!currentMain) return null;
@@ -282,11 +238,13 @@
 
         const shell = currentMain.parentElement;
         const tabBar = shell
-            ? Array.from(shell.children).find((element) => element.classList.contains('tab-bar'))
+            ? Array.from(shell.children).find((element) =>
+                  element.hasAttribute('data-mobile-navigation'),
+              )
             : undefined;
         if (tabBar instanceof HTMLElement) {
             const tabBarClone = snapshotClone(tabBar);
-            tabBarClone.classList.remove('tab-bar');
+            tabBarClone.removeAttribute('data-mobile-navigation');
             tabBarClone.classList.add('back-swipe-tab-bar');
             root.append(tabBarClone);
         }
@@ -453,6 +411,7 @@
     }
 
     function handleBackSwipePointerDown(event: PointerEvent): void {
+        if (isEditingGestureTarget(event.target)) return;
         if (!backSwipeAvailable() || backSwipePhase === 'committing') return;
         if (!event.isPrimary || event.button !== 0) return;
 
@@ -554,9 +513,9 @@
         chatUtilityAutoCollapsed = false;
     }
 
-    function showChat(): void {
+    function showChat(open: boolean | Event = false): void {
         view = 'chat';
-        chatThreadOpen = false;
+        chatThreadOpen = open === true;
         chatUtilityOpen = false;
         chatUtilityAutoCollapsed = false;
     }
@@ -584,9 +543,29 @@
     }
 
     function openStudioSection(next: StudioSection): void {
+        view = 'create';
         studioSection = next;
         studioDetailPage = null;
         resetStudioDetailScroll();
+    }
+
+    function handleImportCommitted(result: ImportCommitResultDto): void {
+        if (result.kind !== 'content') return;
+        view = 'create';
+        chatUtilityOpen = false;
+        chatUtilityAutoCollapsed = false;
+        if (result.content.kind.endsWith('module')) {
+            studioSection = 'content';
+            studioDetailPage = 'modules:candidates';
+        } else {
+            studioSection = 'prompt';
+            studioDetailPage = 'profiles';
+        }
+        resetStudioDetailScroll();
+
+        const conversationId = appState.selected_conversation?.id ?? null;
+        const branchId = appState.conversation_state?.active_branch_id ?? null;
+        void orchestrationController.loadContext(conversationId, branchId);
     }
 
     function closeStudioSection(): void {
@@ -597,6 +576,7 @@
         }
         studioSection = null;
         studioDetailPage = null;
+        if (!isDesktop) view = 'settings';
         resetStudioDetailScroll();
     }
 
@@ -723,7 +703,8 @@
             return;
         }
         if (settingsDetailPage !== null) {
-            settingsDetailPage = null;
+            settingsDetailPage =
+                settingsSection === 'plugins' ? studioDetailParent(settingsDetailPage) : null;
             settingsEditorTitle = '';
             return;
         }
@@ -735,6 +716,11 @@
     }
 
     function settingsDetailTitle(): string {
+        if (settingsDetailPage === 'packages') return $tr('settingsUi.importPrompt');
+        if (settingsSection === 'plugins' && settingsDetailPage) {
+            const title = studioNestedDetailTitleKey(settingsDetailPage);
+            return title ? $tr(title) : $tr('settingsUi.plugins');
+        }
         if (settingsSection === 'persona' && personaEditorMode !== null) {
             return $tr(
                 personaEditorMode === 'create' ? 'persona.editor.new' : 'persona.editor.edit',
@@ -892,6 +878,11 @@
     });
 
     onMount(() => {
+        const disposeAndroidBack = installAndroidBack(
+            mobileRouteDescriptor,
+            performBackSwipeNavigation,
+            showHome,
+        );
         const layout = window.matchMedia(DESKTOP_LAYOUT);
         const utilityDock = window.matchMedia(DESKTOP_UTILITY_DOCK);
         let utilityDockWasWide = utilityDock.matches;
@@ -984,6 +975,7 @@
         });
         void controller.start();
         return () => {
+            disposeAndroidBack();
             resetBackSwipe();
             clearBackSwipeSnapshots();
             cancelSidebarUnmount();
@@ -1059,7 +1051,7 @@
                     state={appState}
                     {controller}
                     client={appClient}
-                    onOpenConversations={() => (homeSection = 'conversations')}
+                    onOpenChat={() => (homeSection = 'conversations')}
                 />
             </section>
 
@@ -1093,6 +1085,7 @@
     class="app-shell"
     data-view={view}
     data-layout={isDesktop ? 'desktop' : 'mobile'}
+    data-mobile-design={isDesktop ? undefined : 'reference'}
     data-titlebar-overlay={nativeMacosTitlebarOverlay ? 'true' : 'false'}
     data-back-swipe={backSwipePhase}
     data-back-swipe-underlay={backSwipeUnderlayReady ? 'ready' : 'empty'}
@@ -1161,13 +1154,16 @@
             onclickcapture={handleBackSwipeClickCapture}
         >
             {#if view === 'home'}
-                <section class="mobile-root home-view" aria-label={$tr('app.tab.home')}>
-                    <LibraryPane
+                <section class="mobile-route-root home-view">
+                    <MobileHome
                         state={appState}
                         {controller}
                         client={appClient}
-                        rootView
-                        onOpenConversations={showChat}
+                        onOpenChat={showChat}
+                        onOpenSettings={(section: SettingsSection) => {
+                            openSettings();
+                            openSettingsSection(section);
+                        }}
                     />
                 </section>
             {:else if view === 'chat'}
@@ -1185,106 +1181,94 @@
                         onOpenHome={showChat}
                     />
                 {:else}
-                    <section class="mobile-root chat-list-view" aria-label={$tr('app.tab.chat')}>
-                        <ConversationPane
+                    <section class="mobile-route-root chat-list-view">
+                        <MobileConversations
                             state={appState}
                             {controller}
                             client={appClient}
-                            rootView
                             onOpenChat={openChatThread}
                         />
                     </section>
                 {/if}
             {:else if view === 'create'}
-                {#if studioSection === null}
-                    {#if !isDesktop}
-                        <header
-                            class="mobile-top-frame mobile-root-header"
-                            data-tauri-drag-region={nativeMacosTitlebarOverlay ? '' : undefined}
-                        >
-                            <h1
-                                data-tauri-drag-region={nativeMacosTitlebarOverlay ? '' : undefined}
-                            >
-                                {$tr('studio.title')}
-                            </h1>
-                        </header>
-                    {/if}
-                {:else}
-                    <header
-                        class="mobile-top-frame mobile-top-frame-leading sub-header"
-                        data-tauri-drag-region={nativeMacosTitlebarOverlay ? '' : undefined}
-                        style:--mobile-top-fade-progress={pushedTopFadeProgress}
-                    >
-                        <button
-                            class="icon-button ghost mobile-top-action mobile-top-action-left back-button"
-                            type="button"
-                            aria-label={$tr('app.nav.back')}
-                            onclick={closeStudioSection}
-                        >
-                            <ArrowLeft aria-hidden="true" />
-                        </button>
-                        {#if studioSection !== null}
-                            <h1
-                                bind:this={pushedTitleElement}
-                                tabindex="-1"
-                                data-tauri-drag-region={nativeMacosTitlebarOverlay ? '' : undefined}
-                            >
-                                {studioDetailTitle()}
-                            </h1>
-                        {/if}
-                    </header>
-                {/if}
-                <div
-                    bind:this={studioScrollElement}
-                    use:syncDetailActionViewport
-                    class="view-scroll"
-                    class:studio-detail-scroll={studioSection !== null}
-                    class:studio-detail-has-actions={studioDetailHasFixedActions(studioDetailPage)}
-                    onscroll={handleStudioDetailScroll}
-                >
-                    <OrchestrationStudio
-                        client={appClient}
+                {#if !isDesktop && studioSection === null}
+                    <MobileAll
                         {appState}
-                        {orchestrationState}
-                        controller={orchestrationController}
-                        appController={controller}
-                        {contentPackageState}
-                        {contentPackageController}
-                        onNavigateToMemorySource={(source: MemoryRecordSourceNavigationDto) =>
-                            void navigateToMemorySource(source)}
-                        section={studioSection}
-                        bind:detailPage={studioDetailPage}
-                        onOpenSection={openStudioSection}
-                        desktop={isDesktop}
-                        showIndexHeader={isDesktop}
                         titlebarOverlay={nativeMacosTitlebarOverlay}
+                        onOpenSettings={(section: SettingsSection) => {
+                            openSettings();
+                            openSettingsSection(section);
+                        }}
+                        onOpenStudio={openStudioSection}
                     />
-                </div>
+                {:else}
+                    {#if studioSection !== null}
+                        <AppDetailHeader
+                            title={studioDetailPage === null && !isDesktop
+                                ? $tr(`mobile.studio.${studioSection}`)
+                                : studioDetailTitle()}
+                            desktop={isDesktop}
+                            titlebarOverlay={nativeMacosTitlebarOverlay}
+                            fadeProgress={pushedTopFadeProgress}
+                            onBack={closeStudioSection}
+                            bind:titleElement={pushedTitleElement}
+                        />
+                    {/if}
+                    <div
+                        bind:this={studioScrollElement}
+                        use:syncDetailActionViewport
+                        class="view-scroll"
+                        class:studio-detail-scroll={studioSection !== null}
+                        class:studio-detail-has-actions={studioDetailHasFixedActions(
+                            studioDetailPage,
+                        )}
+                        onscroll={handleStudioDetailScroll}
+                    >
+                        <OrchestrationStudio
+                            client={appClient}
+                            {appState}
+                            {orchestrationState}
+                            controller={orchestrationController}
+                            appController={controller}
+                            {contentPackageState}
+                            {contentPackageController}
+                            onNavigateToMemorySource={(source: MemoryRecordSourceNavigationDto) =>
+                                void navigateToMemorySource(source)}
+                            section={studioSection}
+                            bind:detailPage={studioDetailPage}
+                            onOpenSection={openStudioSection}
+                            desktop={isDesktop}
+                            showIndexHeader={isDesktop}
+                            titlebarOverlay={nativeMacosTitlebarOverlay}
+                        />
+                    </div>
+                {/if}
             {:else}
                 {#if settingsSection !== null && (!isDesktop || settingsNestedRoute)}
-                    <header
-                        class="mobile-top-frame mobile-top-frame-leading sub-header"
-                        data-tauri-drag-region={nativeMacosTitlebarOverlay ? '' : undefined}
-                        style:--mobile-top-fade-progress={pushedTopFadeProgress}
-                    >
-                        <button
-                            class="icon-button ghost mobile-top-action mobile-top-action-left back-button"
-                            type="button"
-                            aria-label={$tr('app.nav.back')}
-                            onclick={closeSettingsSection}
-                        >
-                            <ArrowLeft aria-hidden="true" />
-                        </button>
-                        <h1
-                            bind:this={pushedTitleElement}
-                            tabindex="-1"
-                            data-tauri-drag-region={nativeMacosTitlebarOverlay ? '' : undefined}
-                        >
-                            {settingsDetailTitle()}
-                        </h1>
-                    </header>
+                    <AppDetailHeader
+                        title={!isDesktop &&
+                        settingsDetailPage === null &&
+                        settingsEditorMode === null &&
+                        personaEditorMode === null
+                            ? $tr(`mobile.settings.${settingsSection}`)
+                            : settingsDetailTitle()}
+                        desktop={isDesktop}
+                        titlebarOverlay={nativeMacosTitlebarOverlay}
+                        fadeProgress={pushedTopFadeProgress}
+                        onBack={closeSettingsSection}
+                        bind:titleElement={pushedTitleElement}
+                    />
                 {/if}
                 <ProviderSettings
+                    services={{
+                        client: appClient,
+                        appState,
+                        appController: controller,
+                        orchestrationState,
+                        orchestrationController,
+                        contentPackageState,
+                        contentPackageController,
+                    }}
                     {appState}
                     {controller}
                     {personaState}
@@ -1295,6 +1279,7 @@
                     bind:editorTitle={settingsEditorTitle}
                     section={settingsSection}
                     onOpenSection={openSettingsSection}
+                    onOpenStudio={openStudioSection}
                     onDetailScroll={handlePushedDetailScroll}
                     titlebarOverlay={nativeMacosTitlebarOverlay}
                     desktop={isDesktop}
@@ -1311,47 +1296,7 @@
     ></div>
 
     {#if !isDesktop && !(view === 'create' && studioSection !== null) && !(view === 'chat' && chatThreadOpen) && !(view === 'settings' && settingsSection !== null)}
-        <nav class="tab-bar" aria-label={$tr('app.nav.label')}>
-            <button
-                class="tab"
-                type="button"
-                aria-current={view === 'home' ? 'page' : undefined}
-                onclick={showHome}
-            >
-                <span class="nav-icon nav-icon-home" aria-hidden="true">
-                    <House class="nav-icon-home-fill-layer" />
-                    <House class="nav-icon-home-stroke-layer" />
-                </span>
-                <span class="tab-label">{$tr('app.tab.home')}</span>
-            </button>
-            <button
-                class="tab"
-                type="button"
-                aria-current={view === 'chat' ? 'page' : undefined}
-                onclick={showChat}
-            >
-                <MessageCircleMore class="nav-icon nav-icon-chat" aria-hidden="true" />
-                <span class="tab-label">{$tr('app.tab.chat')}</span>
-            </button>
-            <button
-                class="tab"
-                type="button"
-                aria-current={view === 'create' ? 'page' : undefined}
-                onclick={openCreate}
-            >
-                <CirclePlus class="nav-icon nav-icon-create" aria-hidden="true" />
-                <span class="tab-label">{$tr('app.tab.create')}</span>
-            </button>
-            <button
-                class="tab"
-                type="button"
-                aria-current={view === 'settings' ? 'page' : undefined}
-                onclick={openSettings}
-            >
-                <Settings class="nav-icon nav-icon-settings" aria-hidden="true" />
-                <span class="tab-label">{$tr('app.tab.providers')}</span>
-            </button>
-        </nav>
+        <MobileNavigation {view} onHome={showHome} onChat={showChat} onSettings={openSettings} />
     {/if}
 
     <div class="sr-only" role="status" aria-live="polite" aria-atomic="true">
@@ -1362,6 +1307,6 @@
     </div>
 
     {#if appState.import_flow.phase !== 'idle'}
-        <ImportReviewDialog state={appState} {controller} />
+        <ImportReviewDialog state={appState} {controller} onCommitted={handleImportCommitted} />
     {/if}
 </div>

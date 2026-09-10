@@ -11,7 +11,7 @@ import type {
     ContentSourceExportInput,
     ContentSourceExportReceiptDto,
     ListCompletedContentPackageExportsInput,
-    CharacterDto,
+    ImportCommitResultDto,
     ImportInspectionDto,
     ImportTicketDto,
     ListPendingContentPackageImportsInput,
@@ -20,6 +20,7 @@ import type {
     SelectContentPackageImportReceiptDto,
     DiscardContentPackageImportInput,
 } from '../contracts';
+import type { ImportResourcePolicyDto } from '../import-contracts';
 
 import { LOREPIA_COMMANDS } from '../commands';
 
@@ -80,8 +81,12 @@ export abstract class ContentImportClient extends InteractionClient {
         return this.call(LOREPIA_COMMANDS.exportContentSource, { request: input });
     }
 
-    selectImportSource(): Promise<ImportTicketDto | null> {
-        return this.call(LOREPIA_COMMANDS.pickImport);
+    selectImportSource(
+        resourcePolicy: ImportResourcePolicyDto = 'standard',
+    ): Promise<ImportTicketDto | null> {
+        return this.call(LOREPIA_COMMANDS.pickImport, {
+            request: { resource_policy: resourcePolicy },
+        });
     }
 
     inspectImport(ticketId: string): Promise<ImportInspectionDto> {
@@ -90,7 +95,7 @@ export abstract class ContentImportClient extends InteractionClient {
         });
     }
 
-    commitImport(inspectionId: string): Promise<CharacterDto> {
+    commitImport(inspectionId: string): Promise<ImportCommitResultDto> {
         return this.call(LOREPIA_COMMANDS.commitImport, {
             request: { inspection_id: inspectionId },
         });

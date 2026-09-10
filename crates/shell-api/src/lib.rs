@@ -12,6 +12,7 @@
 pub const SHELL_API_VERSION: u32 = 3;
 
 mod api;
+pub use api::CharacterGreetingDetailDto;
 mod asset;
 mod catalog;
 mod discovery;
@@ -25,8 +26,12 @@ mod package;
 mod persona;
 mod portable_runtime_state;
 mod provider;
+mod provider_overview;
 mod sensitive;
+mod settings;
 mod stream;
+
+pub use settings::StorageOverviewDto;
 
 #[cfg(any(test, feature = "test-support"))]
 #[doc(hidden)]
@@ -73,14 +78,15 @@ pub use discovery::{
 };
 pub use dto::{
     BootstrapDto, CharacterDisplayTransformDto, CharacterDto, CharacterGreetingCatalogDto,
-    CharacterGreetingKindDto, CharacterGreetingOptionDto, CharacterRenderAssetDto,
-    CharacterRenderProfileDto, CharacterRuntimeKnowledgeDto, CharacterRuntimeScriptDto,
-    ChatEventDto, ChatEventKindDto, ContentKindDto, ConversationBranchDto, ConversationDto,
-    ConversationModeDto, ConversationStateDto, GenerationStartedDto, GenerationTargetDto,
-    GenerationUsageDto, HealthDto, ImportImagePreviewDto, ImportInspectionDto, ImportWarningDto,
-    MessageActionGenerationDto, MessageDisplayProjectionDto, MessageDto, MessageRoleDto,
-    MessageStatusDto, MessageTransformDiagnosticDto, MessageTransformDispositionDto,
-    MessageTransformStageDto,
+    CharacterGreetingKindDto, CharacterGreetingOptionDto, CharacterGreetingPreviewDto,
+    CharacterRenderAssetDto, CharacterRenderProfileDto, CharacterRuntimeKnowledgeDto,
+    CharacterRuntimeScriptDto, ChatEventDto, ChatEventKindDto, ContentKindDto,
+    ConversationBranchDto, ConversationDto, ConversationModeDto, ConversationStateDto,
+    GenerationStartedDto, GenerationTargetDto, GenerationUsageDto, HealthDto,
+    ImportCommitResultDto, ImportImagePreviewDto, ImportInspectionDto, ImportWarningDto,
+    ImportedContentSummaryDto, MessageActionGenerationDto, MessageDisplayProjectionDto, MessageDto,
+    MessageRoleDto, MessageStatusDto, MessageTransformDiagnosticDto,
+    MessageTransformDispositionDto, MessageTransformStageDto,
 };
 pub use error::{ShellError, ShellErrorCode, ShellResult};
 pub use interaction::{
@@ -221,3 +227,8 @@ pub use sensitive::{
     StagedImportFile, TaskCredentialLease, TaskCredentialRead, TaskCredentialReader,
 };
 pub use stream::{ChatEventStream, ChatStreamItem, ReconcileReason, ReconciliationRequiredDto};
+
+pub use orchestration::{
+    CreatorDocumentDto, CreatorDocumentsPageDto, ListCreatorDocumentsPageInput,
+    ListMemoryRecordsPageInput, MemoryRecordsPageDto,
+};

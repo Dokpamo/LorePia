@@ -110,6 +110,7 @@
 .avatar,
 .review-avatar {
     display: grid;
+    position: relative;
     overflow: hidden;
     width: 54px;
     height: 54px;

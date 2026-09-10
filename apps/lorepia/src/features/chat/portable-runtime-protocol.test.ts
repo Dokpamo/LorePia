@@ -25,7 +25,7 @@ describe('portable runtime worker protocol', () => {
                 type: 'response',
                 requestId: 'runtime-1',
                 ok: true,
-                result: { type: 'invoked', value: false },
+                result: { type: 'invoked', value: false, submittedUserText: null },
                 snapshot: {
                     persisted: {},
                     virtualMessage: null,

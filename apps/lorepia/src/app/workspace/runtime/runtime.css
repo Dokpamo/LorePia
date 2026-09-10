@@ -1,0 +1,35 @@
+.ui-preview .ui-runtime-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+.ui-preview .ui-runtime-list > li,
+.ui-preview .ui-runtime-item {
+    padding-block: var(--ui-space-4);
+    overflow-wrap: anywhere;
+}
+.ui-preview .ui-runtime-list p,
+.ui-preview .ui-runtime-hint {
+    font-size: var(--ui-type-secondary);
+    line-height: var(--ui-line-secondary);
+    color: var(--ui-muted);
+}
+.ui-preview .ui-runtime-list fieldset {
+    border: 0;
+    padding: 0;
+    margin: 0;
+    min-width: 0;
+}
+.ui-preview .ui-runtime-selected {
+    color: var(--ui-heading);
+}
+.ui-preview .ui-runtime-controls {
+    display: grid;
+    gap: var(--ui-space-2);
+}
+.ui-preview .ui-runtime-controls fieldset {
+    border: 0;
+    padding: 0;
+    margin: 0;
+    min-width: 0;
+}

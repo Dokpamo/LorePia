@@ -81,9 +81,9 @@ import type {
 
 import { LOREPIA_COMMANDS } from '../commands';
 
-import { DiscoveryClient } from './discovery';
+import { PaginationClient } from './pagination';
 
-export abstract class OrchestrationClient extends DiscoveryClient {
+export abstract class OrchestrationClient extends PaginationClient {
     getOrchestrationWorkspace(
         conversationId: string,
         branchId: string,
@@ -181,7 +181,7 @@ export abstract class OrchestrationClient extends DiscoveryClient {
     }
 
     listMemoryProfiles(): Promise<RevisionedDto<CreatorMemoryProfileDocumentDto>[]> {
-        return this.call(LOREPIA_COMMANDS.listMemoryProfiles);
+        return this.allCreatorDocuments('memory_profile');
     }
 
     getMemoryProfile(
@@ -203,7 +203,7 @@ export abstract class OrchestrationClient extends DiscoveryClient {
     }
 
     listKnowledgeBooks(): Promise<RevisionedDto<CreatorKnowledgeBookDocumentDto>[]> {
-        return this.call(LOREPIA_COMMANDS.listKnowledgeBooks);
+        return this.allCreatorDocuments('knowledge_book');
     }
 
     getKnowledgeBook(
@@ -225,7 +225,7 @@ export abstract class OrchestrationClient extends DiscoveryClient {
     }
 
     listTransformSets(): Promise<RevisionedDto<CreatorTransformSetDocumentDto>[]> {
-        return this.call(LOREPIA_COMMANDS.listTransformSets);
+        return this.allCreatorDocuments('transform_set');
     }
 
     getTransformSet(
@@ -247,7 +247,7 @@ export abstract class OrchestrationClient extends DiscoveryClient {
     }
 
     listInteractionRuleSets(): Promise<RevisionedDto<CreatorInteractionRuleSetDocumentDto>[]> {
-        return this.call(LOREPIA_COMMANDS.listInteractionRuleSets);
+        return this.allCreatorDocuments('interaction_rule_set');
     }
 
     getInteractionRuleSet(
@@ -269,7 +269,7 @@ export abstract class OrchestrationClient extends DiscoveryClient {
     }
 
     listContentModules(): Promise<RevisionedDto<CreatorContentModuleDocumentDto>[]> {
-        return this.call(LOREPIA_COMMANDS.listContentModules);
+        return this.allCreatorDocuments('content_module');
     }
 
     getContentModule(

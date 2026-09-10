@@ -1,6 +1,6 @@
 use lorepia_domain::{
-    ConversationBranchId, ConversationId, CoreResult, Message, MessageRole, MessageStatus,
-    Sha256Digest,
+    ConversationBranchId, ConversationId, CoreResult, GenerationId, Message, MessageRole,
+    MessageStatus, Sha256Digest,
 };
 use lorepia_storage::MessageTransformDiagnostic;
 use sha2::{Digest, Sha256};
@@ -51,21 +51,42 @@ impl Core {
         self.list_branch_message_presentations(&state.active_branch_id)
     }
 
+    /// Loads only the durable terminal pair belonging to this generation route.
+    pub fn list_generation_message_presentations(
+        &self,
+        conversation_id: &ConversationId,
+        branch_id: &ConversationBranchId,
+        generation_id: &GenerationId,
+    ) -> CoreResult<Vec<MessagePresentation>> {
+        self.present_messages(self.storage().list_generation_messages(
+            conversation_id,
+            branch_id,
+            generation_id,
+        )?)
+    }
+
     fn present_messages(&self, messages: Vec<Message>) -> CoreResult<Vec<MessagePresentation>> {
-        messages
-            .into_iter()
-            .map(|message| {
-                let eligible = message.role == MessageRole::Assistant
+        let eligible = messages
+            .iter()
+            .filter(|message| {
+                message.role == MessageRole::Assistant
                     && message.status != MessageStatus::Pending
                     && message
                         .generation_id
                         .as_ref()
-                        .is_some_and(|generation_id| !generation_id.is_character_greeting());
-                let projection = if eligible {
-                    self.storage().get_message_display_projection(&message)?
-                } else {
-                    None
-                };
+                        .is_some_and(|id| !id.is_character_greeting())
+            })
+            .collect::<Vec<_>>();
+        let mut projections = self
+            .storage()
+            .get_message_display_projections(&eligible)?
+            .into_iter()
+            .map(|projection| (projection.message_id.clone(), projection))
+            .collect::<std::collections::HashMap<_, _>>();
+        messages
+            .into_iter()
+            .map(|message| {
+                let projection = projections.remove(&message.id);
                 if let Some(projection) = projection {
                     return Ok(MessagePresentation {
                         message,

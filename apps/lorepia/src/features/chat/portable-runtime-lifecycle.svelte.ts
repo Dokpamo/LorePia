@@ -13,6 +13,7 @@ import {
     PortableCharacterRuntime,
     createPortableRuntimeGrant,
     defaultPortableRuntimeCapabilities,
+    parsePortableRuntimeToggles,
     requiredPortableRuntimeCapabilities,
     type PortableRuntimeCapability,
     type PortableRuntimeGrant,
@@ -28,6 +29,10 @@ interface PortableRuntimeLifecycleOptions {
     displayMessages: () => MessageDto[];
     providerWorkspace: () => ProviderWorkspaceDto;
     primarySelection: () => GenerationSelectionInput | null;
+    sendMessage: (
+        content: string,
+        variableOverrides?: OrchestrationVariableMapDto,
+    ) => Promise<boolean>;
     onNotice: (message: string) => void;
 }
 
@@ -78,6 +83,7 @@ async function loadPortableRuntimePersona(
 
 export class PortableRuntimeLifecycle {
     profile = $state<CharacterRenderProfileDto | null>(null);
+    personaName = $state<string | undefined>(undefined);
     runtime = $state<PortableCharacterRuntime | null>(null);
     selectedCapabilities = $state<PortableRuntimeCapability[]>([]);
     modelCall = $state<PortableRuntimeModelCallStatus | null>(null);
@@ -93,6 +99,7 @@ export class PortableRuntimeLifecycle {
     #resetEpoch = $state(0);
     #lastOutputKey = '';
     #actionCount = 0;
+    #persona = Promise.resolve({ name: t('chat.runtime.persona.default'), description: '' });
 
     constructor(private readonly options: PortableRuntimeLifecycleOptions) {}
 
@@ -185,9 +192,19 @@ export class PortableRuntimeLifecycle {
         );
     }
 
+    get requiresRuntimeWorker(): boolean {
+        return (
+            this.requiresLuaRuntime ||
+            (this.profile !== null &&
+                parsePortableRuntimeToggles(this.profile.toggle_schema).length > 0)
+        );
+    }
+
     loadProfile(
         client: InteractionRoomCapableClient | undefined,
         characterId: string | null,
+        conversationId: string | null,
+        branchId: string | null,
     ): () => void {
         const profileEpoch = ++this.#profileEpoch;
         const getCharacterRenderProfile = client?.getCharacterRenderProfile?.bind(client);
@@ -198,8 +215,20 @@ export class PortableRuntimeLifecycle {
         this.selectedCapabilities = [];
         this.modelCall = null;
         this.persistenceStatus = null;
+        this.personaName = undefined;
+        this.#persona =
+            client !== undefined && conversationId !== null
+                ? loadPortableRuntimePersona(client, conversationId)
+                : Promise.resolve({ name: t('chat.runtime.persona.default'), description: '' });
+        void this.#persona.then((persona) => {
+            if (!cancelled && profileEpoch === this.#profileEpoch) this.personaName = persona.name;
+        });
         if (characterId !== null && getCharacterRenderProfile !== undefined) {
-            void getCharacterRenderProfile(characterId)
+            const scope =
+                conversationId !== null && branchId !== null
+                    ? { conversation_id: conversationId, branch_id: branchId }
+                    : undefined;
+            void getCharacterRenderProfile(characterId, scope)
                 .then((profile) => {
                     if (
                         !cancelled &&
@@ -225,9 +254,9 @@ export class PortableRuntimeLifecycle {
         const grant = this.activeGrant;
         const { client, conversationId, branchId, character } = context;
         const resetEpoch = this.#resetEpoch;
-        const hasLuaRuntime = this.requiresLuaRuntime;
+        const requiresRuntimeWorker = this.requiresRuntimeWorker;
         const hasDynamicProfile =
-            hasLuaRuntime ||
+            requiresRuntimeWorker ||
             (profile?.output_transforms.length ?? 0) > 0 ||
             (profile?.display_transforms.length ?? 0) > 0 ||
             (profile?.background_markup.trim().length ?? 0) > 0;
@@ -245,11 +274,11 @@ export class PortableRuntimeLifecycle {
             ? 'idle'
             : grant === null
               ? 'blocked'
-              : hasLuaRuntime
+              : requiresRuntimeWorker
                 ? 'loading'
                 : 'ready';
         if (
-            !hasLuaRuntime ||
+            !requiresRuntimeWorker ||
             grant === null ||
             profile === null ||
             client === undefined ||
@@ -259,7 +288,7 @@ export class PortableRuntimeLifecycle {
         ) {
             return () => undefined;
         }
-        void loadPortableRuntimePersona(client, conversationId)
+        void this.#persona
             .then((persona) =>
                 PortableCharacterRuntime.create({
                     profile,
@@ -411,7 +440,7 @@ export class PortableRuntimeLifecycle {
         ) => Promise<boolean>,
     ): Promise<boolean | null> {
         let runtime = this.runtime;
-        if (this.requiresLuaRuntime && this.activeGrant !== null && runtime === null) {
+        if (this.requiresRuntimeWorker && this.activeGrant !== null && runtime === null) {
             const portableRuntimePreparationFallbackNotice =
                 '캐릭터 기능을 준비하는 중입니다. 잠시 뒤 다시 보내세요.';
             const copyNotice = this.error ?? portableRuntimePreparationFallbackNotice;
@@ -483,7 +512,10 @@ export class PortableRuntimeLifecycle {
         this.#actionCount += 1;
         this.phase = 'busy';
         try {
-            await runtime.handleAction(action);
+            const submittedUserText = await runtime.handleAction(action);
+            if (submittedUserText !== null) {
+                await this.dispatchInput(submittedUserText, this.options.sendMessage);
+            }
             this.revision += 1;
         } catch (error) {
             this.error = error instanceof Error ? error.message : t('chat.runtime.action_failed');

@@ -1,4 +1,6 @@
 <script lang="ts">
+    import MobileMenuRow from '../../../components/mobile/MobileMenuRow.svelte';
+    import { tr } from '../../../lib/i18n';
     import type { LorepiaAppState } from '../../../app/app-controller';
     import type {
         AuthBindingDto,
@@ -7,12 +9,13 @@
     } from '../../../lib/ipc/contracts';
 
     interface Props {
+        desktop?: boolean;
         appState: LorepiaAppState;
         detailPage: string | null;
         onOpenDetailPage: (page: string, title?: string) => void;
     }
 
-    let { appState, detailPage, onOpenDetailPage }: Props = $props();
+    let { desktop = false, appState, detailPage, onOpenDetailPage }: Props = $props();
 
     function selectedTemplate(): ProviderTemplateDto | undefined {
         if (!detailPage?.startsWith('template:')) return undefined;
@@ -174,6 +177,18 @@
     <p class="inline-note">선택한 템플릿을 찾을 수 없습니다.</p>
 {:else if workspace.templates.length === 0}
     <p class="inline-note">현재 사용할 수 있는 템플릿이 없습니다.</p>
+{:else if !desktop}
+    <ul class="mobile-flat-list" aria-label={$tr('mobile.template.list')}>
+        {#each workspace.templates as template (template.id)}
+            <li>
+                <MobileMenuRow
+                    label={template.display_name}
+                    onSelect={() =>
+                        onOpenDetailPage(`template:${template.id}`, template.display_name)}
+                />
+            </li>
+        {/each}
+    </ul>
 {:else}
     <ul class="setting-list detail-record-list" aria-label="템플릿 목록">
         {#each workspace.templates as template (template.id)}

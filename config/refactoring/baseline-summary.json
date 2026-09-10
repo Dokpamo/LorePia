@@ -1,5 +1,5 @@
 {
-  "baseline_commit": "01af428da8ea64f6028d7fef276b10bfa6fd9f79",
+  "baseline_commit": "8b90a42783f95114a22cd17c487ae3dd96c5c9d7",
   "completion": {
     "overall_status": "complete",
     "phase_gates": {
@@ -42,7 +42,7 @@
     "unresolved_plan_target_count": 0
   },
   "format_version": 1,
-  "full_report_sha256": "18b2eae8e70a6fec0df806ad929d8ac8c6cd8f5ca582faa49dcfefcc3ec00d07",
+  "full_report_sha256": "de30d3cbaa0a709bc10feccad37eda762a1dae5b14f45a351f153a8c46ce6b15",
   "remaining_hotspots": {
     "approved_exception_count": 0,
     "configured_ratchet_count": 55,
@@ -52,10 +52,10 @@
     "unresolved_hard_target_count": 95
   },
   "summary": {
-    "production_bytes": 15340988,
-    "production_declarations": 14156,
-    "production_files": 664,
-    "production_lines": 404855,
-    "public_symbols": 6798
+    "production_bytes": 15653365,
+    "production_declarations": 14449,
+    "production_files": 714,
+    "production_lines": 413324,
+    "public_symbols": 6937
   }
 }

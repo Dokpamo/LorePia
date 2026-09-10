@@ -243,6 +243,7 @@
             importance_weight: 1.0,
             preserve_invalidated_records: false,
             summary_schema: SummarySchemaId::from("core.creator.memory-schema"),
+            summary_template: None,
             provenance,
         };
         let mut invalid_profiles = Vec::new();
@@ -1054,4 +1055,3 @@
             ])
         );
     }
-

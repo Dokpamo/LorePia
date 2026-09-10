@@ -199,9 +199,12 @@
                         enabled={runtime.displayApproved &&
                             runtime.canReadChat &&
                             message.role === 'assistant'}
+                        expandMacros={message.role === 'assistant'}
                         variables={runtime.variables}
                         backgroundMarkup={runtime.background}
                         lastCharacterMessage={runtime.lastCharacterMessage}
+                        characterName={appState.selected_character?.name}
+                        userName={runtime.personaName}
                         messageIndex={runtime.canReadChat ? globalIndex : undefined}
                         lastMessageId={runtime.canReadChat
                             ? messageCollection.items.length - 1
@@ -255,9 +258,12 @@
                             {client}
                             profile={runtime.profile}
                             enabled={runtime.displayApproved && runtime.canReadChat}
+                            expandMacros
                             variables={runtime.variables}
                             backgroundMarkup={runtime.background}
                             lastCharacterMessage={runtime.lastCharacterMessage}
+                            characterName={appState.selected_character?.name}
+                            userName={runtime.personaName}
                             messageIndex={runtime.canReadChat
                                 ? messageCollection.items.length
                                 : undefined}

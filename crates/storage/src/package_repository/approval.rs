@@ -1,19 +1,20 @@
 //! Immutable package import approval persistence and retrieval.
 
 use super::{
-    ApprovedPackageImportPlan, CoreError, CoreResult, Deserialize, MAX_PACKAGE_APPROVAL_BYTES,
-    OptionalExtension, PackageCapability, PackageDocumentCommitBinding,
+    ApprovedPackageImportPlan, CoreError, CoreResult, Deserialize, ImportPlanState,
+    MAX_PACKAGE_APPROVAL_BYTES, OptionalExtension, PackageCapability, PackageDocumentCommitBinding,
     PackageImportApprovalRecord, PackageImportExpectation, PackageImportRecord,
-    PackageImportStatus, PackageNormalizationEvidence, PackageUpdateTargetConfirmation, Serialize,
-    Storage, TransactionBehavior, Utc, VersionedJson, append_audit, assert_expectation,
-    canonical_update_target_confirmations, decode_json, decode_selection, encode_json,
-    load_package_import_target_review, load_selected_commit_components, not_found,
-    package_update_target_confirmations_sha256, params, parse_datetime, read_approval_payload,
-    read_import_state, read_source_hash, sha256_hex, storage_corrupted, storage_db_error,
-    update_import_state, validate_approval_bindings, validate_approval_replay,
-    validate_binding_snapshot_shape, validate_capability_approval_snapshot, validate_expectation,
-    validate_identifier, validate_normalization_evidence_linkage,
-    validate_normalization_evidence_shape, validate_sha256,
+    PackageImportStatus, PackageNormalizationEvidence, PackageUpdateTargetConfirmation,
+    SelectiveImportPlan, Serialize, Sha256Digest, Storage, TransactionBehavior, Utc, VersionedJson,
+    append_audit, assert_expectation, canonical_update_target_confirmations, decode_json,
+    decode_selection, encode_json, load_package_import_target_review,
+    load_selected_commit_components, not_found, package_update_target_confirmations_sha256, params,
+    parse_datetime, read_approval_payload, read_import_state, read_source_hash, sha256_hex,
+    storage_corrupted, storage_db_error, update_import_state, validate_approval_bindings,
+    validate_approval_replay, validate_binding_snapshot_shape,
+    validate_capability_approval_snapshot, validate_expectation, validate_identifier,
+    validate_normalization_evidence_linkage, validate_normalization_evidence_shape,
+    validate_sha256,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -26,6 +27,110 @@ pub(super) struct PackageApprovalPayload {
     pub(super) approved_capabilities: Vec<PackageCapability>,
     pub(super) normalization_evidence_sha256: String,
     pub(super) normalization_evidence: Vec<PackageNormalizationEvidence>,
+}
+
+/// Compact durable approval decision. The immutable reviewed descriptors live
+/// in `package_imports.selection_json`; copying thousands of asset descriptors
+/// here can exceed the frozen 256 KiB database envelope without adding
+/// authority. Expansion is accepted only when the reconstructed plan verifies
+/// against both the selection and approval digests.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct CompactPackageApprovalPayload {
+    approval_sha256: Sha256Digest,
+    approval_id: String,
+    target_review_sha256: Sha256Digest,
+    update_target_confirmations_sha256: Sha256Digest,
+    enabled_component_ordinals: Vec<u32>,
+    document_bindings: Vec<PackageDocumentCommitBinding>,
+    confirmed_update_targets: Vec<PackageUpdateTargetConfirmation>,
+    approved_capabilities: Vec<PackageCapability>,
+    normalization_evidence_sha256: String,
+    normalization_evidence: Vec<PackageNormalizationEvidence>,
+}
+
+impl CompactPackageApprovalPayload {
+    fn from_payload(payload: &PackageApprovalPayload) -> CoreResult<Self> {
+        let enabled_component_ordinals = payload
+            .plan
+            .components
+            .iter()
+            .enumerate()
+            .filter_map(|(ordinal, component)| component.enabled.then_some(ordinal))
+            .map(|ordinal| {
+                u32::try_from(ordinal).map_err(|_| {
+                    CoreError::invalid("package approval has too many component decisions")
+                })
+            })
+            .collect::<CoreResult<Vec<_>>>()?;
+        Ok(Self {
+            approval_sha256: payload.plan.approval_sha256.clone(),
+            approval_id: payload.plan.approval_id.clone(),
+            target_review_sha256: payload.plan.target_review_sha256.clone(),
+            update_target_confirmations_sha256: payload
+                .plan
+                .update_target_confirmations_sha256
+                .clone(),
+            enabled_component_ordinals,
+            document_bindings: payload.document_bindings.clone(),
+            confirmed_update_targets: payload.confirmed_update_targets.clone(),
+            approved_capabilities: payload.approved_capabilities.clone(),
+            normalization_evidence_sha256: payload.normalization_evidence_sha256.clone(),
+            normalization_evidence: payload.normalization_evidence.clone(),
+        })
+    }
+
+    pub(super) fn into_payload(
+        self,
+        selection: &SelectiveImportPlan,
+    ) -> CoreResult<PackageApprovalPayload> {
+        selection.verify().map_err(|error| {
+            storage_corrupted(format!("stored package selection is invalid: {error}"))
+        })?;
+        if !self
+            .enabled_component_ordinals
+            .windows(2)
+            .all(|pair| pair[0] < pair[1])
+        {
+            return Err(storage_corrupted(
+                "stored package approval component decisions are not canonical",
+            ));
+        }
+        let mut components = selection.components.clone();
+        for ordinal in self.enabled_component_ordinals {
+            let component = components.get_mut(ordinal as usize).ok_or_else(|| {
+                storage_corrupted("stored package approval enables an unknown component")
+            })?;
+            component.enabled = true;
+        }
+        let plan = ApprovedPackageImportPlan {
+            approval_sha256: self.approval_sha256,
+            plan_sha256: selection.plan_sha256.clone(),
+            review_sha256: selection.review_sha256.clone(),
+            source_sha256: selection.source_sha256.clone(),
+            package_id: selection.package_id.clone(),
+            state: ImportPlanState::Approved,
+            approval_id: self.approval_id,
+            target_review_sha256: self.target_review_sha256,
+            update_target_confirmations_sha256: self.update_target_confirmations_sha256,
+            components,
+            assets: selection.assets.clone(),
+            required_capabilities: selection.required_capabilities.clone(),
+            redistribution_status: selection.redistribution_status,
+        };
+        plan.verify().map_err(|error| {
+            storage_corrupted(format!("stored package approval is invalid: {error}"))
+        })?;
+        Ok(PackageApprovalPayload {
+            target_review_sha256: plan.target_review_sha256.as_str().to_owned(),
+            plan,
+            document_bindings: self.document_bindings,
+            confirmed_update_targets: self.confirmed_update_targets,
+            approved_capabilities: self.approved_capabilities,
+            normalization_evidence_sha256: self.normalization_evidence_sha256,
+            normalization_evidence: self.normalization_evidence,
+        })
+    }
 }
 
 impl Storage {
@@ -88,9 +193,10 @@ impl Storage {
             normalization_evidence_sha256,
             normalization_evidence,
         };
+        let compact_payload = CompactPackageApprovalPayload::from_payload(&approval_payload)?;
         let payload = VersionedJson {
-            schema_version: 1,
-            value: serde_json::to_value(&approval_payload).map_err(|error| {
+            schema_version: 2,
+            value: serde_json::to_value(&compact_payload).map_err(|error| {
                 CoreError::invalid(format!("package approval cannot be encoded: {error}"))
             })?,
         };
@@ -113,13 +219,7 @@ impl Storage {
         if current.record.status == PackageImportStatus::Approved
             && current.record.revision == next_revision
         {
-            validate_approval_replay(
-                &transaction,
-                &current,
-                expected,
-                &approval_payload,
-                &payload,
-            )?;
+            validate_approval_replay(&transaction, &current, expected, &approval_payload)?;
             return Ok(current.record);
         }
         assert_expectation(&current, expected)?;
@@ -224,7 +324,7 @@ impl Storage {
     ) -> CoreResult<PackageImportApprovalRecord> {
         validate_identifier("package import", import_id)?;
         let connection = self.connection()?;
-        let record = connection
+        let mut record = connection
             .query_row(
                 "SELECT id, inspection_sha256, selection_sha256,
                         capability_review_sha256, approval_payload_json,
@@ -273,6 +373,14 @@ impl Storage {
                 "package approval differs from its reviewed import snapshots",
             ));
         }
+        record.payload = VersionedJson {
+            schema_version: 1,
+            value: serde_json::to_value(&payload).map_err(|error| {
+                storage_corrupted(format!(
+                    "stored package approval cannot be encoded: {error}"
+                ))
+            })?,
+        };
         Ok(record)
     }
 }

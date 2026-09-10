@@ -6,6 +6,7 @@
         LorepiaClient,
     } from '../../../lib/ipc/contracts';
     import DetailActionBar from '../../../components/detail/DetailActionBar.svelte';
+    import { importedText } from '../../../lib/import-display';
     import ContentModuleLifecyclePanel from '../ContentModuleLifecyclePanel.svelte';
     import {
         MAX_COMPLETED_CONTENT_PACKAGE_EXPORTS,
@@ -207,7 +208,8 @@
                     {#each contentPackageState.pending_imports.slice(0, MAX_INLINE_ITEMS) as pendingImport (pendingImport.import_id)}
                         <li>
                             <span>
-                                {pendingImport.package_id} · {pendingImport.status} · revision
+                                {importedText(pendingImport.package_id)} ·
+                                {pendingImport.status} · revision
                                 {pendingImport.revision}
                             </span>
                             <button
@@ -232,7 +234,7 @@
             <article class="revision-diff" aria-labelledby="package-result-title">
                 <h4 id="package-result-title">가져오기 완료</h4>
                 <p>
-                    {contentPackageState.result.package_id} ·
+                    {importedText(contentPackageState.result.package_id)} ·
                     {contentPackageState.result.status} · revision
                     {contentPackageState.result.revision}
                 </p>

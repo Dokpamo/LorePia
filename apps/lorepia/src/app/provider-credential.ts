@@ -1,4 +1,9 @@
-import type { CredentialTargetDto, ProviderDiscoverySessionDto } from '../lib/ipc/contracts';
+import { t } from '../lib/i18n';
+import type {
+    CredentialTargetDto,
+    NativeCaptureStatusDto,
+    ProviderDiscoverySessionDto,
+} from '../lib/ipc/contracts';
 
 export function credentialKey(target: CredentialTargetDto): string {
     switch (target.kind) {
@@ -30,4 +35,15 @@ export function discoveryCredentialTarget(
               expected_revision: session.revision,
           }
         : null;
+}
+
+export function captureAnnouncement(status: NativeCaptureStatusDto, success: string): string {
+    switch (status.clipboard_cleanup) {
+        case 'cleared':
+            return success;
+        case 'already_replaced':
+            return t('app.capture.clipboard_changed', { success });
+        case 'clear_failed':
+            return t('app.capture.clipboard_kept', { success });
+    }
 }

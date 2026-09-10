@@ -13,6 +13,8 @@ import {
 import type { OrchestrationStateController } from './orchestration-state-controller';
 
 export class PromptTaskController {
+    private promptRequestEpoch = 0;
+
     constructor(
         private readonly client: OrchestrationCapableClient,
         private readonly state: OrchestrationStateController,
@@ -22,6 +24,8 @@ export class PromptTaskController {
         contextKey: string,
         promptPresetId: string | null,
     ): Promise<void> {
+        const requestEpoch = ++this.promptRequestEpoch;
+        const contextEpoch = this.state.currentContextEpoch();
         const loader = this.client.getEditablePromptPreset;
         if (promptPresetId === null || loader === undefined) {
             this.state.updateForContext(contextKey, (state) => ({
@@ -45,6 +49,7 @@ export class PromptTaskController {
             const document = await loader.call(this.client, {
                 prompt_preset_id: promptPresetId,
             });
+            if (!this.isCurrentPromptRequest(requestEpoch, contextEpoch, contextKey)) return;
             this.state.updateForContext(contextKey, (state) => ({
                 ...state,
                 editable_prompt_preset: document,
@@ -53,6 +58,7 @@ export class PromptTaskController {
                 editable_prompt_preset_error: null,
             }));
         } catch (error: unknown) {
+            if (!this.isCurrentPromptRequest(requestEpoch, contextEpoch, contextKey)) return;
             this.state.updateForContext(contextKey, (state) => ({
                 ...state,
                 editable_prompt_preset: null,
@@ -61,6 +67,18 @@ export class PromptTaskController {
                 editable_prompt_preset_error: errorLabel(error),
             }));
         }
+    }
+
+    private isCurrentPromptRequest(
+        epoch: number,
+        contextEpoch: number,
+        contextKey: string,
+    ): boolean {
+        return (
+            epoch === this.promptRequestEpoch &&
+            this.state.isContextEpoch(contextEpoch) &&
+            this.state.isCurrentContext(contextKey)
+        );
     }
 
     async loadEditableTaskProfilesForContext(contextKey: string): Promise<void> {
@@ -100,6 +118,32 @@ export class PromptTaskController {
             }));
         }
     }
+
+    stageEditablePromptPreset(
+        patch: Partial<
+            Pick<
+                CreatorPromptPresetDocumentDto,
+                'default_generation_preset_id' | 'memory_profile_id'
+            >
+        >,
+    ): boolean {
+        const state = this.state.snapshot();
+        const document = state.editable_prompt_preset;
+        if (state.phase !== 'ready' || document === null) return false;
+        this.state.invalidatePlanPreviewForContext(state.context_key);
+        this.state.updateForContext(state.context_key, (current) => ({
+            ...current,
+            editable_prompt_preset: {
+                ...document,
+                value: { ...document.value, ...patch, id: document.value.id },
+            },
+            editable_prompt_preset_dirty: true,
+            editable_prompt_preset_error: null,
+            workspace: { ...current.workspace, plan_preview: null },
+        }));
+        return true;
+    }
+
     stageEditablePromptBlock(blockId: string, patch: EditablePromptBlockPatch): boolean {
         const state = this.state.snapshot();
         const document = state.editable_prompt_preset;
@@ -232,6 +276,7 @@ export class PromptTaskController {
         const save = this.client.upsertPromptPreset;
         const reload = this.client.getEditablePromptPreset;
         if (document === null || !state.editable_prompt_preset_dirty) return false;
+        if (document.value.id !== state.workspace.room_config.prompt_preset_id) return false;
         if (save === undefined || reload === undefined) {
             this.state.updateForContext(state.context_key, (current) => ({
                 ...current,
@@ -240,6 +285,8 @@ export class PromptTaskController {
             return false;
         }
         const contextKey = state.context_key;
+        const requestEpoch = ++this.promptRequestEpoch;
+        const contextEpoch = this.state.currentContextEpoch();
         this.state.updateForContext(contextKey, (current) => ({
             ...current,
             editable_prompt_preset_loading: true,
@@ -253,6 +300,7 @@ export class PromptTaskController {
             const refreshed = await reload.call(this.client, {
                 prompt_preset_id: document.value.id,
             });
+            if (!this.isCurrentPromptRequest(requestEpoch, contextEpoch, contextKey)) return false;
             if (!this.state.invalidatePlanPreviewForContext(contextKey)) return false;
             return this.state.updateForContext(contextKey, (current) => {
                 const currentDocument = current.editable_prompt_preset;
@@ -287,6 +335,7 @@ export class PromptTaskController {
                 };
             });
         } catch (error: unknown) {
+            if (!this.isCurrentPromptRequest(requestEpoch, contextEpoch, contextKey)) return false;
             this.state.updateForContext(contextKey, (current) => ({
                 ...current,
                 editable_prompt_preset_loading: false,

@@ -12,18 +12,19 @@
         X,
     } from '@lucide/svelte';
     import { tr } from '../../lib/i18n';
+    import { importedText as label } from '../../lib/import-display';
     import { onDestroy, tick, type Snippet } from 'svelte';
 
+    import MobileMenuRow from '../../components/mobile/MobileMenuRow.svelte';
+    import { isEditingGestureTarget } from '../../components/mobile/gesture-target';
     import ChoicePopover from '../../components/ChoicePopover.svelte';
     import SegmentedControl from '../../components/SegmentedControl.svelte';
     import ToggleSwitch from '../../components/ToggleSwitch.svelte';
     import type { LorepiaAppState } from '../../app/app-controller';
-    import type {
-        CreatorControlDto,
-        CreatorControlValue,
-        RoomOrchestrationConfigDto,
-    } from '../../lib/ipc/contracts';
+    import type { RoomOrchestrationConfigDto } from '../../lib/ipc/contracts';
+    import CreatorControlFields from './quick/CreatorControlFields.svelte';
     import type { OrchestrationController, OrchestrationState } from './orchestration-controller';
+    import { panelSwipeCommitDistance } from './quick-drawer-gesture';
 
     interface Props {
         appState: LorepiaAppState;
@@ -46,6 +47,9 @@
         onOpen = () => undefined,
         roomControls,
     }: Props = $props();
+    type MobileSettingsPage = 'answer' | 'memory' | 'creator' | 'room' | null;
+    let mobilePage = $state<MobileSettingsPage>(null);
+    let mobileTitle = $state<HTMLHeadingElement>();
     let settingsButton = $state<HTMLButtonElement | null>(null);
     let panelToggleButton = $state<HTMLButtonElement | null>(null);
     let drawerElement = $state<HTMLDivElement | null>(null);
@@ -68,9 +72,6 @@
     let suppressPanelClickUntil = 0;
 
     const PANEL_SWIPE_AXIS_LOCK_PX = 8;
-    const PANEL_SWIPE_COMMIT_MIN_PX = 64;
-    const PANEL_SWIPE_COMMIT_MAX_PX = 120;
-    const PANEL_SWIPE_COMMIT_RATIO = 0.22;
     const PANEL_SWIPE_FLING_MIN_PX = 32;
     const PANEL_SWIPE_FLING_VELOCITY = 0.55;
     const PANEL_SWIPE_SETTLE_MS = 260;
@@ -140,6 +141,7 @@
             void controller.saveRoomConfig();
         }
         if (didClose) {
+            mobilePage = null;
             void tick().then(() => {
                 if (restoreToggleFocusOnClose) {
                     const target =
@@ -171,20 +173,23 @@
         await tick();
     }
 
+    async function showMobilePage(page: MobileSettingsPage): Promise<void> {
+        mobilePage = page;
+        view = 'settings';
+        await tick();
+        const body = drawerElement?.querySelector('.drawer-body');
+        if (body) body.scrollTop = 0;
+        mobileTitle?.focus({ preventScroll: true });
+    }
+
     async function showTools(): Promise<void> {
         view = 'tools';
         await tick();
         drawerElement?.focus();
     }
 
-    function panelSwipeCommitDistance(viewportWidth: number): number {
-        return Math.min(
-            PANEL_SWIPE_COMMIT_MAX_PX,
-            Math.max(PANEL_SWIPE_COMMIT_MIN_PX, viewportWidth * PANEL_SWIPE_COMMIT_RATIO),
-        );
-    }
-
     function handlePanelPointerDown(event: PointerEvent): void {
+        if (isEditingGestureTarget(event.target)) return;
         if (desktop || !open || event.button !== 0 || !event.isPrimary) return;
         const target = event.currentTarget as HTMLElement;
         const boundsWidth = target.getBoundingClientRect().width;
@@ -251,7 +256,8 @@
         panelSettleTimer = setTimeout(() => {
             panelSettleTimer = undefined;
             if (closes) {
-                void setOpen(false, false);
+                if (!desktop && mobilePage !== null) void showMobilePage(null);
+                else void setOpen(false, false);
                 suppressPanelClickUntil = Date.now() + 120;
             }
             resetPanelGesture();
@@ -300,25 +306,6 @@
     }
 
     onDestroy(clearPanelSettleTimer);
-
-    function controlValue(control: CreatorControlDto): CreatorControlValue {
-        return roomConfig.creator_values[control.id] ?? control.value;
-    }
-
-    function selectedValues(control: CreatorControlDto): string[] {
-        const value = controlValue(control);
-        return Array.isArray(value) ? value : [];
-    }
-
-    function toggleMultiChoice(control: CreatorControlDto, choice: string, checked: boolean): void {
-        const values = selectedValues(control);
-        const nextValues = checked
-            ? values.includes(choice)
-                ? values
-                : [...values, choice]
-            : values.filter((value) => value !== choice);
-        controller.stageCreatorControl(control.id, nextValues);
-    }
 
     function selectModelRoute(modelRouteId: string): void {
         if (modelRouteId === '') {
@@ -383,6 +370,7 @@
         class:open
         class:desktop
         data-view={view}
+        data-mobile-page={desktop ? undefined : (mobilePage ?? 'root')}
         class:utility-dragging={panelGesture === 'dragging'}
         class:utility-settling={panelGesture === 'settling'}
         bind:this={drawerElement}
@@ -399,39 +387,88 @@
         onpointercancel={handlePanelPointerCancel}
         onclickcapture={handlePanelClickCapture}
     >
-        <header>
-            <div class="quick-drawer-heading">
-                {#if view === 'settings'}
-                    <button
-                        class="icon-button drawer-back-button"
-                        type="button"
-                        aria-label={$tr('quick.panel.back')}
-                        onclick={() => void showTools()}
-                    >
-                        <ArrowLeft class="quick-drawer-back-icon" aria-hidden="true" />
-                    </button>
-                {/if}
-                <div>
-                    <p class="eyebrow">
-                        {view === 'settings' ? $tr('quick.eyebrow') : $tr('quick.panel.eyebrow')}
-                    </p>
-                    <h3 id="orchestration-quick-title">
-                        {view === 'settings' ? $tr('quick.title') : $tr('quick.panel.title')}
-                    </h3>
+        {#if !desktop}
+            <header class="mobile-room-header">
+                <button
+                    class="mobile-icon-button"
+                    type="button"
+                    aria-label={mobilePage === null
+                        ? $tr('quick.panel.dismiss')
+                        : $tr('app.nav.back')}
+                    onclick={() =>
+                        mobilePage === null ? void setOpen(false) : void showMobilePage(null)}
+                    ><ArrowLeft aria-hidden="true" /></button
+                >
+                <h3 id="orchestration-quick-title" bind:this={mobileTitle} tabindex="-1">
+                    {mobilePage === null ? $tr('quick.title') : $tr(`mobile.room.${mobilePage}`)}
+                </h3>
+            </header>
+        {:else}
+            <header>
+                <div class="quick-drawer-heading">
+                    {#if view === 'settings'}
+                        <button
+                            class="icon-button drawer-back-button"
+                            type="button"
+                            aria-label={$tr('quick.panel.back')}
+                            onclick={() => void showTools()}
+                        >
+                            <ArrowLeft class="quick-drawer-back-icon" aria-hidden="true" />
+                        </button>
+                    {/if}
+                    <div>
+                        <p class="eyebrow">
+                            {view === 'settings'
+                                ? $tr('quick.eyebrow')
+                                : $tr('quick.panel.eyebrow')}
+                        </p>
+                        <h3 id="orchestration-quick-title">
+                            {view === 'settings' ? $tr('quick.title') : $tr('quick.panel.title')}
+                        </h3>
+                    </div>
                 </div>
-            </div>
-            <button
-                class="icon-button drawer-dismiss-button"
-                type="button"
-                aria-label={$tr('quick.panel.dismiss')}
-                onclick={(event) => void setOpen(false, event.detail === 0)}
-            >
-                <X class="quick-drawer-close-icon" aria-hidden="true" />
-            </button>
-        </header>
-
+                <button
+                    class="icon-button drawer-dismiss-button"
+                    type="button"
+                    aria-label={$tr('quick.panel.dismiss')}
+                    onclick={(event) => void setOpen(false, event.detail === 0)}
+                >
+                    <X class="quick-drawer-close-icon" aria-hidden="true" />
+                </button>
+            </header>
+        {/if}
         <div class="drawer-body">
-            {#if view === 'tools'}
+            {#if !desktop && mobilePage === null}
+                {#if orchestrationState.phase === 'loading'}
+                    <p class="drawer-status" role="status">{$tr('quick.loading')}</p>
+                {:else if orchestrationState.error}
+                    <p class="drawer-status" role="alert">{orchestrationState.error}</p>
+                {/if}
+                <section class="mobile-card mobile-menu-card">
+                    <MobileMenuRow
+                        label={$tr('mobile.room.answer')}
+                        description={selectedModelRoute?.display_name ?? $tr('quick.model.auto')}
+                        onSelect={() => void showMobilePage('answer')}
+                    />
+                    <MobileMenuRow
+                        label={$tr('mobile.room.memory')}
+                        onSelect={() => void showMobilePage('memory')}
+                    />
+                    {#if orchestrationState.workspace.creator_controls.length > 0}
+                        <MobileMenuRow
+                            label={$tr('mobile.room.creator')}
+                            onSelect={() => void showMobilePage('creator')}
+                        />
+                    {/if}
+                    {#if roomControls}
+                        <MobileMenuRow
+                            label={$tr('mobile.room.room')}
+                            onSelect={() => void showMobilePage('room')}
+                        />
+                    {/if}
+                </section>
+                <p class="mobile-room-hint">{$tr('mobile.room.hint')}</p>
+            {:else if view === 'tools'}
                 <div class="utility-panel-home">
                     <p>{$tr('quick.panel.description')}</p>
 
@@ -503,7 +540,9 @@
 
                     {#if selectedPromptPreset !== null}
                         <p class="utility-active-preset">
-                            프롬프트 프리셋 <strong>{selectedPromptPreset.name}</strong> 사용 중
+                            {$tr('quick.preset')}
+                            <strong>{label(selectedPromptPreset.name)}</strong>
+                            {$tr('quick.active')}
                         </p>
                     {/if}
 
@@ -524,7 +563,7 @@
                         <p class="drawer-status error" role="alert">{orchestrationState.error}</p>
                     {/if}
 
-                    {#if roomControls}
+                    {#if roomControls && (desktop || mobilePage === 'room')}
                         <section class="drawer-room-controls" aria-labelledby="room-controls-title">
                             <h4 id="room-controls-title">대화</h4>
                             {@render roomControls(() => setOpen(false, false))}
@@ -541,240 +580,171 @@
                     disabled={orchestrationState.phase !== 'ready'}
                 >
                     <legend class="sr-only">{$tr('quick.legend')}</legend>
-                    <div class="drawer-setting-row">
-                        <ChoicePopover
-                            id="orchestration-prompt-preset"
-                            label={$tr('quick.preset')}
-                            value={roomConfig.prompt_preset_id ?? ''}
-                            disabled={orchestrationState.workspace.prompt_presets.length === 0}
-                            options={[
-                                { value: '', label: $tr('quick.preset.default') },
-                                ...orchestrationState.workspace.prompt_presets
-                                    .slice(0, 100)
-                                    .map((preset) => ({ value: preset.id, label: preset.name })),
-                            ]}
-                            onSelect={(value: string) =>
-                                controller.stageRoomConfig({
-                                    prompt_preset_id: value.length === 0 ? null : value,
-                                })}
-                        />
-                    </div>
+                    {#if desktop || mobilePage === 'answer'}
+                        <div class="drawer-setting-row">
+                            <ChoicePopover
+                                id="orchestration-prompt-preset"
+                                label={$tr('quick.preset')}
+                                value={roomConfig.prompt_preset_id ?? ''}
+                                disabled={orchestrationState.workspace.prompt_presets.length === 0}
+                                options={[
+                                    { value: '', label: $tr('quick.preset.default') },
+                                    ...orchestrationState.workspace.prompt_presets
+                                        .slice(0, 100)
+                                        .map((preset) => ({
+                                            value: preset.id,
+                                            label: label(preset.name),
+                                        })),
+                                ]}
+                                onSelect={(value: string) =>
+                                    controller.stageRoomConfig({
+                                        prompt_preset_id: value.length === 0 ? null : value,
+                                    })}
+                            />
+                        </div>
 
-                    <div class="drawer-setting-row">
-                        <ChoicePopover
-                            id="orchestration-model-route"
-                            label={$tr('quick.model')}
-                            value={selectedModelRouteId ?? ''}
-                            disabled={modelRoutes.length === 0}
-                            options={[
-                                { value: '', label: $tr('quick.model.auto') },
-                                ...modelRoutes.map((route) => ({
-                                    value: route.id,
-                                    label: `${route.display_name ?? route.model_id} · ${route.status}`,
-                                    disabled: !generationPresets.some(
-                                        (preset) => preset.model_route_id === route.id,
-                                    ),
-                                })),
-                            ]}
-                            onSelect={selectModelRoute}
-                        />
-                    </div>
+                        <div class="drawer-setting-row">
+                            <ChoicePopover
+                                id="orchestration-model-route"
+                                label={$tr('quick.model')}
+                                value={selectedModelRouteId ?? ''}
+                                disabled={modelRoutes.length === 0}
+                                options={[
+                                    { value: '', label: $tr('quick.model.auto') },
+                                    ...modelRoutes.map((route) => ({
+                                        value: route.id,
+                                        label:
+                                            desktop || route.status !== 'available'
+                                                ? `${route.display_name ?? route.model_id} · ${route.status}`
+                                                : (route.display_name ?? route.model_id),
+                                        disabled: !generationPresets.some(
+                                            (preset) => preset.model_route_id === route.id,
+                                        ),
+                                    })),
+                                ]}
+                                onSelect={selectModelRoute}
+                            />
+                        </div>
 
-                    <div class="drawer-setting-row">
-                        <ChoicePopover
-                            id="orchestration-generation-preset"
-                            label={$tr('quick.generation_preset')}
-                            value={roomConfig.generation_preset_id ?? ''}
-                            options={[
-                                { value: '', label: $tr('quick.generation_preset.default') },
-                                ...visibleGenerationPresets.map((preset) => ({
-                                    value: preset.id,
-                                    label: preset.display_name,
-                                })),
-                            ]}
-                            onSelect={(value: string) =>
-                                controller.stageRoomConfig({
-                                    generation_preset_id: value.length === 0 ? null : value,
-                                })}
-                        />
-                    </div>
+                        <div class="drawer-setting-row">
+                            <ChoicePopover
+                                id="orchestration-generation-preset"
+                                label={$tr('quick.generation_preset')}
+                                value={roomConfig.generation_preset_id ?? ''}
+                                options={[
+                                    { value: '', label: $tr('quick.generation_preset.default') },
+                                    ...visibleGenerationPresets.map((preset) => ({
+                                        value: preset.id,
+                                        label: preset.display_name,
+                                    })),
+                                ]}
+                                onSelect={(value: string) =>
+                                    controller.stageRoomConfig({
+                                        generation_preset_id: value.length === 0 ? null : value,
+                                    })}
+                            />
+                        </div>
 
-                    <fieldset>
-                        <legend>{$tr('quick.length')}</legend>
-                        <SegmentedControl
-                            id="response-length"
-                            label={$tr('quick.length')}
-                            value={roomConfig.response_length}
-                            disabled={!roomConfig.supported_fields.response_length}
-                            options={[
-                                { value: 'short', label: $tr('quick.length.short') },
-                                { value: 'balanced', label: $tr('quick.length.balanced') },
-                                { value: 'long', label: $tr('quick.length.long') },
-                            ]}
-                            onSelect={(value: string) =>
-                                controller.stageRoomConfig({
-                                    response_length:
-                                        value as RoomOrchestrationConfigDto['response_length'],
-                                })}
-                        />
-                    </fieldset>
-
-                    <label>
-                        <span
-                            >{$tr('quick.creativity')}
-                            <output>{roomConfig.creativity}</output></span
-                        >
-                        <input
-                            type="range"
-                            aria-label={$tr('quick.creativity')}
-                            min="0"
-                            max="100"
-                            step="1"
-                            value={roomConfig.creativity}
-                            disabled={!roomConfig.supported_fields.creativity}
-                            oninput={(event) =>
-                                controller.stageRoomConfig({
-                                    creativity: Number(event.currentTarget.value),
-                                })}
-                        />
-                    </label>
-
-                    <div class="drawer-setting-row">
-                        <ChoicePopover
-                            id="orchestration-reasoning-effort"
-                            label={$tr('quick.reasoning')}
-                            value={roomConfig.reasoning_effort}
-                            disabled={!roomConfig.supported_fields.reasoning_effort}
-                            options={[
-                                {
-                                    value: 'provider_default',
-                                    label: $tr('quick.reasoning.provider_default'),
-                                },
-                                { value: 'minimal', label: $tr('quick.reasoning.minimal') },
-                                { value: 'low', label: $tr('quick.reasoning.low') },
-                                { value: 'medium', label: $tr('quick.reasoning.medium') },
-                                { value: 'high', label: $tr('quick.reasoning.high') },
-                                { value: 'extra_high', label: $tr('quick.reasoning.extra_high') },
-                                { value: 'maximum', label: $tr('quick.reasoning.maximum') },
-                            ]}
-                            onSelect={(value: string) =>
-                                controller.stageRoomConfig({
-                                    reasoning_effort:
-                                        value as RoomOrchestrationConfigDto['reasoning_effort'],
-                                })}
-                        />
-                    </div>
-
-                    <fieldset>
-                        <legend>{$tr('quick.enrichment')}</legend>
-                        <ToggleSwitch
-                            label={$tr('quick.memory')}
-                            checked={roomConfig.memory_enabled}
-                            disabled={!roomConfig.supported_fields.memory_enabled}
-                            showLabel
-                            onChange={(checked: boolean) =>
-                                controller.stageRoomConfig({
-                                    memory_enabled: checked,
-                                })}
-                        />
-                        <ToggleSwitch
-                            label={$tr('quick.knowledge')}
-                            checked={roomConfig.knowledge_enabled}
-                            disabled={!roomConfig.supported_fields.knowledge_enabled}
-                            showLabel
-                            onChange={(checked: boolean) =>
-                                controller.stageRoomConfig({
-                                    knowledge_enabled: checked,
-                                })}
-                        />
-                    </fieldset>
-
-                    {#if orchestrationState.workspace.creator_controls.length > 0}
                         <fieldset>
-                            <legend>{$tr('quick.creator_controls')}</legend>
-                            <div class="creator-controls">
-                                {#each orchestrationState.workspace.creator_controls.slice(0, 80) as control (control.id)}
-                                    {#if control.kind === 'toggle'}
-                                        <ToggleSwitch
-                                            label={control.label}
-                                            checked={Boolean(controlValue(control))}
-                                            showLabel
-                                            onChange={(checked: boolean) =>
-                                                controller.stageCreatorControl(control.id, checked)}
-                                        />
-                                    {:else if control.kind === 'select'}
-                                        <div class="creator-choice-row">
-                                            <ChoicePopover
-                                                id={`creator-control-${control.id}`}
-                                                label={control.label}
-                                                value={String(controlValue(control))}
-                                                options={control.choices
-                                                    .slice(0, 100)
-                                                    .map((choice) => ({
-                                                        value: choice,
-                                                        label: choice,
-                                                    }))}
-                                                onSelect={(value: string) =>
-                                                    controller.stageCreatorControl(
-                                                        control.id,
-                                                        value,
-                                                    )}
-                                            />
-                                        </div>
-                                    {:else if control.kind === 'multi_select'}
-                                        <fieldset class="nested-fieldset">
-                                            <legend>{control.label}</legend>
-                                            {#each control.choices.slice(0, 40) as choice (choice)}
-                                                <ToggleSwitch
-                                                    label={choice}
-                                                    checked={selectedValues(control).includes(
-                                                        choice,
-                                                    )}
-                                                    showLabel
-                                                    onChange={(checked: boolean) =>
-                                                        toggleMultiChoice(control, choice, checked)}
-                                                />
-                                            {/each}
-                                        </fieldset>
-                                    {:else if control.kind === 'number' || control.kind === 'slider'}
-                                        <label>
-                                            <span>{control.label}</span>
-                                            <input
-                                                type={control.kind === 'slider'
-                                                    ? 'range'
-                                                    : 'number'}
-                                                min={control.minimum ?? undefined}
-                                                max={control.maximum ?? undefined}
-                                                step={control.step ?? 1}
-                                                value={Number(controlValue(control))}
-                                                oninput={(event) =>
-                                                    controller.stageCreatorControl(
-                                                        control.id,
-                                                        Number(event.currentTarget.value),
-                                                    )}
-                                            />
-                                        </label>
-                                    {:else}
-                                        <label>
-                                            <span>{control.label}</span>
-                                            <input
-                                                type="text"
-                                                maxlength="4096"
-                                                value={String(controlValue(control))}
-                                                oninput={(event) =>
-                                                    controller.stageCreatorControl(
-                                                        control.id,
-                                                        event.currentTarget.value,
-                                                    )}
-                                            />
-                                        </label>
-                                    {/if}
-                                    {#if control.description}
-                                        <small>{control.description}</small>
-                                    {/if}
-                                {/each}
-                            </div>
+                            <legend>{$tr('quick.length')}</legend>
+                            <SegmentedControl
+                                id="response-length"
+                                label={$tr('quick.length')}
+                                value={roomConfig.response_length}
+                                disabled={!roomConfig.supported_fields.response_length}
+                                options={[
+                                    { value: 'short', label: $tr('quick.length.short') },
+                                    { value: 'balanced', label: $tr('quick.length.balanced') },
+                                    { value: 'long', label: $tr('quick.length.long') },
+                                ]}
+                                onSelect={(value: string) =>
+                                    controller.stageRoomConfig({
+                                        response_length:
+                                            value as RoomOrchestrationConfigDto['response_length'],
+                                    })}
+                            />
                         </fieldset>
+
+                        <label>
+                            <span
+                                >{$tr('quick.creativity')}
+                                <output>{roomConfig.creativity}</output></span
+                            >
+                            <input
+                                type="range"
+                                aria-label={$tr('quick.creativity')}
+                                min="0"
+                                max="100"
+                                step="1"
+                                value={roomConfig.creativity}
+                                disabled={!roomConfig.supported_fields.creativity}
+                                oninput={(event) =>
+                                    controller.stageRoomConfig({
+                                        creativity: Number(event.currentTarget.value),
+                                    })}
+                            />
+                        </label>
+
+                        <div class="drawer-setting-row">
+                            <ChoicePopover
+                                id="orchestration-reasoning-effort"
+                                label={$tr('quick.reasoning')}
+                                value={roomConfig.reasoning_effort}
+                                disabled={!roomConfig.supported_fields.reasoning_effort}
+                                options={[
+                                    {
+                                        value: 'provider_default',
+                                        label: $tr('quick.reasoning.provider_default'),
+                                    },
+                                    { value: 'minimal', label: $tr('quick.reasoning.minimal') },
+                                    { value: 'low', label: $tr('quick.reasoning.low') },
+                                    { value: 'medium', label: $tr('quick.reasoning.medium') },
+                                    { value: 'high', label: $tr('quick.reasoning.high') },
+                                    {
+                                        value: 'extra_high',
+                                        label: $tr('quick.reasoning.extra_high'),
+                                    },
+                                    { value: 'maximum', label: $tr('quick.reasoning.maximum') },
+                                ]}
+                                onSelect={(value: string) =>
+                                    controller.stageRoomConfig({
+                                        reasoning_effort:
+                                            value as RoomOrchestrationConfigDto['reasoning_effort'],
+                                    })}
+                            />
+                        </div>
+                    {/if}
+                    {#if desktop || mobilePage === 'memory'}
+                        <fieldset>
+                            <legend>{$tr('quick.enrichment')}</legend>
+                            <ToggleSwitch
+                                label={$tr('quick.memory')}
+                                checked={roomConfig.memory_enabled}
+                                disabled={!roomConfig.supported_fields.memory_enabled}
+                                showLabel
+                                onChange={(checked: boolean) =>
+                                    controller.stageRoomConfig({
+                                        memory_enabled: checked,
+                                    })}
+                            />
+                            <ToggleSwitch
+                                label={$tr('quick.knowledge')}
+                                checked={roomConfig.knowledge_enabled}
+                                disabled={!roomConfig.supported_fields.knowledge_enabled}
+                                showLabel
+                                onChange={(checked: boolean) =>
+                                    controller.stageRoomConfig({
+                                        knowledge_enabled: checked,
+                                    })}
+                            />
+                        </fieldset>
+                    {/if}
+                    {#if (desktop || mobilePage === 'creator') && orchestrationState.workspace.creator_controls.length > 0}
+                        <CreatorControlFields
+                            controls={orchestrationState.workspace.creator_controls}
+                            {roomConfig}
+                            {controller}
+                        />
                     {/if}
                 </fieldset>
             {/if}
@@ -890,7 +860,7 @@
         border: 1px solid var(--desktop-divider);
         border-radius: 18px;
         background: var(--desktop-panel-bg, var(--desktop-sidebar-bg));
-        box-shadow: 0 12px 36px rgb(0 0 0 / 16%);
+        box-shadow: var(--popover-shadow);
     }
 
     .quick-drawer:focus {
@@ -1165,8 +1135,7 @@
         opacity: var(--disabled-opacity);
     }
 
-    .drawer-scroll > label,
-    .creator-controls > label {
+    .drawer-scroll > label {
         display: grid;
         gap: 6px;
     }
@@ -1196,17 +1165,6 @@
         border-radius: 4px 4px var(--radius-lg) var(--radius-lg);
     }
 
-    .drawer-scroll input[type='text'],
-    .drawer-scroll input[type='number'] {
-        height: 38px;
-        min-height: 38px;
-        padding: 0 34px 0 12px;
-        border: 1px solid var(--line);
-        border-radius: var(--radius-md);
-        background: var(--bg);
-        color: var(--ink);
-    }
-
     .drawer-scroll fieldset {
         display: grid;
         gap: 9px;
@@ -1217,22 +1175,6 @@
         border-radius: var(--radius-md);
     }
 
-    .nested-fieldset {
-        background: var(--surface-sunken);
-    }
-
-    .creator-controls {
-        display: grid;
-        gap: 10px;
-    }
-
-    .creator-choice-row {
-        min-width: 0;
-        border-radius: var(--radius-md);
-        background: var(--surface-sunken);
-    }
-
-    .creator-controls small,
     .drawer-status {
         color: var(--ink-muted);
     }

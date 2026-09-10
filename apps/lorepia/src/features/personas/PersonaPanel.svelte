@@ -2,6 +2,10 @@
     import { UserRoundPlus } from '@lucide/svelte';
     import DetailActionBar from '../../components/detail/DetailActionBar.svelte';
     import DetailPage from '../../components/detail/DetailPage.svelte';
+    import { useOptionalChoiceSheet } from '../../ui/workspace/choice-sheet.svelte';
+    const workspaceChoices = useOptionalChoiceSheet();
+    import SettingsChoiceField from '../providers/settings/SettingsChoiceField.svelte';
+    import SettingsTextField from '../providers/settings/SettingsTextField.svelte';
     import { tr } from '../../lib/i18n';
     import type { PersonaController, PersonaState } from './persona-controller';
     import type { PersonaDto } from './persona-contracts';
@@ -90,21 +94,22 @@
                 void save();
             }}
         >
-            <label>
-                <span>{$tr('persona.editor.name')}</span>
-                <input
-                    bind:value={name}
-                    required
-                    maxlength="120"
-                    autocomplete="off"
-                    disabled={busy}
-                />
-            </label>
-            <label>
-                <span>{$tr('persona.editor.description')}</span>
-                <textarea bind:value={description} rows="3" maxlength="4000" disabled={busy}
-                ></textarea>
-            </label>
+            <SettingsTextField
+                label={$tr('persona.editor.name')}
+                value={name}
+                required
+                maxlength={120}
+                disabled={busy}
+                onchange={(value: string) => (name = value)}
+            />
+            <SettingsTextField
+                label={$tr('persona.editor.description')}
+                value={description}
+                maxlength={4000}
+                rows={3}
+                disabled={busy}
+                onchange={(value: string) => (description = value)}
+            />
         </form>
     {:else}
         {#if personaState.phase === 'loading'}
@@ -123,6 +128,40 @@
             </div>
         {/if}
 
+        {#if workspaceChoices}
+            <SettingsChoiceField
+                id="settings-conversation-persona"
+                label={$tr('settingsLive.personaForRoom')}
+                value={personaState.selection?.selected_persona?.value.id ?? ''}
+                options={[
+                    { value: '', label: $tr('settingsUi.none') },
+                    ...(personaState.selection?.selected_persona &&
+                    !personaState.personas.some(
+                        (item) =>
+                            item.value.id === personaState.selection?.selected_persona?.value.id,
+                    )
+                        ? [
+                              {
+                                  value: personaState.selection.selected_persona.value.id,
+                                  label: personaState.selection.selected_persona.value.name,
+                              },
+                          ]
+                        : []),
+                    ...personaState.personas.map((item) => ({
+                        value: item.value.id,
+                        label: item.value.name,
+                    })),
+                ]}
+                disabled={busy || personaState.phase !== 'ready'}
+                onSelect={(value: string) => {
+                    if (value === (personaState.selection?.selected_persona?.value.id ?? ''))
+                        return;
+                    const persona = personaState.personas.find((item) => item.value.id === value);
+                    if (persona) void controller.selectPersona(persona);
+                    else if (value === '') void controller.clearSelection();
+                }}
+            />
+        {/if}
         <div class="persona-catalog">
             <div class="setting-list persona-list">
                 {#if personaState.personas.length === 0 && personaState.phase !== 'loading'}
@@ -264,7 +303,7 @@
         gap: 14px;
     }
 
-    .persona-form label {
+    .persona-form :global(label) {
         display: grid;
         gap: 7px;
         color: var(--ink-muted);
@@ -272,8 +311,8 @@
         font-weight: 700;
     }
 
-    .persona-form input,
-    .persona-form textarea {
+    .persona-form :global(input),
+    .persona-form :global(textarea) {
         width: 100%;
         min-width: 0;
         box-sizing: border-box;
@@ -293,25 +332,25 @@
             box-shadow 140ms ease;
     }
 
-    .persona-form input {
+    .persona-form :global(input) {
         min-height: clamp(48px, 13.73vw, 60px);
     }
 
-    .persona-form textarea {
+    .persona-form :global(textarea) {
         min-height: clamp(112px, 32.037vw, 140px);
         resize: none;
     }
 
-    .persona-form :is(input, textarea):hover:not(:focus, :disabled) {
+    .persona-form :global(:is(input, textarea)):hover:not(:focus, :disabled) {
         border-color: var(--line);
     }
 
-    .persona-form :is(input, textarea):focus {
+    .persona-form :global(:is(input, textarea)):focus {
         border-color: var(--accent);
         outline: none;
     }
 
-    .persona-form :is(input, textarea):disabled {
+    .persona-form :global(:is(input, textarea)):disabled {
         cursor: not-allowed;
         opacity: var(--disabled-opacity);
     }

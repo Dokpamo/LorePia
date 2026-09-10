@@ -1,7 +1,8 @@
 <script lang="ts">
-    import type { LorepiaAppState } from '../../../app/app-controller';
+    import type { LorepiaAppController, LorepiaAppState } from '../../../app/app-controller';
     import DetailActionBar from '../../../components/detail/DetailActionBar.svelte';
     import type { LorepiaClient, PromptPresetHistoryClientApi } from '../../../lib/ipc/contracts';
+    import { tr } from '../../../lib/i18n';
     import CreatorDocumentEditors from '../CreatorDocumentEditors.svelte';
     import type { ContentModuleLifecycleClientApi } from '../module-lifecycle-contracts';
     import {
@@ -13,6 +14,7 @@
         type OrchestrationState,
     } from '../orchestration-controller';
     import PromptPresetHistory from '../PromptPresetHistory.svelte';
+    import ImportedCompatibilityPanel from '../ImportedCompatibilityPanel.svelte';
     import TaskProfilesPanel from '../TaskProfilesPanel.svelte';
     import PromptBlocksSection from './PromptBlocksSection.svelte';
 
@@ -20,6 +22,7 @@
         client?: LorepiaClient &
             Partial<PromptPresetHistoryClientApi & ContentModuleLifecycleClientApi>;
         appState: LorepiaAppState;
+        appController?: LorepiaAppController;
         orchestrationState: OrchestrationState;
         controller: OrchestrationController;
         detailPage?: string | null;
@@ -34,6 +37,7 @@
     let {
         client,
         appState,
+        appController,
         orchestrationState,
         controller,
         detailPage = $bindable(null),
@@ -245,7 +249,7 @@
             <p class="empty-note">현재 프리셋이 공개한 변수가 없습니다.</p>
         {:else}
             <div class="setting-list variable-list" aria-label="프롬프트 변수 목록">
-                {#each orchestrationState.workspace.creator_controls.slice(0, 100) as control (control.id)}
+                {#each orchestrationState.workspace.creator_controls.slice(0, 256) as control (control.id)}
                     <div class="setting-row variable-row">
                         <div class="setting-content">
                             <div class="setting-copy variable-copy">
@@ -266,14 +270,25 @@
                     </div>
                 {/each}
             </div>
-            {#if orchestrationState.workspace.creator_controls.length > 100}
-                <p class="bounded-note">처음 100개 변수만 표시합니다.</p>
+            {#if orchestrationState.workspace.creator_controls.length > 256}
+                <p class="bounded-note">
+                    {$tr('orchestration.variables.truncated', { count: 256 })}
+                </p>
             {/if}
         {/if}
     </section>
 {/if}
 
 {#if detailPage?.startsWith('profiles')}
+    {#if detailPage === 'profiles'}
+        <ImportedCompatibilityPanel
+            {client}
+            {appController}
+            {appState}
+            {orchestrationState}
+            {controller}
+        />
+    {/if}
     <TaskProfilesPanel {appState} {orchestrationState} {controller} bind:detailPage />
 {/if}
 
