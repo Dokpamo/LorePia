@@ -112,6 +112,6 @@ impl Core {
 }
 
 fn sha256_digest(bytes: &[u8]) -> CoreResult<Sha256Digest> {
-    Sha256Digest::parse(format!("{:x}", Sha256::digest(bytes)))
+    Sha256Digest::parse(hex::encode(Sha256::digest(bytes)))
         .map_err(|error| lorepia_domain::CoreError::internal(format!("invalid SHA-256: {error}")))
 }

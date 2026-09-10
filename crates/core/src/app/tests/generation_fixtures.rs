@@ -648,7 +648,7 @@ fn assert_prompt_source_snapshot(
         serde_json::to_string(&summary.value).expect("encode exact summary revision");
     assert_eq!(
         snapshot.summaries[0].active_revision_sha256,
-        format!("{:x}", Sha256::digest(summary_json.as_bytes()))
+        hex::encode(Sha256::digest(summary_json.as_bytes()))
     );
     let snapshot_binding = snapshot.binding.as_ref().expect("binding evidence");
     assert_eq!(snapshot_binding.binding_id, binding.value.id);

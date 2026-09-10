@@ -145,7 +145,7 @@ impl DiscoveryDocumentEvidence {
 
 pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
-    format!("{digest:x}")
+    hex::encode(digest)
 }
 
 pub(crate) fn redact_and_bound(value: &str, max_bytes: usize) -> String {

@@ -222,7 +222,7 @@ fn assert_exact_embedding_and_coverage(fixture: &Fixture, write: &KnowledgeEmbed
     assert_eq!(exact[0].similarity_millionths, 1_000_000);
     assert_eq!(
         exact[0].vector_sha256,
-        format!("{:x}", Sha256::digest(encode_vector(&write.values)))
+        hex::encode(Sha256::digest(encode_vector(&write.values)))
     );
     assert!(
         fixture
@@ -376,7 +376,7 @@ fn seed_unrelated_embeddings(fixture: &Fixture, entry_count: usize) {
         .expect("enable foreign keys");
     let transaction = connection.transaction().expect("begin embedding fixture");
     let bytes = encode_vector(&[0.0, 1.0, 0.0]);
-    let vector_sha256 = format!("{:x}", Sha256::digest(&bytes));
+    let vector_sha256 = hex::encode(Sha256::digest(&bytes));
     {
         let mut statement = transaction
             .prepare(
@@ -415,7 +415,7 @@ fn seed_provider_graph(root: &Path) {
         .pragma_update(None, "foreign_keys", true)
         .expect("enable foreign keys");
     let manifest_json = "{}";
-    let manifest_sha256 = format!("{:x}", Sha256::digest(manifest_json.as_bytes()));
+    let manifest_sha256 = hex::encode(Sha256::digest(manifest_json.as_bytes()));
     connection
         .execute(
             "INSERT INTO provider_templates

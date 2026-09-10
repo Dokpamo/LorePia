@@ -1,3 +1,5 @@
+import com.android.build.api.dsl.LibraryExtension
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.gradle.api.artifacts.dsl.LockMode
 
 plugins {
@@ -5,7 +7,7 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-android {
+configure<LibraryExtension> {
     namespace = "dev.lorepia.tauri.platform"
     compileSdk = 36
 
@@ -19,9 +21,6 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
 }
 
 allprojects {
@@ -37,8 +36,14 @@ allprojects {
 dependencies {
     implementation(project(":tauri-android"))
     implementation("androidx.activity:activity:1.10.1")
-    compileOnly("androidx.appcompat:appcompat:1.6.0")
+    implementation("androidx.appcompat:appcompat:1.8.0")
     testImplementation("junit:junit:4.13.2")
-    androidTestImplementation("androidx.test.ext:junit:1.2.1")
-    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test.ext:junit:1.3.0")
+    androidTestImplementation("androidx.test:runner:1.7.0")
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_17)
+    }
 }

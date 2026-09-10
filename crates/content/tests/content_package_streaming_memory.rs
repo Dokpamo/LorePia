@@ -80,7 +80,7 @@ struct PackageFixture {
 }
 
 fn sha256(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    hex::encode(Sha256::digest(bytes))
 }
 
 fn asset_bytes(index: u32, size: usize) -> Vec<u8> {

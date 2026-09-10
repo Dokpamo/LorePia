@@ -683,16 +683,11 @@ async fn provider_semantic_knowledge_reuses_one_durable_query_for_preview_and_se
             .collect::<Vec<_>>()
             .join("\n\n")
     };
-    let query_sha256 = format!(
-        "{:x}",
-        Sha256::digest(
+    let query_sha256 = hex::encode(Sha256::digest(
             serde_json::to_vec(&("lorepia.memory-query.v1", &query_text))
                 .expect("encode provider semantic query")
-        )
-    );
-    let intent_digest = format!(
-        "{:x}",
-        Sha256::digest(
+        ));
+    let intent_digest = hex::encode(Sha256::digest(
             serde_json::to_vec(&(
                 "lorepia.memory-query-embedding-intent.v1",
                 memory_profile_id.as_str(),
@@ -708,8 +703,7 @@ async fn provider_semantic_knowledge_reuses_one_durable_query_for_preview_and_se
                 3_u32,
             ))
             .expect("encode provider semantic intent")
-        )
-    );
+        ));
     let intent = MemoryQueryEmbeddingIntent {
         id: format!("memory-query-embedding-{intent_digest}"),
         idempotency_key: format!("memory-query-embedding:v1:{intent_digest}"),

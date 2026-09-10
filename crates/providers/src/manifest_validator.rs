@@ -112,7 +112,7 @@ pub fn validate_manifest(manifest: &ProviderManifest) -> CoreResult<ValidatedPro
     }
 
     let digest = Sha256::digest(&canonical_json);
-    let sha256 = format!("{digest:x}");
+    let sha256 = hex::encode(digest);
     Ok(ValidatedProviderManifest {
         manifest: manifest.clone(),
         sha256,

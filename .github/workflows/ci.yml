@@ -19,7 +19,7 @@ jobs:
   android-dependency-integrity:
     name: Android dependency integrity
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 55
     env:
       ANDROID_HOME: ${{ github.workspace }}/.android-sdk
       ANDROID_SDK_ROOT: ${{ github.workspace }}/.android-sdk
@@ -77,12 +77,10 @@ jobs:
           "build-tools;36.0.0"
           "ndk;27.2.12479018"
 
-      - name: Initialize Tauri Android project
-        working-directory: apps/lorepia
-        run: npm run tauri -- android init --ci --skip-targets-install
-
       - name: Prepare ignored Tauri Android Gradle inputs
-        run: python3 scripts/prepare_tauri_android_gradle.py
+        run: |
+          python3 scripts/prepare_tauri_android_gradle.py
+          git diff --exit-code -- apps/lorepia/src-tauri/gen/android plugins/lorepia-platform/android
 
       - name: Resolve app buildscript and release dependencies with strict locks
         working-directory: apps/lorepia/src-tauri/gen/android
@@ -97,6 +95,19 @@ jobs:
           ./gradlew --no-daemon --console=plain --dependency-verification strict \
             :tauri-android:dependencies --configuration releaseRuntimeClasspath
 
+      - name: Build Android app with the pinned Rust toolchain and strict Gradle verification
+        working-directory: apps/lorepia
+        run: |
+          rustup target add aarch64-linux-android
+          npm run tauri -- android build --ci --debug --target aarch64 --apk
+
+      - name: Compile instrumented sources with strict dependency verification
+        working-directory: apps/lorepia/src-tauri/gen/android
+        run: |
+          ./gradlew --no-daemon --console=plain --dependency-verification strict \
+            :app:compileArm64DebugKotlin :app:compileArm64DebugAndroidTestKotlin \
+            :tauri-plugin-lorepia-platform:compileDebugAndroidTestKotlin
+
       - name: Resolve standalone plugin dependencies with strict verification and locks
         working-directory: plugins/lorepia-platform/android
         run: |
@@ -108,6 +119,12 @@ jobs:
           "$WRAPPER" -p "$PLUGIN_ROOT" --no-daemon --console=plain \
             --dependency-verification strict :tauri-android:dependencies \
             --configuration releaseRuntimeClasspath
+          "$WRAPPER" -p "$PLUGIN_ROOT" --no-daemon --console=plain \
+            --dependency-verification strict compileDebugKotlin \
+            compileDebugAndroidTestKotlin testDebugUnitTest
+
+      - name: Verify the build preserved committed Android configuration
+        run: git diff --exit-code -- apps/lorepia/src-tauri/gen/android plugins/lorepia-platform/android
 
   ios-simulator:
     name: iOS simulator

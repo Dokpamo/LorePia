@@ -182,7 +182,7 @@ pub(crate) fn atomic_export_to_destination(
             .flush()
             .and_then(|()| temporary.sync_all())
             .map_err(|_| PlatformError::new(PlatformErrorCode::StorageUnavailable))?;
-        let actual_sha256 = format!("{:x}", hasher.finalize());
+        let actual_sha256 = hex::encode(hasher.finalize());
         let partial_metadata = temporary
             .metadata()
             .map_err(|_| PlatformError::new(PlatformErrorCode::StorageUnavailable))?;
@@ -489,7 +489,7 @@ mod tests {
             crate::validation::validate_content_export_destination(&destination_path, &data_root)
                 .expect("validated destination");
         let bytes = b"lossless synthetic source";
-        let digest = format!("{:x}", Sha256::digest(bytes));
+        let digest = hex::encode(Sha256::digest(bytes));
         std::fs::write(&source, bytes).expect("source");
         std::fs::write(&destination_path, b"previous bytes").expect("previous destination");
 
@@ -543,7 +543,7 @@ mod tests {
         let destination = export_parent.join("database.sqlite3");
         let protected = data_root.join("database.sqlite3");
         let bytes = b"verified export bytes";
-        let digest = format!("{:x}", Sha256::digest(bytes));
+        let digest = hex::encode(Sha256::digest(bytes));
         std::fs::write(&source, bytes).expect("source");
         std::fs::write(&protected, b"protected database").expect("protected database");
 
@@ -606,7 +606,7 @@ mod tests {
         let protected = data_root.join("database.sqlite3");
         let destination_path = export_parent.join("database.sqlite3");
         let bytes = b"verified export bytes";
-        let digest = format!("{:x}", Sha256::digest(bytes));
+        let digest = hex::encode(Sha256::digest(bytes));
         std::fs::write(&source, bytes).expect("source");
         std::fs::write(&protected, b"protected database").expect("protected database");
         std::os::windows::fs::symlink_file(&protected, &destination_path)

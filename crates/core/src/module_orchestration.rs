@@ -1475,7 +1475,7 @@ fn content_module_deactivation_review_sha256(
             "cannot encode content module deactivation review: {error}"
         ))
     })?;
-    Sha256Digest::parse(format!("{:x}", Sha256::digest(encoded)))
+    Sha256Digest::parse(hex::encode(Sha256::digest(encoded)))
         .map_err(|error| CoreError::invalid(error.clone()))
 }
 

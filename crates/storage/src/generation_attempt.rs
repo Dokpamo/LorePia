@@ -1801,7 +1801,7 @@ fn validate_active_content_revision<T: Serialize>(
     let raw = raw.ok_or_else(|| CoreError::invalid(format!("{label} is not active")))?;
     let document_json = serde_json::to_string(&expected.value)
         .map_err(|error| CoreError::invalid(format!("{label} cannot be canonicalized: {error}")))?;
-    let document_sha256 = format!("{:x}", Sha256::digest(document_json.as_bytes()));
+    let document_sha256 = hex::encode(Sha256::digest(document_json.as_bytes()));
     if expected.revision != u64_from_i64(raw.0)?
         || expected.revision_id.as_deref() != Some(raw.1.as_str())
         || expected.created_at != parse_time(&format!("{label} created_at"), &raw.2)?
@@ -2803,7 +2803,7 @@ fn encode_hashed<T: Serialize>(label: &str, value: &T) -> CoreResult<(String, Sh
             "{label} exceeds its byte limit"
         )));
     }
-    let sha256 = Sha256Digest::parse(format!("{:x}", Sha256::digest(json.as_bytes())))
+    let sha256 = Sha256Digest::parse(hex::encode(Sha256::digest(json.as_bytes())))
         .map_err(CoreError::invalid)?;
     Ok((json, sha256))
 }
@@ -2819,7 +2819,7 @@ where
     match (json, expected_sha256) {
         (None, None) => Ok(None),
         (Some(json), Some(expected)) => {
-            let actual = Sha256Digest::parse(format!("{:x}", Sha256::digest(json.as_bytes())))
+            let actual = Sha256Digest::parse(hex::encode(Sha256::digest(json.as_bytes())))
                 .map_err(|error| corrupted(format!("{label} hash is invalid: {error}")))?;
             let expected = parse_sha(label, expected)?;
             if actual != expected {
@@ -2841,7 +2841,7 @@ fn hash_json<T: Serialize>(value: &T) -> CoreResult<Sha256Digest> {
             false,
         )
     })?;
-    Sha256Digest::parse(format!("{:x}", Sha256::digest(bytes))).map_err(CoreError::invalid)
+    Sha256Digest::parse(hex::encode(Sha256::digest(bytes))).map_err(CoreError::invalid)
 }
 
 fn parse_sha(label: &str, value: &str) -> CoreResult<Sha256Digest> {

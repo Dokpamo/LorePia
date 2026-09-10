@@ -654,7 +654,7 @@ impl Core {
 fn canonical_value_sha256(value: &impl Serialize, label: &str) -> CoreResult<String> {
     let encoded = serde_json::to_vec(value)
         .map_err(|error| CoreError::internal(format!("cannot encode {label}: {error}")))?;
-    Ok(format!("{:x}", Sha256::digest(encoded)))
+    Ok(hex::encode(Sha256::digest(encoded)))
 }
 
 fn normalize_bounded_text(

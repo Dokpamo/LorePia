@@ -25,7 +25,7 @@ pub(crate) fn register_integrity_functions(connection: &Connection) -> CoreResul
     connection
         .create_scalar_function("lorepia_sha256_hex", 1, flags, |context| {
             let value = context.get::<String>(0)?;
-            Ok(format!("{:x}", Sha256::digest(value.as_bytes())))
+            Ok(hex::encode(Sha256::digest(value.as_bytes())))
         })
         .map_err(storage_db_error)?;
     connection
@@ -73,10 +73,7 @@ pub(crate) fn register_integrity_functions(connection: &Connection) -> CoreResul
                     "commit_plan_sha256": context.get::<String>(6)?,
                     "connection_id": context.get::<String>(7)?,
                 });
-                Ok(format!(
-                    "{:x}",
-                    Sha256::digest(evidence.to_string().as_bytes())
-                ))
+                Ok(hex::encode(Sha256::digest(evidence.to_string().as_bytes())))
             },
         )
         .map_err(storage_db_error)?;

@@ -25,6 +25,7 @@ dependencyLocking {
 
 dependencies {
     compileOnly(gradleApi())
-    implementation("com.android.tools.build:gradle:8.11.0")
+    implementation("com.android.tools.build:gradle:9.3.2")
+    // buildSrc otherwise exposes AGP's older Kotlin plugin to the whole app build.
+    implementation("org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.20")
 }
-

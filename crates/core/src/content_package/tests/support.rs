@@ -51,7 +51,7 @@
         let mut hashes = BTreeMap::new();
         hashes.insert(
             "transforms/rules.json",
-            format!("{:x}", Sha256::digest(&transform)),
+            hex::encode(Sha256::digest(&transform)),
         );
         let manifest = json!({
             "format": "lorepia_content_package",
@@ -118,7 +118,7 @@
             transform("array-transform-b", "Array B")
         ]))
         .expect("encode transform array");
-        let digest = format!("{:x}", Sha256::digest(&payload));
+        let digest = hex::encode(Sha256::digest(&payload));
         let manifest = json!({
             "format": "lorepia_content_package",
             "format_version": 1,
@@ -182,7 +182,7 @@
 
     fn synthetic_prompt_package(path: &Path, preset: &PromptPreset, package_id: &str) {
         let payload = serde_json::to_vec(preset).expect("encode prompt preset");
-        let digest = format!("{:x}", Sha256::digest(&payload));
+        let digest = hex::encode(Sha256::digest(&payload));
         let manifest = json!({
             "format": "lorepia_content_package",
             "format_version": 1,
@@ -266,7 +266,7 @@
         let mut components = Vec::new();
         let mut entries = Vec::new();
         for (id, bytes, media_type, extension) in media {
-            let digest = format!("{:x}", Sha256::digest(bytes));
+            let digest = hex::encode(Sha256::digest(bytes));
             let logical_path = format!("assets/sha256/{digest}.{extension}");
             hashes.insert(logical_path.clone(), digest);
             content_types.insert(logical_path.clone(), media_type.to_owned());
@@ -328,7 +328,7 @@
     ) -> (ContentModuleId, AssetId, Vec<String>) {
         let mut asset_bytes = b"\x89PNG\r\n\x1a\nsynthetic module illustration ".to_vec();
         asset_bytes.extend_from_slice(marker.as_bytes());
-        let asset_sha256 = format!("{:x}", Sha256::digest(&asset_bytes));
+        let asset_sha256 = hex::encode(Sha256::digest(&asset_bytes));
         let asset_id = AssetId::from(format!("sha256:{asset_sha256}"));
         let asset_path = format!("assets/sha256/{asset_sha256}.png");
         let module_id = ContentModuleId::from("core.package.content-module");
@@ -363,7 +363,7 @@
             }
         });
         let module_bytes = serde_json::to_vec(&module).expect("encode module");
-        let module_sha256 = format!("{:x}", Sha256::digest(&module_bytes));
+        let module_sha256 = hex::encode(Sha256::digest(&module_bytes));
         let manifest = json!({
             "format": "lorepia_content_package",
             "format_version": 1,
@@ -615,7 +615,7 @@
             .map(|(logical_path, bytes)| {
                 (
                     (*logical_path).to_owned(),
-                    format!("{:x}", Sha256::digest(bytes)),
+                    hex::encode(Sha256::digest(bytes)),
                 )
             })
             .collect::<BTreeMap<_, _>>();
@@ -729,7 +729,7 @@
             }
         });
         let module_bytes = serde_json::to_vec(&module).expect("encode unbound module");
-        let module_sha256 = format!("{:x}", Sha256::digest(&module_bytes));
+        let module_sha256 = hex::encode(Sha256::digest(&module_bytes));
         let manifest = json!({
             "format": "lorepia_content_package",
             "format_version": 1,

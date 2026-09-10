@@ -25,6 +25,7 @@ tokio.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]
+hex.workspace = true
 lorepia-core = { path = "../core", features = ["test-support"] }
 lorepia-storage = { path = "../storage" }
 rusqlite.workspace = true

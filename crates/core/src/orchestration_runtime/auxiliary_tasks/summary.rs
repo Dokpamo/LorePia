@@ -701,7 +701,7 @@ pub(super) fn memory_source_sha256(
             parent_id: &message.parent_id,
             role: message.role,
             status: message.status,
-            content_sha256: format!("{:x}", Sha256::digest(message.content.as_bytes())),
+            content_sha256: hex::encode(Sha256::digest(message.content.as_bytes())),
         })
         .collect::<Vec<_>>();
     versioned_digest(&(

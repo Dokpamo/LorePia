@@ -304,7 +304,7 @@
     #[tokio::test]
     async fn install_is_started_before_single_store_and_journal_is_secret_free() {
         const SECRET: &str = "synthetic-fake-vault-secret-canary";
-        let secret_sha256 = format!("{:x}", Sha256::digest(SECRET.as_bytes()));
+        let secret_sha256 = hex::encode(Sha256::digest(SECRET.as_bytes()));
         let root = tempdir().expect("root");
         let shell = ShellApi::open_data_root(root.path()).expect("shell");
         create_credential_connection(&shell, "bound-install");

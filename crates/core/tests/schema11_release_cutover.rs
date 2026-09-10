@@ -207,7 +207,7 @@ fn install_frozen_schema_eleven_fixture(root: &Path) {
 }
 
 fn write_fixture_cas_object(root: &Path, namespace: &str, sha256: &str, bytes: &[u8]) {
-    assert_eq!(format!("{:x}", Sha256::digest(bytes)), sha256);
+    assert_eq!(hex::encode(Sha256::digest(bytes)), sha256);
     let directory = root.join(namespace).join("sha256").join(&sha256[..2]);
     fs::create_dir_all(&directory).expect("create fixture CAS directory");
     fs::write(directory.join(&sha256[2..]), bytes).expect("write fixture CAS object");
@@ -266,8 +266,7 @@ fn conversation_count(path: &Path, conversation_id: &str) -> u32 {
 }
 
 fn file_sha256(path: &Path) -> String {
-    format!(
-        "{:x}",
-        Sha256::digest(fs::read(path).expect("read file for SHA-256"))
-    )
+    hex::encode(Sha256::digest(
+        fs::read(path).expect("read file for SHA-256"),
+    ))
 }

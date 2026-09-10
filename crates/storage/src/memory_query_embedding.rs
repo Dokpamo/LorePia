@@ -773,7 +773,7 @@ fn encode_vector(values: &[f32]) -> CoreResult<(Vec<u8>, String)> {
     for value in values {
         bytes.extend_from_slice(&value.to_le_bytes());
     }
-    let digest = format!("{:x}", Sha256::digest(&bytes));
+    let digest = hex::encode(Sha256::digest(&bytes));
     Ok((bytes, digest))
 }
 
@@ -787,7 +787,7 @@ fn decode_vector(
         .checked_mul(4)
         .ok_or_else(|| corrupted("stored query embedding vector size overflow"))?;
     if bytes.len() != expected_len
-        || expected_sha256 != Some(format!("{:x}", Sha256::digest(bytes)).as_str())
+        || expected_sha256 != Some(hex::encode(Sha256::digest(bytes)).as_str())
     {
         return Err(corrupted(
             "stored query embedding vector bytes or digest are invalid",

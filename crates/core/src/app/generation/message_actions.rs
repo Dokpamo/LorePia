@@ -96,7 +96,7 @@ impl Core {
             .storage
             .get_conversation_state(conversation_id)?
             .selected_mode;
-        let replacement_text_sha256 = format!("{:x}", Sha256::digest(text.as_bytes()));
+        let replacement_text_sha256 = hex::encode(Sha256::digest(text.as_bytes()));
         let semantic_base_fingerprint_sha256 = Sha256Digest::parse(canonical_value_sha256(
             &GenerationActionSemanticSnapshot {
                 schema_version: 1,

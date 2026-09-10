@@ -1506,7 +1506,7 @@ pub fn prompt_local_user_id_sha256(local_user_id: &LocalUserId) -> String {
     let mut hasher = Sha256::new();
     hasher.update(b"lorepia.prompt-context.local-user.v1\0");
     hasher.update(local_user_id.as_str().as_bytes());
-    format!("{digest:x}", digest = hasher.finalize())
+    hex::encode(hasher.finalize())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

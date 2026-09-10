@@ -170,7 +170,7 @@ fn commit_uses_the_card_declared_main_icon_instead_of_archive_order() {
         .get_character_content(&character.id)
         .expect("load character content");
     assert_eq!(content.value.assets.len(), 3);
-    let first_image_hash = format!("{:x}", Sha256::digest(first_image));
+    let first_image_hash = hex::encode(Sha256::digest(first_image));
     let duplicate_hash_assets = content
         .value
         .assets
@@ -181,7 +181,7 @@ fn commit_uses_the_card_declared_main_icon_instead_of_archive_order() {
     assert_ne!(duplicate_hash_assets[0].id, duplicate_hash_assets[1].id);
     assert_eq!(
         character.avatar_asset_hash.as_deref(),
-        Some(format!("{:x}", Sha256::digest(main_image)).as_str())
+        Some(hex::encode(Sha256::digest(main_image)).as_str())
     );
 }
 

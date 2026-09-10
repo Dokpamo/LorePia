@@ -424,7 +424,7 @@ pub(super) fn knowledge_semantic_query_sha256(
                 "cannot encode knowledge semantic query evidence: {error}"
             ))
         })?;
-    Ok(format!("{:x}", Sha256::digest(encoded)))
+    Ok(hex::encode(Sha256::digest(encoded)))
 }
 
 pub(super) fn knowledge_semantic_scores_sha256(
@@ -467,7 +467,7 @@ pub(super) fn knowledge_semantic_scores_sha256(
             "cannot encode knowledge semantic score evidence: {error}"
         ))
     })?;
-    Ok(format!("{:x}", Sha256::digest(encoded)))
+    Ok(hex::encode(Sha256::digest(encoded)))
 }
 
 fn semantic_score_millionths(score: f32) -> CoreResult<u32> {
@@ -510,7 +510,7 @@ pub(super) fn knowledge_embedding_matches_sha256(
             "cannot encode knowledge embedding match evidence: {error}"
         )));
     }
-    Ok(format!("{:x}", writer.hasher.finalize()))
+    Ok(hex::encode(writer.hasher.finalize()))
 }
 
 struct BudgetedKnowledgeMatchHasher<'a> {

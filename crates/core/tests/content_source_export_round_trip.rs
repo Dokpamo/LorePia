@@ -20,7 +20,7 @@ const EXPORT_CREDENTIAL_CANARY: &str = "sk-synthetic-package-export-canary-4f91"
 const EXPORT_PATH_CANARY: &str = "private-origin-path-canary";
 
 fn sha256(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    hex::encode(Sha256::digest(bytes))
 }
 
 fn write_synthetic_transform_package(path: &Path) -> Vec<u8> {

@@ -772,7 +772,7 @@ fn memory_record_from_provider_output(
         &entry.job.id,
         &entry.input_fingerprint_sha256,
     ))?;
-    let output_sha256 = format!("{:x}", Sha256::digest(canonical_text.as_bytes()));
+    let output_sha256 = hex::encode(Sha256::digest(canonical_text.as_bytes()));
     let record = MemoryRecord {
         id: MemoryRecordId::from(format!("memory-record-{record_digest}")),
         conversation_id: entry.job.conversation_id.clone(),

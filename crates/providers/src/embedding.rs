@@ -245,7 +245,7 @@ impl EmbeddingContract {
         digest_component(&mut digest, self.endpoint_path.as_str().as_bytes());
         digest_component(&mut digest, self.manifest_sha256.as_bytes());
         digest_component(&mut digest, self.request_schema.digest_name().as_bytes());
-        format!("{:x}", digest.finalize())
+        hex::encode(digest.finalize())
     }
 
     /// Binds one document/query dispatch to its exact vector space.
@@ -254,7 +254,7 @@ impl EmbeddingContract {
         digest_component(&mut digest, b"lorepia-embedding-execution-v1");
         digest_component(&mut digest, self.vector_space_sha256().as_bytes());
         digest_component(&mut digest, purpose.digest_name().as_bytes());
-        format!("{:x}", digest.finalize())
+        hex::encode(digest.finalize())
     }
 }
 

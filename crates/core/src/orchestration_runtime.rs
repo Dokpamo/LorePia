@@ -86,7 +86,7 @@ include!("orchestration_runtime/tests/memory_summary_instruction.rs");
 fn versioned_digest<T: Serialize>(value: &T) -> CoreResult<String> {
     let encoded = serde_json::to_vec(value)
         .map_err(|error| CoreError::internal(format!("cannot hash runtime value: {error}")))?;
-    Ok(format!("{:x}", Sha256::digest(encoded)))
+    Ok(hex::encode(Sha256::digest(encoded)))
 }
 
 fn hex_prefix_bytes(digest: &str) -> CoreResult<[u8; 8]> {

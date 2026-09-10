@@ -705,5 +705,5 @@ fn json_string(value: &Value, field: &str) -> String {
 }
 
 fn sha256(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    hex::encode(Sha256::digest(bytes))
 }

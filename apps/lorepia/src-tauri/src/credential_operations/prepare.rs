@@ -67,7 +67,7 @@ pub(crate) fn provider_connection_credential_effect_context(
     state_hasher.update(format!("{authority:?}").as_bytes());
     state_hasher.update([0]);
     state_hasher.update(format!("{unresolved:?}").as_bytes());
-    let state_sha256 = format!("{:x}", state_hasher.finalize());
+    let state_sha256 = hex::encode(state_hasher.finalize());
     let journal = unresolved
         .first()
         .map_or("settled", |operation| operation.status.as_str());

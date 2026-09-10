@@ -2233,7 +2233,7 @@ mod tests {
             "html": "<script>not executable</script>"
         }))
         .expect("encode hostile module fixture");
-        let module_sha256 = format!("{:x}", Sha256::digest(&module));
+        let module_sha256 = hex::encode(Sha256::digest(&module));
         let manifest = serde_json::to_vec(&json!({
             "format": "lorepia_content_package",
             "format_version": 1,

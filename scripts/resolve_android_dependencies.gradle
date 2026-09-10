@@ -1,0 +1,24 @@
+// Maintenance-only init script: resolve artifacts before reviewing new locks/checksums.
+// Use with --no-configuration-cache --write-locks --write-verification-metadata sha256.
+gradle.projectsEvaluated {
+    rootProject.tasks.register("resolveDependencyIntegrity") {
+        doLast {
+            rootProject.allprojects.sort { it.path }.each { project ->
+                // KGP's synthetic common-metadata configurations are not Android
+                // compilation inputs and cannot select Android project variants.
+                project.configurations.findAll {
+                    it.canBeResolved && !it.name.endsWith("DependenciesMetadata")
+                }.sort { it.name }.each { configuration ->
+                    println("Resolving ${project.path}:${configuration.name}")
+                    configuration.incoming.resolutionResult.allComponents
+                    // Local project artifacts are produced by the compilation checks.
+                    configuration.incoming.artifactView {
+                        componentFilter { id ->
+                            id instanceof org.gradle.api.artifacts.component.ModuleComponentIdentifier
+                        }
+                    }.files.files
+                }
+            }
+        }
+    }
+}

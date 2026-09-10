@@ -409,7 +409,7 @@ fn prepare_package_commit_documents(
             ));
         }
         let document_json = serde_json::to_vec(&document).map_err(package_json_error)?;
-        let document_sha256 = format!("{:x}", Sha256::digest(&document_json));
+        let document_sha256 = hex::encode(Sha256::digest(&document_json));
         let document_index = u32::try_from(index)
             .map_err(|_| CoreError::invalid("package contains too many documents"))?;
         let expected_object_revision = if let Some(replay_bindings) = replay_bindings {

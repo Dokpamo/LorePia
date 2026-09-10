@@ -92,7 +92,7 @@ fn populated_v31_knowledge_embedding_is_quarantined_and_reopen_is_idempotent() {
     let root = tempdir().expect("temporary storage root");
     let fixture = seed_current_dependencies(root.path());
     let expected_vector = encode_vector(&[1.0, 0.0, 0.0]);
-    let expected_vector_sha256 = format!("{:x}", Sha256::digest(&expected_vector));
+    let expected_vector_sha256 = hex::encode(Sha256::digest(&expected_vector));
     downgrade_and_seed_populated_v31(&fixture, &expected_vector, &expected_vector_sha256);
 
     let storage =
@@ -216,7 +216,7 @@ fn seed_provider_graph(database_path: &Path) {
         .pragma_update(None, "foreign_keys", true)
         .expect("enable foreign keys");
     let manifest_json = "{}";
-    let manifest_sha256 = format!("{:x}", Sha256::digest(manifest_json.as_bytes()));
+    let manifest_sha256 = hex::encode(Sha256::digest(manifest_json.as_bytes()));
     connection
         .execute(
             "INSERT INTO provider_templates

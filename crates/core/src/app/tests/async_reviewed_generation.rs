@@ -167,7 +167,7 @@ async fn async_generation_operating_paths_send_edit_and_regenerate() {
             Some("async edited question"),
             new_test_generation_operation("async-edit-v1"),
             GenerationActionTargetIdentity::DirectModel {
-                model_sha256: format!("{:x}", Sha256::digest(edit_model.as_bytes())),
+                model_sha256: hex::encode(Sha256::digest(edit_model.as_bytes())),
             },
             edit_model.to_owned(),
             None,
@@ -218,7 +218,7 @@ async fn async_generation_operating_paths_send_edit_and_regenerate() {
             None,
             new_test_generation_operation("async-regenerate-v1"),
             GenerationActionTargetIdentity::DirectModel {
-                model_sha256: format!("{:x}", Sha256::digest(regenerate_model.as_bytes())),
+                model_sha256: hex::encode(Sha256::digest(regenerate_model.as_bytes())),
             },
             regenerate_model.to_owned(),
             None,
