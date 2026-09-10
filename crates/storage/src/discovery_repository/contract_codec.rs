@@ -294,7 +294,7 @@ fn validate_initial_curl_deterministic_output(
     }
     let extracted_bytes = serde_json::to_vec(&evidence.extracted_json)
         .map_err(|_| CoreError::internal("cannot hash sanitized cURL evidence"))?;
-    let extracted_sha256 = format!("{:x}", Sha256::digest(extracted_bytes));
+    let extracted_sha256 = hex::encode(Sha256::digest(extracted_bytes));
     if evidence.content_sha256 != extracted_sha256
         || extracted.origin != evidence.source_origin
         || extracted.trust != "sanitized_curl_structure"

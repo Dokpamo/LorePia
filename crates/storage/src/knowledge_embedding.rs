@@ -531,7 +531,7 @@ fn score_encoded_vector(
     bytes: &[u8],
     expected_sha256: &str,
 ) -> CoreResult<f64> {
-    if format!("{:x}", Sha256::digest(bytes)) != expected_sha256 {
+    if hex::encode(Sha256::digest(bytes)) != expected_sha256 {
         return Err(corrupted("stored knowledge embedding digest is invalid"));
     }
     let mut candidate_norm = 0.0_f64;
@@ -859,7 +859,7 @@ fn encode_vector(dimensions: u32, values: &[f32]) -> CoreResult<(Vec<u8>, String
     for value in values {
         bytes.extend_from_slice(&value.to_le_bytes());
     }
-    let sha256 = format!("{:x}", Sha256::digest(&bytes));
+    let sha256 = hex::encode(Sha256::digest(&bytes));
     Ok((bytes, sha256))
 }
 

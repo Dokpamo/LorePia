@@ -960,7 +960,7 @@ fn provider_execution_hash(
     };
     let canonical_json = serde_json::to_vec(&identity)
         .map_err(|_| ProviderPromptContractError::ExecutionIdentityEncoding)?;
-    Ok(format!("{:x}", Sha256::digest(canonical_json)))
+    Ok(hex::encode(Sha256::digest(canonical_json)))
 }
 
 const fn cache_dialect_matches_family(family: ApiFamily, dialect: PromptCacheWireDialect) -> bool {

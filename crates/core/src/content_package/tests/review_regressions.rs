@@ -5,7 +5,7 @@ fn approved_large_asset_survives_restart_selection_approval_and_commit() {
     let data = root.path().join("library");
     let mut bytes = b"ID3synthetic".to_vec();
     bytes.resize(65 * 1024 * 1024, 0);
-    let digest = format!("{:x}", Sha256::digest(&bytes));
+    let digest = hex::encode(Sha256::digest(&bytes));
     let path = format!("assets/sha256/{digest}.mp3");
     let manifest = json!({
         "format": "lorepia_content_package", "format_version": 1,

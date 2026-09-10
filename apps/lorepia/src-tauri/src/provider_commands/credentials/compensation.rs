@@ -76,7 +76,7 @@ pub(in crate::provider_commands) fn discovery_compensation_confirmation_context(
         state_hasher.update(value);
         state_hasher.update([0]);
     }
-    let state_sha256 = format!("{:x}", state_hasher.finalize());
+    let state_sha256 = hex::encode(state_hasher.finalize());
     NativeCredentialEffectContext::new(
         NativeCredentialEffect::DiscoveryCompensation,
         session.connection_id.clone(),

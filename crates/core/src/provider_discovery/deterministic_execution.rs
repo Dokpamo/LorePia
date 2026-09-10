@@ -590,10 +590,10 @@ fn sha256_json(value: &Value) -> Result<String, DeterministicDiscoveryError> {
         )
     })?;
     let digest = Sha256::digest(encoded);
-    Ok(format!("{digest:x}"))
+    Ok(hex::encode(digest))
 }
 
 pub(super) fn sha256_bytes(value: &[u8]) -> String {
     let digest = Sha256::digest(value);
-    format!("{digest:x}")
+    hex::encode(digest)
 }

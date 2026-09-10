@@ -360,7 +360,7 @@ pub(crate) fn hash_regular_file(path: &Path) -> PlatformResult<(String, u64)> {
             .ok_or_else(|| PlatformError::new(PlatformErrorCode::InvalidInput))?;
         hasher.update(&buffer[..read]);
     }
-    Ok((format!("{:x}", hasher.finalize()), total))
+    Ok((hex::encode(hasher.finalize()), total))
 }
 
 #[cfg(any(mobile, target_os = "macos", windows, test))]
@@ -444,7 +444,7 @@ mod tests {
         let data_root = root.path().join("data");
         std::fs::create_dir(&data_root).expect("data root");
         let bytes = b"synthetic-content-source";
-        let digest = format!("{:x}", Sha256::digest(bytes));
+        let digest = hex::encode(Sha256::digest(bytes));
         let source = data_root
             .join("sources/sha256")
             .join(&digest[..2])

@@ -829,7 +829,7 @@ fn install_frozen_schema_eleven_fixture(root: &Path) {
 }
 
 fn write_fixture_cas_object(root: &Path, namespace: &str, sha256: &str, bytes: &[u8]) {
-    assert_eq!(format!("{:x}", Sha256::digest(bytes)), sha256);
+    assert_eq!(hex::encode(Sha256::digest(bytes)), sha256);
     let path = fixture_cas_path(root, namespace, sha256);
     let directory = path.parent().expect("fixture CAS parent");
     fs::create_dir_all(directory).expect("create fixture CAS directory");
@@ -1023,7 +1023,7 @@ fn install_previous_release_cas_fixture(root: &Path, namespace: &str) -> (String
         "assets" => b"previous-release rollback asset",
         _ => panic!("unsupported previous-release CAS namespace"),
     };
-    let sha256 = format!("{:x}", Sha256::digest(bytes));
+    let sha256 = hex::encode(Sha256::digest(bytes));
     let relative_path = format!("{namespace}/sha256/{}/{}", &sha256[..2], &sha256[2..]);
     let connection = Connection::open(&seed_canonical).expect("open previous-release CAS seed");
     match namespace {
@@ -1085,7 +1085,7 @@ fn install_previous_release_journal_cas_fixture(root: &Path, namespace: &str) ->
         "asset" => b"previous-release journal-only asset",
         _ => panic!("unsupported journal CAS namespace"),
     };
-    let sha256 = format!("{:x}", Sha256::digest(bytes));
+    let sha256 = hex::encode(Sha256::digest(bytes));
     let directory = match namespace {
         "source" => "sources",
         "asset" => "assets",
@@ -1219,7 +1219,7 @@ fn selected_generation_manifest(root: &Path) -> (PathBuf, serde_json::Value) {
             .expect("generation directory ID is UTF-8");
         assert_eq!(manifest["cutover_id"].as_str(), Some(directory_id.as_str()));
         assert_eq!(commit["cutover_id"].as_str(), Some(directory_id.as_str()));
-        let manifest_sha256 = format!("{:x}", Sha256::digest(&manifest_bytes));
+        let manifest_sha256 = hex::encode(Sha256::digest(&manifest_bytes));
         assert_eq!(
             commit["manifest_sha256"].as_str(),
             Some(manifest_sha256.as_str()),
@@ -1330,8 +1330,7 @@ fn conversation_title(path: &Path) -> String {
 }
 
 fn file_sha256(path: &Path) -> String {
-    format!(
-        "{:x}",
-        Sha256::digest(fs::read(path).expect("read file for SHA-256"))
-    )
+    hex::encode(Sha256::digest(
+        fs::read(path).expect("read file for SHA-256"),
+    ))
 }

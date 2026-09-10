@@ -1060,11 +1060,8 @@ fn discovery_credential_confirmation_revision(
         hasher.update(value);
         hasher.update([0]);
     }
-    format!(
-        "session_revision={};credential_authority_sha256={:x}",
-        session.revision,
-        hasher.finalize()
-    )
+    let hash = hex::encode(hasher.finalize());
+    format!("session_revision={session_revision};credential_authority_sha256={hash}")
 }
 
 fn consume_discovery_capture_confirmation(

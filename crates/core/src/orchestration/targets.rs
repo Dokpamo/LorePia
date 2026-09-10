@@ -629,5 +629,5 @@ pub(super) fn prompt_execution_hash(
     .map_err(|error| {
         CoreError::internal(format!("cannot encode prompt execution identity: {error}"))
     })?;
-    Ok(format!("{:x}", Sha256::digest(encoded)))
+    Ok(hex::encode(Sha256::digest(encoded)))
 }

@@ -9,6 +9,7 @@ rust-version.workspace = true
 test-support = []
 
 [dependencies]
+hex.workspace = true
 chrono.workspace = true
 lorepia-chat = { path = "../chat" }
 lorepia-content = { path = "../content" }

@@ -117,7 +117,7 @@ impl Core {
                 operation_nonce: "core-direct-edit-v1",
             },
             GenerationActionTargetIdentity::DirectModel {
-                model_sha256: format!("{:x}", Sha256::digest(model.as_bytes())),
+                model_sha256: hex::encode(Sha256::digest(model.as_bytes())),
             },
             model,
             credential,
@@ -148,7 +148,7 @@ impl Core {
                 operation_nonce: "core-direct-regenerate-v1",
             },
             GenerationActionTargetIdentity::DirectModel {
-                model_sha256: format!("{:x}", Sha256::digest(model.as_bytes())),
+                model_sha256: hex::encode(Sha256::digest(model.as_bytes())),
             },
             model,
             credential,

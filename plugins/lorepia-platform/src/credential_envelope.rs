@@ -41,7 +41,10 @@ pub(crate) fn physical_reference(
     update_length_prefixed(&mut digest, logical_reference.as_bytes());
     update_length_prefixed(&mut digest, authority.authority_id().as_bytes());
     update_length_prefixed(&mut digest, authority.binding_sha256().as_bytes());
-    let reference = format!("{PHYSICAL_REFERENCE_PREFIX}{:x}", digest.finalize());
+    let reference = format!(
+        "{PHYSICAL_REFERENCE_PREFIX}{}",
+        hex::encode(digest.finalize())
+    );
     debug_assert_eq!(reference.len(), PHYSICAL_REFERENCE_LENGTH);
     Ok(reference)
 }
@@ -154,8 +157,8 @@ pub(crate) fn legacy_confirmation_revision(
     // even if a caller could control every other field and its length.
     update_length_prefixed(&mut digest, process_key);
     Ok(format!(
-        "legacy-profile-v1;slot=raw;state_sha256={:x}",
-        digest.finalize()
+        "legacy-profile-v1;slot=raw;state_sha256={}",
+        hex::encode(digest.finalize())
     ))
 }
 
@@ -298,7 +301,10 @@ mod tests {
         );
         assert_ne!(
             reference,
-            format!("{PHYSICAL_REFERENCE_PREFIX}{:x}", without_domain.finalize())
+            format!(
+                "{PHYSICAL_REFERENCE_PREFIX}{}",
+                hex::encode(without_domain.finalize())
+            )
         );
     }
 
@@ -347,7 +353,7 @@ mod tests {
     #[test]
     fn envelope_round_trips_without_debugging_secret_or_digest() {
         let secret = "sk-bound-envelope-canary";
-        let secret_sha256 = format!("{:x}", Sha256::digest(secret.as_bytes()));
+        let secret_sha256 = hex::encode(Sha256::digest(secret.as_bytes()));
         let authority = authority("install-a", 0xab);
         let encoded = encode(&authority, NativeCredential::new(secret.to_owned())).expect("encode");
         let debug = format!("{encoded:?}");

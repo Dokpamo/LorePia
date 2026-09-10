@@ -694,5 +694,5 @@ pub(super) fn write_canonical_json(value: &Value, output: &mut String) -> CoreRe
 }
 
 pub(super) fn sha256_hex(value: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(value))
+    hex::encode(Sha256::digest(value))
 }

@@ -17,6 +17,8 @@ use tauri::Manager;
 use tauri::{AppHandle, Runtime};
 
 #[cfg(any(windows, test))]
+use hex::encode;
+#[cfg(any(windows, test))]
 use sha2::{Digest, Sha256};
 #[cfg(any(windows, test))]
 use uuid::{Uuid, Version};
@@ -211,7 +213,7 @@ fn windows_bound_credential_record_path(
     digest.update(reference.as_bytes());
     data_root
         .join(WINDOWS_BOUND_LOCATOR_DIRECTORY)
-        .join(format!("{prefix}-{:x}.record", digest.finalize()))
+        .join(format!("{prefix}-{}.record", encode(digest.finalize())))
 }
 
 #[cfg(any(windows, test))]
@@ -249,8 +251,8 @@ fn windows_bound_credential_mutex_name(
     digest.update((reference.len() as u64).to_be_bytes());
     digest.update(reference.as_bytes());
     Ok(format!(
-        "Global\\LorePia.ProviderCredential.Lock.v1.{:x}",
-        digest.finalize()
+        "Global\\LorePia.ProviderCredential.Lock.v1.{}",
+        encode(digest.finalize())
     ))
 }
 
@@ -404,7 +406,7 @@ fn encode_windows_bound_credential_locator_for_claim(
     let mut digest = Sha256::new();
     digest.update(domain);
     digest.update(payload.as_bytes());
-    format!("{payload}{:x}\n", digest.finalize()).into_bytes()
+    format!("{payload}{}\n", encode(digest.finalize())).into_bytes()
 }
 
 #[cfg(any(windows, test))]
@@ -440,7 +442,7 @@ fn encode_windows_bound_delete_record(
     let mut digest = Sha256::new();
     digest.update(checksum_domain);
     digest.update(payload.as_bytes());
-    format!("{payload}{:x}\n", digest.finalize()).into_bytes()
+    format!("{payload}{}\n", encode(digest.finalize())).into_bytes()
 }
 
 #[cfg(any(windows, test))]
@@ -495,8 +497,7 @@ fn decode_windows_bound_credential_locator(
     let mut digest = Sha256::new();
     digest.update(WINDOWS_BOUND_LOCATOR_CHECKSUM_DOMAIN);
     digest.update(payload.as_bytes());
-    let expected_checksum = format!("{:x}", digest.finalize());
-    if checksum != expected_checksum {
+    if checksum != encode(digest.finalize()) {
         return Err(PlatformError::new(
             PlatformErrorCode::CredentialRecoveryRequired,
         ));
@@ -557,7 +558,7 @@ fn decode_windows_bound_credential_locator_v2(
     let mut digest = Sha256::new();
     digest.update(WINDOWS_BOUND_LOCATOR_V2_CHECKSUM_DOMAIN);
     digest.update(payload.as_bytes());
-    if checksum != format!("{:x}", digest.finalize()) {
+    if checksum != encode(digest.finalize()) {
         return Err(PlatformError::new(
             PlatformErrorCode::CredentialRecoveryRequired,
         ));
@@ -629,7 +630,7 @@ fn decode_windows_bound_delete_record(
     let mut digest = Sha256::new();
     digest.update(checksum_domain);
     digest.update(payload.as_bytes());
-    if checksum != format!("{:x}", digest.finalize()) {
+    if checksum != encode(digest.finalize()) {
         return Err(PlatformError::new(
             PlatformErrorCode::CredentialRecoveryRequired,
         ));
@@ -705,7 +706,7 @@ fn decode_windows_bound_delete_record_v2(
     let mut digest = Sha256::new();
     digest.update(checksum_domain);
     digest.update(payload.as_bytes());
-    if checksum != format!("{:x}", digest.finalize()) {
+    if checksum != encode(digest.finalize()) {
         return Err(PlatformError::new(
             PlatformErrorCode::CredentialRecoveryRequired,
         ));
@@ -814,7 +815,7 @@ fn windows_bound_file_record_digest(bytes: &[u8]) -> String {
     digest.update(WINDOWS_BOUND_FILE_RECORD_DOMAIN);
     digest.update((bytes.len() as u64).to_be_bytes());
     digest.update(bytes);
-    format!("{:x}", digest.finalize())
+    encode(digest.finalize())
 }
 
 #[cfg(any(windows, test))]
@@ -833,9 +834,8 @@ fn windows_bound_credential_file_path(
         digest.update((component.len() as u64).to_be_bytes());
         digest.update(component);
     }
-    Ok(data_root
-        .join(WINDOWS_BOUND_LOCATOR_DIRECTORY)
-        .join(format!("lpcw-credential-v2-{:x}.blob", digest.finalize())))
+    let name = format!("lpcw-credential-v2-{}.blob", encode(digest.finalize()));
+    Ok(data_root.join(WINDOWS_BOUND_LOCATOR_DIRECTORY).join(name))
 }
 
 #[cfg(any(windows, test))]
@@ -3028,7 +3028,7 @@ mod tests {
         path_digest.update((reference.len() as u64).to_be_bytes());
         path_digest.update(reference.as_bytes());
         assert_eq!(
-            format!("{:x}", path_digest.finalize()),
+            encode(path_digest.finalize()),
             recovery_vector_str(vector, "reference_digest_sha256")
         );
 
@@ -3046,7 +3046,7 @@ mod tests {
         }
         mutex_digest.update((reference.len() as u64).to_be_bytes());
         mutex_digest.update(reference.as_bytes());
-        let mutex_digest = format!("{:x}", mutex_digest.finalize());
+        let mutex_digest = encode(mutex_digest.finalize());
         assert_eq!(
             mutex_digest,
             recovery_vector_str(&vector["mutex"], "digest_sha256")
@@ -3115,7 +3115,7 @@ mod tests {
             ))
         );
         assert_eq!(
-            format!("{:x}", Sha256::digest(plaintext.as_slice())),
+            encode(Sha256::digest(plaintext.as_slice())),
             recovery_vector_str(&file_vector["plaintext"], "sha256")
         );
 
@@ -3215,7 +3215,7 @@ mod tests {
             decode_hex(recovery_vector_str(&file_vector["entropy"], "encoded_hex"))
         );
         assert_eq!(
-            format!("{:x}", Sha256::digest(&entropy)),
+            encode(Sha256::digest(&entropy)),
             recovery_vector_str(&file_vector["entropy"], "sha256")
         );
     }

@@ -442,7 +442,7 @@ fn database_fingerprint_from_snapshots(
         digest_field(&mut digest, &table.row_count.to_be_bytes());
         digest_field(&mut digest, &table.rows_sha256);
     }
-    Ok(format!("{:x}", digest.finalize()))
+    Ok(hex::encode(digest.finalize()))
 }
 
 fn database_logical_page_span_bytes(connection: &Connection) -> CoreResult<u64> {
@@ -832,7 +832,7 @@ fn sha256_file(path: &Path) -> CoreResult<String> {
         }
         digest.update(&buffer[..count]);
     }
-    Ok(format!("{:x}", digest.finalize()))
+    Ok(hex::encode(digest.finalize()))
 }
 
 fn generation_source_database_path(
@@ -1235,7 +1235,7 @@ fn read_bounded_file(path: &Path, label: &str) -> CoreResult<Vec<u8>> {
 }
 
 fn sha256_bytes(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    hex::encode(Sha256::digest(bytes))
 }
 
 fn validate_owned_relative_path(path: &Path) -> CoreResult<()> {
@@ -1393,7 +1393,7 @@ impl ActiveDatabaseManifest {
             rollback_cas_pin_count: self.rollback_cas_pin_count,
         };
         let bytes = serde_json::to_vec(&payload).expect("manifest checksum payload serializes");
-        format!("{:x}", Sha256::digest(bytes))
+        hex::encode(Sha256::digest(bytes))
     }
 }
 

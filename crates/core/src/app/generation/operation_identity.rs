@@ -15,7 +15,7 @@ use crate::app::canonical_value_sha256;
 pub(in crate::app) fn same_branch_generation_semantic_fingerprint(
     input: &SameBranchGenerationAttemptIdentity<'_>,
 ) -> CoreResult<Sha256Digest> {
-    let user_text_sha256 = format!("{:x}", Sha256::digest(input.text.as_bytes()));
+    let user_text_sha256 = hex::encode(Sha256::digest(input.text.as_bytes()));
     Sha256Digest::parse(canonical_value_sha256(
         &GenerationSendSemanticSnapshot {
             schema_version: 1,

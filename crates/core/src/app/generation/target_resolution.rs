@@ -259,7 +259,7 @@ pub(in crate::app) fn build_resolved_generation_target(
 pub(in crate::app) fn direct_model_provider_target_authority(
     model: &str,
 ) -> CoreResult<GenerationProviderTargetAuthority> {
-    let digest = format!("{:x}", Sha256::digest(model.as_bytes()));
+    let digest = hex::encode(Sha256::digest(model.as_bytes()));
     Ok(GenerationProviderTargetAuthority::DirectModel {
         model_sha256: Sha256Digest::parse(digest).map_err(CoreError::invalid)?,
     })

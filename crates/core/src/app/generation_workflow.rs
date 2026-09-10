@@ -549,7 +549,7 @@ fn map_generation_transform_report(
 }
 
 pub(super) fn transform_content_sha256(value: &str) -> Sha256Digest {
-    match Sha256Digest::parse(format!("{:x}", Sha256::digest(value.as_bytes()))) {
+    match Sha256Digest::parse(hex::encode(Sha256::digest(value.as_bytes()))) {
         Ok(digest) => digest,
         Err(error) => unreachable!("SHA-256 formatter produced an invalid digest: {error}"),
     }

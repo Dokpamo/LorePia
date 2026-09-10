@@ -1490,10 +1490,9 @@ mod tests {
     }
 
     fn file_sha256(path: &Path) -> String {
-        format!(
-            "{:x}",
-            Sha256::digest(fs::read(path).expect("read file for SHA-256"))
-        )
+        hex::encode(Sha256::digest(
+            fs::read(path).expect("read file for SHA-256"),
+        ))
     }
 
     #[tokio::test]
