@@ -6,6 +6,7 @@ import type {
     ProviderWorkspaceDto,
 } from '../../lib/ipc/contracts';
 import { t } from '../../lib/i18n';
+import { normalizeClientError } from '../../lib/ipc/errors';
 import type { PersonaClientApi } from '../personas/persona-contracts';
 import type { InteractionRoomCapableClient } from './interaction-room-controller';
 import type { PortableRuntimeModelBudgetSnapshot } from './portable-runtime-model-policy';
@@ -83,6 +84,9 @@ async function loadPortableRuntimePersona(
 
 export class PortableRuntimeLifecycle {
     profile = $state<CharacterRenderProfileDto | null>(null);
+    profileLoading = $state(false);
+    profileError = $state<string | null>(null);
+    #retryProfile: (() => Promise<void>) | null = null;
     personaName = $state<string | undefined>(undefined);
     runtime = $state<PortableCharacterRuntime | null>(null);
     selectedCapabilities = $state<PortableRuntimeCapability[]>([]);
@@ -210,6 +214,9 @@ export class PortableRuntimeLifecycle {
         const getCharacterRenderProfile = client?.getCharacterRenderProfile?.bind(client);
         let cancelled = false;
         this.profile = null;
+        this.profileError = null;
+        this.profileLoading = false;
+        this.#retryProfile = null;
         this.#grant = null;
         this.#grantProfile = null;
         this.selectedCapabilities = [];
@@ -228,21 +235,27 @@ export class PortableRuntimeLifecycle {
                 conversationId !== null && branchId !== null
                     ? { conversation_id: conversationId, branch_id: branchId }
                     : undefined;
-            void getCharacterRenderProfile(characterId, scope)
-                .then((profile) => {
-                    if (
-                        !cancelled &&
-                        profileEpoch === this.#profileEpoch &&
-                        profile.character_id === characterId
-                    ) {
+            let requestId = 0;
+            const current = (id: number): boolean =>
+                !cancelled && profileEpoch === this.#profileEpoch && id === requestId;
+            this.#retryProfile = async () => {
+                const id = ++requestId;
+                this.profileLoading = true;
+                this.profileError = null;
+                try {
+                    const profile = await getCharacterRenderProfile(characterId, scope);
+                    if (current(id) && profile.character_id === characterId) {
                         this.profile = profile;
                         this.selectedCapabilities = defaultPortableRuntimeCapabilities(profile);
                     }
-                })
-                .catch(() => {
-                    // Legacy characters have no companion render profile and
-                    // continue through the ordinary Markdown renderer.
-                });
+                } catch (error) {
+                    if (current(id) && normalizeClientError(error).code !== 'not_found')
+                        this.profileError = t('chat.runtime.profileFailed');
+                } finally {
+                    if (current(id)) this.profileLoading = false;
+                }
+            };
+            void this.#retryProfile();
         }
         return () => {
             cancelled = true;
@@ -379,6 +392,30 @@ export class PortableRuntimeLifecycle {
         void runtime.refreshDisplay().then(() => {
             if (runtime === this.runtime) this.revision += 1;
         });
+    }
+
+    retryProfile(): void {
+        if (!this.profileLoading) void this.#retryProfile?.();
+    }
+
+    get lastMessageIndex(): number {
+        return this.canReadChat ? this.options.displayMessages().length - 1 : -1;
+    }
+
+    async approveDisplay(): Promise<void> {
+        const displayCapabilities: PortableRuntimeCapability[] = [
+            'runtime:callbacks',
+            'ui:write',
+            'chat:read',
+            'chat:write',
+            'lore:read',
+            'profile:read',
+            'state:readwrite',
+        ];
+        this.selectedCapabilities = this.capabilities.filter((capability) =>
+            displayCapabilities.includes(capability),
+        );
+        await this.approve();
     }
 
     async approve(): Promise<void> {

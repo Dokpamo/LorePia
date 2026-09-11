@@ -48,5 +48,12 @@ export function performPortableRegexOperation(
 }
 
 export function safePortableRegexFlags(flags: string): string {
-    return [...new Set(flags.split('').filter((flag) => 'dgimsuvy'.includes(flag)))].join('');
+    return [
+        ...new Set(
+            flags
+                .replace(/<[^>]*>/g, '')
+                .split('')
+                .filter((flag) => 'dgimsuvy'.includes(flag)),
+        ),
+    ].join('');
 }

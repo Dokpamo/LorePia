@@ -106,11 +106,11 @@ pub fn get_character_greeting_catalog(
 }
 
 #[tauri::command]
-pub fn get_character_render_profile(
+pub async fn get_character_render_profile(
     state: State<'_, AppState>,
     request: CharacterRenderProfileRequest,
 ) -> CommandResult<lorepia_shell_api::CharacterRenderProfileDto> {
-    crate::character_commands::get_character_render_profile(&state.shell()?, request)
+    crate::character_commands::render_profile(state.shell()?, request).await
 }
 
 #[tauri::command]

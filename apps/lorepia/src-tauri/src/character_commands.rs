@@ -6,7 +6,17 @@ use crate::{
     error::{CommandError, CommandResult},
 };
 
-pub(crate) fn get_character_render_profile(
+pub(crate) async fn render_profile(
+    shell: ShellApi,
+    request: CharacterRenderProfileRequest,
+) -> CommandResult<CharacterRenderProfileDto> {
+    crate::module_lifecycle_commands::run_module_read(move || {
+        get_character_render_profile(&shell, request)
+    })
+    .await
+}
+
+fn get_character_render_profile(
     shell: &ShellApi,
     request: CharacterRenderProfileRequest,
 ) -> CommandResult<CharacterRenderProfileDto> {

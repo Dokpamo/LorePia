@@ -41,16 +41,18 @@ function attach(header: HTMLElement, body: HTMLElement) {
 }
 
 it('follows scrolling down and immediately reverses upward, without leaving header space outside the scroller', () => {
-    const { header, body, back } = setup();
+    const { root, header, body, back } = setup();
     const motion = attach(header, body);
     expect(body.style.paddingTop).toContain('--ui-scroll-header-height');
     expect(body.style.getPropertyValue('--ui-scroll-body-padding')).toBe('12px');
+    expect(root.style.getPropertyValue('--ui-scroll-header-height')).toBe('64px');
     back.focus();
     motion.input();
     scroll(body, 120);
     expect(header.style.getPropertyValue('--ui-scroll-header-offset')).toBe('64px');
     scroll(body, 95);
     expect(header.style.getPropertyValue('--ui-scroll-header-offset')).toBe('39px');
+    expect(root.style.getPropertyValue('--ui-scroll-header-offset')).toBe('39px');
     vi.advanceTimersByTime(120);
     expect(header.style.getPropertyValue('--ui-scroll-header-offset')).toBe('0px');
     scroll(body, -40);
@@ -114,4 +116,7 @@ it('reveals navigation for keyboard access and cleans up all presentation state'
     expect(header).not.toHaveAttribute('data-scroll-header');
     expect(root).not.toHaveAttribute('data-scroll-header-frame');
     expect(header.style.getPropertyValue('--ui-scroll-header-offset')).toBe('');
+    expect(root.style.getPropertyValue('--ui-scroll-header-offset')).toBe('');
+    expect(root.style.getPropertyValue('--ui-scroll-header-height')).toBe('');
+    expect(root).not.toHaveAttribute('data-scroll-header-frame-settling');
 });

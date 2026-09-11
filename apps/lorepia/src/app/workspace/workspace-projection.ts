@@ -1,6 +1,7 @@
 import { t } from '../../lib/i18n';
 import type { LorepiaAppState } from '../app-state';
 import type { MessageDto } from '../../lib/ipc/contracts';
+import type { ChatDisplayMode } from '../../lib/chat-display';
 import { formatMessageDay } from '../../features/chat/chat-scroll.svelte';
 import type {
     SampleCharacter,
@@ -23,7 +24,10 @@ export function messageView(message: MessageDto): SampleMessage {
     };
 }
 
-export function conversationView(state: LorepiaAppState): SampleConversation | null {
+export function conversationView(
+    state: LorepiaAppState,
+    displayMode?: ChatDisplayMode,
+): SampleConversation | null {
     const selected = state.selected_conversation;
     if (!selected) return null;
     const liveId = state.chat.live_assistant_message_id;
@@ -48,7 +52,7 @@ export function conversationView(state: LorepiaAppState): SampleConversation | n
         title: selected.title,
         date: formatMessageDay(selected.created_at),
         messages,
-        mode: state.conversation_state?.selected_mode ?? 'chat',
+        mode: displayMode ?? state.conversation_state?.selected_mode ?? 'chat',
         activeBranchId: state.conversation_state?.active_branch_id,
         branches: state.branches.map((item, index) => ({
             id: item.id,

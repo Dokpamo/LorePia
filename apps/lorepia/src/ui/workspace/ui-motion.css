@@ -45,6 +45,10 @@
     --ui-press-scale: 0.96;
     -webkit-tap-highlight-color: transparent;
 }
+.ui-preview .ui-pressable[data-press-feedback='scale'] {
+    /* Photo/card content scales as one surface, without painting behind it. */
+    --ui-pressed-surface: transparent;
+}
 .ui-preview .ui-press-visual {
     width: 100%;
     transform: scale(1);
@@ -72,7 +76,9 @@
 .ui-preview .ui-submit:is(:active, [data-ui-pressed='true']):not(:disabled) > .ui-press-visual {
     background: var(--ui-action-pressed);
 }
-.ui-preview .ui-pressable:is(:active, [data-ui-pressed='true']):not(:disabled) > .ui-press-visual {
+.ui-preview
+    .ui-pressable:is(:active, [data-ui-pressed='true']):not(:disabled, [data-ui-press-cancelled])
+    > .ui-press-visual {
     transform: scale(var(--ui-press-scale));
     transition-duration: var(--ui-motion-press);
 }

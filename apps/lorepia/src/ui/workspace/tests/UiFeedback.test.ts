@@ -53,6 +53,8 @@ describe('current workspace feedback', () => {
         await fireEvent.click(screen.getByRole('menuitem', { name: t('uiPreview.copyMessage') }));
         const error = await screen.findByText(t('uiPreview.copyFailed'));
         expect(error.closest('.ui-notice')).not.toBeNull();
+        expect(error.closest('.ui-chat-notices')).not.toBeNull();
+        expect(error.closest('.ui-chat-floaters')).toBeNull();
         expect(error.closest('.ui-sr')).toBeNull();
         const notice = error.closest<HTMLElement>('.ui-notice');
         if (!notice) throw new Error('Missing visible notice');

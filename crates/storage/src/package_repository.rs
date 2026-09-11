@@ -16,8 +16,10 @@ mod module_authority_query;
 mod queries;
 mod row_mapping;
 mod selection;
+mod source_verification_cache;
 mod target_review;
 mod types_contract;
+mod verified_json;
 
 use chrono::{DateTime, Utc};
 use lorepia_domain::{

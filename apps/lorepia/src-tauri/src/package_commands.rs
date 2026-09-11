@@ -63,14 +63,17 @@ pub(crate) fn execute_inspect_content_package_import(
 }
 
 #[tauri::command]
-pub fn list_completed_content_package_exports(
+pub async fn list_completed_content_package_exports(
     state: State<'_, AppState>,
     request: shell::ListCompletedContentPackageExportsInput,
 ) -> CommandResult<Vec<shell::ContentSourceExportDescriptorDto>> {
-    state
-        .shell()?
-        .list_completed_content_package_exports(request)
-        .map_err(CommandError::from)
+    let shell = state.shell()?;
+    crate::module_lifecycle_commands::run_module_read(move || {
+        shell
+            .list_completed_content_package_exports(request)
+            .map_err(CommandError::from)
+    })
+    .await
 }
 
 #[tauri::command]

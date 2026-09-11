@@ -79,3 +79,25 @@ tamper 검출, Tauri protocol의 exact range/HEAD/admission/URI parser 테스트
 
 문제가 생기면 lease TTL을 0으로 바꿔 요청마다 재검증하도록 되돌릴 수 있다. opaque digest,
 no-follow open, 동일 handle 검증·read, 크기 제한과 admission gate는 유지한다.
+
+## 완료된 패키지 승인 재검증의 handle 상한 (2026-09-11)
+
+모듈 적용을 위한 완료된 패키지 승인 재검증은 renderer range 전달과 별도다.
+기존 방식은 에셋마다 열린 handle을 유지하여 3,172개 모듈이 macOS 기본
+256개 descriptor 한도를 소진했다. 이 경로는 CAS mutation lock 아래에서
+각 파일을 no-follow로 열어 같은 handle로 전체 hash를 검증하고, 파일 identity를
+봉인한 뒤 handle을 닫는다. 원래 DB 승인 snapshot의 재확인 후 canonical 경로를
+하나씩 다시 열어 동일 identity인지 확인한다. DB lock 중에는 hash하지 않는다.
+경로·inode·길이·mtime/ctime 등 identity가 바뀌면 같은 bytes라도 거부한다.
+
+이 증명은 완료된 package의 native 승인 검증에만 쓰인다. renderer로 bytes를
+전달하는 descriptor/range 경로는 기존처럼 검증된 동일 열린 handle을 유지한다.
+DB snapshot race, 동일 bytes의 inode 교체, descriptor 한도 128 아래에서 512개
+asset 승인 검사와 이후 변조 거부를 회귀 테스트로 확인한다.
+
+큰 원본 아카이브의 연속 검사에는 최대 4개, 1분짜리 별도 verified-handle lease를
+사용한다. 매 요청마다 canonical 경로를 no-follow로 새로 열고 size/link/identity를
+검사한 뒤, 아직 열린 검증 handle과 일치할 때만 그 handle을 복제한다. 바뀐 identity는
+전체 hash를 다시 거치며, 검사 도중 변경은 실패한다. DB 승인 snapshot은 캐시하지 않고
+각 transaction에서 다시 비교한다. 반복 asset 검증은 위의 bounded-descriptor 경로를
+유지한다. warm source를 같은 크기의 다른 bytes로 덮어쓴 뒤에도 거부하는 테스트를 추가했다.

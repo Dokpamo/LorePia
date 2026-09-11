@@ -23,8 +23,27 @@ import type {
 import { LOREPIA_COMMANDS } from '../commands';
 
 import { OrchestrationClient } from './orchestration';
+import type {
+    ModuleReviewPage,
+    ReviewModulePageInput,
+    ModulePlanSummary,
+    ModuleReceiptSummary,
+} from '../../../features/orchestration/module-activation-pages';
 
 export abstract class ModuleLifecycleClient extends OrchestrationClient {
+    reviewContentModuleActivationPage(input: ReviewModulePageInput): Promise<ModuleReviewPage> {
+        return this.call(LOREPIA_COMMANDS.reviewContentModuleActivationPage, { request: input });
+    }
+    resolveContentModuleActivationSummary(
+        input: ResolveContentModuleActivationInput,
+    ): Promise<ModulePlanSummary> {
+        return this.call(LOREPIA_COMMANDS.resolveContentModuleActivationSummary, {
+            request: input,
+        });
+    }
+    activateContentModuleSummary(input: ActivateContentModuleInput): Promise<ModuleReceiptSummary> {
+        return this.call(LOREPIA_COMMANDS.activateContentModuleSummary, { request: input });
+    }
     listContentModuleLifecycleCandidates(
         input: ListContentModuleLifecycleCandidatesInput,
     ): Promise<ContentModuleLifecycleCandidateListDto> {

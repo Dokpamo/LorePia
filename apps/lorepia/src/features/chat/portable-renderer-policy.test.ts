@@ -9,6 +9,33 @@ import {
 import { isPortableRendererMessage, PORTABLE_RENDERER_CHANNEL } from './portable-renderer-protocol';
 
 describe('portable renderer policy', () => {
+    it('allows literal room icons while rejecting generated content with URL or attribute access', () => {
+        const css =
+            '.gear::before { content: "⚙️"; } .bad::before { content: attr(data-secret); } .image::before { content: url(https://evil.test); }';
+        const room = sanitizePortableCss(css, document, 'room');
+        expect(room).toContain('content:"⚙️"');
+        expect(room).not.toMatch(/attr\(|url\(|evil/);
+        expect(sanitizePortableCss(css)).not.toContain('content:');
+    });
+    it('preserves CSS child combinators without accepting HTML style termination', () => {
+        expect(sanitizePortableCss('.controls > button { color: red; }')).toContain(
+            '.controls > button{color:red;}',
+        );
+        expect(sanitizePortableCss('.x { content: "</style><script>bad</script>"; }')).toBe('');
+    });
+    it('allows contained room positioning while still rejecting network and executable CSS', () => {
+        const result = sanitizePortableCss(
+            '.panel { position: fixed; inset: 0; height: 100vh; z-index: 999; background: url(https://evil.test); color: red; }',
+            document,
+            'room',
+        );
+        expect(result).toContain('position:fixed');
+        expect(result).toContain('height:100vh');
+        expect(result).not.toContain('evil.test');
+        expect(sanitizePortableCss('.panel { position: fixed; height: 100vh; }')).not.toContain(
+            'fixed',
+        );
+    });
     it('uses parsed declarations to remove network, overlay, and variable indirection', () => {
         const mainHeadAppend = vi.spyOn(document.head, 'append');
         const result = sanitizePortableCss(`

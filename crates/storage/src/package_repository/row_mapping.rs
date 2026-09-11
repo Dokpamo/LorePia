@@ -3,10 +3,10 @@
 use super::{
     BTreeSet, Connection, CoreError, CoreResult, DateTime, OptionalExtension,
     PackageCapabilityDecision, PackageCapabilityReview, PackageId, PackageImportRecord,
-    PackageImportStatus, PackageReview, PackageSourceRecord, SelectiveImportPlan, Transaction, Utc,
-    Value, VersionedJson, decode_json, encode_json, i64_from_u64, import_status_str,
-    license_fields, not_found, package_capability_review_sha256, params, parse_capability_support,
-    parse_datetime, parse_import_status, parse_package_capability, revision_conflict, sha256_hex,
+    PackageImportStatus, PackageSourceRecord, Transaction, Utc, Value, VersionedJson, decode_json,
+    encode_json, i64_from_u64, import_status_str, license_fields, not_found,
+    package_capability_review_sha256, params, parse_capability_support, parse_datetime,
+    parse_import_status, parse_package_capability, revision_conflict, sha256_hex,
     storage_corrupted, storage_db_error, u32_from_i64, u64_from_i64, validate_source_record,
 };
 
@@ -298,17 +298,7 @@ pub(super) fn read_import_state(
             .collect::<Result<Vec<_>, _>>()
             .map_err(storage_db_error)?
     };
-    let inspection: VersionedJson = decode_json("package inspection", &row.3)?;
-    if inspection.schema_version != 1 {
-        return Err(storage_corrupted(
-            "package inspection wrapper schema is unsupported",
-        ));
-    }
-    let review: PackageReview = serde_json::from_value(inspection.value.clone())
-        .map_err(|error| storage_corrupted(format!("stored package review is invalid: {error}")))?;
-    review
-        .verify()
-        .map_err(|error| storage_corrupted(format!("stored package review is invalid: {error}")))?;
+    let (inspection, review) = super::verified_json::inspection(&row.3)?;
     let source_hash = read_source_hash(connection, &row.14)?;
     if review.review_sha256.as_str() != row.4
         || review.source_sha256.as_str() != source_hash
@@ -318,29 +308,17 @@ pub(super) fn read_import_state(
             "stored package inspection differs from its durable identity",
         ));
     }
-    let selection: Option<VersionedJson> = row
+    let verified_selection = row
         .5
         .as_deref()
-        .map(|json| decode_json("package selection", json))
+        .map(super::verified_json::selection)
         .transpose()?;
-    if selection.is_some() != row.6.is_some() {
+    if verified_selection.is_some() != row.6.is_some() {
         return Err(storage_corrupted(
             "package selection JSON and hash presence differ",
         ));
     }
-    if let Some(wrapper) = &selection {
-        if wrapper.schema_version != 1 {
-            return Err(storage_corrupted(
-                "package selection wrapper schema is unsupported",
-            ));
-        }
-        let plan: SelectiveImportPlan =
-            serde_json::from_value(wrapper.value.clone()).map_err(|error| {
-                storage_corrupted(format!("stored package selection is invalid: {error}"))
-            })?;
-        plan.verify().map_err(|error| {
-            storage_corrupted(format!("stored package selection is invalid: {error}"))
-        })?;
+    if let Some((_, plan)) = &verified_selection {
         let selected = plan
             .components
             .iter()
@@ -397,7 +375,7 @@ pub(super) fn read_import_state(
             status: parse_import_status(&row.1)?,
             revision: u64_from_i64("package import revision", row.2)?,
             inspection,
-            selection,
+            selection: verified_selection.map(|(wrapper, _)| wrapper),
             selected_component_ids,
             failure_code,
             created_at: parse_datetime("package import created_at", &row.11)?,

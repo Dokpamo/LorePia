@@ -1,3 +1,4 @@
+use crate::orchestration::module_plan_documents::{self as documents, Kind};
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
@@ -258,12 +259,10 @@ pub(super) fn prepare_generation_attempt_before_review(
     )?;
     let previous_knowledge_sha256 = sha256_hex(previous_knowledge_json.as_bytes());
 
-    let module_runtime_review_json = encode_json(
-        "generation attempt module runtime review",
-        &commit.module_runtime_review,
-        MAX_STATE_JSON_BYTES,
-    )?;
+    let module_runtime_review_json = documents::encode(&commit.module_runtime_review)?;
     let module_runtime_review_sha256 = sha256_hex(module_runtime_review_json.as_bytes());
+    let module_runtime_review_json =
+        documents::store(transaction, Kind::Review, &module_runtime_review_json)?;
     let memory_head_snapshot_json = encode_json(
         "generation attempt memory head snapshot",
         &commit.memory_head_snapshot,
@@ -289,10 +288,10 @@ pub(super) fn prepare_generation_attempt_before_review(
                 .as_ref()
                 .map(|sha256| sha256.as_str().to_owned()),
             Some(plan.source_approval.plan.plan_sha256.as_str().to_owned()),
-            Some(encode_json(
-                "generation attempt applied module runtime plan",
-                plan,
-                MAX_STATE_JSON_BYTES,
+            Some(documents::store(
+                transaction,
+                Kind::Runtime,
+                &documents::encode(plan)?,
             )?),
         ),
         None => (

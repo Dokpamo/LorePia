@@ -44,6 +44,9 @@ On macOS, append `-- --config src-tauri/tauri.macos.dev.conf.json` to select the
 existing development app identity. The UI itself uses no native IPC in either
 launch mode. For a standalone macOS app, use `npm run tauri:ui:build --prefix
 apps/lorepia -- --config src-tauri/tauri.macos.dev.conf.json`; the bundle is
+`target/release/bundle/macos/LorePia UI.app`. The standalone UI build is optimized
+so large imported cards do not pay unoptimized Rust validation costs. Use
+`npm run tauri:ui:build:debug --prefix apps/lorepia` for a debugger build at
 `target/debug/bundle/macos/LorePia UI.app`.
 
 ## Verification — 2026-09-06

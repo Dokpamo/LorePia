@@ -1,3 +1,4 @@
+use crate::orchestration::module_plan_documents::{self as documents, Kind};
 use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{DateTime, Utc};
@@ -16,7 +17,9 @@ use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+mod module_authority;
 mod retryable_projection;
+use module_authority::{decode_module_runtime_authority, encode_generation_attempt_authorities};
 
 use crate::database::{Storage, storage_db_error};
 use crate::interaction_repository::{
@@ -1221,41 +1224,6 @@ fn ensure_provider_credential_authority_has_durable_history(
     Ok(())
 }
 
-fn encode_generation_attempt_authorities(
-    input: &GenerationAttemptInput,
-) -> CoreResult<EncodedGenerationAttemptAuthorities> {
-    let prompt_selection = input.prompt_selection_authority.as_ref().ok_or_else(|| {
-        CoreError::invalid("generation attempt prompt selection authority is missing")
-    })?;
-    let (prompt_selection_json, prompt_selection_sha256) =
-        encode_hashed("generation prompt selection authority", prompt_selection)?;
-    let module_runtime_review =
-        input
-            .module_runtime_review_authority
-            .as_ref()
-            .ok_or_else(|| {
-                CoreError::invalid("generation attempt module runtime authority is missing")
-            })?;
-    let (module_runtime_review_json, module_runtime_review_sha256) = encode_hashed(
-        "generation attempt module runtime review authority",
-        module_runtime_review,
-    )?;
-    let (applied_runtime_plan_json, applied_runtime_plan_sha256) = input
-        .applied_runtime_plan_authority
-        .as_ref()
-        .map(|plan| encode_hashed("generation attempt applied runtime plan authority", plan))
-        .transpose()?
-        .map_or((None, None), |(json, sha256)| (Some(json), Some(sha256)));
-    Ok(EncodedGenerationAttemptAuthorities {
-        prompt_selection_json,
-        prompt_selection_sha256,
-        module_runtime_review_json,
-        module_runtime_review_sha256,
-        applied_runtime_plan_json,
-        applied_runtime_plan_sha256,
-    })
-}
-
 fn insert_prepared_generation_attempt(
     transaction: &Transaction<'_>,
     input: &GenerationAttemptInput,
@@ -1303,9 +1271,17 @@ fn insert_prepared_generation_attempt(
                 prepared_at.to_rfc3339(),
                 authorities.prompt_selection_json,
                 authorities.prompt_selection_sha256.as_str(),
-                authorities.module_runtime_review_json,
+                documents::store(
+                    transaction,
+                    Kind::Review,
+                    &authorities.module_runtime_review_json
+                )?,
                 authorities.module_runtime_review_sha256.as_str(),
-                authorities.applied_runtime_plan_json,
+                authorities
+                    .applied_runtime_plan_json
+                    .as_deref()
+                    .map(|json| documents::store(transaction, Kind::Runtime, json))
+                    .transpose()?,
                 authorities
                     .applied_runtime_plan_sha256
                     .as_ref()
@@ -1890,9 +1866,17 @@ pub(crate) fn read_attempt(
     )?;
     let (module_runtime_review_authority, applied_runtime_plan_authority) =
         decode_module_runtime_authority(
-            row.module_runtime_review_authority_json.as_deref(),
+            row.module_runtime_review_authority_json
+                .as_deref()
+                .map(|json| documents::expand(connection, Kind::Review, json))
+                .transpose()?
+                .as_deref(),
             row.module_runtime_review_authority_sha256.as_deref(),
-            row.applied_runtime_plan_authority_json.as_deref(),
+            row.applied_runtime_plan_authority_json
+                .as_deref()
+                .map(|json| documents::expand(connection, Kind::Runtime, json))
+                .transpose()?
+                .as_deref(),
             row.applied_runtime_plan_authority_sha256.as_deref(),
             row.module_runtime_authority_version,
         )?;
@@ -2031,92 +2015,6 @@ fn decode_prompt_selection_authority(
             }
         },
     )
-}
-
-fn decode_module_runtime_authority(
-    review_json: Option<&str>,
-    review_sha256: Option<&str>,
-    plan_json: Option<&str>,
-    plan_sha256: Option<&str>,
-    authority_version: i64,
-) -> CoreResult<(Option<ModuleMergeReview>, Option<AppliedModuleRuntimePlan>)> {
-    match (
-        review_json,
-        review_sha256,
-        plan_json,
-        plan_sha256,
-        authority_version,
-    ) {
-        (None, None, None, None, 0) => Ok((None, None)),
-        (Some(review_json), Some(review_sha256), plan_json, plan_sha256, 1) => {
-            let review = decode_hashed::<ModuleMergeReview>(
-                "generation module runtime review authority",
-                Some(review_json),
-                Some(review_sha256),
-            )?
-            .ok_or_else(|| corrupted("generation module runtime review authority is missing"))?
-            .0;
-            review.verify().map_err(|error| {
-                corrupted(format!(
-                    "generation module runtime review authority is invalid: {error}"
-                ))
-            })?;
-            if serde_json::to_string(&review).map_err(|error| {
-                corrupted(format!(
-                    "generation module runtime review authority cannot be canonicalized: {error}"
-                ))
-            })? != review_json
-            {
-                return Err(corrupted(
-                    "generation module runtime review authority JSON is not canonical",
-                ));
-            }
-            let plan = match (plan_json, plan_sha256) {
-                (None, None) => None,
-                (Some(plan_json), Some(plan_sha256)) => {
-                    let plan = decode_hashed::<AppliedModuleRuntimePlan>(
-                        "generation applied runtime plan authority",
-                        Some(plan_json),
-                        Some(plan_sha256),
-                    )?
-                    .ok_or_else(|| {
-                        corrupted("generation applied runtime plan authority is missing")
-                    })?
-                    .0;
-                    plan.verify().map_err(|error| {
-                        corrupted(format!(
-                            "generation applied runtime plan authority is invalid: {error}"
-                        ))
-                    })?;
-                    if serde_json::to_string(&plan).map_err(|error| {
-                        corrupted(format!(
-                            "generation applied runtime plan authority cannot be canonicalized: {error}"
-                        ))
-                    })? != plan_json
-                    {
-                        return Err(corrupted(
-                            "generation applied runtime plan authority JSON is not canonical",
-                        ));
-                    }
-                    Some(plan)
-                }
-                _ => {
-                    return Err(corrupted(
-                        "generation applied runtime plan authority columns are incomplete",
-                    ));
-                }
-            };
-            if plan.as_ref().is_some_and(|plan| plan.review != review) {
-                return Err(corrupted(
-                    "generation applied runtime plan authority differs from its review",
-                ));
-            }
-            Ok((Some(review), plan))
-        }
-        _ => Err(corrupted(
-            "generation module runtime authority columns are incomplete",
-        )),
-    }
 }
 
 fn require_valid_stored_attempt_identity(stored: &StoredGenerationAttempt) -> CoreResult<()> {

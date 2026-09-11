@@ -11,7 +11,10 @@ use lorepia_domain::{CoreError, CoreErrorCode, CoreResult};
 use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 
-use crate::{database::Storage, verified_asset_cache::AssetFileSnapshot};
+use crate::{
+    database::Storage,
+    verified_asset_cache::{AssetFileSnapshot, open_cas_file},
+};
 
 use super::{CompletedPackageAuthority, storage_corrupted, validate_sha256};
 
@@ -112,7 +115,10 @@ impl Storage {
             load(&connection, approval_id)?
         };
         before_cas_verification();
-        let open_files = initial
+        // Seal each identity and release the handle immediately. A package can
+        // contain thousands of assets, while macOS may permit only 256 FDs.
+        // Reopen and compare every sealed identity after the DB snapshot check.
+        let identities = initial
             .cas_files
             .iter()
             .map(|file| {
@@ -123,7 +129,13 @@ impl Storage {
                     file.size_bytes,
                     &file.relative_path,
                 )
-                .map(|open| (file.namespace, open))
+                .and_then(|open| {
+                    open.into_identity_proof().map_err(|error| {
+                        storage_corrupted(format!(
+                            "durable CAS identity could not be sealed: {error}"
+                        ))
+                    })
+                })
             })
             .collect::<CoreResult<Vec<_>>>()?;
         let current = {
@@ -135,10 +147,21 @@ impl Storage {
                 "completed package authority changed during CAS verification",
             ));
         }
-        for (namespace, file) in open_files {
-            file.ensure_unchanged().map_err(|error| {
+        for (file, identity) in initial.cas_files.iter().zip(&identities) {
+            let reopened = open_owned_cas_file(
+                self,
+                file.namespace,
+                &file.sha256,
+                file.size_bytes,
+                &file.relative_path,
+            )?;
+            let snapshot = AssetFileSnapshot::capture(reopened).map_err(|error| {
+                storage_corrupted(format!("durable CAS identity could not be read: {error}"))
+            })?;
+            snapshot.verify_identity_proof(identity).map_err(|error| {
                 storage_corrupted(format!(
-                    "durable {namespace} CAS file changed during authority verification: {error}"
+                    "durable {} CAS file changed during authority verification: {error}",
+                    file.namespace
                 ))
             })?;
         }
@@ -170,6 +193,38 @@ fn verify_owned_cas_file(
     expected_size: u64,
     stored_relative_path: &str,
 ) -> CoreResult<AssetFileSnapshot> {
+    let file = open_owned_cas_file(
+        storage,
+        namespace,
+        sha256,
+        expected_size,
+        stored_relative_path,
+    )?;
+    if namespace == "sources" {
+        let current = AssetFileSnapshot::capture(file.try_clone().map_err(|error| {
+            storage_corrupted(format!("cannot retain current source identity: {error}"))
+        })?)
+        .map_err(|error| {
+            storage_corrupted(format!("cannot read current source identity: {error}"))
+        })?;
+        if let Some(verified) = super::source_verification_cache::lookup(sha256, &current)? {
+            return Ok(verified);
+        }
+    }
+    let verified = capture_and_hash_owned_cas_file(file, namespace, sha256, expected_size)?;
+    if namespace == "sources" {
+        super::source_verification_cache::insert(sha256, &verified)?;
+    }
+    Ok(verified)
+}
+
+fn open_owned_cas_file(
+    storage: &Storage,
+    namespace: &str,
+    sha256: &str,
+    expected_size: u64,
+    stored_relative_path: &str,
+) -> CoreResult<File> {
     validate_sha256("CAS", sha256)?;
     let expected_relative = format!("{namespace}/sha256/{}/{}", &sha256[..2], &sha256[2..]);
     if stored_relative_path != expected_relative {
@@ -210,7 +265,7 @@ fn verify_owned_cas_file(
             "durable {namespace} CAS file escapes its owned root"
         )));
     }
-    let file = File::open(&canonical_path).map_err(|error| {
+    let file = open_cas_file(storage.data_root(), namespace, sha256).map_err(|error| {
         CoreError::new(
             CoreErrorCode::StorageUnavailable,
             format!("cannot open durable {namespace} CAS file: {error}"),
@@ -239,7 +294,7 @@ fn verify_owned_cas_file(
             )));
         }
     }
-    capture_and_hash_owned_cas_file(file, namespace, sha256, expected_size)
+    Ok(file)
 }
 
 fn capture_and_hash_owned_cas_file(
@@ -398,5 +453,114 @@ mod tests {
             )
             .expect_err("changed DB authority must fail closed");
         assert_eq!(error.code, CoreErrorCode::StorageCorrupted);
+    }
+
+    #[test]
+    fn replacing_verified_bytes_with_an_identical_file_invalidates_authority() {
+        let root = tempdir().expect("data root");
+        let storage = Storage::open(root.path()).expect("storage");
+        let bytes = b"immutable package source";
+        let digest = super::super::sha256_hex(bytes);
+        let snapshot =
+            empty_completed_authority_snapshot("replacement", &digest, bytes.len() as u64);
+        let path = root.path().join(&snapshot.cas_files[0].relative_path);
+        fs::create_dir_all(path.parent().expect("prefix")).expect("prefix directory");
+        fs::write(&path, bytes).expect("source");
+        let calls = Cell::new(0);
+        let error = storage
+            .verify_completed_package_authority_with(
+                "replacement",
+                |_, _| {
+                    calls.set(calls.get() + 1);
+                    if calls.get() == 2 {
+                        let replacement = path.with_extension("replacement");
+                        fs::write(&replacement, bytes).expect("replacement");
+                        fs::rename(&replacement, &path).expect("replace verified source");
+                    }
+                    Ok(snapshot.clone())
+                },
+                || {},
+            )
+            .expect_err("identical bytes on another identity must be re-reviewed");
+        assert_eq!(error.code, CoreErrorCode::StorageCorrupted);
+    }
+
+    #[test]
+    fn warm_source_lease_rejects_same_size_mutation() {
+        let root = tempdir().expect("data root");
+        let storage = Storage::open(root.path()).expect("storage");
+        let bytes = b"source lease mutation fixture";
+        let digest = super::super::sha256_hex(bytes);
+        let snapshot = empty_completed_authority_snapshot("warm", &digest, bytes.len() as u64);
+        let path = root.path().join(&snapshot.cas_files[0].relative_path);
+        fs::create_dir_all(path.parent().expect("prefix")).expect("prefix directory");
+        fs::write(&path, bytes).expect("source");
+        for _ in 0..2 {
+            storage
+                .verify_completed_package_authority_with("warm", |_, _| Ok(snapshot.clone()), || {})
+                .expect("cold and warm source checks");
+        }
+        let mut changed = bytes.to_vec();
+        changed[0] ^= 1;
+        fs::write(&path, changed).expect("same-size mutation");
+        let error = storage
+            .verify_completed_package_authority_with("warm", |_, _| Ok(snapshot.clone()), || {})
+            .expect_err("a retained lease cannot authorize changed bytes");
+        assert_eq!(error.code, CoreErrorCode::StorageCorrupted);
+    }
+
+    #[cfg(any(target_os = "linux", target_vendor = "apple"))]
+    #[test]
+    fn large_package_verification_uses_bounded_file_descriptors() {
+        const MARKER: &str = "LOREPIA_CAS_FD_REGRESSION_CHILD";
+        if std::env::var_os(MARKER).is_none() {
+            // Limit only the subprocess: parallel tests keep their original limit.
+            let result = std::process::Command::new("sh")
+                .args(["-c", "ulimit -n 128; exec \"$1\" --exact package_repository::completed_authority::tests::large_package_verification_uses_bounded_file_descriptors --nocapture", "cas-fd-test"])
+                .arg(std::env::current_exe().expect("test executable"))
+                .env(MARKER, "1")
+                .output().expect("run descriptor-limited child");
+            assert!(
+                result.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&result.stdout),
+                String::from_utf8_lossy(&result.stderr)
+            );
+            return;
+        }
+        let root = tempdir().expect("data root");
+        let storage = Storage::open(root.path()).expect("storage");
+        let mut snapshot = empty_completed_authority_snapshot("large", &"aa".repeat(32), 1);
+        snapshot.cas_files.clear();
+        for index in 0..512 {
+            let bytes = format!("synthetic asset {index}");
+            let digest = super::super::sha256_hex(bytes.as_bytes());
+            let file = CompletedPackageCasFile {
+                namespace: "assets",
+                relative_path: format!("assets/sha256/{}/{}", &digest[..2], &digest[2..]),
+                sha256: digest,
+                size_bytes: bytes.len() as u64,
+            };
+            let path = root.path().join(&file.relative_path);
+            fs::create_dir_all(path.parent().expect("prefix")).expect("prefix directory");
+            fs::write(path, bytes).expect("asset");
+            snapshot.cas_files.push(file);
+        }
+        storage
+            .verify_completed_package_authority_with("large", |_, _| Ok(snapshot.clone()), || {})
+            .expect("512 assets with only 128 available descriptors");
+        let path = root.path().join(&snapshot.cas_files[0].relative_path);
+        fs::write(path, "tampered asset").expect("tamper");
+        assert_eq!(
+            storage
+                .verify_completed_package_authority_with(
+                    "large",
+                    |_, _| Ok(snapshot.clone()),
+                    || {}
+                )
+                .expect_err("tampering still fails closed")
+                .code,
+            CoreErrorCode::StorageCorrupted
+        );
     }
 }

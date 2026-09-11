@@ -111,6 +111,10 @@ pub use model_sync::{
     ModelSyncDiffDto, ModelSyncEventDto, ModelSyncFailureDto, ModelSyncJobDto,
     ModelSyncProgressDto, ModelSyncReviewDto, ModelSyncSourceProvenanceDto, ModelSyncStartedDto,
 };
+pub use module_lifecycle::pages::{
+    ContentModuleActivationPlanSummaryDto, ContentModuleActivationReceiptSummaryDto,
+    ContentModuleActivationReviewPageDto, ReviewContentModuleActivationPageInput,
+};
 pub use module_lifecycle::{
     ActivateContentModuleInput, ApplyContentModuleRollbackInput, ContentModuleActivationPlanDto,
     ContentModuleActivationReceiptDto, ContentModuleActivationReviewDto,

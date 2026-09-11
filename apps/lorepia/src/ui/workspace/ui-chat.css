@@ -29,20 +29,6 @@
 .ui-preview .ui-user-turn {
     align-items: flex-end;
 }
-.ui-preview .ui-date {
-    align-self: stretch;
-    margin: 0 0 24px;
-    text-align: center;
-    color: var(--ui-muted);
-    font-size: var(--ui-type-caption);
-    line-height: 1.5;
-}
-.ui-preview .ui-date span {
-    display: inline-block;
-    padding: 4px 12px;
-    border-radius: 12px;
-    background: var(--ui-soft);
-}
 .ui-preview .ui-message-body {
     --surface-sunken: var(--ui-image);
     --line: var(--ui-image);
@@ -69,13 +55,17 @@
     background: var(--ui-selected);
     border-radius: 18px 18px 6px 18px;
 }
-.ui-preview [data-conversation-mode='story'] .ui-message-turn:not(.ui-user-turn) .ui-message-body {
-    width: 100%;
-    max-width: 100%;
-    padding: 6px 0;
-    background: transparent;
-    border-radius: 0;
-    line-height: 1.8;
+.ui-preview .ui-chat-notices {
+    position: absolute;
+    inset-inline: var(--ui-chat-inset);
+    top: calc(
+        var(--ui-scroll-header-height, var(--ui-header)) - var(--ui-scroll-header-offset, 0px) + 8px
+    );
+    z-index: 12;
+    pointer-events: none;
+}
+.ui-preview [data-scroll-header-frame-settling='true'] > .ui-chat-notices {
+    transition: top 180ms cubic-bezier(0.35, 0, 0.35, 1);
 }
 .ui-preview .ui-chat-floaters {
     position: absolute;
@@ -108,30 +98,9 @@
     background: var(--ui-soft);
     border-radius: 50%;
 }
-@media (max-height: 640px) {
-    /* Keep a tall composer and a wrapped notice inside a short viewport. */
-    .ui-preview .ui-chat-floaters:has(.ui-notice) {
-        flex-direction: row;
-        align-items: flex-end;
-        gap: 12px;
-    }
-    .ui-preview .ui-chat-floaters:has(.ui-notice) .ui-notice {
-        flex: 1;
-        min-width: 0;
-    }
-    .ui-preview .ui-chat-floaters:has(.ui-notice) .ui-jump-latest {
-        width: 0;
-    }
-    .ui-preview .ui-chat-floaters:has(.ui-notice) .ui-jump-latest[data-visible='false'] {
-        display: none;
-    }
-    .ui-preview .ui-chat-floaters:has(.ui-notice) .ui-jump-latest[data-visible='true'] {
-        width: var(--ui-control);
-        height: var(--ui-control);
-    }
-}
 @media (prefers-reduced-motion: reduce) {
-    .ui-preview .ui-jump-latest {
+    .ui-preview .ui-jump-latest,
+    .ui-preview [data-scroll-header-frame-settling='true'] > .ui-chat-notices {
         transition: none;
     }
 }

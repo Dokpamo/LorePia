@@ -71,6 +71,28 @@ const resolutions = {
 };
 
 describe('content-module lifecycle client boundary', () => {
+    it('uses bounded module page and summary commands with the original approval tuple', async () => {
+        const transport = new RecordingTransport();
+        const client = new LiveLorepiaClient(transport);
+        const page = { activation, offset: 64, expected_review_sha256: 'a'.repeat(64) };
+        const plan = { activation, resolutions };
+        const apply = {
+            ...plan,
+            approval: {
+                approval_id: 'page-approval',
+                expected_review_sha256: 'a'.repeat(64),
+                expected_plan_sha256: 'b'.repeat(64),
+            },
+        };
+        await client.reviewContentModuleActivationPage(page);
+        await client.resolveContentModuleActivationSummary(plan);
+        await client.activateContentModuleSummary(apply);
+        expect(transport.calls).toEqual([
+            { commandName: 'review_content_module_activation_page', args: { request: page } },
+            { commandName: 'resolve_content_module_activation_summary', args: { request: plan } },
+            { commandName: 'activate_content_module_summary', args: { request: apply } },
+        ]);
+    });
     it('maps every safe lifecycle call to one high-level Tauri command without paths or bytes', async () => {
         const transport = new RecordingTransport();
         const client = new LiveLorepiaClient(transport);

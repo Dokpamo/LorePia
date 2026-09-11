@@ -17,3 +17,5 @@ workerScope.onmessage = (event) => {
         result: performPortableRegexOperation(request.request),
     });
 };
+
+workerScope.postMessage('portable_regex_ready');

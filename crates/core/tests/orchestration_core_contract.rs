@@ -947,3 +947,4 @@ include!("../src/orchestration/tests/documents.rs");
 include!("../src/orchestration/tests/memory.rs");
 include!("../src/orchestration/tests/generation.rs");
 include!("../src/orchestration/tests/modules.rs");
+include!("../src/orchestration/tests/runtime_state.rs");

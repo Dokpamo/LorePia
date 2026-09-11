@@ -1,4 +1,5 @@
 <script lang="ts">
+    import type { ChatDisplayMode } from '../../lib/chat-display';
     import { untrack, type Snippet } from 'svelte';
     import type { Appearance, Page } from '../workspace/view-types';
     import { ROOT_TABS, type RootTab } from './navigation-types';
@@ -37,7 +38,7 @@
         nested?: boolean;
         appearance?: Appearance;
         textScale?: number;
-        conversationMode?: 'chat' | 'story';
+        conversationMode?: ChatDisplayMode;
         home: Snippet;
         chats: Snippet;
         create: Snippet;

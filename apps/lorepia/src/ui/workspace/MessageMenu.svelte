@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { untrack } from 'svelte';
     import {
         ArrowLeft,
         Check,
@@ -17,6 +18,7 @@
     import './ui-message-menu.css';
     let {
         anchor,
+        initialView = 'actions',
         message,
         busy,
         branches,
@@ -30,6 +32,7 @@
         onregenerate,
     }: {
         anchor: HTMLElement;
+        initialView?: 'actions' | 'branches';
         message: SampleMessage;
         busy: boolean;
         branches: SampleBranch[];
@@ -42,7 +45,7 @@
         onremove: () => void;
         onregenerate: () => void;
     } = $props();
-    let view = $state<'actions' | 'branches' | 'remove'>('actions');
+    let view = $state<'actions' | 'branches' | 'remove'>(untrack(() => initialView));
     let closing = $state(false);
     const exitDuration = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 100;
     function dismiss(restoreFocus: boolean) {

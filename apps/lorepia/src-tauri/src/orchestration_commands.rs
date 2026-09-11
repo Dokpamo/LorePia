@@ -12,6 +12,8 @@ use crate::{
     state::AppState,
 };
 
+mod projections;
+
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ValidatePromptPresetRequest {
@@ -579,25 +581,19 @@ pub fn expire_generation_attempt_proposals(
 }
 
 #[tauri::command]
-pub fn list_interaction_effect_history(
+pub async fn list_interaction_effect_history(
     state: State<'_, AppState>,
     request: shell::ListInteractionEffectHistoryInput,
 ) -> CommandResult<shell::InteractionEffectHistoryPageDto> {
-    state
-        .shell()?
-        .list_interaction_effect_history(request)
-        .map_err(CommandError::from)
+    projections::list_interaction_effect_history(state.shell()?, request).await
 }
 
 #[tauri::command]
-pub fn list_reopen_interaction_effects(
+pub async fn list_reopen_interaction_effects(
     state: State<'_, AppState>,
     request: shell::ListRecentReopenInteractionEffectsInput,
 ) -> CommandResult<shell::InteractionReopenSnapshotDto> {
-    state
-        .shell()?
-        .list_reopen_interaction_effects(request)
-        .map_err(CommandError::from)
+    projections::list_reopen_interaction_effects(state.shell()?, request).await
 }
 
 #[tauri::command]

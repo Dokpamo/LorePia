@@ -131,14 +131,17 @@
                 {#each images as image, i (image.assetId)}
                     <button
                         type="button"
-                        class="seed-profile-slide"
+                        class="seed-profile-slide ui-pressable"
+                        data-press-feedback="scale"
                         tabindex={i === index ? 0 : -1}
                         aria-hidden={i !== index}
                         aria-label={$tr('navigation.imageSelectItem', { name: image.title })}
                         onclick={(event) => onview(image.assetId, event.currentTarget)}
                         onkeydown={(event) => imageKey(event, i)}
                     >
-                        {#if Math.abs(i - index) <= 1}{@render portrait(image)}{/if}
+                        <span class="ui-press-visual">
+                            {#if Math.abs(i - index) <= 1}{@render portrait(image)}{/if}
+                        </span>
                     </button>
                 {/each}
             </div>

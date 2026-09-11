@@ -84,3 +84,5 @@ pub(super) const MIGRATION_0040: &str =
     include_str!("../../migrations/0040_portable_runtime_state.sql");
 pub(super) const MIGRATION_0041: &str =
     include_str!("../../migrations/0041_portable_runtime_package_capability.sql");
+pub(super) const MIGRATION_0042: &str =
+    include_str!("../../migrations/0042_module_plan_documents.sql");

@@ -1,8 +1,5 @@
-//! Hash-bound content-module activation and rollback for the webview.
-//!
-//! Callers submit only inert drafts, exact hashes, explicit choices, and stable
-//! approval ids. Core recreates reviews and performs the durable CAS; oversized
-//! authoritative candidate sets are rejected, never truncated.
+//! Hash-bound module lifecycle. Full-document and paged projections both keep
+//! Core's complete review, explicit resolutions, approval hashes, and durable CAS.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -26,6 +23,7 @@ use serde::{Deserialize, Serialize};
 use crate::{ShellApi, ShellError, ShellResult, api::validate_identifier};
 
 mod legacy_import_approvals;
+pub(super) mod pages;
 
 use legacy_import_approvals::project_revision_import_approvals;
 
@@ -1471,7 +1469,7 @@ mod tests {
         }
     }
 
-    fn module(
+    pub(super) fn module(
         id: &str,
         version: &str,
         source_byte: &str,
@@ -1549,7 +1547,7 @@ mod tests {
         }
     }
 
-    fn shell_and_target() -> (tempfile::TempDir, ShellApi, ContentModuleRuntimeTarget) {
+    pub(super) fn shell_and_target() -> (tempfile::TempDir, ShellApi, ContentModuleRuntimeTarget) {
         let root = tempdir().expect("temporary Shell root");
         let shell = ShellApi::open(CoreConfig::new(root.path())).expect("open Shell");
         let mut source = NamedTempFile::new().expect("temporary synthetic character");
@@ -1584,7 +1582,7 @@ mod tests {
         )
     }
 
-    fn activation(
+    pub(super) fn activation(
         module_id: &str,
         binding_id: &str,
         target: &ContentModuleRuntimeTarget,

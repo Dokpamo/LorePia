@@ -2,6 +2,7 @@ import type {
     OrchestrationModuleScope,
     OrchestrationVariableMapDto,
 } from '../../lib/ipc/contracts';
+import type { ContentModulePagedClientApi } from './module-activation-pages';
 
 export type ContentModuleSourceKindDto =
     | 'application_built_in'
@@ -479,7 +480,7 @@ export interface ContentModuleDeactivationReceiptDto {
     deleted_at: string;
 }
 
-export interface ContentModuleLifecycleClientApi {
+export interface ContentModuleLifecycleClientApi extends Partial<ContentModulePagedClientApi> {
     listContentModuleLifecycleCandidates(
         input: ListContentModuleLifecycleCandidatesInput,
     ): Promise<ContentModuleLifecycleCandidateListDto>;

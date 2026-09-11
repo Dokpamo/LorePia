@@ -100,7 +100,6 @@
         }
     });
     onMount(() => {
-        void packages.loadPendingImports();
         return () => {
             personas.destroy();
             orchestration.destroy();

@@ -100,76 +100,268 @@
   },
   "limits": {
     "facade": {
-      "css": {"bytes": 40960, "lines": 500},
-      "kotlin": {"bytes": 40960, "lines": 500},
-      "lua": {"bytes": 40960, "lines": 500},
-      "rust": {"bytes": 40960, "lines": 500},
-      "svelte": {"bytes": 30720, "lines": 500},
-      "swift": {"bytes": 40960, "lines": 500},
-      "typescript": {"bytes": 40960, "lines": 500}
+      "css": {
+        "bytes": 40960,
+        "lines": 500
+      },
+      "kotlin": {
+        "bytes": 40960,
+        "lines": 500
+      },
+      "lua": {
+        "bytes": 40960,
+        "lines": 500
+      },
+      "rust": {
+        "bytes": 40960,
+        "lines": 500
+      },
+      "svelte": {
+        "bytes": 30720,
+        "lines": 500
+      },
+      "swift": {
+        "bytes": 40960,
+        "lines": 500
+      },
+      "typescript": {
+        "bytes": 40960,
+        "lines": 500
+      }
     },
     "generated": {
-      "css": {"bytes": 40960, "lines": 900},
-      "kotlin": {"bytes": 40960, "lines": 900},
-      "lua": {"bytes": 40960, "lines": 900},
-      "rust": {"bytes": 40960, "lines": 900},
-      "svelte": {"bytes": 30720, "lines": 600},
-      "swift": {"bytes": 40960, "lines": 900},
-      "typescript": {"bytes": 40960, "lines": 900}
+      "css": {
+        "bytes": 40960,
+        "lines": 900
+      },
+      "kotlin": {
+        "bytes": 40960,
+        "lines": 900
+      },
+      "lua": {
+        "bytes": 40960,
+        "lines": 900
+      },
+      "rust": {
+        "bytes": 40960,
+        "lines": 900
+      },
+      "svelte": {
+        "bytes": 30720,
+        "lines": 600
+      },
+      "swift": {
+        "bytes": 40960,
+        "lines": 900
+      },
+      "typescript": {
+        "bytes": 40960,
+        "lines": 900
+      }
     },
     "production": {
-      "css": {"bytes": 61440, "lines": 2000},
-      "kotlin": {"bytes": 40960, "lines": 900},
-      "lua": {"bytes": 40960, "lines": 900},
-      "rust": {"bytes": 40960, "lines": 900},
-      "svelte": {"bytes": 30720, "lines": 600},
-      "swift": {"bytes": 40960, "lines": 900},
-      "typescript": {"bytes": 40960, "lines": 900}
+      "css": {
+        "bytes": 61440,
+        "lines": 2000
+      },
+      "kotlin": {
+        "bytes": 40960,
+        "lines": 900
+      },
+      "lua": {
+        "bytes": 40960,
+        "lines": 900
+      },
+      "rust": {
+        "bytes": 40960,
+        "lines": 900
+      },
+      "svelte": {
+        "bytes": 30720,
+        "lines": 600
+      },
+      "swift": {
+        "bytes": 40960,
+        "lines": 900
+      },
+      "typescript": {
+        "bytes": 40960,
+        "lines": 900
+      }
     }
   },
   "baselines": {
-    "apps/lorepia/src-tauri/src/contract.rs": {"bytes": 83586, "lines": 2131},
-    "apps/lorepia/src-tauri/src/state.rs": {"bytes": 78974, "lines": 2112},
-    "apps/lorepia/src/app/app-controller.ts": {"bytes": 21618, "lines": 562},
-    "crates/chat/src/generation.rs": {"bytes": 103271, "lines": 2772},
-    "crates/content/src/package.rs": {"bytes": 116140, "lines": 3179},
-    "crates/core/src/catalog.rs": {"bytes": 83792, "lines": 2120},
-    "crates/core/src/module_orchestration.rs": {"bytes": 80611, "lines": 1925},
-    "crates/domain/src/discovery.rs": {"bytes": 175109, "lines": 4422},
-    "crates/domain/src/orchestration.rs": {"bytes": 167139, "lines": 4840},
-    "crates/domain/src/provider.rs": {"bytes": 93309, "lines": 2721},
-    "crates/orchestration/src/interactions.rs": {"bytes": 127891, "lines": 3353},
-    "crates/orchestration/src/modules.rs": {"bytes": 136696, "lines": 3644},
-    "crates/orchestration/src/package.rs": {"bytes": 82299, "lines": 2380},
-    "crates/orchestration/src/resolver.rs": {"bytes": 78360, "lines": 2016},
-    "crates/providers/src/anthropic_messages.rs": {"bytes": 119976, "lines": 3047},
-    "crates/providers/src/capability_probe.rs": {"bytes": 73467, "lines": 2085},
-    "crates/providers/src/catalog.rs": {"bytes": 116069, "lines": 3203},
-    "crates/providers/src/discovery/fetcher.rs": {"bytes": 70013, "lines": 2043},
-    "crates/providers/src/discovery/openapi.rs": {"bytes": 83155, "lines": 2475},
-    "crates/providers/src/gemini_generate_content.rs": {"bytes": 74369, "lines": 2068},
-    "crates/providers/src/ollama_native.rs": {"bytes": 78913, "lines": 2166},
-    "crates/providers/src/openai_compatible.rs": {"bytes": 126683, "lines": 3361},
-    "crates/providers/src/parameter_mapping.rs": {"bytes": 235689, "lines": 6545},
-    "crates/providers/src/prompt_contract.rs": {"bytes": 81927, "lines": 2036},
-    "crates/providers/src/registry.rs": {"bytes": 218947, "lines": 5578},
-    "crates/providers/src/setup_assistant.rs": {"bytes": 184720, "lines": 5010},
-    "crates/providers/src/url_policy.rs": {"bytes": 69213, "lines": 2027},
-    "crates/shell-api/src/discovery.rs": {"bytes": 112556, "lines": 2878},
-    "crates/shell-api/src/module_lifecycle.rs": {"bytes": 99773, "lines": 2416},
-    "crates/shell-api/src/orchestration.rs": {"bytes": 223704, "lines": 5861},
-    "crates/shell-api/src/package.rs": {"bytes": 110343, "lines": 2757},
-    "crates/shell-api/src/provider.rs": {"bytes": 114834, "lines": 3040},
-    "crates/storage/src/catalog.rs": {"bytes": 85986, "lines": 2410},
-    "crates/storage/src/cutover.rs": {"bytes": 82294, "lines": 2110},
-    "crates/storage/src/database.rs": {"bytes": 33656, "lines": 890},
-    "crates/storage/src/generation_attempt.rs": {"bytes": 163943, "lines": 4150},
-    "crates/storage/src/interaction_repository.rs": {"bytes": 30474, "lines": 813},
-    "crates/storage/src/memory_queue.rs": {"bytes": 231062, "lines": 6110},
-    "crates/storage/src/model_sync.rs": {"bytes": 129970, "lines": 3358},
-    "crates/storage/src/orchestration.rs": {"bytes": 28803, "lines": 765},
-    "crates/storage/src/provider_credential_repository.rs": {"bytes": 154521, "lines": 3949},
-    "plugins/lorepia-platform/src/desktop.rs": {"bytes": 204178, "lines": 5320},
-    "plugins/lorepia-platform/src/desktop/macos.rs": {"bytes": 81746, "lines": 2310}
+    "apps/lorepia/src-tauri/src/contract.rs": {
+      "bytes": 83586,
+      "lines": 2131
+    },
+    "apps/lorepia/src-tauri/src/state.rs": {
+      "bytes": 78974,
+      "lines": 2112
+    },
+    "apps/lorepia/src/app/app-controller.ts": {
+      "bytes": 21618,
+      "lines": 562
+    },
+    "crates/chat/src/generation.rs": {
+      "bytes": 103271,
+      "lines": 2772
+    },
+    "crates/content/src/package.rs": {
+      "bytes": 116140,
+      "lines": 3179
+    },
+    "crates/core/src/catalog.rs": {
+      "bytes": 83792,
+      "lines": 2120
+    },
+    "crates/core/src/module_orchestration.rs": {
+      "bytes": 80611,
+      "lines": 1925
+    },
+    "crates/domain/src/discovery.rs": {
+      "bytes": 175109,
+      "lines": 4422
+    },
+    "crates/domain/src/orchestration.rs": {
+      "bytes": 167139,
+      "lines": 4840
+    },
+    "crates/domain/src/provider.rs": {
+      "bytes": 93309,
+      "lines": 2721
+    },
+    "crates/orchestration/src/interactions.rs": {
+      "bytes": 127891,
+      "lines": 3353
+    },
+    "crates/orchestration/src/modules.rs": {
+      "bytes": 133309,
+      "lines": 3562
+    },
+    "crates/orchestration/src/package.rs": {
+      "bytes": 82299,
+      "lines": 2380
+    },
+    "crates/orchestration/src/resolver.rs": {
+      "bytes": 78360,
+      "lines": 2016
+    },
+    "crates/providers/src/anthropic_messages.rs": {
+      "bytes": 119976,
+      "lines": 3047
+    },
+    "crates/providers/src/capability_probe.rs": {
+      "bytes": 73467,
+      "lines": 2085
+    },
+    "crates/providers/src/catalog.rs": {
+      "bytes": 116069,
+      "lines": 3203
+    },
+    "crates/providers/src/discovery/fetcher.rs": {
+      "bytes": 70013,
+      "lines": 2043
+    },
+    "crates/providers/src/discovery/openapi.rs": {
+      "bytes": 83155,
+      "lines": 2475
+    },
+    "crates/providers/src/gemini_generate_content.rs": {
+      "bytes": 74369,
+      "lines": 2068
+    },
+    "crates/providers/src/ollama_native.rs": {
+      "bytes": 78913,
+      "lines": 2166
+    },
+    "crates/providers/src/openai_compatible.rs": {
+      "bytes": 126683,
+      "lines": 3361
+    },
+    "crates/providers/src/parameter_mapping.rs": {
+      "bytes": 235689,
+      "lines": 6545
+    },
+    "crates/providers/src/prompt_contract.rs": {
+      "bytes": 81927,
+      "lines": 2036
+    },
+    "crates/providers/src/registry.rs": {
+      "bytes": 218947,
+      "lines": 5578
+    },
+    "crates/providers/src/setup_assistant.rs": {
+      "bytes": 184720,
+      "lines": 5010
+    },
+    "crates/providers/src/url_policy.rs": {
+      "bytes": 69213,
+      "lines": 2027
+    },
+    "crates/shell-api/src/discovery.rs": {
+      "bytes": 112556,
+      "lines": 2878
+    },
+    "crates/shell-api/src/module_lifecycle.rs": {
+      "bytes": 99773,
+      "lines": 2416
+    },
+    "crates/shell-api/src/orchestration.rs": {
+      "bytes": 223704,
+      "lines": 5861
+    },
+    "crates/shell-api/src/package.rs": {
+      "bytes": 110343,
+      "lines": 2757
+    },
+    "crates/shell-api/src/provider.rs": {
+      "bytes": 114834,
+      "lines": 3040
+    },
+    "crates/storage/src/catalog.rs": {
+      "bytes": 85986,
+      "lines": 2410
+    },
+    "crates/storage/src/cutover.rs": {
+      "bytes": 82294,
+      "lines": 2110
+    },
+    "crates/storage/src/database.rs": {
+      "bytes": 33656,
+      "lines": 890
+    },
+    "crates/storage/src/generation_attempt.rs": {
+      "bytes": 159784,
+      "lines": 4048
+    },
+    "crates/storage/src/interaction_repository.rs": {
+      "bytes": 30474,
+      "lines": 813
+    },
+    "crates/storage/src/memory_queue.rs": {
+      "bytes": 231062,
+      "lines": 6110
+    },
+    "crates/storage/src/model_sync.rs": {
+      "bytes": 129970,
+      "lines": 3358
+    },
+    "crates/storage/src/orchestration.rs": {
+      "bytes": 28803,
+      "lines": 765
+    },
+    "crates/storage/src/provider_credential_repository.rs": {
+      "bytes": 154521,
+      "lines": 3949
+    },
+    "plugins/lorepia-platform/src/desktop.rs": {
+      "bytes": 204178,
+      "lines": 5320
+    },
+    "plugins/lorepia-platform/src/desktop/macos.rs": {
+      "bytes": 81746,
+      "lines": 2310
+    }
   }
 }

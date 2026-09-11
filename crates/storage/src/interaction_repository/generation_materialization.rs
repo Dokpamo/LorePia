@@ -1,3 +1,4 @@
+use crate::orchestration::module_plan_documents::{self as documents, Kind};
 use std::collections::BTreeSet;
 
 use chrono::{DateTime, Utc};
@@ -574,11 +575,11 @@ fn read_generation_attempt_append_snapshot(
         &raw.previous_knowledge_json,
         MAX_STATE_JSON_BYTES,
     )?;
-    let module_runtime_review: ModuleMergeReview = decode_json(
-        "generation append module runtime review",
-        &raw.module_runtime_review_json,
-        MAX_STATE_JSON_BYTES,
-    )?;
+    let module_runtime_review_json =
+        documents::expand(connection, Kind::Review, &raw.module_runtime_review_json)?;
+    let module_runtime_review: ModuleMergeReview =
+        serde_json::from_str(&module_runtime_review_json)
+            .map_err(|_| storage_corrupted("invalid generation module review JSON"))?;
     module_runtime_review.verify().map_err(|error| {
         storage_corrupted(format!(
             "generation append module runtime review is invalid: {error}"
@@ -657,12 +658,8 @@ fn read_generation_attempt_append_snapshot(
             MAX_STATE_JSON_BYTES,
         )? != raw.previous_knowledge_json
         || sha256_hex(raw.previous_knowledge_json.as_bytes()) != raw.previous_knowledge_sha256
-        || encode_json(
-            "generation append module runtime review",
-            &module_runtime_review,
-            MAX_STATE_JSON_BYTES,
-        )? != raw.module_runtime_review_json
-        || sha256_hex(raw.module_runtime_review_json.as_bytes()) != raw.module_runtime_review_sha256
+        || documents::encode(&module_runtime_review)? != module_runtime_review_json
+        || sha256_hex(module_runtime_review_json.as_bytes()) != raw.module_runtime_review_sha256
         || encode_json(
             "generation append memory head snapshot",
             &memory_head_snapshot,
@@ -738,21 +735,15 @@ fn read_generation_attempt_append_snapshot(
         .applied_runtime_plan_json
         .as_deref()
         .map(|json| {
-            let runtime: AppliedModuleRuntimePlan = decode_json(
-                "generation append applied module runtime plan",
-                json,
-                MAX_STATE_JSON_BYTES,
-            )?;
+            let expanded = documents::expand(connection, Kind::Runtime, json)?;
+            let runtime: AppliedModuleRuntimePlan = serde_json::from_str(&expanded)
+                .map_err(|_| storage_corrupted("invalid generation runtime plan JSON"))?;
             runtime.verify().map_err(|error| {
                 CoreError::invalid(format!(
                     "generation append runtime plan is invalid: {error}"
                 ))
             })?;
-            if encode_json(
-                "generation append applied module runtime plan",
-                &runtime,
-                MAX_STATE_JSON_BYTES,
-            )? != json
+            if documents::encode(&runtime)? != expanded
                 || runtime.applied_plan_sha256.as_str() != raw.applied_runtime_plan_sha256
                 || runtime.review != module_runtime_review
                 || runtime.derived_from_plan_sha256 != source_runtime_plan_sha256

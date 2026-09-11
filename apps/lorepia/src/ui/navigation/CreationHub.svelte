@@ -1,6 +1,6 @@
 <script lang="ts">
     import {
-        UserRoundPlus,
+        FileInput,
         BookOpen,
         SlidersHorizontal,
         Blocks,
@@ -70,12 +70,12 @@
         <div class="seed-content">
             <section class="seed-group">
                 <NavigationRow
-                    title={$tr('navigation.createCharacter')}
-                    description={$tr('navigation.createCharacterHint')}
+                    title={$tr('importSetup.fileTitle')}
+                    description={$tr('importSetup.fileHint')}
                     onclick={onimport}
                     disabled={!ready}
                 >
-                    {#snippet prefix()}<UserRoundPlus />{/snippet}
+                    {#snippet prefix()}<FileInput />{/snippet}
                 </NavigationRow>
             </section>
             <section class="seed-group">

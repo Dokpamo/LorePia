@@ -1,0 +1,87 @@
+.ui-preview .ui-chat[data-conversation-mode='default'] > .ui-messages {
+    padding-inline: 0;
+}
+.ui-preview [data-conversation-mode='default'] .ui-message-turn {
+    align-items: stretch;
+    padding: var(--ui-space-5) var(--ui-chat-inset) var(--ui-space-2);
+    background: var(--ui-soft);
+}
+.ui-preview [data-conversation-mode='default'] .ui-user-turn {
+    background: var(--ui-selected);
+}
+.ui-preview [data-conversation-mode='default'] .ui-message-body,
+.ui-preview [data-conversation-mode='story'] .ui-message-body {
+    width: 100%;
+    max-width: 100%;
+    padding: 0;
+    background: transparent;
+    border-radius: 0;
+}
+.ui-preview .ui-message-speaker {
+    display: flex;
+    align-items: center;
+    gap: var(--ui-space-3);
+    margin-bottom: var(--ui-space-3);
+    min-width: 0;
+}
+.ui-preview .ui-message-speaker strong {
+    font-size: var(--ui-type-secondary);
+    font-weight: 600;
+    color: var(--ui-heading);
+    overflow-wrap: anywhere;
+}
+.ui-preview .ui-message-avatar {
+    display: grid;
+    place-items: center;
+    flex: 0 0 36px;
+    width: 36px;
+    height: 36px;
+    overflow: hidden;
+    border-radius: 50%;
+    background: var(--ui-paper);
+    font-size: var(--ui-type-secondary);
+}
+.ui-preview .ui-message-avatar > svg {
+    width: 20px;
+    height: 20px;
+}
+.ui-preview .ui-message-tools {
+    display: flex;
+    align-items: center;
+    gap: var(--ui-space-1);
+    margin: var(--ui-space-2) -8px 0;
+}
+.ui-preview .ui-message-tools > .ui-icon-button {
+    width: 44px;
+    height: 44px;
+    min-height: 44px;
+}
+.ui-preview .ui-message-tools svg {
+    width: 20px;
+    height: 20px;
+}
+.ui-preview [data-conversation-mode='story'] .ui-message-turn {
+    align-items: stretch;
+}
+.ui-preview [data-conversation-mode='story'] .ui-message-body {
+    padding-block: 6px;
+    line-height: 1.8;
+}
+.ui-preview [data-conversation-mode='story'] .ui-user-turn .ui-message-body {
+    color: var(--ui-story-user);
+}
+.ui-preview [data-conversation-mode='default'] .ui-result-empty {
+    margin-inline: var(--ui-chat-inset);
+}
+.ui-preview .ui-transcript-extras {
+    display: contents;
+}
+.ui-preview [data-conversation-mode='default'] .ui-transcript-extras {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-inline: var(--ui-chat-inset);
+}
+.ui-preview .ui-transcript-extras:empty {
+    display: none;
+}

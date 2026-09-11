@@ -10,8 +10,11 @@
     import ChatMessage from './ChatMessage.svelte';
     import type { SampleCharacter, SampleConversation } from './view-types';
     import type { ChatSession } from './chat-session';
+    import type { LorepiaClient } from '../../lib/ipc/contracts';
     let {
         character,
+        client,
+        personaName,
         conversation,
         session,
         renderMessage,
@@ -24,6 +27,8 @@
         onwrite,
     }: {
         character: SampleCharacter;
+        client?: Pick<LorepiaClient, 'resolveAssetDelivery'>;
+        personaName?: string;
         conversation: SampleConversation;
         session: ChatSession;
         renderMessage?: Snippet<[SampleMessage, number]>;
@@ -85,10 +90,10 @@
                     includesDayDivider: false,
                 }}
             >
-                {#if viewport.start + index === 0}<div class="ui-date">
-                        <span>{conversation.date}</span>
-                    </div>{/if}
                 <ChatMessage
+                    {client}
+                    {personaName}
+                    mode={conversation.mode}
                     {message}
                     {character}
                     {session}
@@ -103,6 +108,6 @@
                 />
             </article>
         {/each}
-        {#if extras}{@render extras()}{/if}
+        {#if extras}<div class="ui-transcript-extras">{@render extras()}</div>{/if}
     </div>
 </div>

@@ -44,6 +44,9 @@ struct VerifiedAssetHandle {
     verified_at: Instant,
 }
 
+/// Identity evidence without an open descriptor; never used to serve renderer bytes.
+pub(crate) struct AssetIdentityProof(FileIdentity);
+
 pub(crate) struct AssetFileSnapshot {
     file: File,
     identity: FileIdentity,
@@ -114,9 +117,45 @@ impl FileIdentity {
 }
 
 impl AssetFileSnapshot {
+    pub(crate) fn same_verified_identity(&self, other: &Self) -> io::Result<bool> {
+        if self.identity != other.identity {
+            return Ok(false);
+        }
+        self.ensure_unchanged()?;
+        other.ensure_unchanged()?;
+        Ok(true)
+    }
+
+    pub(crate) fn verified_clone(&self) -> io::Result<Self> {
+        self.ensure_unchanged()?;
+        let cloned = Self {
+            file: self.file.try_clone()?,
+            identity: self.identity.clone(),
+        };
+        cloned.ensure_unchanged()?;
+        Ok(cloned)
+    }
+
     pub(crate) fn capture(file: File) -> io::Result<Self> {
         let identity = FileIdentity::read(&file)?;
         Ok(Self { file, identity })
+    }
+
+    pub(crate) fn into_identity_proof(self) -> io::Result<AssetIdentityProof> {
+        self.ensure_unchanged()?;
+        Ok(AssetIdentityProof(self.identity))
+    }
+
+    pub(crate) fn verify_identity_proof(&self, proof: &AssetIdentityProof) -> io::Result<()> {
+        self.ensure_unchanged()?;
+        if self.identity == proof.0 {
+            Ok(())
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "CAS file identity changed after verification",
+            ))
+        }
     }
 
     pub(crate) fn file_mut(&mut self) -> &mut File {
@@ -235,14 +274,18 @@ impl Default for VerifiedAssetCache {
     }
 }
 
+pub(crate) fn open_asset_file(root: &Path, sha256: &str) -> io::Result<File> {
+    open_cas_file(root, "assets", sha256)
+}
+
 /// Opens the exact digest file without following a final symlink or reparse point.
 #[cfg(any(target_os = "android", target_os = "linux", target_vendor = "apple"))]
-pub(crate) fn open_asset_file(root: &Path, sha256: &str) -> io::Result<File> {
+pub(crate) fn open_cas_file(root: &Path, namespace: &str, sha256: &str) -> io::Result<File> {
     use rustix::fs::{Mode, OFlags, open, openat};
 
     let directory_flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC | OFlags::NOFOLLOW;
     let file_flags = OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW;
-    let assets = open(root.join("assets"), directory_flags, Mode::empty())?;
+    let assets = open(root.join(namespace), directory_flags, Mode::empty())?;
     let sha256_dir = openat(&assets, "sha256", directory_flags, Mode::empty())?;
     let prefix = sha256
         .get(..2)
@@ -256,7 +299,7 @@ pub(crate) fn open_asset_file(root: &Path, sha256: &str) -> io::Result<File> {
 }
 
 #[cfg(windows)]
-pub(crate) fn open_asset_file(root: &Path, sha256: &str) -> io::Result<File> {
+pub(crate) fn open_cas_file(root: &Path, namespace: &str, sha256: &str) -> io::Result<File> {
     use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
     use windows_sys::Win32::Storage::FileSystem::{
         FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ,
@@ -269,7 +312,7 @@ pub(crate) fn open_asset_file(root: &Path, sha256: &str) -> io::Result<File> {
         .get(2..)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid asset digest"))?;
     let path = root
-        .join("assets")
+        .join(namespace)
         .join("sha256")
         .join(prefix)
         .join(basename);
@@ -325,16 +368,19 @@ fn windows_file_information(
     target_vendor = "apple",
     windows
 )))]
-pub(crate) fn open_asset_file(root: &Path, sha256: &str) -> io::Result<File> {
+pub(crate) fn open_cas_file(root: &Path, namespace: &str, sha256: &str) -> io::Result<File> {
     let prefix = sha256
         .get(..2)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid asset digest"))?;
     let basename = sha256
         .get(2..)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid asset digest"))?;
-    std::fs::OpenOptions::new()
-        .read(true)
-        .open(root.join("assets/sha256").join(prefix).join(basename))
+    std::fs::OpenOptions::new().read(true).open(
+        root.join(namespace)
+            .join("sha256")
+            .join(prefix)
+            .join(basename),
+    )
 }
 
 #[cfg(test)]

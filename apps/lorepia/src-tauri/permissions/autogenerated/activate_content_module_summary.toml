@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-activate-content-module-summary"
+description = "Enables the activate_content_module_summary command without any pre-configured scope."
+commands.allow = ["activate_content_module_summary"]
+
+[[permission]]
+identifier = "deny-activate-content-module-summary"
+description = "Denies the activate_content_module_summary command without any pre-configured scope."
+commands.deny = ["activate_content_module_summary"]

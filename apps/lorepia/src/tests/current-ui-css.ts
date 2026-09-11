@@ -26,6 +26,7 @@ import source24 from '../ui/workspace/ui-motion.css?raw';
 import source25 from '../ui/workspace/ui-responsive.css?raw';
 import source26 from '../ui/workspace/ui-scrollbars.css?raw';
 import source27 from '../ui/workspace/ui-tokens.css?raw';
+import source28 from '../ui/workspace/ui-chat-modes.css?raw';
 
 export default [
     source0,
@@ -56,4 +57,5 @@ export default [
     source25,
     source26,
     source27,
+    source28,
 ].join('\n');

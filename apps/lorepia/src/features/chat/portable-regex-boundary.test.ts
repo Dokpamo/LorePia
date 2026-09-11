@@ -11,8 +11,84 @@ import {
 import runtimeSource from './portable-runtime.ts?raw';
 import workerSource from './portable-regex.worker.ts?raw';
 
+function readyListener(type: string, listener: (event: MessageEvent<unknown>) => void): void {
+    if (type === 'message')
+        queueMicrotask(() =>
+            listener(new MessageEvent('message', { data: 'portable_regex_ready' })),
+        );
+}
+
 describe('portable regex isolation boundary', () => {
     afterEach(() => resetPortableRegexRuleFailuresForTests());
+
+    it('allows bounded worker startup before timing execution and reuses the ready worker', async () => {
+        const create = vi.fn(() => {
+            let listener: ((event: MessageEvent<unknown>) => void) | null = null;
+            setTimeout(
+                () => listener?.(new MessageEvent('message', { data: 'portable_regex_ready' })),
+                35,
+            );
+            return {
+                addEventListener: (type: string, callback: typeof listener) => {
+                    if (type === 'message') listener = callback;
+                },
+                removeEventListener: (type: string) => {
+                    if (type === 'message') listener = null;
+                },
+                postMessage: (request: { id: string }) =>
+                    queueMicrotask(() =>
+                        listener?.(
+                            new MessageEvent('message', {
+                                data: { id: request.id, result: { ok: true, value: true } },
+                            }),
+                        ),
+                    ),
+                terminate: vi.fn(),
+            } as unknown as Worker;
+        });
+        const restore = setPortableRegexWorkerFactoryForTests(create);
+        try {
+            for (let i = 0; i < 3; i += 1) {
+                await expect(
+                    runPortableRegex(
+                        { operation: 'test', pattern: 'a', source: 'a', flags: '' },
+                        5,
+                    ),
+                ).resolves.toEqual({ ok: true, value: true });
+            }
+            expect(create).toHaveBeenCalledOnce();
+        } finally {
+            restore();
+        }
+    });
+
+    it('does not disable a rule when the worker fails before execution', async () => {
+        const create = vi.fn(
+            () =>
+                ({
+                    addEventListener: (type: string, callback: () => void) => {
+                        if (type === 'error') queueMicrotask(callback);
+                    },
+                    removeEventListener: vi.fn(),
+                    postMessage: vi.fn(),
+                    terminate: vi.fn(),
+                }) as unknown as Worker,
+        );
+        const restore = setPortableRegexWorkerFactoryForTests(create);
+        try {
+            for (let i = 0; i < 2; i += 1) {
+                await expect(
+                    runPortableRegex(
+                        { operation: 'test', pattern: 'a', source: 'a', flags: '' },
+                        { timeoutMs: 5, ruleKey: 'cold' },
+                    ),
+                ).resolves.toEqual({ ok: false, reason: 'worker_error' });
+            }
+            expect(create).toHaveBeenCalledTimes(2);
+        } finally {
+            restore();
+        }
+    });
 
     it('keeps imported regular expressions out of renderer and runtime modules', () => {
         expect(displaySource).not.toContain('new RegExp(');
@@ -25,7 +101,7 @@ describe('portable regex isolation boundary', () => {
         const restore = setPortableRegexWorkerFactoryForTests(
             () =>
                 ({
-                    addEventListener: vi.fn(),
+                    addEventListener: readyListener,
                     removeEventListener: vi.fn(),
                     postMessage: vi.fn(),
                     terminate,
@@ -55,7 +131,7 @@ describe('portable regex isolation boundary', () => {
             activeWorkers += 1;
             maximumActiveWorkers = Math.max(maximumActiveWorkers, activeWorkers);
             return {
-                addEventListener: vi.fn(),
+                addEventListener: readyListener,
                 removeEventListener: vi.fn(),
                 postMessage: vi.fn(),
                 terminate: () => {
@@ -88,7 +164,7 @@ describe('portable regex isolation boundary', () => {
         const createWorker = vi.fn(
             () =>
                 ({
-                    addEventListener: vi.fn(),
+                    addEventListener: readyListener,
                     removeEventListener: vi.fn(),
                     postMessage: vi.fn(),
                     terminate: vi.fn(),
@@ -177,7 +253,7 @@ describe('portable regex isolation boundary', () => {
         const restore = setPortableRegexWorkerFactoryForTests(
             () =>
                 ({
-                    addEventListener: vi.fn(),
+                    addEventListener: readyListener,
                     removeEventListener: vi.fn(),
                     postMessage: vi.fn(),
                     terminate: vi.fn(),

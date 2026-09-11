@@ -1017,6 +1017,24 @@
         receipt.verify().expect("verify linked module receipt");
         assert_eq!(receipt.approved_components.len(), 3);
 
+        let selected = &receipt.approved_plan.plan.components;
+        let batch = core.storage().get_module_revision_components(selected)
+            .expect("load all exact children in one snapshot");
+        for (component, snapshot) in selected.iter().zip(&batch) {
+            assert_eq!(*snapshot, core.storage().get_module_revision_component(
+                &component.selected_source, &component.component, &component.sha256,
+            ).expect("single component material"));
+        }
+        assert_eq!(batch.len(), selected.len());
+        let mut stale = selected.clone();
+        stale[1].selected_source.revision_source_sha256 = Sha256Digest::parse("c".repeat(64)).unwrap();
+        assert!(core.storage().get_module_revision_components(&stale).is_err(),
+            "a reused parent must still match every requested source hash");
+        stale = selected.clone();
+        stale[1].sha256 = Sha256Digest::parse("d".repeat(64)).unwrap();
+        assert!(core.storage().get_module_revision_components(&stale).is_err(),
+            "batch reads must not return partial material after a child hash mismatch");
+
         let mut loaded_child_revisions = BTreeMap::new();
         for approved in &receipt.approved_components {
             assert_eq!(

@@ -4,7 +4,7 @@
     import { onMount, untrack } from 'svelte';
     import { ArrowDown, ArrowLeft, PanelRight } from '@lucide/svelte';
     import { tr } from '../../lib/i18n';
-    import type { MessageDto } from '../../lib/ipc/contracts';
+    import type { LorepiaClient, MessageDto } from '../../lib/ipc/contracts';
     import {
         ChatScrollLifecycle,
         type MessageCollectionSnapshot,
@@ -19,6 +19,8 @@
     import type { Page, SampleCharacter, SampleConversation } from './view-types';
     let {
         character,
+        client,
+        personaName,
         conversation,
         session,
         renderMessage,
@@ -34,6 +36,8 @@
         oninteract,
     }: {
         character: SampleCharacter;
+        client?: Pick<LorepiaClient, 'resolveAssetDelivery'>;
+        personaName?: string;
         conversation: SampleConversation;
         session: ChatSession;
         renderMessage?: Snippet<[SampleMessage, number]>;
@@ -99,10 +103,15 @@
             ':' +
             (conversation.mode ?? 'chat'),
     );
+    let noticeScope = untrack(
+        () => conversation.id + ':' + (conversation.activeBranchId ?? 'main'),
+    );
     $effect(() => {
         const key = branchKey;
+        const scope = conversation.id + ':' + (conversation.activeBranchId ?? 'main');
         untrack(() => {
-            notice = null;
+            if (noticeScope !== scope) notice = null;
+            noticeScope = scope;
             scroll.syncBranch(key, () => activate(null));
         });
     });
@@ -145,11 +154,16 @@
         <strong>{character.name}</strong><small>{conversation.title}</small>
     </div>
     {#if character.subpage && !creatorVisible}<IconButton
-            label={$tr('uiPreview.openSubpage')}
+            label={$tr('chat.runtime.openRoom')}
             onclick={() => onnavigate(2)}><PanelRight /></IconButton
         >{/if}
 </header>
+<div class="ui-chat-notices">
+    {#if notice}{#key notice.id}<UiNotice {notice} ondismiss={() => (notice = null)} />{/key}{/if}
+</div>
 <ChatTranscript
+    {client}
+    {personaName}
     {character}
     {conversation}
     {session}
@@ -167,7 +181,6 @@
             ?.focus()}
 />
 <div class="ui-chat-floaters">
-    {#if notice}{#key notice.id}<UiNotice {notice} ondismiss={() => (notice = null)} />{/key}{/if}
     <div
         class="ui-jump-latest"
         data-visible={!scroll.nearBottom}

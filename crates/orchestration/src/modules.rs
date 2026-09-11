@@ -1,5 +1,7 @@
 //! Deterministic content-module composition, review, and rollback planning.
 
+mod verification;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use lorepia_domain::{
@@ -173,26 +175,6 @@ pub struct ModuleMergeReview {
     pub effective_variable_overrides: VariableMap,
 }
 
-impl ModuleMergeReview {
-    pub fn verify(&self) -> Result<(), ModuleMergeError> {
-        let expected = module_merge_review_sha256(ModuleMergeReviewDigest {
-            state_revision: self.state_revision,
-            context: &self.context,
-            activation_binding_ids: &self.activation_binding_ids,
-            ordered_bindings: &self.ordered_bindings,
-            ignored_bindings: &self.ignored_bindings,
-            components: &self.components,
-            conflicts: &self.conflicts,
-            import_approvals: &self.import_approvals,
-            effective_variable_overrides: &self.effective_variable_overrides,
-        })?;
-        if expected != self.review_sha256 {
-            return Err(ModuleMergeError::ReviewHashMismatch);
-        }
-        Ok(())
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ModuleMergeResolutionSet {
@@ -235,25 +217,6 @@ pub type ModuleActivationReview = ModuleMergeReview;
 /// Hash-bound activation plan derived from [`ModuleActivationReview`].
 pub type ModuleActivationPlan = ResolvedModulePlan;
 
-impl ResolvedModulePlan {
-    pub fn verify(&self) -> Result<(), ModuleMergeError> {
-        let expected = resolved_module_plan_sha256(
-            &self.review_sha256,
-            self.expected_state_revision,
-            &self.activation_binding_ids,
-            &self.ordered_binding_ids,
-            &self.components,
-            &self.omitted_components,
-            &self.import_approvals,
-            &self.effective_variable_overrides,
-        )?;
-        if expected != self.plan_sha256 {
-            return Err(ModuleMergeError::PlanHashMismatch);
-        }
-        Ok(())
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ModuleActivationApproval {
@@ -268,21 +231,6 @@ pub struct ApprovedModuleActivationPlan {
     pub approval_sha256: Sha256Digest,
     pub approval_id: String,
     pub plan: ModuleActivationPlan,
-}
-
-impl ApprovedModuleActivationPlan {
-    pub fn verify(&self) -> Result<(), ModuleMergeError> {
-        self.plan.verify()?;
-        validate_activation_approval_id(&self.approval_id)?;
-        if self.plan.activation_binding_ids.len() != 1 {
-            return Err(ModuleMergeError::ActivationPlanRequired);
-        }
-        let expected = module_activation_approval_sha256(&self.approval_id, &self.plan)?;
-        if expected != self.approval_sha256 {
-            return Err(ModuleMergeError::ActivationApprovalHashMismatch);
-        }
-        Ok(())
-    }
 }
 
 /// Exact, hash-bound module composition that trusted runtime code may apply.
@@ -300,40 +248,6 @@ pub struct AppliedModuleRuntimePlan {
     pub derived_from_plan_sha256: Option<Sha256Digest>,
     pub review: ModuleMergeReview,
     pub plan: ResolvedModulePlan,
-}
-
-impl AppliedModuleRuntimePlan {
-    pub fn verify(&self) -> Result<(), ModuleMergeError> {
-        self.source_approval.verify()?;
-        self.review.verify()?;
-        self.plan.verify()?;
-        if !self.review.activation_binding_ids.is_empty()
-            || !self.plan.activation_binding_ids.is_empty()
-            || self.plan.review_sha256 != self.review.review_sha256
-            || self.plan.expected_state_revision != self.review.state_revision
-        {
-            return Err(ModuleMergeError::InvalidRuntimeMaterialization(
-                "runtime plans must resolve one no-pending-binding review".to_owned(),
-            ));
-        }
-        let resolutions = module_merge_resolution_set_from_plan(&self.review, &self.plan)?;
-        let reconstructed = resolve_module_merge(&self.review, &resolutions)?;
-        if reconstructed != self.plan {
-            return Err(ModuleMergeError::InvalidRuntimeMaterialization(
-                "runtime plan differs from its reviewed resolution".to_owned(),
-            ));
-        }
-        let expected = applied_module_runtime_plan_sha256(
-            &self.source_approval,
-            self.derived_from_plan_sha256.as_ref(),
-            &self.review,
-            &self.plan,
-        )?;
-        if expected != self.applied_plan_sha256 {
-            return Err(ModuleMergeError::RuntimePlanHashMismatch);
-        }
-        Ok(())
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]

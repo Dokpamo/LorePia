@@ -4,14 +4,87 @@ import {
     hasPortableDisplayTransform,
     mergePortableDisplayVariables,
     renderPortableDisplay,
+    renderPortableMacros,
 } from './portable-display';
 
 describe('portable display transforms', () => {
+    it('renders bounded card actions and responsive width conditions', () => {
+        const source = '{{#if {{? {{screen_width}} <= 600}}}}small{{:else}}wide{{/}}';
+        expect(renderPortableMacros(source, { variables: {}, screenWidth: 393 }, source)).toBe(
+            'small',
+        );
+        expect(renderPortableMacros(source, { variables: {}, screenWidth: 900 }, source)).toBe(
+            'wide',
+        );
+        expect(
+            renderPortableMacros('{{button::<script>::ToggleSettings}}', { variables: {} }, ''),
+        ).toBe('<button type="button" card-btn="ToggleSettings">&lt;script&gt;</button>');
+        expect(
+            renderPortableMacros('{{button::Label::invalid action}}', { variables: {} }, ''),
+        ).toBe('Label');
+    });
     const context = {
         variables: { mode: '0', enabled: '1' },
         chatIndex: 4,
         lastMessageId: 5,
     };
+
+    it('expands CBS patterns before regex compilation for empty and existing chats', async () => {
+        const transform = {
+            pattern:
+                '{{#if {{not_equal::{{lastmessageid}}::-1}} }}${{/}}{{#if {{equal::{{lastmessageid}}::-1}} }}※※{{/}}',
+            replacement:
+                '{{#if {{equal::{{chat_index}}::{{lastmessageid}}}}}}<button>Settings</button>{{/}}',
+            flags: 'gu<cbs>',
+        };
+        await expect(
+            renderPortableDisplay('hello', [transform], {
+                variables: {},
+                chatIndex: 0,
+                lastMessageId: 0,
+            }),
+        ).resolves.toBe('hello<button>Settings</button>');
+        await expect(
+            renderPortableDisplay('※※hello', [transform], {
+                variables: {},
+                chatIndex: -1,
+                lastMessageId: -1,
+            }),
+        ).resolves.toBe('<button>Settings</button>hello');
+        await expect(
+            renderPortableDisplay('older', [transform], {
+                variables: {},
+                chatIndex: 0,
+                lastMessageId: 1,
+            }),
+        ).resolves.toBe('older');
+    });
+
+    it('evaluates single-equals CBS settings and skips a disabled pattern entirely', async () => {
+        const transforms = [
+            {
+                pattern: '{{#if {{? {{getglobalvar::toggle_stopbracket}}=1}}}}x{{/if}}',
+                replacement: 'y',
+                flags: 'g<cbs>',
+            },
+        ];
+        await expect(
+            renderPortableDisplay('x', transforms, { variables: { toggle_stopbracket: '0' } }),
+        ).resolves.toBe('x');
+        await expect(
+            renderPortableDisplay('x', transforms, { variables: { toggle_stopbracket: '1' } }),
+        ).resolves.toBe('y');
+    });
+
+    it('does not accidentally enable dotAll from the CBS modifier', async () => {
+        await expect(
+            renderPortableDisplay(
+                'a\nb',
+                [{ pattern: 'a.b', replacement: 'bad', flags: 'g<cbs>' }],
+                context,
+            ),
+        ).resolves.toBe('a\nb');
+    });
 
     it('renders tagged blocks and evaluates nested portable conditions', async () => {
         const transforms = [

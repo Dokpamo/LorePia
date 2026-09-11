@@ -342,12 +342,18 @@ impl Core {
     ) -> CoreResult<PromptModuleOverlay> {
         let mut overlay = initialize_prompt_module_overlay(preset, preset_dependencies, approved)?;
 
-        for component in &approved.plan.components {
-            let snapshot = self.storage().get_module_revision_component(
-                &component.selected_source,
-                &component.component,
-                &component.sha256,
-            )?;
+        let snapshots = approved
+            .plan
+            .components
+            .chunks(8192)
+            .map(|components| self.storage().get_module_revision_components(components))
+            .collect::<CoreResult<Vec<_>>>()?;
+        for (component, snapshot) in approved
+            .plan
+            .components
+            .iter()
+            .zip(snapshots.into_iter().flatten())
+        {
             match (&component.component, snapshot) {
                 (
                     ModuleComponentRef::PromptBlock { .. },

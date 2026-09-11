@@ -12,11 +12,15 @@
     import DataAction from './DataAction.svelte';
     import DataChoice from './DataChoice.svelte';
     import DataNumber from './DataNumber.svelte';
+    import ModuleActivationReview from './ModuleActivationReview.svelte';
+    import { hasModulePages } from '../../../features/orchestration/module-activation-pages';
     let { services }: { services: SettingsServices } = $props();
     const controller = untrack(() => new ContentModuleLifecycleController(services.client));
     const controllerStore = controller.state;
+    let pageBusy = $state(false);
     const busy = $derived(
-        ['loading', 'reviewing', 'resolving', 'applying'].includes($controllerStore.phase),
+        pageBusy ||
+            ['loading', 'reviewing', 'resolving', 'applying'].includes($controllerStore.phase),
     );
     onMount(() => {
         void controller.loadContext(
@@ -33,6 +37,19 @@
             $controllerStore.activation !== null ||
             $controllerStore.rollback !== null ||
             $controllerStore.deactivation !== null
+        );
+    }
+    function begin(moduleId: string) {
+        if (!controller.beginActivation(moduleId)) return;
+        const approvals = $controllerStore.activation?.candidate.completed_package_approvals;
+        if (approvals?.length === 1 && approvals[0])
+            controller.selectCompletedPackageApproval(approvals[0].approval_id);
+    }
+    function applied() {
+        controller.clearReview();
+        void controller.loadContext(
+            services.appState.selected_conversation?.id ?? null,
+            services.appState.conversation_state?.active_branch_id ?? null,
         );
     }
 </script>
@@ -79,7 +96,18 @@
                 onSelect={(value: string) =>
                     controller.selectCompletedPackageApproval(value === '' ? null : value)}
             />{/if}
-        {#if activation.review}
+        {#if hasModulePages(services.client)}
+            {#key JSON.stringify(activation.request)}
+                <ModuleActivationReview
+                    client={services.client}
+                    {activation}
+                    onComplete={applied}
+                    onBusy={(value: boolean) => {
+                        pageBusy = value;
+                    }}
+                />
+            {/key}
+        {:else if activation.review}
             {#each activation.review.review.conflicts as conflict (contentModuleComponentKey(conflict.component))}<DataChoice
                     label={conflict.component.id + ' · ' + conflict.reason}
                     value={activation.conflict_choices[
@@ -120,11 +148,15 @@
             >{$tr('settingsLive.cancel')}</DataAction
         >
     {:else}
+        {#if !$controllerStore.runtime_target}<p>{$tr('importSetup.chooseRoom')}</p>
+        {:else if $controllerStore.phase === 'ready' && !$controllerStore.candidates.length}
+            <p>{$tr('importSetup.modulesEmpty')}</p>
+        {/if}
         {#each $controllerStore.candidates as item (item.module_id)}<SettingsRow
                 label={item.name}
                 value={item.version}
                 disabled={busy || !item.local_use_allowed}
-                onclick={() => controller.beginActivation(item.module_id)}
+                onclick={() => begin(item.module_id)}
             />{/each}
         {#each $controllerStore.bindings as item (item.binding.binding.id)}<DataAction
                 disabled={busy}
@@ -143,6 +175,20 @@
             >{$tr('settingsLive.cancel')}</DataAction
         >{/if}
     <RollbackData {controller} lifecycle={$controllerStore} {busy} />
-    {#if $controllerStore.error}<p role="alert">{$controllerStore.error}</p>{/if}
-    {#if $controllerStore.announcement}<p role="status">{$controllerStore.announcement}</p>{/if}
+    {#if $controllerStore.error}<p role="alert">
+            {$controllerStore.error === 'error.storage_unavailable'
+                ? $tr('importSetup.moduleError')
+                : $controllerStore.error}
+        </p>
+        <DataAction
+            disabled={busy}
+            onclick={() =>
+                void controller.loadContext(
+                    services.appState.selected_conversation?.id ?? null,
+                    services.appState.conversation_state?.active_branch_id ?? null,
+                )}>{$tr('settingsLive.retry')}</DataAction
+        >
+    {:else if $controllerStore.announcement}<p role="status">
+            {$controllerStore.announcement}
+        </p>{/if}
 </section>

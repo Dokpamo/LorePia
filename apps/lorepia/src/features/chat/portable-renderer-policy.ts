@@ -308,19 +308,40 @@ const ALLOWED_CSS_PROPERTIES = new Set([
 const UNSAFE_CSS_VALUE =
     /(?:url|image-set|-webkit-image-set|cross-fade|element|paint|var|env|attr|expression)\s*\(|(?:javascript|data|file|lorepia-asset|https?):/i;
 const VIEWPORT_UNIT = /(?:^|[^a-z0-9_-])[-+]?(?:\d*\.)?\d+(?:d?v[wh]|s?v[wh]|l?v[wh]|vmin|vmax)\b/i;
+export type PortableSurface = 'message' | 'room';
+// Room CSS stays inside a fixed-size opaque iframe below trusted app chrome.
+// The message policy remains unchanged; imported markup cannot select this mode.
+const ROOM_LAYOUT_PROPERTIES = new Set([
+    'inset',
+    'inset-block',
+    'inset-inline',
+    'top',
+    'right',
+    'bottom',
+    'left',
+    'z-index',
+    'pointer-events',
+    'content',
+    'all',
+]);
+
 const SAFE_ACTION = /^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,511}$/;
 
 export function isPortableAction(value: unknown): value is string {
     return typeof value === 'string' && SAFE_ACTION.test(value);
 }
 
-export function sanitizePortableCss(value: string, ownerDocument: Document = document): string {
+export function sanitizePortableCss(
+    value: string,
+    ownerDocument: Document = document,
+    surface: PortableSurface = 'message',
+): string {
     if (
         value === '' ||
         value.length > MAX_PORTABLE_CSS_CHARS ||
         value.includes('\0') ||
         value.includes('\\') ||
-        /[<>]/.test(value)
+        value.includes('<')
     ) {
         return '';
     }
@@ -332,7 +353,7 @@ export function sanitizePortableCss(value: string, ownerDocument: Document = doc
         sheet.replaceSync(value);
         const rules = sheet.cssRules;
         if (rules.length > MAX_PORTABLE_CSS_RULES) return '';
-        return sanitizeRuleList(rules);
+        return sanitizeRuleList(rules, surface);
     } catch {
         return '';
     }
@@ -341,6 +362,7 @@ export function sanitizePortableCss(value: string, ownerDocument: Document = doc
 export function sanitizePortableInlineStyle(
     value: string,
     ownerDocument: Document = document,
+    surface: PortableSurface = 'message',
 ): string {
     if (
         value === '' ||
@@ -353,10 +375,14 @@ export function sanitizePortableInlineStyle(
     }
     const element = ownerDocument.createElement('span');
     element.style.cssText = value;
-    return sanitizeDeclaration(element.style);
+    return sanitizeDeclaration(element.style, surface);
 }
 
-export function sanitizePortableTree(root: HTMLElement, mediaUrls: ReadonlySet<string>): void {
+export function sanitizePortableTree(
+    root: HTMLElement,
+    mediaUrls: ReadonlySet<string>,
+    surface: PortableSurface = 'message',
+): void {
     const elements = [root, ...root.querySelectorAll('*')];
     for (const element of elements) {
         if (element !== root && !root.contains(element)) continue;
@@ -365,7 +391,11 @@ export function sanitizePortableTree(root: HTMLElement, mediaUrls: ReadonlySet<s
             continue;
         }
         if (element instanceof HTMLStyleElement) {
-            element.textContent = sanitizePortableCss(element.textContent, root.ownerDocument);
+            element.textContent = sanitizePortableCss(
+                element.textContent,
+                root.ownerDocument,
+                surface,
+            );
         }
         for (const attribute of [...element.attributes]) {
             const name = attribute.name.toLowerCase();
@@ -384,7 +414,7 @@ export function sanitizePortableTree(root: HTMLElement, mediaUrls: ReadonlySet<s
                 continue;
             }
             if (name === 'style') {
-                const sanitized = sanitizePortableInlineStyle(value, root.ownerDocument);
+                const sanitized = sanitizePortableInlineStyle(value, root.ownerDocument, surface);
                 if (sanitized === '') element.removeAttribute(attribute.name);
                 else element.setAttribute(name, sanitized);
             }
@@ -405,10 +435,10 @@ export function sanitizePortableTree(root: HTMLElement, mediaUrls: ReadonlySet<s
     }
 }
 
-function sanitizeRuleList(rules: CSSRuleList): string {
+function sanitizeRuleList(rules: CSSRuleList, surface: PortableSurface): string {
     const output: string[] = [];
     for (const rule of rules) {
-        const sanitized = sanitizeRule(rule);
+        const sanitized = sanitizeRule(rule, surface);
         if (sanitized !== '') output.push(sanitized);
     }
     return output.join('\n').slice(0, MAX_PORTABLE_CSS_CHARS);
@@ -420,7 +450,7 @@ function legacyCssRuleType(rule: CSSRule): unknown {
     return Reflect.get(rule, 'type');
 }
 
-function sanitizeRule(rule: CSSRule): string {
+function sanitizeRule(rule: CSSRule, surface: PortableSurface): string {
     if (
         legacyCssRuleType(rule) === PORTABLE_STYLE_RULE &&
         'selectorText' in rule &&
@@ -434,7 +464,7 @@ function sanitizeRule(rule: CSSRule): string {
         ) {
             return '';
         }
-        const declaration = sanitizeDeclaration(rule.style as CSSStyleDeclaration);
+        const declaration = sanitizeDeclaration(rule.style as CSSStyleDeclaration, surface);
         return declaration === '' ? '' : `${selector}{${declaration}}`;
     }
     if (
@@ -450,7 +480,7 @@ function sanitizeRule(rule: CSSRule): string {
         ) {
             return '';
         }
-        const children = sanitizeRuleList(rule.cssRules as CSSRuleList);
+        const children = sanitizeRuleList(rule.cssRules as CSSRuleList, surface);
         return children === '' ? '' : `@media ${condition}{${children}}`;
     }
     if (
@@ -477,7 +507,7 @@ function sanitizeRule(rule: CSSRule): string {
             ) {
                 continue;
             }
-            const declaration = sanitizeDeclaration(frame.style as CSSStyleDeclaration);
+            const declaration = sanitizeDeclaration(frame.style as CSSStyleDeclaration, surface);
             if (declaration !== '') frames.push(`${key}{${declaration}}`);
         }
         return frames.length === 0 ? '' : `@keyframes ${name}{${frames.join('')}}`;
@@ -485,22 +515,34 @@ function sanitizeRule(rule: CSSRule): string {
     return '';
 }
 
-function sanitizeDeclaration(style: CSSStyleDeclaration): string {
+function sanitizeDeclaration(style: CSSStyleDeclaration, surface: PortableSurface): string {
     const declarations: string[] = [];
     for (let index = 0; index < style.length; index += 1) {
         const property = style.item(index).toLowerCase();
         const value = style.getPropertyValue(property).trim();
         if (
-            !ALLOWED_CSS_PROPERTIES.has(property) ||
+            (!ALLOWED_CSS_PROPERTIES.has(property) &&
+                !(surface === 'room' && ROOM_LAYOUT_PROPERTIES.has(property))) ||
             value === '' ||
             value.length > MAX_PORTABLE_CSS_VALUE_CHARS ||
             value.includes('\\') ||
             UNSAFE_CSS_VALUE.test(value) ||
-            VIEWPORT_UNIT.test(value)
+            (surface !== 'room' && VIEWPORT_UNIT.test(value))
         ) {
             continue;
         }
-        if (property === 'position' && !/^(?:static|relative)$/.test(value)) continue;
+        if (property === 'content' && !/^(?:"[^"\\]*"|'[^'\\]*'|none|normal)$/.test(value))
+            continue;
+        if (property === 'all' && !/^(?:unset|initial)$/.test(value)) continue;
+        if (
+            property === 'position' &&
+            !(
+                surface === 'room'
+                    ? /^(?:static|relative|absolute|fixed|sticky)$/
+                    : /^(?:static|relative)$/
+            ).test(value)
+        )
+            continue;
         declarations.push(`${property}:${value};`);
     }
     return declarations.join('');

@@ -21,6 +21,37 @@ beforeAll(() => {
 afterEach(cleanup);
 
 describe('connected workspace', () => {
+    it('keeps the same room profile when chat publications update the root store', async () => {
+        const client = createPreviewClient();
+        const character = required((await client.listCharacters())[0]);
+        const conversation = required((await client.listConversations(character.id))[0]);
+        const readProfile = vi.spyOn(client, 'getCharacterRenderProfile');
+        const sendMessage = vi.spyOn(client, 'sendMessage');
+        render(WorkspaceApp, { client });
+        await fireEvent.click(screen.getByRole('button', { name: t('navigation.chats') }));
+        await fireEvent.click(
+            await screen.findByRole('button', {
+                name: new RegExp('^' + conversation.title + ' ·'),
+            }),
+        );
+        const input = await screen.findByRole('textbox', { name: t('uiPreview.message') });
+        await waitFor(() =>
+            expect(
+                readProfile.mock.calls.some(
+                    ([id, scope]) =>
+                        id === character.id &&
+                        scope?.conversation_id === conversation.id &&
+                        typeof scope.branch_id === 'string',
+                ),
+            ).toBe(true),
+        );
+        const calls = readProfile.mock.calls.length;
+        await fireEvent.input(input, { target: { value: 'A new message' } });
+        await fireEvent.submit(required(input.closest('form') ?? undefined));
+        await waitFor(() => expect(sendMessage).toHaveBeenCalled());
+        await waitFor(() => expect(input).toHaveValue(''));
+        expect(readProfile.mock.calls.length).toBe(calls);
+    });
     it('keeps the empty-library CTA out of bootstrap and a pending character list', async () => {
         const client = createPreviewClient();
         const characters = await client.listCharacters();

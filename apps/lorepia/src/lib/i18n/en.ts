@@ -3,6 +3,12 @@ import { enNavigation } from './en-navigation';
 
 export const en = {
     ...enNavigation,
+    'uiPreview.defaultMode': 'Default',
+    'uiPreview.defaultModeHint': 'See each profile and message in its own section',
+    'uiPreview.storyMode': 'Novel',
+    'uiPreview.storyModeHint': 'Read flowing text, with your writing in a different color',
+    'uiPreview.chatMode': 'Chat',
+    'uiPreview.chatModeHint': 'Exchange messages in bubbles',
     'workspace.noPersona': 'Start without a persona',
     'workspace.startingScene': 'Starting scene',
     'workspace.finishStart':

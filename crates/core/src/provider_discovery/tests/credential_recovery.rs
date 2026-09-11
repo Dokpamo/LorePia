@@ -238,7 +238,7 @@ fn schema36_started_cancel_crash_upgrades_without_synthesizing_physical_authorit
     .expect("upgrade genuine schema-36 Started cancellation");
     assert_eq!(
         upgraded.storage().schema_version().expect("schema version"),
-        41
+        42
     );
     upgraded
         .get_provider_discovery_credential_install_context(&committing.session.id)

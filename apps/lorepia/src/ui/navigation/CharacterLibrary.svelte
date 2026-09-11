@@ -35,7 +35,8 @@
     <div class="seed-character-grid">
         {#each items as item (item.id)}
             <button
-                class="seed-character-card"
+                class="seed-character-card ui-pressable"
+                data-press-feedback="scale"
                 aria-label={$tr('uiPreview.cardSelect', { name: item.name })}
                 onclick={() => onselect(item.id)}
             >

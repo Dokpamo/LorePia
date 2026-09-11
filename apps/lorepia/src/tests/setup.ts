@@ -5,6 +5,11 @@ import { setPortableRegexWorkerFactoryForTests } from '../features/chat/portable
 
 setPortableRegexWorkerFactoryForTests(() => {
     let messageListener: EventListenerOrEventListenerObject | null = null;
+    queueMicrotask(() => {
+        const event = { data: 'portable_regex_ready' } as MessageEvent;
+        if (typeof messageListener === 'function') messageListener(event);
+        else messageListener?.handleEvent(event);
+    });
     return {
         addEventListener: (type: string, listener: EventListenerOrEventListenerObject) => {
             if (type === 'message') messageListener = listener;
