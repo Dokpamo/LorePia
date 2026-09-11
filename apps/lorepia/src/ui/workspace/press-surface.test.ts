@@ -1,7 +1,6 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
+import { cleanup, render } from '@testing-library/svelte';
 import { afterEach, describe, expect, it } from 'vitest';
-import { t } from '../../lib/i18n';
-import UiPreview from '../../preview/ui/UiPreview.svelte';
+import EditField from './EditField.svelte';
 import { styleRules } from '../../tests/css-rules';
 import editing from './ui-editing.css?raw';
 import layout from './ui-layout.css?raw';
@@ -14,9 +13,13 @@ const declarations = (selector: string) =>
 afterEach(cleanup);
 
 describe('button visual surfaces', () => {
-    it('keeps the edit-field label and arrow inside one scalable visual', async () => {
-        const { container } = render(UiPreview);
-        await fireEvent.click(screen.getByRole('button', { name: t('uiPreview.cardSettings') }));
+    it('keeps the edit-field label and arrow inside one scalable visual', () => {
+        const { container } = render(EditField, {
+            label: 'Title',
+            value: 'Current field',
+            maxlength: 100,
+            onchange: () => undefined,
+        });
         const field = container.querySelector('.ui-edit-field');
         expect(field).not.toBeNull();
         expect(field?.children).toHaveLength(1);

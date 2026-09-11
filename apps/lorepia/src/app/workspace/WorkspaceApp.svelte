@@ -221,6 +221,7 @@
             client={appClient}
             ondetail={(active: boolean) => (rootDetails.home = active)}
             ready={appState.bootstrap.phase === 'ready'}
+            loaded={appState.library.phase === 'ready'}
             onselect={(id: string) => void selectCharacter(id)}
             onadd={() => void controller.beginImport()}
         />

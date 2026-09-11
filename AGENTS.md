@@ -146,7 +146,7 @@
 - Shell API: `cargo test -p lorepia-shell-api`
 - Tauri shell: `cargo test -p lorepia-tauri --lib`
 - Frontend: `npm run check --prefix apps/lorepia` and, for example,
-  `npm run test --prefix apps/lorepia -- src/features/chat/ChatPane.test.ts`.
+  `npm run test --prefix apps/lorepia -- src/ui/workspace/MessageComposer.test.ts`.
 - IPC/architecture:
   `python3 scripts/generate_ipc_commands.py --check` and
   `python3 scripts/check_source_architecture.py --base-ref "$(git merge-base HEAD main)"`.

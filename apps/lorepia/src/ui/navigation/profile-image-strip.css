@@ -48,13 +48,11 @@
 .ui-preview .seed-image-strip .seed-image-strip-item {
     cursor: inherit;
 }
-.ui-preview .seed-image-strip[data-strip-dragging='true'] .ui-pressable:active > .ui-press-visual {
-    transform: none;
-}
 .seed-image-strip::-webkit-scrollbar {
     display: none;
 }
 .seed-image-strip-item {
+    -webkit-tap-highlight-color: transparent;
     flex: 0 0 48px;
     width: 48px;
     height: 56px;

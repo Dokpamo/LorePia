@@ -18,7 +18,6 @@
     {#each images as image (image.assetId)}
         <button
             type="button"
-            class="ui-pressable"
             aria-label={$tr('navigation.imageSelectItem', { name: image.title })}
             onclick={(event) => onview(image, event.currentTarget)}
         >

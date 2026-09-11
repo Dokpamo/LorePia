@@ -12,6 +12,7 @@
         characters,
         client,
         ready,
+        loaded = ready,
         onselect,
         onadd,
         ondetail,
@@ -19,6 +20,7 @@
         characters: SampleCharacter[];
         client: LorepiaClient;
         ready: boolean;
+        loaded?: boolean;
         onselect: (id: string) => void;
         onadd: () => void;
         ondetail: (active: boolean) => void;
@@ -33,7 +35,7 @@
     <div class="seed-character-grid">
         {#each items as item (item.id)}
             <button
-                class="seed-character-card ui-pressable"
+                class="seed-character-card"
                 aria-label={$tr('uiPreview.cardSelect', { name: item.name })}
                 onclick={() => onselect(item.id)}
             >
@@ -76,10 +78,10 @@
     <div class="seed-content seed-library">
         {#if characters.length > 0}
             {@render cards(library)}
-        {:else}
+        {:else if loaded}
             <div class="seed-empty">
                 <Users aria-hidden="true" />
-                <h3>{ready ? $tr('workspace.emptyLibrary') : $tr('workspace.loading')}</h3>
+                <h3>{$tr('workspace.emptyLibrary')}</h3>
             </div>
             <button class="seed-primary ui-pressable" disabled={!ready} onclick={onadd}
                 ><span class="ui-press-visual"

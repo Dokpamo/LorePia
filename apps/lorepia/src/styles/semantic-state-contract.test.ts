@@ -1,58 +1,25 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import ChatErrorRegion from '../features/chat/ChatErrorRegion.svelte';
-import { styleRules } from '../tests/css-rules';
-import appCss from './app-css';
+import UiNotice from '../ui/workspace/UiNotice.svelte';
+import { t } from '../lib/i18n';
 
-afterEach(cleanup);
+afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+});
 
-describe('semantic feedback', () => {
-    it('defines complete semantic feedback palettes for every theme', () => {
-        const palettes = styleRules(appCss).filter(
-            (rule) => rule.declarations['--status-error-fg'],
-        );
-        expect(palettes.length).toBeGreaterThanOrEqual(2);
-        for (const palette of palettes) {
-            for (const state of ['error', 'warning', 'success', 'info']) {
-                for (const part of ['fg', 'bg', 'border'])
-                    expect(
-                        palette.declarations[`--status-${state}-${part}`],
-                        palette.selector,
-                    ).toBeTruthy();
-            }
-        }
-    });
-
-    it('announces independent errors and dispatches the matching dismiss action', async () => {
-        const onDismissChat = vi.fn();
-        const onDismissRuntime = vi.fn();
-        const onDismissInteraction = vi.fn();
-        const result = render(ChatErrorRegion, {
-            chatError: 'Chat failed',
-            runtimeError: 'Runtime failed',
-            interactionError: 'Interaction failed',
-            onDismissChat,
-            onDismissRuntime,
-            onDismissInteraction,
-        });
-        expect(screen.getAllByRole('alert')).toHaveLength(3);
-        const runtimeAlert = screen.getByText('Runtime failed').closest('[role=alert]');
-        if (!(runtimeAlert instanceof HTMLElement)) throw new Error('Missing runtime alert');
-        const dismissRuntime = within(runtimeAlert).getByRole('button');
-        expect(dismissRuntime).toHaveAccessibleName();
-        await fireEvent.click(dismissRuntime);
-        expect(onDismissRuntime).toHaveBeenCalledOnce();
-        expect(onDismissChat).not.toHaveBeenCalled();
-        expect(onDismissInteraction).not.toHaveBeenCalled();
-        await result.rerender({
-            chatError: 'Chat failed',
-            runtimeError: null,
-            interactionError: null,
-            onDismissChat,
-            onDismissRuntime,
-            onDismissInteraction,
-        });
-        expect(screen.getAllByRole('alert')).toHaveLength(1);
-        expect(screen.getByRole('alert')).toHaveTextContent('Chat failed');
+describe('current semantic feedback', () => {
+    it('keeps a retryable failure announced and actionable until it is dismissed', async () => {
+        vi.useFakeTimers();
+        const retry = vi.fn();
+        const ondismiss = vi.fn();
+        render(UiNotice, { notice: { id: 1, text: 'Failed to copy', retry }, ondismiss });
+        expect(screen.getByRole('status')).toHaveTextContent('Failed to copy');
+        await vi.advanceTimersByTimeAsync(10000);
+        expect(ondismiss).not.toHaveBeenCalled();
+        await fireEvent.click(screen.getByRole('button', { name: t('uiPreview.retryReply') }));
+        expect(retry).toHaveBeenCalledOnce();
+        await fireEvent.click(screen.getByRole('button', { name: t('uiPreview.dismissNotice') }));
+        expect(ondismiss).toHaveBeenCalledOnce();
     });
 });

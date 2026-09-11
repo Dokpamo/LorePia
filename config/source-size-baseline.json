@@ -6,15 +6,11 @@
     "apps/lorepia/src-tauri/src/main.rs",
     "apps/lorepia/src-tauri/src/provider_commands.rs",
     "apps/lorepia/src/app/app-controller.ts",
-    "apps/lorepia/src/features/chat/ChatPane.svelte",
-    "apps/lorepia/src/features/orchestration/OrchestrationStudio.svelte",
     "apps/lorepia/src/features/orchestration/orchestration-controller.ts",
-    "apps/lorepia/src/features/providers/ProviderSettings.svelte",
     "apps/lorepia/src/lib/ipc/client.ts",
     "apps/lorepia/src/lib/ipc/contracts.ts",
     "apps/lorepia/src/main.ts",
     "apps/lorepia/src/preview/main.ts",
-    "apps/lorepia/src/styles/app.css",
     "crates/core/src/app.rs",
     "crates/core/src/content_package.rs",
     "crates/core/src/orchestration.rs",
@@ -40,32 +36,21 @@
       "apps/lorepia/src/app/operations/",
       "apps/lorepia/src/app/tests/"
     ],
-    "apps/lorepia/src/features/chat/ChatPane.svelte": [
+    "apps/lorepia/src/app/workspace/WorkspaceApp.svelte": [
       "apps/lorepia/src/features/chat/"
     ],
-    "apps/lorepia/src/features/orchestration/OrchestrationStudio.svelte": [
-      "apps/lorepia/src/features/orchestration/studio/"
+    "apps/lorepia/src/app/workspace/WorkspaceFeatures.svelte": [
+      "apps/lorepia/src/features/providers/settings/"
     ],
     "apps/lorepia/src/features/orchestration/orchestration-controller.ts": [
       "apps/lorepia/src/features/orchestration/controllers/",
       "apps/lorepia/src/features/orchestration/tests/"
-    ],
-    "apps/lorepia/src/features/providers/ProviderSettings.svelte": [
-      "apps/lorepia/src/features/providers/settings/"
     ],
     "apps/lorepia/src/lib/ipc/client.ts": [
       "apps/lorepia/src/lib/ipc/clients/"
     ],
     "apps/lorepia/src/lib/ipc/contracts.ts": [
       "apps/lorepia/src/lib/ipc/contracts/"
-    ],
-    "apps/lorepia/src/styles/app.css": [
-      "apps/lorepia/src/styles/app-css.ts",
-      "apps/lorepia/src/styles/app/",
-      "apps/lorepia/src/styles/chat/",
-      "apps/lorepia/src/styles/orchestration/",
-      "apps/lorepia/src/styles/provider/",
-      "apps/lorepia/src/styles/shared/"
     ],
     "crates/core/src/app.rs": [
       "crates/core/src/app/"
@@ -146,7 +131,6 @@
     "apps/lorepia/src-tauri/src/contract.rs": {"bytes": 83586, "lines": 2131},
     "apps/lorepia/src-tauri/src/state.rs": {"bytes": 78974, "lines": 2112},
     "apps/lorepia/src/app/app-controller.ts": {"bytes": 21618, "lines": 562},
-    "apps/lorepia/src/features/chat/ChatPane.svelte": {"bytes": 24126, "lines": 600},
     "crates/chat/src/generation.rs": {"bytes": 103271, "lines": 2772},
     "crates/content/src/package.rs": {"bytes": 116140, "lines": 3179},
     "crates/core/src/catalog.rs": {"bytes": 83792, "lines": 2120},

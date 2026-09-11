@@ -1,15 +1,9 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
+import { cleanup, fireEvent, screen } from '@testing-library/svelte';
 import { afterEach, describe, expect, it } from 'vitest';
-import UiPreview from '../../preview/ui/UiPreview.svelte';
-import { createSampleCharacters } from '../../preview/ui/sample-data';
-import { t } from '../../lib/i18n';
+import { openWorkspaceChat } from '../../tests/workspace-chat';
 afterEach(cleanup);
 async function setup() {
-    render(UiPreview);
-    const chat = createSampleCharacters()[0]?.histories[0];
-    if (!chat) throw new Error('Missing sample conversation');
-    await fireEvent.click(screen.getByRole('button', { name: `${chat.title} · ${chat.date}` }));
-    const input = screen.getByRole('textbox', { name: t('uiPreview.message') });
+    const { input } = await openWorkspaceChat();
     const field = input.closest('.ui-compose-field');
     input.focus();
     await fireEvent.focusIn(input);

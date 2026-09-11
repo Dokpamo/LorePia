@@ -1,9 +1,8 @@
-import { t } from '../lib/i18n';
 import { get } from 'svelte/store';
-import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
+import { cleanup, fireEvent, screen } from '@testing-library/svelte';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import App from '../app/App.svelte';
+import { openWorkspaceChat } from '../tests/workspace-chat';
 import { LorepiaAppController } from '../app/app-controller';
 import { OrchestrationController } from '../features/orchestration/orchestration-controller';
 import { PersonaController } from '../features/personas/persona-controller';
@@ -116,26 +115,7 @@ describe('preview demo client', () => {
     });
 
     it('boots the connected mobile demo and keeps chat input interactive', async () => {
-        render(App, {
-            client: createPreviewClient(),
-            initialSelection: {
-                characterId: DEMO_INITIAL_CHARACTER_ID,
-                conversationId: DEMO_INITIAL_CONVERSATION_ID,
-            },
-        });
-
-        const character = await screen.findByRole('button', {
-            name: /아리아 오래된 항해 기록/,
-        });
-        expect(character).toBeEnabled();
-
-        await fireEvent.click(screen.getByRole('button', { name: t('mobile.nav.chat') }));
-        const conversation = await screen.findByRole('button', {
-            name: /잊혀진 서고/,
-        });
-        await fireEvent.click(conversation);
-
-        const textbox = await screen.findByRole('textbox', { name: '메시지' });
+        const { input: textbox } = await openWorkspaceChat();
         await fireEvent.input(textbox, { target: { value: '데모 입력 확인' } });
         expect(screen.getByRole('button', { name: '메시지 보내기' })).toBeEnabled();
     });

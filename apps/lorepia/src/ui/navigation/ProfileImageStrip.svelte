@@ -82,7 +82,7 @@
         {#each images as image, i (image.assetId)}
             <button
                 type="button"
-                class="seed-image-strip-item ui-pressable"
+                class="seed-image-strip-item"
                 aria-label={$tr('navigation.imageThumbnail', { number: i + 1, name: image.title })}
                 aria-pressed={i === index}
                 tabindex={i === index ? 0 : -1}

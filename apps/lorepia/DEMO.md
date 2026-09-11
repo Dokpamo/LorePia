@@ -10,6 +10,8 @@ npm run tauri:demo
 
 이 명령은 `preview.html`과 데모 전용 클라이언트를 실제 Tauri 창에 연결합니다. 일반 `npm run tauri -- dev`는 계속 실제 로컬 데이터 모드로 실행됩니다.
 
+`preview.html`과 `ui-preview.html`은 모두 현재 앱과 같은 홈·채팅·생성·설정 화면을 사용합니다.
+
 ## 포함된 화면 데이터
 
 - 캐릭터 4명과 캐릭터별 인사말
@@ -24,5 +26,5 @@ npm run tauri:demo
 
 - `src/preview/demo-data.ts`: 데모 데이터 원본
 - `src/preview/mock-client.ts`: 화면 동작을 연결하는 상태형 인메모리 클라이언트
-- `src/preview/main.ts`: 데모 진입점과 최초 캐릭터·대화 선택
+- `src/preview/main.ts`: 현재 화면에 데모 클라이언트와 이미지 데이터를 주입하는 공통 진입점
 - `src-tauri/tauri.demo.conf.json`: Tauri 데모 실행 설정

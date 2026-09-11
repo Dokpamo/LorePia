@@ -1,4 +1,4 @@
-/* SEED: role typography, 16px global gutter, 44px navigation targets. */
+/* SEED: role typography, shared image-grid spacing, 44px navigation targets. */
 .seed-app.ui-preview {
     --ui-density: 1;
     --ui-left-width: 100vw;
@@ -34,7 +34,8 @@
     --seed-detail: calc(14px * var(--ui-text-scale));
     /* Reference: 618px image, normalized to a 390px mobile viewport. */
     --seed-root-gutter: clamp(20px, 6.153846vw, 30px);
-    --seed-root-title: calc(clamp(20px, 6.153846vw, 24px) * var(--ui-text-scale));
+    --seed-root-title: var(--ui-type-title);
+    --seed-image-grid-gap: 8px;
     --seed-nav-control: clamp(44px, 11.282051vw, 54px);
     --seed-nav-icon: clamp(23px, 7.179487vw, 34px);
     --seed-nav-edge: clamp(32px, 10vw, 48px);

@@ -121,6 +121,8 @@
         use:imageGestures={{
             next,
             previous,
+            canNext: index < images.length - 1,
+            canPrevious: index > 0,
             dismiss: onclose,
             move: (x, y, active) => {
                 dx = x;

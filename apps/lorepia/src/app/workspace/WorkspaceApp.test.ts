@@ -4,7 +4,7 @@ import WorkspaceApp from './WorkspaceApp.svelte';
 import { createPreviewClient } from '../../preview/mock-client';
 import { t } from '../../lib/i18n';
 import type { LorepiaClient } from '../../lib/ipc/contracts';
-import { createSampleCharacters } from '../../preview/ui/sample-data';
+import { deferred } from '../../tests/deferred';
 
 function required<T>(value: T | undefined): T {
     if (value === undefined) throw new Error('Fixture is empty');
@@ -21,6 +21,24 @@ beforeAll(() => {
 afterEach(cleanup);
 
 describe('connected workspace', () => {
+    it('keeps the empty-library CTA out of bootstrap and a pending character list', async () => {
+        const client = createPreviewClient();
+        const characters = await client.listCharacters();
+        const list = deferred<typeof characters>();
+        const listCharacters = vi.spyOn(client, 'listCharacters').mockReturnValue(list.promise);
+        render(WorkspaceApp, { client });
+        expect(screen.queryByText(t('workspace.emptyLibrary'))).toBeNull();
+        expect(screen.queryByRole('button', { name: t('workspace.importCard') })).toBeNull();
+        await waitFor(() => expect(listCharacters).toHaveBeenCalled());
+        expect(screen.getByRole('button', { name: t('navigation.addCharacter') })).toBeEnabled();
+        expect(screen.queryByText(t('workspace.emptyLibrary'))).toBeNull();
+        expect(screen.queryByRole('button', { name: t('workspace.importCard') })).toBeNull();
+        list.resolve(characters);
+        await screen.findByRole('button', {
+            name: t('uiPreview.cardSelect', { name: required(characters[0]).name }),
+        });
+        expect(screen.queryByRole('button', { name: t('workspace.importCard') })).toBeNull();
+    });
     it('loads characters and histories through the client and opens a real conversation', async () => {
         const client = createPreviewClient();
         const listCharacters = vi.spyOn(client, 'listCharacters');
@@ -42,17 +60,17 @@ describe('connected workspace', () => {
         await screen.findByRole('textbox', { name: t('uiPreview.message') });
         expect(openConversation).toHaveBeenCalledWith(required(histories[0]).id);
         expect(view.container.querySelector('.ui-chat > .ui-compose')).not.toBeNull();
-        expect(screen.queryByText(required(createSampleCharacters()[0]).name)).toBeNull();
     });
     it('shows an empty library without injecting sample characters', async () => {
         const client = createPreviewClient();
+        const fixtureName = required((await client.listCharacters())[0]).name;
         vi.spyOn(client, 'listCharacters').mockResolvedValue([]);
         render(WorkspaceApp, { client });
         await screen.findByText(t('workspace.emptyLibrary'));
         expect(
             screen.queryByRole('button', {
                 name: t('uiPreview.cardSelect', {
-                    name: required(createSampleCharacters()[0]).name,
+                    name: fixtureName,
                 }),
             }),
         ).toBeNull();

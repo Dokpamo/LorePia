@@ -14,6 +14,8 @@ const tauriMocks = vi.hoisted(() => ({
 vi.mock('@tauri-apps/api/core', () => tauriMocks);
 
 import TrustedAsset from './TrustedAsset.svelte';
+import { t } from '../../lib/i18n';
+import { deferred } from '../../tests/deferred';
 
 const SHA256 = 'ab'.repeat(32);
 const WINDOWS_ASSET_URL = `http://lorepia-asset.localhost/sha256/${SHA256}`;
@@ -74,6 +76,79 @@ function renderAsset(
 }
 
 describe('TrustedAsset', () => {
+    it('prepares image decoding before reporting that its pixels are ready', async () => {
+        renderAsset(descriptor('image'));
+        const image = await screen.findByRole<HTMLImageElement>('img');
+        const decoded = deferred<undefined>();
+        const decode = vi.fn(() => decoded.promise);
+        image.decode = decode;
+        await fireEvent.load(image);
+        expect(decode).toHaveBeenCalledOnce();
+        expect(image.closest('.trusted-asset')).toHaveAttribute(
+            'data-asset-phase',
+            'media_loading',
+        );
+        decoded.resolve(undefined);
+        await waitFor(() =>
+            expect(image.closest('.trusted-asset')).toHaveAttribute('data-asset-phase', 'ready'),
+        );
+    });
+
+    it('does not let decoding of an old identity mark its replacement ready', async () => {
+        const first = descriptor('image');
+        const second = descriptor('image', {
+            asset_id: 'replacement',
+            sha256: 'cd'.repeat(32),
+            url: `lorepia-asset://sha256/${'cd'.repeat(32)}`,
+        });
+        const client = {
+            resolveAssetDelivery: vi
+                .fn()
+                .mockResolvedValueOnce(first)
+                .mockResolvedValueOnce(second),
+        };
+        const view = render(TrustedAsset, {
+            client,
+            selector: { kind: 'asset_id', asset_id: first.asset_id },
+            alt: 'First',
+        });
+        const old = await screen.findByRole<HTMLImageElement>('img', { name: 'First' });
+        const decoded = deferred<undefined>();
+        old.decode = vi.fn(() => decoded.promise);
+        await fireEvent.load(old);
+        await view.rerender({
+            selector: { kind: 'asset_id', asset_id: second.asset_id },
+            alt: 'Second',
+        });
+        const next = await screen.findByRole('img', { name: 'Second' });
+        decoded.resolve(undefined);
+        await Promise.resolve();
+        expect(next.closest('.trusted-asset')).toHaveAttribute('data-asset-phase', 'media_loading');
+    });
+
+    it('keeps a budget-limited image loading until it can be verified and displayed', async () => {
+        vi.useFakeTimers();
+        const value = descriptor('image');
+        const client = {
+            resolveAssetDelivery: vi
+                .fn()
+                .mockRejectedValueOnce({ code: 'storage_unavailable', recoverable: true })
+                .mockResolvedValue(value),
+        };
+        render(TrustedAsset, {
+            client,
+            selector: { kind: 'asset_id', asset_id: value.asset_id },
+            alt: 'Queued image',
+        });
+        await vi.advanceTimersByTimeAsync(10);
+        expect(screen.queryByRole('alert')).toBeNull();
+        expect(screen.getByRole('status')).toHaveTextContent(t('workspace.assetWaiting'));
+        expect(document.querySelector('.trusted-asset')).toHaveAttribute('aria-busy', 'true');
+        await vi.advanceTimersByTimeAsync(1000);
+        const image = screen.getByRole('img', { name: 'Queued image' });
+        await fireEvent.load(image);
+        expect(image.closest('.trusted-asset')).toHaveAttribute('data-asset-phase', 'ready');
+    });
     it('resolves an opaque image URL and keeps markup in alt text inert', async () => {
         const value = descriptor('image');
         const resolveAssetDelivery = renderAsset(value);

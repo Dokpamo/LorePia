@@ -113,6 +113,9 @@
             use:imageGestures={{
                 next,
                 previous,
+                canNext: index < images.length - 1,
+                canPrevious: index > 0,
+                backAtStart: true,
                 move: (x, _y, active) => {
                     dx = x;
                     dragging = active;
@@ -152,7 +155,14 @@
             {/if}
         </div>
     {:else}{@render portrait()}{/if}
-    <div class="seed-profile-blur" aria-hidden="true">{@render portrait()}</div>
+    <div
+        class="seed-profile-blur"
+        aria-hidden="true"
+        data-dragging={dragging}
+        style:transform={`translateX(${String(index === images.length - 1 ? Math.min(dx, 0) : 0)}px)`}
+    >
+        {@render portrait()}
+    </div>
     <div class="seed-profile-summary" bind:clientHeight={summaryHeight}>
         <div class="seed-profile-copy" use:measureCopy={character.name}>
             <h1 data-scroll-title>{character.name}</h1>

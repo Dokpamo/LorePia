@@ -33,6 +33,7 @@ it('lists images as thumbnails and opens the original only when a thumbnail is a
 
 it('does not resolve offscreen thumbnails and disconnects its observer', async () => {
     let intersect: IntersectionObserverCallback | undefined;
+    let target: Element | undefined;
     const disconnect = vi.fn();
     vi.stubGlobal(
         'IntersectionObserver',
@@ -40,7 +41,10 @@ it('does not resolve offscreen thumbnails and disconnects its observer', async (
             constructor(callback: IntersectionObserverCallback) {
                 intersect = callback;
             }
-            observe = vi.fn();
+            observe = (element: Element) => {
+                target = element;
+            };
+            unobserve = vi.fn();
             disconnect = disconnect;
         },
     );
@@ -49,11 +53,19 @@ it('does not resolve offscreen thumbnails and disconnects its observer', async (
     client.resolveAssetDelivery = resolve;
     const view = render(ProfileThumbnail, { client, assetId: 'near', name: 'Thumbnail' });
     expect(resolve).not.toHaveBeenCalled();
+    if (!target) throw new Error('Expected an observed thumbnail');
     intersect?.(
-        [{ isIntersecting: true } as IntersectionObserverEntry],
+        [
+            {
+                target,
+                isIntersecting: true,
+                boundingClientRect: target.getBoundingClientRect(),
+            } as IntersectionObserverEntry,
+        ],
         {} as IntersectionObserver,
     );
     await waitFor(() => expect(resolve).toHaveBeenCalledTimes(1));
-    expect(disconnect).toHaveBeenCalled();
+    expect(disconnect).not.toHaveBeenCalled();
     view.unmount();
+    expect(disconnect).toHaveBeenCalledOnce();
 });

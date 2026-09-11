@@ -13,11 +13,11 @@
 
 - `main.ts`: live entry; mounts `app/workspace/WorkspaceApp.svelte` without an
   explicit client. `WorkspaceApp.svelte` creates the live client fallback.
-- `preview/main.ts`: isolated demo entry; injects `createPreviewClient()`.
+- `preview/main.ts`: isolated current-design demo entry for both preview HTML
+  pages; injects `createPreviewClient()` and demo asset presentations.
 - `app/workspace/WorkspaceApp.svelte`: live screen composition and controller wiring.
-- `ui/workspace/WorkspaceFrame.svelte`: shared mockup layout, navigation, gestures,
-  and editor/choice-sheet presentation.
-- `app/App.svelte`: earlier shell retained for the isolated demo and regressions.
+- `ui/navigation/ApplicationFrame.svelte`: shared four-tab layout, navigation,
+  gestures, and editor/choice-sheet presentation.
 - `app/app-controller.ts`: root bootstrap/library/conversation/chat/provider
   application state and action facade.
 - `lib/ipc/contracts.ts`: renderer-safe DTO/client contracts and versions.
@@ -29,7 +29,7 @@ entry or use production data, Tauri IPC, credentials, database, or host files.
 
 ## State and Transaction Owner
 
-- `WorkspaceApp.svelte` owns live navigation and open panels; `WorkspaceFrame`
+- `WorkspaceApp.svelte` owns live navigation and open panels; `ApplicationFrame`
   owns responsive geometry, gestures, and modal presentation. The app creates
   one shared client and root feature controllers, then disposes subscriptions
   and controllers on unmount.
@@ -41,9 +41,9 @@ entry or use production data, Tauri IPC, credentials, database, or host files.
 - Orchestration, content-package, module-lifecycle, prompt-history, persona,
   interaction-room, and generation-approval controllers own their bounded async
   state and authority.
-- `ChatPane.svelte` wires the chat surfaces and owns view-local subscriptions
-  and teardown. Its interaction-room, portable-runtime, scroll, message-action,
-  composer, and utility-swipe helpers own their focused lifecycle/state.
+- `ui/workspace/ChatPage.svelte` wires the chat presentation. `LiveChatSession`
+  adapts the shared app controller; interaction-room and portable-runtime
+  helpers own their focused lifecycle/state.
 - DB transactions, CAS/recovery, durable generation state, and credential
   material are not renderer state.
 
@@ -81,19 +81,21 @@ entry or use production data, Tauri IPC, credentials, database, or host files.
 
 - `app/`: root shell/state facade; `app/controllers/` owns feature workflow
   authority and `app/operations/` owns epochs, identities, and serialization.
-- `components/`: shared controls and detail-page primitives.
-- `features/chat/`: transcript/composer, verified stream handling,
-  virtualization, approvals/interactions, and portable runtime/workers.
+- `ui/navigation/`: current root tabs, library/profile/gallery presentation.
+- `ui/workspace/`: shared controls, chat presentation, gestures, sheets and styles.
+- `features/chat/`: verified stream handling, approvals/interactions, shared
+  scroll behavior and portable runtime/workers.
 - `features/orchestration/`: prompt, memory, knowledge, creator documents,
   packages/modules, and their controllers.
-- `features/providers/`: connections, capabilities, sync, discovery, and catalog.
-- `features/library`, `conversations`, `import`, `assets`, `personas`, `licenses`:
-  bounded feature UI.
+- `features/providers/`: shared provider settings services and defaults.
+- `app/workspace/ai`, `data`, `runtime`: current provider, settings and runtime UI.
+- `features/assets`, `personas`: trusted media and persona workflow logic.
 - `lib/ipc/`: DTOs, client, command registry, errors, and payload guards.
 - `lib/i18n/`: Korean message catalog; use reactive `$tr` in templates and
   `t(...)` in imperative code, including imperative code inside Svelte files.
 - `preview/`: fixed in-memory demo data/client only.
-- `styles/`: global Paper & Ink tokens and responsive/semantic contracts.
+- `styles/`: current theme, icon and accessibility regression tests. Runtime
+  styles live beside their owners under `ui/` and `app/workspace/`.
 - Tests are colocated as `*.test.ts` or grouped under feature `tests/` shards
   such as `app/tests`, `features/chat/tests`, and
   `features/orchestration/tests`; shared setup lives in `tests/setup.ts`.
@@ -148,7 +150,7 @@ python3 scripts/check_source_architecture.py --base-ref "$(git merge-base HEAD m
 ```
 
 For one Vitest target, use a real path such as
-`npm run test --prefix apps/lorepia -- src/features/chat/ChatPane.test.ts`.
+`npm run test --prefix apps/lorepia -- src/ui/workspace/MessageComposer.test.ts`.
 IPC/native changes additionally require Shell API and Tauri Rust tests; the
 root guide defines the full pre-merge gate.
 

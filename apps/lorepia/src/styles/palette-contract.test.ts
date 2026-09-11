@@ -1,31 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
-import { styleRules } from '../tests/css-rules';
-import foundation from './shared/foundation.css?raw';
 
 const { syncNative } = vi.hoisted(() => ({ syncNative: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('@tauri-apps/api/core', () => ({ isTauri: () => true }));
 vi.mock('../lib/ipc/client', () => ({ syncNativeSystemBarStyle: syncNative }));
-
-describe('shared palette', () => {
-    it('provides usable light, dark and system theme specimens without freezing their colors', () => {
-        const declarations = styleRules(foundation).reduce<Record<string, string>>(
-            (tokens, rule) => ({ ...tokens, ...rule.declarations }),
-            {},
-        );
-        for (const token of [
-            'light-canvas',
-            'light-sidebar',
-            'light-main',
-            'dark-frame',
-            'dark-canvas',
-            'dark-sidebar',
-            'system-overlay',
-        ]) {
-            expect(declarations[`--theme-preview-${token}`]).toBeTruthy();
-        }
-    });
-});
 
 describe('renderer and native theme behavior', () => {
     let systemDark = false;
