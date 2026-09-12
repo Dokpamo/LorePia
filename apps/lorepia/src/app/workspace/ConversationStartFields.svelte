@@ -4,9 +4,13 @@
     import type {
         CharacterGreetingCatalogDto,
         CharacterRenderProfileDto,
-        ConversationMode,
         LorepiaClient,
     } from '../../lib/ipc/contracts';
+    import {
+        CHAT_DISPLAY_MODES,
+        isChatDisplayMode,
+        type ChatDisplayMode,
+    } from '../../lib/chat-display';
     import type { PersonaController } from '../../features/personas/persona-controller';
     import ConversationPersonaField from './ConversationPersonaField.svelte';
     import ChoiceField from '../../ui/workspace/ChoiceField.svelte';
@@ -22,7 +26,7 @@
         client,
         catalog,
         name = $bindable(''),
-        mode = $bindable<ConversationMode>('chat'),
+        mode = $bindable<ChatDisplayMode>('default'),
         personaId = $bindable(''),
         greetingId = $bindable<string | null>(null),
         disabled = false,
@@ -31,7 +35,7 @@
         client: LorepiaClient;
         catalog: CharacterGreetingCatalogDto | null;
         name?: string;
-        mode?: ConversationMode;
+        mode?: ChatDisplayMode;
         personaId?: string;
         greetingId?: string | null;
         disabled?: boolean;
@@ -175,27 +179,23 @@
     {/if}
     <ChoiceField
         label={$tr('uiPreview.conversationMode')}
-        value={$tr(mode === 'chat' ? 'uiPreview.chatMode' : 'uiPreview.storyMode')}
+        value={$tr(
+            CHAT_DISPLAY_MODES.find((option) => option.value === mode)?.label ??
+                'uiPreview.defaultMode',
+        )}
         {disabled}
         onopen={(opener: HTMLButtonElement) =>
             choices.open(
                 {
                     label: t('uiPreview.conversationMode'),
                     value: mode,
-                    options: [
-                        {
-                            value: 'chat',
-                            label: t('uiPreview.chatMode'),
-                            description: t('uiPreview.chatModeHint'),
-                        },
-                        {
-                            value: 'story',
-                            label: t('uiPreview.storyMode'),
-                            description: t('uiPreview.storyModeHint'),
-                        },
-                    ],
+                    options: CHAT_DISPLAY_MODES.map((option) => ({
+                        value: option.value,
+                        label: t(option.label),
+                        description: t(option.hint),
+                    })),
                     onselect: (value) => {
-                        mode = value === 'story' ? 'story' : 'chat';
+                        if (isChatDisplayMode(value)) mode = value;
                     },
                 },
                 opener,

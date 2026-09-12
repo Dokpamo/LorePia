@@ -19,6 +19,7 @@
         <button
             type="button"
             class="ui-pressable"
+            data-press-feedback="scale"
             aria-label={$tr('navigation.imageSelectItem', { name: image.title })}
             onclick={(event) => onview(image, event.currentTarget)}
         >

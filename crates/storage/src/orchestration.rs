@@ -43,7 +43,9 @@ mod memory_records;
 mod memory_visibility;
 mod module_activation;
 mod module_bindings;
+pub(crate) mod module_plan_documents;
 mod module_runtime;
+mod module_runtime_cache;
 mod package_commit_bridge;
 mod pagination;
 mod revision;
@@ -131,8 +133,7 @@ pub(crate) use module_authority::{
 };
 pub use prompt_bindings::{PromptPresetBinding, PromptResponseLength};
 
-/// Largest canonical JSON document accepted by the orchestration repository.
-/// Large payloads remain in CAS; relational storage keeps bounded metadata.
+/// Ordinary JSON limit; complete module authority uses bounded native chunks.
 pub const MAX_ORCHESTRATION_JSON_BYTES: usize = 2 * 1024 * 1024;
 pub const MAX_ORCHESTRATION_JSON_CHARS: usize = 1_000_000;
 pub const MAX_ORCHESTRATION_JSON_DEPTH: usize = 32;

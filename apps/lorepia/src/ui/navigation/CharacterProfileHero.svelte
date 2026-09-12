@@ -113,6 +113,9 @@
             use:imageGestures={{
                 next,
                 previous,
+                canNext: index < images.length - 1,
+                canPrevious: index > 0,
+                backAtStart: true,
                 move: (x, _y, active) => {
                     dx = x;
                     dragging = active;
@@ -128,14 +131,17 @@
                 {#each images as image, i (image.assetId)}
                     <button
                         type="button"
-                        class="seed-profile-slide"
+                        class="seed-profile-slide ui-pressable"
+                        data-press-feedback="scale"
                         tabindex={i === index ? 0 : -1}
                         aria-hidden={i !== index}
                         aria-label={$tr('navigation.imageSelectItem', { name: image.title })}
                         onclick={(event) => onview(image.assetId, event.currentTarget)}
                         onkeydown={(event) => imageKey(event, i)}
                     >
-                        {#if Math.abs(i - index) <= 1}{@render portrait(image)}{/if}
+                        <span class="ui-press-visual">
+                            {#if Math.abs(i - index) <= 1}{@render portrait(image)}{/if}
+                        </span>
                     </button>
                 {/each}
             </div>
@@ -152,7 +158,14 @@
             {/if}
         </div>
     {:else}{@render portrait()}{/if}
-    <div class="seed-profile-blur" aria-hidden="true">{@render portrait()}</div>
+    <div
+        class="seed-profile-blur"
+        aria-hidden="true"
+        data-dragging={dragging}
+        style:transform={`translateX(${String(index === images.length - 1 ? Math.min(dx, 0) : 0)}px)`}
+    >
+        {@render portrait()}
+    </div>
     <div class="seed-profile-summary" bind:clientHeight={summaryHeight}>
         <div class="seed-profile-copy" use:measureCopy={character.name}>
             <h1 data-scroll-title>{character.name}</h1>

@@ -850,63 +850,49 @@ mod content_module_lifecycle_contract_tests {
     }
 
     fn assert_lifecycle_route_signatures() {
-        let _: for<'a> fn(
-            tauri::State<'a, crate::state::AppState>,
+        assert_async_route::<
             ListContentModuleLifecycleCandidatesInput,
-        )
-            -> crate::error::CommandResult<ContentModuleLifecycleCandidatesDto> =
-            crate::module_lifecycle_commands::list_content_module_lifecycle_candidates;
-        let _: for<'a> fn(
-            tauri::State<'a, crate::state::AppState>,
+            ContentModuleLifecycleCandidatesDto,
+            _,
+        >(crate::module_lifecycle_commands::list_content_module_lifecycle_candidates);
+        assert_async_route::<
             ListContentModuleLifecycleBindingsInput,
-        )
-            -> crate::error::CommandResult<ContentModuleLifecycleBindingsDto> =
-            crate::module_lifecycle_commands::list_content_module_lifecycle_bindings;
-        let _: for<'a> fn(
-            tauri::State<'a, crate::state::AppState>,
-            ReviewContentModuleActivationInput,
-        )
-            -> crate::error::CommandResult<ContentModuleActivationReviewDto> =
-            crate::module_lifecycle_commands::review_content_module_activation;
-        let _: for<'a> fn(
-            tauri::State<'a, crate::state::AppState>,
-            ResolveContentModuleActivationInput,
-        ) -> crate::error::CommandResult<ContentModuleActivationPlanDto> =
-            crate::module_lifecycle_commands::resolve_content_module_activation;
-        let _: for<'a> fn(
-            tauri::State<'a, crate::state::AppState>,
-            ActivateContentModuleInput,
-        )
-            -> crate::error::CommandResult<ContentModuleActivationReceiptDto> =
-            crate::module_lifecycle_commands::activate_content_module;
-        let _: for<'a> fn(
-            tauri::State<'a, crate::state::AppState>,
+            ContentModuleLifecycleBindingsDto,
+            _,
+        >(crate::module_lifecycle_commands::list_content_module_lifecycle_bindings);
+        assert_async_route::<ReviewContentModuleActivationInput, ContentModuleActivationReviewDto, _>(
+            crate::module_lifecycle_commands::review_content_module_activation,
+        );
+        assert_async_route::<ResolveContentModuleActivationInput, ContentModuleActivationPlanDto, _>(
+            crate::module_lifecycle_commands::resolve_content_module_activation,
+        );
+        assert_async_route::<ActivateContentModuleInput, ContentModuleActivationReceiptDto, _>(
+            crate::module_lifecycle_commands::activate_content_module,
+        );
+        assert_async_route::<
             ReviewContentModuleDeactivationInput,
-        )
-            -> crate::error::CommandResult<ContentModuleDeactivationReviewDto> =
-            crate::module_lifecycle_commands::review_content_module_deactivation;
-        let _: for<'a> fn(
-            tauri::State<'a, crate::state::AppState>,
-            DeactivateContentModuleInput,
-        )
-            -> crate::error::CommandResult<ContentModuleDeactivationReceiptDto> =
-            crate::module_lifecycle_commands::deactivate_content_module;
-        let _: for<'a> fn(
-            tauri::State<'a, crate::state::AppState>,
-            ReviewContentModuleRollbackInput,
-        ) -> crate::error::CommandResult<ContentModuleRollbackReviewDto> =
-            crate::module_lifecycle_commands::review_content_module_rollback;
-        let _: for<'a> fn(
-            tauri::State<'a, crate::state::AppState>,
-            ResolveContentModuleRollbackInput,
-        ) -> crate::error::CommandResult<ContentModuleRollbackPlanDto> =
-            crate::module_lifecycle_commands::resolve_content_module_rollback;
-        let _: for<'a> fn(
-            tauri::State<'a, crate::state::AppState>,
-            ApplyContentModuleRollbackInput,
-        )
-            -> crate::error::CommandResult<ContentModuleActivationReceiptDto> =
-            crate::module_lifecycle_commands::apply_content_module_rollback;
+            ContentModuleDeactivationReviewDto,
+            _,
+        >(crate::module_lifecycle_commands::review_content_module_deactivation);
+        assert_async_route::<DeactivateContentModuleInput, ContentModuleDeactivationReceiptDto, _>(
+            crate::module_lifecycle_commands::deactivate_content_module,
+        );
+        assert_async_route::<ReviewContentModuleRollbackInput, ContentModuleRollbackReviewDto, _>(
+            crate::module_lifecycle_commands::review_content_module_rollback,
+        );
+        assert_async_route::<ResolveContentModuleRollbackInput, ContentModuleRollbackPlanDto, _>(
+            crate::module_lifecycle_commands::resolve_content_module_rollback,
+        );
+        assert_async_route::<ApplyContentModuleRollbackInput, ContentModuleActivationReceiptDto, _>(
+            crate::module_lifecycle_commands::apply_content_module_rollback,
+        );
+    }
+
+    fn assert_async_route<'a, Input, Output, Fut>(
+        _: fn(tauri::State<'a, crate::state::AppState>, Input) -> Fut,
+    ) where
+        Fut: std::future::Future<Output = crate::error::CommandResult<Output>> + Send,
+    {
     }
 
     fn actual_lifecycle_route_contracts() -> [LifecycleRouteContract; 10] {
@@ -1045,7 +1031,7 @@ mod content_module_lifecycle_contract_tests {
         let release: Value =
             serde_json::from_str(RELEASE_CAPABILITY).expect("release capability must be JSON");
         for &(command, _, _, request_argument) in actual {
-            let invoke_entry = format!("module_lifecycle_commands::{command}");
+            let invoke_entry = format!("module_lifecycle_commands::{command},");
             assert_eq!(
                 INVOKE_REGISTRY_SOURCE.matches(&invoke_entry).count(),
                 1,
@@ -1494,7 +1480,7 @@ mod content_module_lifecycle_contract_tests {
     }
 
     fn assert_command_argument_name(command: &str, expected: &str) {
-        let needle = format!("pub fn {command}(");
+        let needle = format!("pub async fn {command}(");
         let start = COMMAND_SOURCE
             .find(&needle)
             .unwrap_or_else(|| panic!("{command} command wrapper must exist"));
@@ -1624,7 +1610,7 @@ mod content_source_export_contract_tests {
                 .count(),
             1
         );
-        assert!(COMMAND_SOURCE.contains("pub fn list_completed_content_package_exports("));
+        assert!(COMMAND_SOURCE.contains("pub async fn list_completed_content_package_exports("));
         assert!(COMMAND_SOURCE.contains("request: shell::ListCompletedContentPackageExportsInput"));
         assert!(
             COMMAND_SOURCE.contains("CommandResult<Vec<shell::ContentSourceExportDescriptorDto>>")

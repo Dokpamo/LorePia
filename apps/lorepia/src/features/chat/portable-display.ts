@@ -1,6 +1,7 @@
 import type { CharacterDisplayTransformDto } from '../../lib/ipc/contracts';
 import { t } from '../../lib/i18n';
 import { portableRegexRuleKey, runPortableRegex } from './portable-regex';
+import { isPortableAction } from './portable-renderer-policy';
 
 const MAX_PASSES = 256;
 const MAX_OUTPUT_CHARS = 262_144;
@@ -15,8 +16,10 @@ export interface PortableDisplayContext {
     lastCharacterMessage?: string;
     characterName?: string;
     userName?: string;
+    screenWidth?: number;
     onRegexDiagnostic?: (diagnostic: PortableRegexDiagnostic) => void;
     regexRuleScope?: string;
+    isCancelled?: () => boolean;
 }
 
 export interface PortableRegexDiagnostic {
@@ -25,7 +28,9 @@ export interface PortableRegexDiagnostic {
 }
 
 interface PortableTransformOptions {
+    context?: PortableDisplayContext;
     skipAssetTransforms?: boolean;
+    isCancelled?: () => boolean;
     onRegexDiagnostic?: (diagnostic: PortableRegexDiagnostic) => void;
     ruleScope?: string;
     phase: 'provider_output' | 'display';
@@ -49,6 +54,8 @@ export async function renderPortableDisplay(
             onRegexDiagnostic: context.onRegexDiagnostic,
             ruleScope: context.regexRuleScope,
             phase: 'display',
+            isCancelled: context.isCancelled,
+            context,
         }),
         context,
         source,
@@ -62,16 +69,22 @@ export async function applyPortableTransforms(
 ): Promise<string> {
     let output = source;
     for (const [index, transform] of transforms.slice(0, 128).entries()) {
+        if (options.isCancelled?.()) return source;
         if (
             (options.skipAssetTransforms && isAssetTransform(transform)) ||
             transform.pattern.length > 4096
         )
             continue;
+        const pattern = transform.flags.includes('<cbs>')
+            ? renderPortableMacros(transform.pattern, options.context ?? { variables: {} }, source)
+            : transform.pattern;
+        // A disabled CBS condition has no target; do not run an empty global regex.
+        if (transform.flags.includes('<cbs>') && pattern === '') continue;
         const result = await runPortableRegex(
             {
                 operation: 'replace',
                 source: output,
-                pattern: transform.pattern,
+                pattern,
                 flags: safeFlags(transform.flags, true),
                 replacement: transform.replacement,
             },
@@ -84,6 +97,7 @@ export async function applyPortableTransforms(
                 ),
             },
         );
+        if (options.isCancelled?.()) return source;
         if (!result.ok) {
             const reason = result.reason === 'disabled' ? result.disabledReason : result.reason;
             options.onRegexDiagnostic?.({
@@ -107,10 +121,14 @@ function isAssetTransform(transform: CharacterDisplayTransformDto): boolean {
 }
 
 function safeFlags(flags: string, retainGlobal: boolean): string {
-    const result = [...new Set(flags.split('').filter((flag) => 'dgimsuvy'.includes(flag)))]
-        .filter((flag) => retainGlobal || (flag !== 'g' && flag !== 'y'))
-        .join('');
-    return result;
+    const parsed = new Set<string>();
+    let modifierDepth = 0;
+    for (const flag of flags) {
+        if (flag === '<') modifierDepth += 1;
+        else if (flag === '>') modifierDepth = Math.max(0, modifierDepth - 1);
+        else if (modifierDepth === 0 && 'dgimsuvy'.includes(flag)) parsed.add(flag);
+    }
+    return [...parsed].filter((flag) => retainGlobal || (flag !== 'g' && flag !== 'y')).join('');
 }
 
 export function renderPortableMacros(
@@ -244,6 +262,7 @@ function isKnownToken(value: string): boolean {
             'getglobalvar',
             'equal',
             'notequal',
+            'not_equal',
             'greater',
             'greater_equal',
             'greaterequal',
@@ -259,10 +278,12 @@ function isKnownToken(value: string): boolean {
             'pick',
             'lastmessageid',
             'chat_index',
+            'screen_width',
             'lastcharmessage',
             'char',
             'user',
             'raw',
+            'button',
             '?',
         ].includes(name) || token.startsWith('? ')
     );
@@ -278,6 +299,20 @@ function evaluateToken(
     const [rawName = '', ...args] = token.split('::').map((part) => part.trim());
     const name = rawName.toLocaleLowerCase();
     switch (name) {
+        case 'button': {
+            const action = args[1] ?? '';
+            const label = args[0] ?? '';
+            const escaped = label.replace(
+                /[&<>"']/g,
+                (character) =>
+                    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[
+                        character
+                    ] ?? '',
+            );
+            return isPortableAction(action)
+                ? `<button type="button" card-btn="${action}">${escaped || ' '}</button>`
+                : escaped;
+        }
         case 'getvar':
             return variableValue(context.localVariables ?? context.variables, args[0] ?? '') ?? '0';
         case 'getglobalvar':
@@ -287,6 +322,7 @@ function evaluateToken(
         case 'equal':
             return booleanText(compare(args[0], args[1]) === 0);
         case 'notequal':
+        case 'not_equal':
             return booleanText(compare(args[0], args[1]) !== 0);
         case 'greater':
             return booleanText(compare(args[0], args[1]) > 0);
@@ -312,6 +348,8 @@ function evaluateToken(
             return context.lastMessageId === undefined ? '' : String(context.lastMessageId);
         case 'chat_index':
             return context.chatIndex === undefined ? '' : String(context.chatIndex);
+        case 'screen_width':
+            return String(context.screenWidth ?? 393);
         case 'lastcharmessage':
             return context.lastCharacterMessage ?? '';
         case 'char':
@@ -367,6 +405,26 @@ function booleanText(value: boolean): string {
 
 function arithmetic(value: string): string {
     const expression = value.replaceAll(' ', '');
+    const comparison = /^(-?\d+(?:\.\d+)?)(<=|>=|==|!=|<|>|=)(-?\d+(?:\.\d+)?)$/.exec(expression);
+    if (comparison !== null) {
+        const left = Number(comparison[1]);
+        const right = Number(comparison[3]);
+        switch (comparison[2]) {
+            case '<=':
+                return booleanText(left <= right);
+            case '>=':
+                return booleanText(left >= right);
+            case '=':
+            case '==':
+                return booleanText(left === right);
+            case '!=':
+                return booleanText(left !== right);
+            case '<':
+                return booleanText(left < right);
+            case '>':
+                return booleanText(left > right);
+        }
+    }
     const match = /^(-?\d+)([+-])(\d+)$/.exec(expression);
     if (match === null) return expression;
     const left = Number.parseInt(match[1] ?? '0', 10);

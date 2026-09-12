@@ -1,5 +1,6 @@
 //! Applied module runtime-plan materialization and durable authority.
 
+use super::module_plan_documents::{self as documents, Kind};
 use super::{
     BTreeMap, ContentModuleId, CoreError, CoreResult, DateTime, Deserialize, ModuleBinding,
     ModuleBindingId, OptionalExtension, Storage, Transaction, TransactionBehavior, Utc,
@@ -113,9 +114,9 @@ fn verify_exact_applied_runtime_source_with_stale_authority(
         ));
     }
     let review: lorepia_orchestration::ModuleMergeReview =
-        decode_document("applied runtime source activation review", &row.0)?;
+        documents::decode(transaction, Kind::Review, &row.0)?;
     let approved: lorepia_orchestration::ApprovedModuleActivationPlan =
-        decode_document("applied runtime source activation approval", &row.1)?;
+        documents::decode(transaction, Kind::Approval, &row.1)?;
     review.verify().map_err(|error| {
         storage_corrupted(format!(
             "applied runtime source activation review is invalid: {error}"
@@ -224,7 +225,9 @@ fn get_applied_module_runtime_plan_legacy(
             .map_err(storage_db_error)?;
         rows.into_iter()
             .filter_map(|(id, review_json)| {
-                let review = serde_json::from_str::<lorepia_orchestration::ModuleActivationReview>(
+                let review = documents::decode::<lorepia_orchestration::ModuleActivationReview>(
+                    &transaction,
+                    Kind::Review,
                     &review_json,
                 )
                 .ok()?;
@@ -320,14 +323,14 @@ fn get_applied_module_runtime_plan_legacy(
             error.message
         ))
     })?;
-    let review: lorepia_orchestration::ModuleActivationReview = serde_json::from_str(&row.5)
-        .map_err(|error| {
+    let review: lorepia_orchestration::ModuleActivationReview =
+        documents::decode(&transaction, Kind::Review, &row.5).map_err(|error| {
             storage_corrupted(format!(
                 "stored module activation review is invalid: {error}"
             ))
         })?;
     let approved: lorepia_orchestration::ApprovedModuleActivationPlan =
-        serde_json::from_str(&row.6).map_err(|error| {
+        documents::decode(&transaction, Kind::Approval, &row.6).map_err(|error| {
             storage_corrupted(format!(
                 "stored approved module activation is invalid: {error}"
             ))
@@ -477,27 +480,20 @@ fn get_applied_module_runtime_plan(
     storage: &Storage,
     current_review: &lorepia_orchestration::ModuleMergeReview,
 ) -> CoreResult<lorepia_orchestration::AppliedModuleRuntimePlan> {
-    let runtime = preview_applied_module_runtime_plan(storage, current_review)?;
-    let verified_authorities =
-        verify_module_import_authorities(storage, &current_review.ordered_bindings)?;
-    let mut connection = storage.connection()?;
-    let transaction = connection
-        .transaction_with_behavior(TransactionBehavior::Immediate)
-        .map_err(storage_db_error)?;
-    validate_fresh_module_merge_review(
-        storage,
-        &transaction,
-        current_review,
-        &verified_authorities,
-    )?;
-    persist_applied_module_runtime_plan_transaction(&transaction, &runtime, Utc::now())?;
-    transaction.commit().map_err(storage_db_error)?;
-    Ok(runtime)
+    resolve_applied_module_runtime_plan(storage, current_review, true)
 }
 
 fn preview_applied_module_runtime_plan(
     storage: &Storage,
     current_review: &lorepia_orchestration::ModuleMergeReview,
+) -> CoreResult<lorepia_orchestration::AppliedModuleRuntimePlan> {
+    resolve_applied_module_runtime_plan(storage, current_review, false)
+}
+
+fn resolve_applied_module_runtime_plan(
+    storage: &Storage,
+    current_review: &lorepia_orchestration::ModuleMergeReview,
+    persist: bool,
 ) -> CoreResult<lorepia_orchestration::AppliedModuleRuntimePlan> {
     current_review.verify().map_err(|error| {
         CoreError::invalid(format!("invalid current module runtime review: {error}"))
@@ -544,7 +540,7 @@ fn preview_applied_module_runtime_plan(
     let mut applicable = Vec::new();
     for (plan_sha256, approval_sha256, approved_json) in candidates {
         let approved: lorepia_orchestration::ApprovedModuleActivationPlan =
-            decode_document("applied module activation", &approved_json)?;
+            documents::decode(&transaction, Kind::Approval, &approved_json)?;
         approved.verify().map_err(|error| {
             storage_corrupted(format!(
                 "stored applied module activation is invalid: {error}"
@@ -557,10 +553,7 @@ fn preview_applied_module_runtime_plan(
                 "stored applied module activation identity diverges",
             ));
         }
-        match lorepia_orchestration::materialize_approved_module_runtime_plan(
-            &approved,
-            current_review,
-        ) {
+        match super::module_runtime_cache::materialize(&approved, current_review) {
             Ok(runtime) => applicable.push(runtime),
             Err(
                 lorepia_orchestration::ModuleMergeError::RuntimeDerivationChanged
@@ -582,6 +575,9 @@ fn preview_applied_module_runtime_plan(
             ));
         }
     };
+    if persist {
+        persist_applied_module_runtime_plan_transaction(&transaction, &runtime, Utc::now())?;
+    }
     transaction.commit().map_err(storage_db_error)?;
     Ok(runtime)
 }
@@ -655,6 +651,22 @@ pub(crate) fn persist_applied_module_runtime_plan_transaction(
             "applied runtime plan conversation and branch context are incomplete",
         ));
     }
+    let exists = transaction.query_row(
+        "SELECT EXISTS(SELECT 1 FROM applied_module_runtime_plans WHERE applied_plan_sha256 = ?1)",
+        [runtime.applied_plan_sha256.as_str()], |row| row.get::<_, bool>(0),
+    ).map_err(storage_db_error)?;
+    if exists {
+        let stored = load_applied_module_runtime_plan_transaction(
+            transaction,
+            &runtime.applied_plan_sha256,
+        )?;
+        if &stored != runtime {
+            return Err(storage_corrupted(
+                "applied module runtime hash was reused with different material",
+            ));
+        }
+        return Ok(());
+    }
     let context_json = serde_json::to_string(&runtime.review.context).map_err(|error| {
         CoreError::internal(format!("cannot encode module runtime context: {error}"))
     })?;
@@ -664,7 +676,7 @@ pub(crate) fn persist_applied_module_runtime_plan_transaction(
         ))
     })?;
     validate_json_bounds("module runtime context", &context_json)?;
-    validate_json_bounds("applied module runtime plan", &runtime_json)?;
+    let runtime_json = documents::store(transaction, Kind::Runtime, &runtime_json)?;
     let inserted = transaction
         .execute(
             "INSERT OR IGNORE INTO applied_module_runtime_plans
@@ -753,8 +765,10 @@ fn load_applied_module_runtime_plan_with_stale_authority(
     if row.8 != "applied" && !(allow_stale && row.8 == "stale") {
         return Err(CoreError::invalid("applied module runtime plan is stale"));
     }
+    let runtime_json = documents::expand(transaction, Kind::Runtime, &row.7)?;
     let runtime: lorepia_orchestration::AppliedModuleRuntimePlan =
-        decode_document("applied module runtime plan", &row.7)?;
+        serde_json::from_str(&runtime_json)
+            .map_err(|_| storage_corrupted("invalid applied runtime plan JSON"))?;
     let context: lorepia_orchestration::ModuleResolutionContext =
         decode_document("applied module runtime context", &row.6)?;
     runtime.verify().map_err(|error| {
@@ -785,7 +799,7 @@ fn load_applied_module_runtime_plan_with_stale_authority(
         || runtime.review.context.branch_id.as_deref() != row.4.as_deref()
         || runtime.review.review_sha256.as_str() != row.5
         || canonical_context_json != row.6
-        || canonical_runtime_json != row.7
+        || canonical_runtime_json != runtime_json
     {
         return Err(storage_corrupted(
             "applied module runtime plan authority columns diverge from its canonical payload",

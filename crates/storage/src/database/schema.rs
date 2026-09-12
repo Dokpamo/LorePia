@@ -2,7 +2,7 @@ use lorepia_domain::CoreResult;
 
 use super::{Storage, migration_verification::read_current_schema_version};
 
-pub(crate) const SCHEMA_VERSION: u32 = 41;
+pub(crate) const SCHEMA_VERSION: u32 = 42;
 pub(crate) const FROZEN_NATIVE_SCHEMA_VERSION: u32 = 11;
 
 impl Storage {

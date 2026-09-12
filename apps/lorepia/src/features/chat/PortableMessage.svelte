@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { untrack } from 'svelte';
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { SvelteMap, SvelteSet, SvelteURL } from 'svelte/reactivity';
 
@@ -9,6 +10,7 @@
     } from '../../lib/ipc/contracts';
     import { t } from '../../lib/i18n';
     import MarkdownText from './MarkdownText.svelte';
+    import { escapeHtml, portableFrameDocument } from './portable-renderer-frame';
     import {
         applyPortableTransforms,
         hasPortableDisplayTransform,
@@ -17,12 +19,15 @@
         renderPortableDisplay,
         renderPortableMacros,
     } from './portable-display';
-    import { sanitizePortableCss, sanitizePortableTree } from './portable-renderer-policy';
+    import { selectPortableRoomMarkup } from './portable-room-markup';
+    import {
+        type PortableSurface,
+        sanitizePortableCss,
+        sanitizePortableTree,
+    } from './portable-renderer-policy';
     import {
         isPortableRendererMessage,
-        MAX_PORTABLE_RENDERER_HEIGHT,
         MIN_PORTABLE_RENDERER_HEIGHT,
-        PORTABLE_RENDERER_CHANNEL,
     } from './portable-renderer-protocol';
 
     const MAX_PORTABLE_SOURCE_CHARS = 262_144;
@@ -41,6 +46,7 @@
         client?: LorepiaClient;
         profile: CharacterRenderProfileDto | null;
         enabled?: boolean;
+        surface?: PortableSurface;
         expandMacros?: boolean;
         messageIndex?: number;
         lastMessageId?: number;
@@ -57,6 +63,7 @@
         client,
         profile,
         enabled = true,
+        surface = 'message',
         expandMacros = enabled,
         messageIndex,
         lastMessageId,
@@ -68,6 +75,7 @@
         onAction,
     }: Props = $props();
     let frame = $state<HTMLIFrameElement | null>(null);
+    let frameWidth = $state(393);
     let normalizedText = $state('');
     let regexWarning = $state<string | null>(null);
 
@@ -95,7 +103,10 @@
             void applyPortableTransforms(source, activeProfile.output_transforms, {
                 phase: 'provider_output',
                 ruleScope,
-                onRegexDiagnostic: reportRegexDiagnostic,
+                onRegexDiagnostic: (diagnostic) => {
+                    if (!cancelled) reportRegexDiagnostic(diagnostic);
+                },
+                isCancelled: () => cancelled,
             }).then((result) => {
                 if (!cancelled)
                     normalizedText =
@@ -111,7 +122,10 @@
     const usesPortableMarkup = $derived(
         enabled &&
             profile !== null &&
-            (/<(?:style|details|article|div|section|header|pre|button)\b/i.test(normalizedText) ||
+            ((surface === 'room' && (backgroundMarkup ?? profile.background_markup) !== '') ||
+                /<(?:style|details|article|div|section|header|pre|button)\b/i.test(
+                    normalizedText,
+                ) ||
                 /<img\s*=/i.test(normalizedText) ||
                 /\{\{(?:raw|audio|bgm)::/i.test(normalizedText) ||
                 hasPortableDisplayTransform(normalizedText, profile.display_transforms)),
@@ -119,6 +133,7 @@
     const displayVariables = $derived(
         mergePortableDisplayVariables(profile?.initial_variables ?? {}, variables ?? {}),
     );
+    const displayVariablesKey = $derived(JSON.stringify(displayVariables));
     const portableText = $derived(
         !expandMacros || profile === null
             ? normalizedText
@@ -135,14 +150,33 @@
 
     $effect(() => {
         const target = frame;
+        if (target === null) return;
+        const measure = () => {
+            const width = Math.round(target.clientWidth);
+            if (width > 0) frameWidth = width;
+        };
+        measure();
+        if (typeof ResizeObserver === 'function') {
+            const observer = new ResizeObserver(measure);
+            observer.observe(target);
+            return () => observer.disconnect();
+        }
+        globalThis.addEventListener('resize', measure);
+        return () => globalThis.removeEventListener('resize', measure);
+    });
+
+    $effect(() => {
+        const target = frame;
         const activeProfile = profile;
         const activeClient = client;
         const source = normalizedText;
         const activeMessageIndex = messageIndex;
         const activeLastMessageId = lastMessageId;
         const active = usesPortableMarkup;
-        const actionHandler = onAction;
-        const activeVariables = displayVariables;
+        const activeSurface = surface;
+        const screenWidth = frameWidth;
+        void displayVariablesKey;
+        const activeVariables = untrack(() => displayVariables);
         const activeBackgroundMarkup = backgroundMarkup ?? activeProfile?.background_markup ?? '';
         if (!active || target === null || activeProfile === null || activeClient === undefined) {
             return;
@@ -161,10 +195,10 @@
                 return;
             }
             if (event.data.type === 'portable_action') {
-                actionHandler?.(event.data.action);
+                onAction?.(event.data.action);
                 return;
             }
-            target.style.height = `${String(event.data.height)}px`;
+            if (activeSurface === 'message') target.style.height = `${String(event.data.height)}px`;
         };
         globalThis.addEventListener('message', handleMessage);
         void buildPortableDocument(
@@ -174,6 +208,10 @@
             activeMessageIndex,
             activeLastMessageId,
             activeVariables,
+            activeSurface,
+            screenWidth,
+            activeBackgroundMarkup,
+            isCancelled,
         ).then(async (rendered) => {
             if (isCancelled()) return;
             const importedStyle = extractStyleText(
@@ -189,33 +227,28 @@
                         lastCharacterMessage,
                         characterName,
                         userName,
+                        screenWidth,
                     },
                 ),
+                activeSurface,
             );
             if (isCancelled()) return;
-            target.style.height = `${String(MIN_PORTABLE_RENDERER_HEIGHT)}px`;
-            target.srcdoc = portableFrameDocument(rendered, importedStyle, runtimeId);
+            if (activeSurface === 'message')
+                target.style.height = `${String(MIN_PORTABLE_RENDERER_HEIGHT)}px`;
+            target.srcdoc = portableFrameDocument(
+                rendered,
+                importedStyle,
+                runtimeId,
+                activeSurface,
+            );
         });
         return () => {
             cancelled = true;
             globalThis.removeEventListener('message', handleMessage);
-            target.removeAttribute('srcdoc');
+            // Keep the last complete frame visible while its replacement is built.
+            // Its old bridge loses its listener immediately; unmount unloads the frame.
         };
     });
-
-    const BASE_STYLE = `
-        html, body { display: block; min-width: 0; max-width: 100%; margin: 0; color: inherit;
-            position: relative; contain: layout paint style; isolation: isolate; overflow: hidden; }
-        .portable-message { max-width: 100%; white-space: pre-wrap; overflow: hidden;
-            overflow-wrap: anywhere; }
-        .portable-asset-frame { display: block; width: min(400px, 100%); margin: 12px auto; }
-        .portable-asset-frame img { display: block; width: 100%; height: auto; border-radius: 10px; }
-        .portable-audio { display: block; width: min(420px, 100%); margin: 10px auto; }
-        .portable-asset-missing { display: block; padding: 8px 10px; border: 1px dashed currentColor;
-            border-radius: 8px; opacity: .7; font-size: .85em; }
-        details { white-space: normal; }
-        button, input { font: inherit; }
-    `;
 
     async function buildPortableDocument(
         source: string,
@@ -224,8 +257,16 @@
         activeMessageIndex: number | undefined,
         activeLastMessageId: number | undefined,
         activeVariables: Record<string, string>,
+        activeSurface: PortableSurface,
+        screenWidth: number,
+        activeBackgroundMarkup: string,
+        isCancelled: () => boolean,
     ): Promise<string> {
-        if (source.length > MAX_PORTABLE_SOURCE_CHARS) return portableLimitMarkup();
+        if (
+            source.length > MAX_PORTABLE_SOURCE_CHARS ||
+            activeBackgroundMarkup.length > MAX_PORTABLE_SOURCE_CHARS
+        )
+            return portableLimitMarkup();
         const displaySource = await renderPortableDisplay(
             source,
             activeProfile.display_transforms,
@@ -236,21 +277,44 @@
                 lastCharacterMessage,
                 characterName,
                 userName,
-                onRegexDiagnostic: reportRegexDiagnostic,
+                onRegexDiagnostic: (diagnostic) => {
+                    if (!isCancelled()) reportRegexDiagnostic(diagnostic);
+                },
+                isCancelled,
+                screenWidth,
                 regexRuleScope: `${activeProfile.character_id}:${activeProfile.character_content_revision_id ?? 'legacy'}`,
             },
         );
+        if (isCancelled()) return '';
+        const background = renderPortableMacros(
+            activeBackgroundMarkup,
+            {
+                variables: activeVariables,
+                chatIndex: activeMessageIndex,
+                lastMessageId: activeLastMessageId,
+                lastCharacterMessage,
+                characterName,
+                userName,
+                screenWidth,
+            },
+            source,
+        );
+        const assetSource =
+            activeSurface === 'room' ? `${displaySource}\n${background}` : displaySource;
         if (
-            displaySource.length > MAX_PORTABLE_SOURCE_CHARS ||
-            markupTagCount(displaySource) > MAX_PORTABLE_MARKUP_TAGS
+            assetSource.length > MAX_PORTABLE_SOURCE_CHARS ||
+            background.length > MAX_PORTABLE_SOURCE_CHARS ||
+            markupTagCount(assetSource) > MAX_PORTABLE_MARKUP_TAGS ||
+            markupTagCount(background) > MAX_PORTABLE_MARKUP_TAGS
         ) {
             return portableLimitMarkup();
         }
-        const references = collectAssetReferences(displaySource);
+        const references = collectAssetReferences(assetSource);
         if (references === null) return portableLimitMarkup();
         const resolved = new SvelteMap<string, string | null>();
         const aliases = indexAssetAliases(activeProfile.assets);
         for (let offset = 0; offset < references.length; offset += MAX_PORTABLE_ASSET_CONCURRENCY) {
+            if (isCancelled()) return '';
             await Promise.all(
                 references
                     .slice(offset, offset + MAX_PORTABLE_ASSET_CONCURRENCY)
@@ -276,7 +340,36 @@
             );
         }
 
-        let html = displaySource.replace(
+        const template = document.createElement('template');
+        template.innerHTML = `<div class="portable-message">${resolveMarkupAssets(displaySource, resolved)}</div>`;
+        const root = template.content.firstElementChild;
+        if (!(root instanceof HTMLElement)) {
+            const fallback = document.createElement('div');
+            fallback.className = 'portable-message';
+            fallback.textContent = displaySource;
+            return fallback.outerHTML;
+        }
+        selectPortableRoomMarkup(
+            root,
+            activeSurface === 'room' ? resolveMarkupAssets(background, resolved) : background,
+            activeSurface,
+        );
+        if (root.querySelectorAll('*').length > MAX_PORTABLE_MARKUP_TAGS) {
+            return portableLimitMarkup();
+        }
+        sanitizePortableTree(
+            root,
+            new SvelteSet([...resolved.values()].filter(isString)),
+            activeSurface,
+        );
+        return root.outerHTML;
+    }
+
+    function resolveMarkupAssets(
+        source: string,
+        resolved: ReadonlyMap<string, string | null>,
+    ): string {
+        let html = source.replace(
             /<img\s*=\s*(?:"([^"]+)"|'([^']+)'|([^>\s]+))\s*\/?\s*>/gi,
             (
                 _match,
@@ -306,98 +399,7 @@
             },
         );
 
-        const template = document.createElement('template');
-        template.innerHTML = `<div class="portable-message">${html}</div>`;
-        const root = template.content.firstElementChild;
-        if (!(root instanceof HTMLElement)) {
-            const fallback = document.createElement('div');
-            fallback.className = 'portable-message';
-            fallback.textContent = displaySource;
-            return fallback.outerHTML;
-        }
-        if (root.querySelectorAll('*').length > MAX_PORTABLE_MARKUP_TAGS) {
-            return portableLimitMarkup();
-        }
-        sanitizePortableTree(root, new SvelteSet([...resolved.values()].filter(isString)));
-        return root.outerHTML;
-    }
-
-    function portableFrameDocument(
-        content: string,
-        importedStyle: string,
-        runtimeId: string,
-    ): string {
-        const nonce = globalThis.crypto.randomUUID().replaceAll('-', '');
-        const scriptClose = '</scr' + 'ipt>';
-        const mediaSources =
-            'lorepia-asset: http://lorepia-asset.localhost https://lorepia-asset.localhost';
-        const csp = [
-            "default-src 'none'",
-            `script-src 'nonce-${nonce}'`,
-            "style-src 'unsafe-inline'",
-            `img-src ${mediaSources}`,
-            `media-src ${mediaSources}`,
-            "connect-src 'none'",
-            "font-src 'none'",
-            "object-src 'none'",
-            "base-uri 'none'",
-            "form-action 'none'",
-            "frame-src 'none'",
-            "frame-ancestors 'none'",
-        ].join('; ');
-        return [
-            '<!doctype html><html><head><meta charset="utf-8">',
-            `<meta http-equiv="Content-Security-Policy" content="${escapeHtml(csp)}">`,
-            '<meta name="referrer" content="no-referrer">',
-            `<style>${BASE_STYLE}${importedStyle}</style>`,
-            '</head><body>',
-            content,
-            `<script nonce="${nonce}">${portableFrameBridge(runtimeId)}${scriptClose}`,
-            '</body></html>',
-        ].join('');
-    }
-
-    function portableFrameBridge(runtimeId: string): string {
-        const channel = JSON.stringify(PORTABLE_RENDERER_CHANNEL);
-        const id = JSON.stringify(runtimeId);
-        return String.raw`(() => {
-            'use strict';
-            const channel = ${channel};
-            const runtimeId = ${id};
-            const actionPattern = /^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,511}$/;
-            const publish = (message) => parent.postMessage({ channel, runtimeId, ...message }, '*');
-            const reportHeight = () => {
-                const raw = Math.ceil(Math.max(
-                    document.documentElement?.scrollHeight || 0,
-                    document.body?.scrollHeight || 0,
-                    ${String(MIN_PORTABLE_RENDERER_HEIGHT)}
-                ));
-                publish({
-                    type: 'portable_resize',
-                    height: Math.min(${String(MAX_PORTABLE_RENDERER_HEIGHT)}, Math.max(${String(MIN_PORTABLE_RENDERER_HEIGHT)}, raw))
-                });
-            };
-            const playMedia = () => {
-                for (const media of document.querySelectorAll('audio[autoplay]')) {
-                    if (media instanceof HTMLMediaElement) void media.play().catch(() => undefined);
-                }
-            };
-            document.addEventListener('click', (event) => {
-                if (event.isTrusted !== true || !(event.target instanceof Element)) return;
-                const control = event.target.closest('[data-portable-action]');
-                if (!(control instanceof HTMLButtonElement) && !(control instanceof HTMLInputElement)) return;
-                const action = control.getAttribute('data-portable-action')?.trim() || '';
-                if (!actionPattern.test(action)) return;
-                event.preventDefault();
-                publish({ type: 'portable_action', action });
-            }, true);
-            document.addEventListener('pointerdown', playMedia, { once: true, capture: true });
-            if (typeof ResizeObserver === 'function') {
-                new ResizeObserver(reportHeight).observe(document.documentElement);
-            }
-            globalThis.addEventListener('load', () => { playMedia(); reportHeight(); }, { once: true });
-            reportHeight();
-        })();`;
+        return html;
     }
 
     function collectAssetReferences(source: string): string[] | null {
@@ -517,24 +519,13 @@
         }
     }
 
-    function extractStyleText(markup: string): string {
+    function extractStyleText(markup: string, activeSurface: PortableSurface): string {
         if (markup === '') return '';
         const template = document.createElement('template');
         template.innerHTML = markup;
-        return sanitizePortableCss(
-            [...template.content.querySelectorAll('style')]
-                .map((style) => style.textContent)
-                .join('\n'),
-        );
-    }
-
-    function escapeHtml(value: string): string {
-        return value
-            .replaceAll('&', '&amp;')
-            .replaceAll('<', '&lt;')
-            .replaceAll('>', '&gt;')
-            .replaceAll('"', '&quot;')
-            .replaceAll("'", '&#39;');
+        return [...template.content.querySelectorAll('style')]
+            .map((style) => sanitizePortableCss(style.textContent, document, activeSurface))
+            .join('\n');
     }
 
     function isString(value: string | null): value is string {
@@ -543,7 +534,7 @@
 </script>
 
 {#if usesPortableMarkup && client !== undefined}
-    <div class="portable-boundary">
+    <div class="portable-boundary" class:portable-room={surface === 'room'}>
         <iframe
             class="portable-frame"
             bind:this={frame}
@@ -569,6 +560,15 @@
         max-width: 100%;
         max-height: min(70vh, 720px);
         overflow: auto;
+    }
+
+    .portable-room {
+        height: 100%;
+        max-height: none;
+        overflow: hidden;
+    }
+    .portable-room .portable-frame {
+        height: 100%;
     }
 
     .portable-frame {

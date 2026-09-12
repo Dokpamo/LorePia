@@ -109,7 +109,7 @@ export function edgeBack(node: HTMLElement, initial: BackOptions) {
         };
         if (!(
             event.target instanceof Element &&
-            event.target.closest('button, a, label, input, select')
+            event.target.closest('button, a, label, input, select, summary')
         )) {
             // WebKit starts native text tracking on pointerdown and can consume
             // all following moves. Reserve the accepted edge/free surface now;

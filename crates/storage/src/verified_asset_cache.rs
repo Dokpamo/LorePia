@@ -10,6 +10,9 @@ use std::{
 
 use lorepia_domain::AssetDescriptor;
 
+mod budget;
+use budget::VerificationBudget;
+
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
 
@@ -19,14 +22,8 @@ use std::os::unix::fs::MetadataExt;
 // from turning into a second round of full-file hashes.
 const MAX_RENDERER_ASSET_FAN_OUT: usize = 128;
 const DEFAULT_MAX_HANDLES: usize = MAX_RENDERER_ASSET_FAN_OUT;
-// A cached handle must remain usable for at least as long as its verification
-// consumes the rolling hash budget; otherwise an expired full fan-out cannot
-// be reverified until the longer budget window elapses.
+// Handle lifetime is independent of the continuously replenished work budget.
 const DEFAULT_LEASE_TTL: Duration = Duration::from_mins(1);
-// A cold full-fan-out render needs exactly one verification per distinct asset.
-// Cache hits do not consume this budget; a 129th cold hash remains rate-limited.
-const DEFAULT_MAX_VERIFICATIONS_PER_WINDOW: usize = MAX_RENDERER_ASSET_FAN_OUT;
-const DEFAULT_VERIFICATION_WINDOW: Duration = Duration::from_mins(1);
 
 pub(crate) enum CacheLookup<T> {
     Hit(T),
@@ -36,11 +33,9 @@ pub(crate) enum CacheLookup<T> {
 
 pub(crate) struct VerifiedAssetCache {
     entries: VecDeque<VerifiedAssetHandle>,
-    verification_started: VecDeque<Instant>,
+    verification_budget: VerificationBudget,
     max_handles: usize,
     lease_ttl: Duration,
-    max_verifications_per_window: usize,
-    verification_window: Duration,
 }
 
 struct VerifiedAssetHandle {
@@ -48,6 +43,9 @@ struct VerifiedAssetHandle {
     file: AssetFileSnapshot,
     verified_at: Instant,
 }
+
+/// Identity evidence without an open descriptor; never used to serve renderer bytes.
+pub(crate) struct AssetIdentityProof(FileIdentity);
 
 pub(crate) struct AssetFileSnapshot {
     file: File,
@@ -119,9 +117,45 @@ impl FileIdentity {
 }
 
 impl AssetFileSnapshot {
+    pub(crate) fn same_verified_identity(&self, other: &Self) -> io::Result<bool> {
+        if self.identity != other.identity {
+            return Ok(false);
+        }
+        self.ensure_unchanged()?;
+        other.ensure_unchanged()?;
+        Ok(true)
+    }
+
+    pub(crate) fn verified_clone(&self) -> io::Result<Self> {
+        self.ensure_unchanged()?;
+        let cloned = Self {
+            file: self.file.try_clone()?,
+            identity: self.identity.clone(),
+        };
+        cloned.ensure_unchanged()?;
+        Ok(cloned)
+    }
+
     pub(crate) fn capture(file: File) -> io::Result<Self> {
         let identity = FileIdentity::read(&file)?;
         Ok(Self { file, identity })
+    }
+
+    pub(crate) fn into_identity_proof(self) -> io::Result<AssetIdentityProof> {
+        self.ensure_unchanged()?;
+        Ok(AssetIdentityProof(self.identity))
+    }
+
+    pub(crate) fn verify_identity_proof(&self, proof: &AssetIdentityProof) -> io::Result<()> {
+        self.ensure_unchanged()?;
+        if self.identity == proof.0 {
+            Ok(())
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "CAS file identity changed after verification",
+            ))
+        }
     }
 
     pub(crate) fn file_mut(&mut self) -> &mut File {
@@ -142,42 +176,16 @@ impl AssetFileSnapshot {
 
 impl VerifiedAssetCache {
     pub(crate) fn new(max_handles: usize, lease_ttl: Duration) -> Self {
-        Self::with_limits(
-            max_handles,
-            lease_ttl,
-            DEFAULT_MAX_VERIFICATIONS_PER_WINDOW,
-            DEFAULT_VERIFICATION_WINDOW,
-        )
-    }
-
-    fn with_limits(
-        max_handles: usize,
-        lease_ttl: Duration,
-        max_verifications_per_window: usize,
-        verification_window: Duration,
-    ) -> Self {
         Self {
             entries: VecDeque::new(),
-            verification_started: VecDeque::new(),
+            verification_budget: VerificationBudget::new(Instant::now()),
             max_handles: max_handles.max(1),
             lease_ttl,
-            max_verifications_per_window: max_verifications_per_window.max(1),
-            verification_window,
         }
     }
 
-    pub(crate) fn begin_verification(&mut self) -> io::Result<()> {
-        let now = Instant::now();
-        self.verification_started
-            .retain(|started| now.duration_since(*started) < self.verification_window);
-        if self.verification_started.len() >= self.max_verifications_per_window {
-            return Err(io::Error::new(
-                io::ErrorKind::WouldBlock,
-                "verified asset hash budget is temporarily exhausted",
-            ));
-        }
-        self.verification_started.push_back(now);
-        Ok(())
+    pub(crate) fn begin_verification(&mut self, size_bytes: u64) -> io::Result<()> {
+        self.verification_budget.admit(size_bytes, Instant::now())
     }
 
     pub(crate) fn contains_verified(
@@ -266,14 +274,18 @@ impl Default for VerifiedAssetCache {
     }
 }
 
+pub(crate) fn open_asset_file(root: &Path, sha256: &str) -> io::Result<File> {
+    open_cas_file(root, "assets", sha256)
+}
+
 /// Opens the exact digest file without following a final symlink or reparse point.
 #[cfg(any(target_os = "android", target_os = "linux", target_vendor = "apple"))]
-pub(crate) fn open_asset_file(root: &Path, sha256: &str) -> io::Result<File> {
+pub(crate) fn open_cas_file(root: &Path, namespace: &str, sha256: &str) -> io::Result<File> {
     use rustix::fs::{Mode, OFlags, open, openat};
 
     let directory_flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC | OFlags::NOFOLLOW;
     let file_flags = OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW;
-    let assets = open(root.join("assets"), directory_flags, Mode::empty())?;
+    let assets = open(root.join(namespace), directory_flags, Mode::empty())?;
     let sha256_dir = openat(&assets, "sha256", directory_flags, Mode::empty())?;
     let prefix = sha256
         .get(..2)
@@ -287,7 +299,7 @@ pub(crate) fn open_asset_file(root: &Path, sha256: &str) -> io::Result<File> {
 }
 
 #[cfg(windows)]
-pub(crate) fn open_asset_file(root: &Path, sha256: &str) -> io::Result<File> {
+pub(crate) fn open_cas_file(root: &Path, namespace: &str, sha256: &str) -> io::Result<File> {
     use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
     use windows_sys::Win32::Storage::FileSystem::{
         FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ,
@@ -300,7 +312,7 @@ pub(crate) fn open_asset_file(root: &Path, sha256: &str) -> io::Result<File> {
         .get(2..)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid asset digest"))?;
     let path = root
-        .join("assets")
+        .join(namespace)
         .join("sha256")
         .join(prefix)
         .join(basename);
@@ -356,16 +368,19 @@ fn windows_file_information(
     target_vendor = "apple",
     windows
 )))]
-pub(crate) fn open_asset_file(root: &Path, sha256: &str) -> io::Result<File> {
+pub(crate) fn open_cas_file(root: &Path, namespace: &str, sha256: &str) -> io::Result<File> {
     let prefix = sha256
         .get(..2)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid asset digest"))?;
     let basename = sha256
         .get(2..)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid asset digest"))?;
-    std::fs::OpenOptions::new()
-        .read(true)
-        .open(root.join("assets/sha256").join(prefix).join(basename))
+    std::fs::OpenOptions::new().read(true).open(
+        root.join(namespace)
+            .join("sha256")
+            .join(prefix)
+            .join(basename),
+    )
 }
 
 #[cfg(test)]
@@ -452,14 +467,15 @@ mod tests {
     }
 
     #[test]
-    fn aligned_lease_and_budget_windows_never_expire_into_a_blocked_gap() {
+    fn expired_small_assets_can_be_reverified_without_a_minute_wait() {
         let mut source = NamedTempFile::new().expect("temp file");
         source.write_all(b"data").expect("write");
         source.flush().expect("flush");
         let descriptor = descriptor(&"ce".repeat(32), 4);
-        let window = Duration::from_millis(60);
-        let mut cache = VerifiedAssetCache::with_limits(1, window, 1, window);
-        cache.begin_verification().expect("initial verification");
+        let mut cache = VerifiedAssetCache::default();
+        cache
+            .begin_verification(descriptor.size_bytes)
+            .expect("initial verification");
         cache
             .insert(
                 descriptor.clone(),
@@ -467,34 +483,20 @@ mod tests {
             )
             .expect("insert");
 
-        let within_window = Instant::now()
-            .checked_sub(Duration::from_millis(40))
-            .expect("monotonic clock supports test offset");
-        cache.entries.front_mut().expect("entry").verified_at = within_window;
-        cache.verification_started[0] = within_window;
         assert!(matches!(
             cache.contains_verified(&descriptor).expect("live lease"),
             CacheLookup::Hit(())
         ));
-        assert_eq!(
-            cache
-                .begin_verification()
-                .expect_err("live lease shares the still-consumed hash window")
-                .kind(),
-            io::ErrorKind::WouldBlock
-        );
-
-        let outside_window = Instant::now()
-            .checked_sub(Duration::from_millis(80))
+        let expired = Instant::now()
+            .checked_sub(DEFAULT_LEASE_TTL + Duration::from_secs(1))
             .expect("monotonic clock supports test offset");
-        cache.entries.front_mut().expect("entry").verified_at = outside_window;
-        cache.verification_started[0] = outside_window;
+        cache.entries.front_mut().expect("entry").verified_at = expired;
         assert!(matches!(
             cache.contains_verified(&descriptor).expect("expired lease"),
             CacheLookup::Miss
         ));
         cache
-            .begin_verification()
+            .begin_verification(descriptor.size_bytes)
             .expect("an expired lease can be reverified immediately");
     }
 
@@ -534,7 +536,7 @@ mod tests {
             .collect::<Vec<_>>();
 
         // PortableMessage first invokes resolveAssetDelivery once per unique
-        // reference. Every cold resolution consumes one hash-budget entry.
+        // reference. Every cold resolution pays for its verification work.
         for descriptor in &descriptors {
             assert!(matches!(
                 cache
@@ -543,7 +545,7 @@ mod tests {
                 CacheLookup::Miss
             ));
             cache
-                .begin_verification()
+                .begin_verification(descriptor.size_bytes)
                 .expect("full renderer fan-out stays within the hash budget");
             cache
                 .insert(
@@ -552,7 +554,8 @@ mod tests {
                 )
                 .expect("cache verified handle");
         }
-        assert_eq!(cache.verification_started.len(), MAX_RENDERER_ASSET_FAN_OUT);
+        assert_eq!(cache.entries.len(), MAX_RENDERER_ASSET_FAN_OUT);
+        let remaining_budget = cache.verification_budget.remaining();
 
         // A protocol GET resolves the digest and then reads the requested
         // range. Both operations must hit without consuming another hash.
@@ -572,23 +575,19 @@ mod tests {
             assert_eq!(bytes, b"123");
         }
         assert_eq!(
-            cache.verification_started.len(),
-            MAX_RENDERER_ASSET_FAN_OUT,
+            cache.verification_budget.remaining(),
+            remaining_budget,
             "protocol cache hits must not consume additional hash budget"
         );
     }
 
     #[test]
-    fn default_verification_budget_rejects_more_than_one_full_fan_out() {
+    fn a_small_album_can_exceed_the_live_handle_capacity_without_a_minute_wait() {
         let mut cache = VerifiedAssetCache::default();
-        for _ in 0..MAX_RENDERER_ASSET_FAN_OUT {
-            cache
-                .begin_verification()
-                .expect("one full renderer fan-out is allowed");
+        for index in 0..278 {
+            cache.begin_verification(81_024).unwrap_or_else(|error| {
+                panic!("small album image {index} must be admitted: {error}")
+            });
         }
-        let error = cache
-            .begin_verification()
-            .expect_err("hashing beyond one full fan-out must be rate-limited");
-        assert_eq!(error.kind(), io::ErrorKind::WouldBlock);
     }
 }

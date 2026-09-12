@@ -1,7 +1,16 @@
 <script lang="ts">
-    import { tick, untrack } from 'svelte';
+    import { onDestroy, tick, untrack } from 'svelte';
+    import { get } from 'svelte/store';
     import type { LorepiaAppController, LorepiaAppState } from '../app-controller';
-    import type { LorepiaClient, ConversationMode } from '../../lib/ipc/contracts';
+    import type { LorepiaClient } from '../../lib/ipc/contracts';
+    import {
+        CHAT_DISPLAY_MODES,
+        chatDisplayPreferences,
+        conversationDisplayMode,
+        generationMode,
+        setConversationDisplayMode,
+        type ChatDisplayMode,
+    } from '../../lib/chat-display';
     import { t, tr } from '../../lib/i18n';
     import type { Overlay } from '../../ui/workspace/view-types';
     import SettingsPanel from '../../ui/workspace/SettingsPanel.svelte';
@@ -39,6 +48,12 @@
         covered?: boolean;
     } = $props();
     const formId = $props.id();
+    const characterId = untrack(() => appState.selected_character?.id);
+    const conversationId = untrack(() => appState.selected_conversation?.id);
+    let mounted = true;
+    onDestroy(() => {
+        mounted = false;
+    });
     let busy = $state(false);
     let confirming = $state(false);
     let addingPersona = $state<PersonaController | null>(null);
@@ -68,12 +83,18 @@
     const pendingStart = $derived(
         kind === 'new-chat' && appState.pending_conversation_start !== null,
     );
-    let mode = $state<ConversationMode>(
-        untrack(() =>
-            kind === 'new-chat'
-                ? (appState.pending_conversation_start?.mode ?? 'chat')
-                : (appState.conversation_state?.selected_mode ?? 'chat'),
-        ),
+    let mode = $state<ChatDisplayMode>(
+        untrack(() => {
+            const pending = appState.pending_conversation_start;
+            if (kind === 'new-chat' && !pending) return 'default';
+            return conversationDisplayMode(
+                kind === 'new-chat' ? pending?.conversation.id : conversationId,
+                (kind === 'new-chat'
+                    ? pending?.mode
+                    : appState.conversation_state?.selected_mode) ?? 'chat',
+                get(chatDisplayPreferences),
+            );
+        }),
     );
     const originalMode = untrack(() => mode);
     const dirty = $derived(
@@ -127,20 +148,40 @@
         saveError = '';
         busy = true;
         try {
+            const nativeMode = generationMode(mode);
             if (kind === 'new-chat') {
                 if (greetingId && !controller.selectGreeting(greetingId)) {
                     saveError = t('chat.notice.greeting_reselect');
                     return;
                 }
-                if (await controller.openNewConversation(name, mode, personaId || undefined))
-                    oncreated();
+                const created = await controller.openNewConversation(
+                    name,
+                    nativeMode,
+                    personaId || undefined,
+                );
+                const current = get(controller.state);
+                if (!mounted || current.selected_character?.id !== characterId) return;
+                const room = created
+                    ? current.selected_conversation
+                    : current.pending_conversation_start?.conversation;
+                if (room && room.character_id === characterId)
+                    setConversationDisplayMode(room.id, mode);
+                if (created) oncreated();
             } else {
+                if (get(controller.state).selected_conversation?.id !== conversationId) return;
+                const saved =
+                    appState.conversation_state?.selected_mode === nativeMode ||
+                    (await controller.setConversationMode(nativeMode));
+                const current = get(controller.state);
+                if (!mounted || current.selected_conversation?.id !== conversationId) return;
                 if (
-                    appState.conversation_state?.selected_mode === mode ||
-                    (await controller.setConversationMode(mode))
-                )
+                    saved &&
+                    conversationId &&
+                    current.conversation_state?.selected_mode === nativeMode
+                ) {
+                    setConversationDisplayMode(conversationId, mode);
                     onclose();
-                else
+                } else
                     saveError =
                         workspaceFeedback(appState.announcement) || t('workspace.saveFailed');
             }
@@ -200,29 +241,17 @@
             {:else}
                 <fieldset class="ui-chat-mode-options" disabled={busy || pendingStart}>
                     <legend>{$tr('uiPreview.conversationMode')}</legend>
-                    {#each ['chat', 'story'] as value (value)}
+                    {#each CHAT_DISPLAY_MODES as option (option.value)}
                         <label>
                             <input
                                 type="radio"
                                 name="ui-conversation-mode"
-                                {value}
+                                value={option.value}
                                 bind:group={mode}
                             />
                             <span>
-                                <strong
-                                    >{$tr(
-                                        value === 'chat'
-                                            ? 'uiPreview.chatMode'
-                                            : 'uiPreview.storyMode',
-                                    )}</strong
-                                >
-                                <small
-                                    >{$tr(
-                                        value === 'chat'
-                                            ? 'uiPreview.chatModeHint'
-                                            : 'uiPreview.storyModeHint',
-                                    )}</small
-                                >
+                                <strong>{$tr(option.label)}</strong>
+                                <small>{$tr(option.hint)}</small>
                             </span>
                         </label>
                     {/each}

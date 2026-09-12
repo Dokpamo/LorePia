@@ -248,8 +248,8 @@ export const ko = {
     'chat.notice.greeting_reselect': '사용 가능한 시작 인사를 다시 선택해 주세요.',
     'chat.notice.greeting_revision':
         '정확한 캐릭터 인사 리비전을 불러온 뒤 새 대화를 시작해 주세요.',
-    'chat.notice.mode_chat': '채팅 모드로 변경했습니다.',
-    'chat.notice.mode_story': '스토리 모드로 변경했습니다.',
+    'chat.notice.mode_chat': '대화 모드를 변경했어요.',
+    'chat.notice.mode_story': '대화 모드를 변경했어요.',
     'chat.notice.plan_stale':
         '대화 상태가 미리보기 이후 바뀌었습니다. 최종 계획을 다시 검토하세요.',
     'chat.notice.reconciling': '저장된 메시지를 확인하는 중입니다.',

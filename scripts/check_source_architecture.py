@@ -953,6 +953,21 @@ def evaluate_size_config_changes(
             )
         return not candidate.exists()
 
+    def transferred(entries: list[str], groups: dict[str, list[str]]) -> bool:
+        if root is None:
+            return False
+        surviving = {entry for entry in entries if not retired(entry)}
+        # An obsolete facade may leave shared children behind. Keep their whole
+        # aggregate under one real replacement owner instead of dropping scope.
+        return any(
+            is_production_source(Path(owner))
+            and (root / owner).is_file()
+            and not (root / owner).is_symlink()
+            and isinstance(children, list)
+            and surviving.issubset(children)
+            for owner, children in groups.items()
+        )
+
     if current_version == 2 and base_version == 2:
         if current.get("bootstrap_ref") != base.get("bootstrap_ref"):
             failures.append("source-size bootstrap_ref is immutable after v2 bootstrap")
@@ -969,7 +984,10 @@ def evaluate_size_config_changes(
                 for parent, base_entries in sorted(base_groups.items()):
                     current_entries = current_groups.get(parent)
                     if not isinstance(current_entries, list):
-                        if retired(parent) and all(retired(entry) for entry in base_entries):
+                        if retired(parent) and (
+                            all(retired(entry) for entry in base_entries)
+                            or transferred(base_entries, current_groups)
+                        ):
                             continue
                         failures.append(
                             f"parent-child aggregate group cannot be removed: {parent}"

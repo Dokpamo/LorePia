@@ -45,6 +45,10 @@ pub(super) fn store_verified_source_observed(
         .ok_or_else(|| CoreError::internal("source path has no parent"))?;
     create_and_sync_cas_directory(cas_root, parent)?;
 
+    // The caller owns CAS mutation. Release cached readers before the durable
+    // publication/flush path; keep no-follow, hash and no-clobber checks intact.
+    crate::package_repository::invalidate_verified_source_lease(expected_sha256)?;
+
     match fs::symlink_metadata(final_path) {
         Ok(metadata) if metadata.file_type().is_file() => {
             verify_file(final_path, expected_sha256, expected_size)?;

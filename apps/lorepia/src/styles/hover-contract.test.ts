@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { styleRules } from '../tests/css-rules';
-import css from './app-css';
+import css from '../tests/current-ui-css';
+import controls from '../ui/workspace/ui-layout.css?raw';
 
 const rules = styleRules(css);
 
@@ -17,8 +18,8 @@ describe('input accessibility styling', () => {
         ).toBe(true);
     });
 
-    it('restricts pointer hover feedback to devices that support hover', () => {
-        const hoverRules = rules.filter((rule) => rule.selector.includes(':hover'));
+    it('restricts icon-button pointer hover feedback to devices that support hover', () => {
+        const hoverRules = styleRules(controls).filter((rule) => rule.selector.includes(':hover'));
         expect(hoverRules.length).toBeGreaterThan(0);
         for (const rule of hoverRules) {
             expect(

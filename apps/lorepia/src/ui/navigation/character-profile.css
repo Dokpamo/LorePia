@@ -130,6 +130,10 @@
     margin-inline: auto;
     padding-inline: var(--profile-gutter);
 }
+.seed-app .ui-overlay[data-kind='profile-resource'] .ui-detail-title {
+    font-size: var(--ui-type-title);
+    line-height: 1.35;
+}
 .seed-app .ui-overlay[data-kind='profile-resource'] > .ui-page-header {
     width: min(100%, var(--profile-width));
     margin-inline: auto;

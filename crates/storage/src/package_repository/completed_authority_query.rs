@@ -103,26 +103,43 @@ impl Storage {
                 "completed package approval payload differs from its durable identity",
             ));
         }
+        let mut asset_sources = BTreeMap::<_, Vec<_>>::new();
+        for planned in &approval.plan.components {
+            for asset_id in planned
+                .component
+                .asset_ids
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+            {
+                asset_sources.entry(asset_id).or_default().push(
+                    CompletedPackageAssetSourceAuthority {
+                        component_id: planned.component.id.clone(),
+                        component_sha256: planned.component.sha256.as_str().to_owned(),
+                    },
+                );
+            }
+        }
         let mut committed_assets = Vec::with_capacity(approval.plan.assets.len());
-        for asset in &approval.plan.assets {
-            let stored = connection
-                .query_row(
-                    "SELECT cas.relative_path, cas.media_type, cas.size_bytes,
+        let mut asset_statement = connection
+            .prepare_cached(
+                "SELECT cas.relative_path, cas.media_type, cas.size_bytes,
                             descriptor.payload_json
                      FROM assets AS cas
                      JOIN asset_descriptors AS descriptor
                        ON descriptor.asset_hash = cas.sha256
                      WHERE cas.sha256 = ?1 AND descriptor.id = ?2",
-                    params![asset.sha256.as_str(), asset.id.as_str()],
-                    |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, String>(1)?,
-                            row.get::<_, i64>(2)?,
-                            row.get::<_, String>(3)?,
-                        ))
-                    },
-                )
+            )
+            .map_err(storage_db_error)?;
+        for asset in &approval.plan.assets {
+            let stored = asset_statement
+                .query_row(params![asset.sha256.as_str(), asset.id.as_str()], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, String>(3)?,
+                    ))
+                })
                 .optional()
                 .map_err(storage_db_error)?
                 .ok_or_else(|| {
@@ -147,16 +164,7 @@ impl Storage {
                     "completed package asset descriptor differs from approval",
                 ));
             }
-            let source_components = approval
-                .plan
-                .components
-                .iter()
-                .filter(|component| component.component.asset_ids.contains(&asset.id))
-                .map(|component| CompletedPackageAssetSourceAuthority {
-                    component_id: component.component.id.clone(),
-                    component_sha256: component.component.sha256.as_str().to_owned(),
-                })
-                .collect();
+            let source_components = asset_sources.get(&asset.id).cloned().unwrap_or_default();
             committed_assets.push(CompletedPackageAssetAuthority {
                 asset_id: asset.id.clone(),
                 descriptor: asset.clone(),

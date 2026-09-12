@@ -1,6 +1,7 @@
 <script lang="ts">
     import { tr } from '../../../lib/i18n';
     import SettingsTextField from './DataText.svelte';
+    import PromptOptions from './PromptOptions.svelte';
     import ChoiceField from './DataChoice.svelte';
     import type { CreatorPromptPresetDocumentDto } from '../../../lib/ipc/contracts';
     import type {
@@ -33,7 +34,9 @@
     const selected = $derived(
         documentsState.prompts.find((item) => item.value.id === (draft?.id ?? builtin)),
     );
-    const busy = $derived(documentsState.busy || loading || applying);
+    const busy = $derived(
+        documentsState.busy || loading || applying || services.orchestrationState.saving,
+    );
     async function edit(promptId: string) {
         if (isBuiltInPrompt(promptId)) {
             controller.cancelSelection();
@@ -82,6 +85,7 @@
         try {
             services.orchestrationController.stageRoomConfig({
                 prompt_preset_id: selected.value.id,
+                generation_preset_id: selected.value.default_generation_preset_id,
             });
             await services.orchestrationController.saveRoomConfig();
         } finally {
@@ -98,7 +102,10 @@
     }
     import DataAction from './DataAction.svelte';
     export function isDirty() {
-        return dirty;
+        return dirty || services.orchestrationState.dirty_room_config;
+    }
+    export async function discardChanges() {
+        if (services.orchestrationState.dirty_room_config) await refreshRuntime();
     }
     export function isBusy() {
         return busy;
@@ -114,7 +121,7 @@
             >{/each}
     {:else}
         <DataAction
-            disabled={busy}
+            disabled={busy || dirty || services.orchestrationState.dirty_room_config}
             onclick={() => {
                 draft = null;
                 builtin = null;
@@ -122,6 +129,9 @@
         >
     {/if}
     {#if loading}<p role="status">{$tr('settingsLive.loading')}</p>{/if}
+    {#if services.orchestrationState.workspace.room_config.prompt_preset_id === selected?.value.id}
+        <PromptOptions {services} />
+    {/if}
     {#if draft}
         <SettingsTextField
             label={$tr('settingsUi.promptName')}

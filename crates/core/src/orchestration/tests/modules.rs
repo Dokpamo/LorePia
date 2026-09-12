@@ -1,9 +1,18 @@
 #[test]
+fn app_scope_module_applies_in_a_second_room_and_on_a_manual_branch_first_send() {
+    assert_app_scope_first_send(false);
+}
+
+#[test]
+fn chunked_module_authority_survives_reopen_and_first_send_in_derived_contexts() {
+    assert_app_scope_first_send(true);
+}
+
 #[allow(
     clippy::too_many_lines,
     reason = "one app-scope activation must be materialized for both another room and a manual branch"
 )]
-fn app_scope_module_applies_in_a_second_room_and_on_a_manual_branch_first_send() {
+fn assert_app_scope_first_send(chunked: bool) {
     const MARKER: &str = "SYNTHETIC_APP_SCOPE_MODULE_MARKER_5D31";
 
     let root = tempdir().expect("temporary Core root");
@@ -38,7 +47,10 @@ fn app_scope_module_applies_in_a_second_room_and_on_a_manual_branch_first_send()
         .next()
         .expect("second-room root branch");
 
-    let module = prompt_marker_module();
+    let mut module = prompt_marker_module();
+    if chunked {
+        seed_large_module_assets(root.path(), &mut module);
+    }
     activate_app_module(
         &core,
         &module,
@@ -48,6 +60,29 @@ fn app_scope_module_applies_in_a_second_room_and_on_a_manual_branch_first_send()
         },
         "synthetic.core.module.prompt-marker.binding",
     );
+    let core = if chunked {
+        drop(core);
+        let core = Core::open(CoreConfig::new(root.path())).expect("reopen chunked module");
+        let review = core
+            .review_content_module_runtime_workspace(&ContentModuleRuntimeTarget {
+                conversation_id: activation_room.id.clone(),
+                branch_id: activation_branch.id.clone(),
+            })
+            .expect("review restored complete module");
+        assert_eq!(review.bindings.len(), 1);
+        let connection = rusqlite::Connection::open(active_database_path(root.path())).unwrap();
+        let count: i64 = connection
+            .query_row(
+                "SELECT count(*) FROM module_plan_documents WHERE kind = 'runtime'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(count > 0, "fixture must persist a chunked runtime plan");
+        core
+    } else {
+        core
+    };
     let manual_branch = core
         .create_conversation_branch(
             &activation_room.id,
@@ -912,4 +947,48 @@ fn module_revisions_diff_and_share_gate_are_durable() {
             .all(|binding| binding.binding.id != binding_id),
         "a deactivated binding must remain absent after restart"
     );
+}
+
+/// Synthetic aliases for one genuine PNG keep the fixture small on disk while
+/// exercising the same large plan and prompt-authority paths as an asset pack.
+fn seed_large_module_assets(root: &Path, module: &mut ContentModule) {
+    use sha2::Digest;
+    let bytes = fs::read(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../testdata/tauri-upgrade/native-schema-11/assets/avatar.png"),
+    )
+    .unwrap();
+    let digest = hex::encode(sha2::Sha256::digest(&bytes));
+    let relative = format!("sha256/{}/{}", &digest[..2], &digest[2..]);
+    let file = root.join("assets").join(&relative);
+    fs::create_dir_all(file.parent().unwrap()).unwrap();
+    fs::write(&file, &bytes).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    let mut connection = rusqlite::Connection::open(active_database_path(root)).unwrap();
+    let transaction = connection.transaction().unwrap();
+    transaction.execute("INSERT INTO assets (sha256, relative_path, media_type, size_bytes, created_at) VALUES (?1, ?2, 'image/png', ?3, ?4)", rusqlite::params![digest, relative, bytes.len(), timestamp().to_rfc3339()]).unwrap();
+    for index in 0..1024 {
+        let descriptor = lorepia_domain::AssetDescriptor {
+            id: lorepia_domain::AssetId::from(format!(
+                "chunk-asset-{index:04}-{}",
+                "a".repeat(180)
+            )),
+            sha256: Sha256Digest::parse(digest.clone()).unwrap(),
+            media_type: "image/png".into(),
+            role: lorepia_domain::AssetRole::Illustration,
+            name: format!("Synthetic image {index}"),
+            size_bytes: bytes.len().try_into().unwrap(),
+            width: None,
+            height: None,
+            duration_ms: None,
+            source: lorepia_domain::AssetSource::default(),
+        };
+        transaction.execute("INSERT INTO asset_descriptors (id, asset_hash, name, role, media_type, size_bytes, risk_class, source_kind, payload_json, created_at) VALUES (?1, ?2, ?3, 'illustration', 'image/png', ?4, 'normal', 'unknown', ?5, ?6)", rusqlite::params![descriptor.id.as_str(), digest, descriptor.name, bytes.len(), serde_json::to_string(&descriptor).unwrap(), timestamp().to_rfc3339()]).unwrap();
+        module.asset_ids.push(descriptor.id);
+    }
+    transaction.commit().unwrap();
 }

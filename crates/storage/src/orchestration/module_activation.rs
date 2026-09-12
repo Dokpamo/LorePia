@@ -1,5 +1,6 @@
 //! Approved module activation, rollback, and response-loss recovery.
 
+use super::module_plan_documents::{self as documents, Kind};
 use super::{
     CoreError, CoreResult, DateTime, Deserialize, ModuleBinding, ModuleBindingId,
     OptionalExtension, RecoveredModuleActivation, RecoveredModuleRollback, Storage, StoredRevision,
@@ -149,9 +150,9 @@ fn recover_applied_module_activation(
         ));
     }
     let review: lorepia_orchestration::ModuleActivationReview =
-        decode_document("applied module activation review", &row.0)?;
+        documents::decode(&connection, Kind::Review, &row.0)?;
     let approved: lorepia_orchestration::ApprovedModuleActivationPlan =
-        decode_document("applied module activation plan", &row.1)?;
+        documents::decode(&connection, Kind::Approval, &row.1)?;
     review.verify().map_err(|error| {
         storage_corrupted(format!(
             "applied module activation review is invalid: {error}"
@@ -606,8 +607,8 @@ fn apply_approved_module_activation_internal(
     validate_json_bounds("module activation revisions", &input_module_revisions_json)?;
     validate_json_bounds("module activation conflicts", &conflicts_json)?;
     validate_json_bounds("module activation resolutions", &resolutions_json)?;
-    validate_json_bounds("module activation review", &review_json)?;
-    validate_json_bounds("approved module activation", &approved_plan_json)?;
+    let review_json = documents::store(&transaction, Kind::Review, &review_json)?;
+    let approved_plan_json = documents::store(&transaction, Kind::Approval, &approved_plan_json)?;
     let merge_sha256 = sha256_hex(resolutions_json.as_bytes());
 
     stale_affected_module_activation_plans(

@@ -49,6 +49,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../../migrations/0039_runtime_model_audit.sql"),
     include_str!("../../migrations/0040_portable_runtime_state.sql"),
     include_str!("../../migrations/0041_portable_runtime_package_capability.sql"),
+    include_str!("../../migrations/0042_module_plan_documents.sql"),
 ];
 
 pub(crate) fn expected_schema_version() -> u32 {

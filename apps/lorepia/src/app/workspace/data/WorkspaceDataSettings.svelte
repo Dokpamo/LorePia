@@ -18,6 +18,7 @@
     import PackageData from './PackageData.svelte';
     import SettingsRow from '../../../ui/workspace/SettingsRow.svelte';
     import DataAction from './DataAction.svelte';
+    import ImportedSetup from './ImportedSetup.svelte';
     let {
         section,
         services,
@@ -38,6 +39,8 @@
         return () => controller.destroy();
     });
     let packages = $state(false);
+    let importedSetup = $state(false);
+    let importedEditor = $state<{ isBusy: () => boolean }>();
     let packageEditor = $state<{ isBusy: () => boolean }>();
     async function closePackages() {
         packages = false;
@@ -56,7 +59,11 @@
                       : 'settingsUi.storage',
         ),
     );
-    let editor = $state<{ isDirty: () => boolean; isBusy: () => boolean }>();
+    let editor = $state<{
+        isDirty: () => boolean;
+        isBusy: () => boolean;
+        discardChanges?: () => Promise<void>;
+    }>();
     let confirming = $state(false);
     let resumeBack: (() => Promise<void>) | undefined;
     async function keepEditing() {
@@ -84,7 +91,7 @@
     {onclose}
     disabled={$controllerStore.busy}
     {beforeback}
-    covered={confirming || packages}
+    covered={confirming || packages || importedSetup}
 >
     {#if section === 'persona'}<PersonaData
             bind:this={editor}
@@ -103,6 +110,13 @@
     {:else if $controllerStore.phase === 'error'}<p role="alert">{$controllerStore.error}</p>
         <DataAction onclick={() => void controller.load()}>{$tr('settingsLive.retry')}</DataAction>
     {:else}
+        <SettingsRow
+            label={$tr(
+                section === 'prompt' ? 'importSetup.promptTitle' : 'importSetup.memoryTitle',
+            )}
+            disabled={editor?.isDirty() ?? false}
+            onclick={() => (importedSetup = true)}
+        />
         <SettingsRow
             label={$tr('workspaceData.pickPackage')}
             disabled={editor?.isDirty() ?? false}
@@ -124,6 +138,25 @@
     {/if}
 </SettingsPanel>
 
+{#if importedSetup && (section === 'prompt' || section === 'memory')}
+    <SettingsPanel
+        title={$tr(section === 'prompt' ? 'importSetup.promptTitle' : 'importSetup.memoryTitle')}
+        onclose={() => (importedSetup = false)}
+        beforeback={() => !(importedEditor?.isBusy() ?? false)}
+    >
+        <ImportedSetup
+            bind:this={importedEditor}
+            kind={section === 'prompt' ? 'generation' : 'memory'}
+            {services}
+            documentsState={$controllerStore}
+            onsaved={() => {
+                importedSetup = false;
+                void controller.load();
+            }}
+        />
+    </SettingsPanel>
+{/if}
+
 {#if packages}
     <SettingsPanel
         title={$tr('workspaceData.pickPackage')}
@@ -134,4 +167,10 @@
     </SettingsPanel>
 {/if}
 
-{#if confirming}<DiscardChanges onkeep={keepEditing} ondiscard={onclose} />{/if}
+{#if confirming}<DiscardChanges
+        onkeep={keepEditing}
+        ondiscard={() => {
+            void editor?.discardChanges?.();
+            onclose();
+        }}
+    />{/if}

@@ -13,6 +13,7 @@ use crate::verified_asset_cache::{
 };
 
 const MAX_APPROVED_ASSET_READ_BYTES: u64 = 64 * 1_024 * 1_024;
+const MAX_APPROVED_IMAGE_BYTES: u64 = 16 * 1_024 * 1_024;
 
 /// One verified, bounded byte range from an approved content-addressed asset.
 ///
@@ -127,7 +128,9 @@ impl Storage {
                 ));
             }
             CacheLookup::Miss => {
-                cache.begin_verification().map_err(storage_io_error)?;
+                cache
+                    .begin_verification(descriptor.size_bytes)
+                    .map_err(storage_io_error)?;
                 let file = self.open_verified_approved_asset(&descriptor, &relative_path)?;
                 cache
                     .insert(descriptor.clone(), file)
@@ -189,6 +192,17 @@ impl Storage {
             ));
         }
         validate_renderer_media_type(&descriptor.media_type)?;
+        if descriptor.size_bytes == 0
+            || descriptor.size_bytes > MAX_APPROVED_ASSET_READ_BYTES
+            || (descriptor.media_type.starts_with("image/")
+                && descriptor.size_bytes > MAX_APPROVED_IMAGE_BYTES)
+        {
+            return Err(CoreError::new(
+                CoreErrorCode::UnsafeArchive,
+                "approved asset size is outside renderer bounds",
+                false,
+            ));
+        }
         Ok((descriptor, row.1))
     }
 
@@ -208,7 +222,9 @@ impl Storage {
                 "approved asset changed after it was verified",
             )),
             CacheLookup::Miss => {
-                cache.begin_verification().map_err(storage_io_error)?;
+                cache
+                    .begin_verification(descriptor.size_bytes)
+                    .map_err(storage_io_error)?;
                 let file = self.open_verified_approved_asset(descriptor, relative_path)?;
                 cache
                     .insert(descriptor.clone(), file)

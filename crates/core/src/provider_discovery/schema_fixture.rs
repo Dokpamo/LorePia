@@ -38,6 +38,15 @@ pub(super) fn drop_post_schema_37_migrations(connection: &rusqlite::Connection) 
         ("TRIGGER", "portable_runtime_state_scope_guard_insert"),
         ("TRIGGER", "portable_runtime_state_scope_guard_update"),
     ];
+    connection
+        .execute_batch("DROP TABLE module_plan_document_parts; DROP TABLE module_plan_documents;")
+        .expect("remove schema-42 module document storage");
+    assert_eq!(
+        connection
+            .execute("DELETE FROM schema_migrations WHERE version = 42", [])
+            .expect("remove schema-42 registry row"),
+        1
+    );
     assert_additive_migration_objects(MIGRATION_0040, SCHEMA_40_OBJECTS);
     connection
         .execute_batch(include_str!(

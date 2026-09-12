@@ -12,6 +12,7 @@
     import { t, tr } from '../../lib/i18n';
     import { themePreference } from '../../lib/theme';
     import { chatTextSize } from '../../lib/display';
+    import { chatDisplayPreferences, conversationDisplayMode } from '../../lib/chat-display';
     import { PortableRuntimeLifecycle } from '../../features/chat/portable-runtime-lifecycle.svelte';
     import PortableMessage from '../../features/chat/PortableMessage.svelte';
     import ImportReviewDialog from './WorkspaceImportReview.svelte';
@@ -86,17 +87,28 @@
         onNotice: (value: string) => (notice = value),
     });
     const subpage = $derived(
-        !!runtime.profile &&
-            (runtime.requiresRuntimeWorker ||
-                !!runtime.profile.background_markup.trim() ||
-                runtime.profile.display_transforms.length > 0 ||
-                runtime.profile.output_transforms.length > 0),
+        runtime.profileLoading ||
+            runtime.profileError !== null ||
+            (!!runtime.profile &&
+                (runtime.requiresRuntimeWorker ||
+                    !!runtime.profile.background_markup.trim() ||
+                    runtime.profile.display_transforms.length > 0 ||
+                    runtime.profile.output_transforms.length > 0)),
     );
     const characters = $derived(characterViews(appState, subpage));
     const character = $derived(
         characters.find((item) => item.id === appState.selected_character?.id),
     );
-    const conversation = $derived(conversationView(appState));
+    const conversation = $derived(
+        conversationView(
+            appState,
+            conversationDisplayMode(
+                appState.selected_conversation?.id,
+                appState.conversation_state?.selected_mode ?? 'chat',
+                $chatDisplayPreferences,
+            ),
+        ),
+    );
     const error = $derived(
         appState.bootstrap.error ??
             appState.library.error ??
@@ -120,30 +132,43 @@
         if (mounted && !state.selected_character && state.library.characters[0])
             await controller.selectCharacter(state.library.characters[0], true);
     }
+    // Root store publications include streaming and unrelated workspace updates.
+    // Track stable scope values so they cannot reload the large profile or revoke
+    // the current runtime grant on every publication.
+    const runtimeCharacterId = $derived(appState.selected_character?.id ?? null);
+    const runtimeConversationId = $derived(appState.selected_conversation?.id ?? null);
+    const runtimeBranchId = $derived(appState.conversation_state?.active_branch_id ?? null);
+    const runtimeCharacterName = $derived(appState.selected_character?.name ?? '');
+    const runtimeCharacterDescription = $derived(appState.selected_character?.description ?? '');
     $effect(() =>
-        runtime.loadProfile(
-            appClient,
-            appState.selected_character?.id ?? null,
-            appState.selected_conversation?.id ?? null,
-            appState.conversation_state?.active_branch_id ?? null,
-        ),
+        runtime.loadProfile(appClient, runtimeCharacterId, runtimeConversationId, runtimeBranchId),
     );
     $effect(() =>
         runtime.recreate({
             client: appClient,
-            character: appState.selected_character,
-            conversationId: appState.selected_conversation?.id ?? null,
-            branchId: appState.conversation_state?.active_branch_id ?? null,
+            character:
+                runtimeCharacterId === null
+                    ? null
+                    : {
+                          name: runtimeCharacterName,
+                          description: runtimeCharacterDescription,
+                      },
+            conversationId: runtimeConversationId,
+            branchId: runtimeBranchId,
         }),
+    );
+    const runtimeMessages = $derived(appState.messages.items);
+    const runtimeGeneration = $derived(appState.chat.active_generation_id);
+    const runtimeStreaming = $derived(
+        appState.chat.live_assistant_message_id !== null ||
+            !!appState.chat.streaming_text ||
+            !!appState.chat.reasoning_text,
     );
     $effect(() =>
         runtime.syncMessages({
-            messages: appState.messages.items,
-            activeGenerationId: appState.chat.active_generation_id,
-            hasStreamingPresentation:
-                appState.chat.live_assistant_message_id !== null ||
-                !!appState.chat.streaming_text ||
-                !!appState.chat.reasoning_text,
+            messages: runtimeMessages,
+            activeGenerationId: runtimeGeneration,
+            hasStreamingPresentation: runtimeStreaming,
         }),
     );
     $effect(() => {
@@ -221,6 +246,7 @@
             client={appClient}
             ondetail={(active: boolean) => (rootDetails.home = active)}
             ready={appState.bootstrap.phase === 'ready'}
+            loaded={appState.library.phase === 'ready'}
             onselect={(id: string) => void selectCharacter(id)}
             onadd={() => void controller.beginImport()}
         />
@@ -339,6 +365,8 @@
     )}
         {#if character && conversation}
             <ChatPage
+                client={appClient}
+                personaName={runtime.personaName}
                 {character}
                 {conversation}
                 {session}

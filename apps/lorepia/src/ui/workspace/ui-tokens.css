@@ -21,6 +21,7 @@ body {
     --ui-ink: light-dark(#333d4b, #e4e4e7);
     --ui-muted: light-dark(#596574, #c4c4ca);
     --ui-secondary: light-dark(#465262, #d4d4d8);
+    --ui-story-user: light-dark(#526535, #c0d594);
     --ui-hint: light-dark(#596574, #9e9ea4);
     --ui-critical: light-dark(#b42318, #ffb4ab);
     --ui-pressed-surface: light-dark(#e5e8eb, #313136);

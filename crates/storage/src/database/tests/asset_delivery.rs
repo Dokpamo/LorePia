@@ -229,3 +229,66 @@ fn approved_asset_delivery_rejects_non_renderer_media() {
         .expect_err("attachments must not reach the renderer protocol");
     assert_eq!(error.code, CoreErrorCode::UnsafeArchive);
 }
+
+#[test]
+fn approved_asset_delivery_rejects_oversized_images_before_hashing() {
+    let root = tempdir().expect("temp root");
+    let source_bytes = b"synthetic character";
+    let mut image_bytes = vec![0u8; 16 * 1024 * 1024 + 1];
+    image_bytes[..8].copy_from_slice(b"\x89PNG\r\n\x1a\n");
+    let mut source = NamedTempFile::new_in(root.path()).expect("source staging");
+    source.write_all(source_bytes).expect("source");
+    let mut asset = NamedTempFile::new_in(root.path()).expect("asset staging");
+    asset.write_all(&image_bytes).expect("asset");
+    let source_hash = hex::encode(Sha256::digest(source_bytes));
+    let asset_hash = hex::encode(Sha256::digest(&image_bytes));
+    let asset_digest = Sha256Digest::parse(&asset_hash).expect("asset digest");
+    let descriptor = AssetDescriptor {
+        id: AssetId::from("avatar"),
+        sha256: asset_digest.clone(),
+        media_type: "image/png".to_owned(),
+        role: lorepia_domain::AssetRole::Avatar,
+        name: "avatar.png".to_owned(),
+        size_bytes: u64::try_from(image_bytes.len()).expect("small image"),
+        width: Some(1),
+        height: Some(1),
+        duration_ms: None,
+        source: lorepia_domain::AssetSource {
+            kind: lorepia_domain::AssetSourceKind::CharxPackage,
+            source_sha256: Some(Sha256Digest::parse(&source_hash).expect("source digest")),
+            logical_path: Some("assets/avatar.png".to_owned()),
+        },
+    };
+    let mut content = CharacterContentV1::default();
+    content.assets.push(descriptor.clone());
+    let mut character = Character::new("Segu", "Guide", &source_hash);
+    character.avatar_asset_hash = Some(asset_hash.clone());
+    let staged_assets = [StagedAssetImport {
+        staged_path: asset.path().to_path_buf(),
+        sha256: asset_hash.clone(),
+        media_type: "image/png".to_owned(),
+        size_bytes: descriptor.size_bytes,
+    }];
+    let storage = Storage::open(root.path()).expect("open storage");
+    storage
+        .commit_character_import_with_content(
+            source.path(),
+            &character,
+            &content,
+            &"ab".repeat(32),
+            u64::try_from(source_bytes.len()).expect("small source"),
+            "approved-asset-import",
+            &staged_assets,
+        )
+        .expect("commit approved asset");
+
+    for error in [
+        storage.resolve_approved_asset_by_id(&descriptor.id).unwrap_err(),
+        storage.resolve_approved_asset_by_sha256(&asset_digest).unwrap_err(),
+        storage.read_approved_asset_range(&asset_digest, 0, 1).unwrap_err(),
+    ] {
+        assert_eq!(error.code, CoreErrorCode::UnsafeArchive);
+        assert!(!error.recoverable);
+    }
+    assert_eq!(storage.approved_asset_hash_verification_count(), 0);
+}

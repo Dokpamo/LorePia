@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-resolve-content-module-activation-summary"
+description = "Enables the resolve_content_module_activation_summary command without any pre-configured scope."
+commands.allow = ["resolve_content_module_activation_summary"]
+
+[[permission]]
+identifier = "deny-resolve-content-module-activation-summary"
+description = "Denies the resolve_content_module_activation_summary command without any pre-configured scope."
+commands.deny = ["resolve_content_module_activation_summary"]

@@ -2383,6 +2383,41 @@ class SourceArchitectureTests(unittest.TestCase):
             current["limits"]["production"]["rust"]["lines"] += 1
             self.assertTrue(any("limit increased" in item for item in evaluate_baseline_changes(current, base, root=root)))
 
+    def test_retired_parent_can_transfer_its_complete_surviving_aggregate(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            parent = "crates/sample/src/old.rs"
+            replacement = "crates/sample/src/current.rs"
+            entries = ["crates/sample/src/shared/", "crates/sample/src/shared_extra.rs"]
+            base = source_config(baselines={}, parent_child_groups={parent: entries})
+            current = source_config(baselines={}, parent_child_groups={replacement: entries})
+            for relative in (replacement, entries[0] + "child.rs", entries[1]):
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("fn active() {}\n", encoding="utf-8")
+            self.assertEqual(evaluate_baseline_changes(current, base, root=root), [])
+
+            current["parent_child_groups"][replacement] = entries[:1]
+            self.assertTrue(evaluate_baseline_changes(current, base, root=root))
+            current["parent_child_groups"][replacement] = entries
+
+            (root / parent).write_text("fn still_active() {}\n", encoding="utf-8")
+            self.assertTrue(evaluate_baseline_changes(current, base, root=root))
+            (root / parent).unlink()
+
+            (root / replacement).unlink()
+            self.assertTrue(evaluate_baseline_changes(current, base, root=root))
+            (root / replacement).symlink_to(root / entries[1])
+            self.assertTrue(evaluate_baseline_changes(current, base, root=root))
+            (root / replacement).unlink()
+            (root / replacement).write_text("fn active() {}\n", encoding="utf-8")
+
+            current["limits"]["production"]["rust"]["lines"] += 1
+            self.assertTrue(any(
+                "limit increased" in item
+                for item in evaluate_baseline_changes(current, base, root=root)
+            ))
+
     def test_dependency_upgrade_requires_the_updated_exact_contract(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

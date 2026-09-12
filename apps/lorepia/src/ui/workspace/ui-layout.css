@@ -102,7 +102,9 @@
         background-color: var(--ui-pressed-surface);
     }
 }
-.ui-preview .ui-pressable:is(:active, [data-ui-pressed='true']):not(:disabled) > .ui-press-visual {
+.ui-preview
+    .ui-pressable:is(:active, [data-ui-pressed='true']):not(:disabled, [data-ui-press-cancelled])
+    > .ui-press-visual {
     background-color: var(--ui-pressed-surface);
 }
 .ui-preview .ui-left-layout {

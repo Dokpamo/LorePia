@@ -1,7 +1,11 @@
 <script lang="ts">
+    import { getContext } from 'svelte';
     import { t, tr } from '../../lib/i18n';
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { SvelteURL } from 'svelte/reactivity';
+    import { loadAssetDelivery } from './asset-delivery-loader';
+    import { assetLoadPriorityContext, type AssetLoadPriority } from './asset-load-priority';
+    const loadPriority = getContext<AssetLoadPriority | undefined>(assetLoadPriorityContext);
 
     import type {
         AssetDeliveryDto,
@@ -37,7 +41,7 @@
     }: Props = $props();
     let descriptor = $state<AssetDeliveryDto | null>(null);
     let rendererUrl = $state<string | null>(null);
-    let phase = $state<'loading' | 'media_loading' | 'ready' | 'error'>('loading');
+    let phase = $state<'loading' | 'waiting' | 'media_loading' | 'ready' | 'error'>('loading');
     let error = $state<string | null>(null);
     let mediaRetryCount = 0;
     let mediaRetryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -55,14 +59,22 @@
                 : { kind: 'sha256', sha256: selectorValue };
         const activeExpectedKind = expectedKind;
         let cancelled = false;
+        const abort = new AbortController();
         mediaRetryCount = 0;
         descriptor = null;
         rendererUrl = null;
         error = null;
         phase = 'loading';
 
-        void activeClient
-            .resolveAssetDelivery({ selector: activeSelector })
+        void loadAssetDelivery(
+            activeClient,
+            activeSelector,
+            abort.signal,
+            () => {
+                if (!cancelled) phase = 'waiting';
+            },
+            loadPriority,
+        )
             .then((result) => {
                 if (cancelled) return;
                 if (
@@ -91,6 +103,7 @@
 
         return () => {
             cancelled = true;
+            abort.abort();
             if (mediaRetryTimer !== null) clearTimeout(mediaRetryTimer);
             mediaRetryTimer = null;
         };
@@ -206,6 +219,21 @@
         if (descriptor !== null && rendererUrl !== null) phase = 'ready';
     }
 
+    async function imageReady(event: Event): Promise<void> {
+        const image = event.currentTarget;
+        if (!(image instanceof HTMLImageElement)) return;
+        const currentDescriptor = descriptor;
+        const currentUrl = rendererUrl;
+        const current = () =>
+            image.isConnected && descriptor === currentDescriptor && rendererUrl === currentUrl;
+        try {
+            if (typeof image.decode === 'function') await image.decode();
+            if (current()) mediaReady();
+        } catch {
+            if (current()) mediaFailed();
+        }
+    }
+
     function mediaFailed(): void {
         if (descriptor !== null && rendererUrl !== null && mediaRetryCount < 2) {
             const retryDescriptor = descriptor;
@@ -233,8 +261,9 @@
 
 <div
     class="trusted-asset"
-    aria-busy={phase === 'loading' || phase === 'media_loading'}
+    aria-busy={phase === 'loading' || phase === 'waiting' || phase === 'media_loading'}
     data-asset-phase={phase}
+    data-asset-bytes={descriptor?.size_bytes}
     data-status-presentation={statusPresentation}
 >
     {#if descriptor !== null && rendererUrl !== null}
@@ -245,8 +274,9 @@
                 width={descriptor.width ?? undefined}
                 height={descriptor.height ?? undefined}
                 draggable="false"
+                decoding="async"
                 referrerpolicy="no-referrer"
-                onload={mediaReady}
+                onload={imageReady}
                 onerror={mediaFailed}
             />
         {:else if descriptor.kind === 'audio'}
@@ -274,9 +304,13 @@
         {/if}
     {/if}
 
-    {#if phase === 'loading' || phase === 'media_loading'}
+    {#if phase === 'loading' || phase === 'waiting' || phase === 'media_loading'}
         <span class="asset-status" role="status">
-            {phase === 'loading' ? $tr('asset.verifying') : $tr('asset.loading')}
+            {phase === 'waiting'
+                ? $tr('workspace.assetWaiting')
+                : phase === 'loading'
+                  ? $tr('asset.verifying')
+                  : $tr('asset.loading')}
         </span>
     {:else if error !== null}
         <span class="asset-error" role="alert">{error}</span>

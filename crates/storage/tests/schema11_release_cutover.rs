@@ -1141,7 +1141,7 @@ fn checkpoint_and_close(connection: Connection) {
 /// Update the migration constant and the expected version together whenever a
 /// migration is added; the assertion below is what forces that.
 fn downgrade_latest_schema_by_one(path: &Path, current_schema: u32) {
-    const LATEST_SCHEMA: u32 = 41;
+    const LATEST_SCHEMA: u32 = 42;
 
     assert_eq!(
         current_schema, LATEST_SCHEMA,
@@ -1152,16 +1152,14 @@ fn downgrade_latest_schema_by_one(path: &Path, current_schema: u32) {
         .execute_batch("PRAGMA foreign_keys = OFF;")
         .expect("disable foreign keys for the previous-release fixture downgrade");
     connection
-        .execute_batch(include_str!(
-            "../../../testdata/tauri-upgrade/schema-40-package-capability-requests.sql"
-        ))
-        .expect("restore schema-40 package capability table");
+        .execute_batch("DROP TABLE module_plan_document_parts; DROP TABLE module_plan_documents;")
+        .expect("remove schema-42 module document storage");
     connection
         .execute(
             "DELETE FROM schema_migrations WHERE version = ?1",
             [LATEST_SCHEMA],
         )
-        .expect("remove schema-41 migration registry row");
+        .expect("remove schema-42 migration registry row");
     connection
         .execute_batch("PRAGMA foreign_keys = ON;")
         .expect("reenable foreign keys after the previous-release fixture downgrade");

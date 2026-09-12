@@ -4,6 +4,9 @@ export function scrollHeaderMotion(header: HTMLElement, body: HTMLElement) {
     const floating = getComputedStyle(header).position === 'absolute';
     const previousPosition = frame?.style.position ?? '';
     const previousPadding = body.style.paddingTop;
+    const previousMetrics = ['--ui-scroll-header-height', '--ui-scroll-header-offset'].map(
+        (name) => [name, frame?.style.getPropertyValue(name) ?? ''] as const,
+    );
     let height = 0;
     let offset = 0;
     let previous = body.scrollTop;
@@ -30,9 +33,14 @@ export function scrollHeaderMotion(header: HTMLElement, body: HTMLElement) {
         clearTimeout(animationTimer);
         header.dataset.scrollHeaderSettling = String(animate);
         header.style.setProperty('--ui-scroll-header-offset', `${String(offset)}px`);
+        if (frame) {
+            frame.style.setProperty('--ui-scroll-header-offset', `${String(offset)}px`);
+            frame.dataset.scrollHeaderFrameSettling = String(animate);
+        }
         if (animate)
             animationTimer = setTimeout(() => {
                 header.dataset.scrollHeaderSettling = 'false';
+                if (frame) frame.dataset.scrollHeaderFrameSettling = 'false';
             }, 180);
     }
     function show() {
@@ -43,6 +51,7 @@ export function scrollHeaderMotion(header: HTMLElement, body: HTMLElement) {
     function measure() {
         const top = body.scrollTop;
         height = header.offsetHeight;
+        frame?.style.setProperty('--ui-scroll-header-height', `${String(height)}px`);
         if (!floating) {
             delete body.dataset.scrollHeaderBody;
             body.style.paddingTop = previousPadding;
@@ -113,6 +122,11 @@ export function scrollHeaderMotion(header: HTMLElement, body: HTMLElement) {
             body.style.paddingTop = previousPadding;
             if (frame) {
                 delete frame.dataset.scrollHeaderFrame;
+                delete frame.dataset.scrollHeaderFrameSettling;
+                for (const [name, value] of previousMetrics) {
+                    if (value) frame.style.setProperty(name, value);
+                    else frame.style.removeProperty(name);
+                }
                 frame.style.position = previousPosition;
             }
         },

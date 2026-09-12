@@ -1,33 +1,31 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import MobileNavigation from '../components/mobile/MobileNavigation.svelte';
+import BottomNavigation from '../ui/navigation/BottomNavigation.svelte';
 import { t } from '../lib/i18n';
 
 afterEach(cleanup);
 
 describe('navigation icons and accessible actions', () => {
     it('keeps icon artwork decorative while buttons expose names and destinations', async () => {
-        const onHome = vi.fn();
-        const onChat = vi.fn();
-        const onSettings = vi.fn();
-        render(MobileNavigation, { view: 'chat', onHome, onChat, onSettings });
-        const navigation = screen.getByRole('navigation', { name: t('app.nav.label') });
+        const onchange = vi.fn();
+        render(BottomNavigation, { selected: 'chats', onchange });
+        const navigation = screen.getByRole('navigation', { name: t('navigation.label') });
         const buttons = within(navigation).getAllByRole('button');
-        expect(buttons).toHaveLength(3);
+        expect(buttons).toHaveLength(4);
         for (const button of buttons) {
             expect(button).toHaveAccessibleName();
             for (const svg of button.querySelectorAll('svg'))
                 expect(svg).toHaveAttribute('aria-hidden', 'true');
         }
         expect(
-            within(navigation).getByRole('button', { name: t('mobile.nav.chat') }),
+            within(navigation).getByRole('button', { name: t('navigation.chats') }),
         ).toHaveAttribute('aria-current', 'page');
-        await fireEvent.click(within(navigation).getByRole('button', { name: t('app.tab.home') }));
         await fireEvent.click(
-            within(navigation).getByRole('button', { name: t('mobile.nav.all') }),
+            within(navigation).getByRole('button', { name: t('navigation.home') }),
         );
-        expect(onHome).toHaveBeenCalledOnce();
-        expect(onSettings).toHaveBeenCalledOnce();
-        expect(onChat).not.toHaveBeenCalled();
+        await fireEvent.click(
+            within(navigation).getByRole('button', { name: t('navigation.settings') }),
+        );
+        expect(onchange.mock.calls).toEqual([['home'], ['settings']]);
     });
 });

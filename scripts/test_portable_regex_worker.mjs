@@ -51,6 +51,14 @@ const compatible = await runInWorker(
 );
 assert.deepEqual(compatible, { ok: true, value: 'prefix-item-ok' });
 
+for (const flags of ['g<cbs>', 'g<<cbs>>', 'g<cbs', '<sc<script>ript>g']) {
+    const modifier = await runInWorker(
+        { operation: 'replace', source: 'a\nb', pattern: 'a.b', flags, replacement: 'bad' },
+        1_000,
+    );
+    assert.deepEqual(modifier, { ok: true, value: 'a\nb' });
+}
+
 let heartbeat = 0;
 const heartbeatTimer = setInterval(() => {
     heartbeat += 1;

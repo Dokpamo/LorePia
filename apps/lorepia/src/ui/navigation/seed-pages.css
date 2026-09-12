@@ -27,10 +27,12 @@
 .seed-character-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 24px 16px;
+    gap: 20px var(--seed-image-grid-gap);
+    margin-inline: calc(var(--seed-image-grid-gap) - var(--seed-root-gutter));
     margin-bottom: 24px;
 }
 .seed-character-card {
+    -webkit-tap-highlight-color: transparent;
     align-self: start;
     display: block;
     min-width: 0;
@@ -60,9 +62,9 @@
     margin-bottom: 4px;
 }
 .seed-character-card strong {
-    font-size: var(--ui-body);
-    line-height: 1.375;
-    font-weight: 700;
+    font-size: var(--seed-detail);
+    line-height: 1.5;
+    font-weight: 600;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

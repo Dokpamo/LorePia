@@ -1,13 +1,13 @@
 //! Approval replay, capability, expectation, and normalization validation.
 
 use super::{
-    BTreeMap, BTreeSet, CompactPackageApprovalPayload, Connection, ContentCapability, CoreError,
-    CoreResult, MAX_NORMALIZATION_REASON_BYTES, OptionalExtension, PackageApprovalPayload,
-    PackageCapability, PackageCapabilitySupport, PackageCommitDocument,
-    PackageDocumentCommitBinding, PackageImportExpectation, PackageImportStatus,
-    PackageInspectionExpectation, PackageNormalizationEvidence, ReviewedComponentRow,
-    StoredImportState, VersionedJson, canonical_update_target_confirmations, decode_json,
-    i64_from_u64, load_package_import_target_review, load_selected_commit_components,
+    BTreeMap, BTreeSet, Connection, ContentCapability, CoreError, CoreResult,
+    MAX_NORMALIZATION_REASON_BYTES, OptionalExtension, PackageApprovalPayload, PackageCapability,
+    PackageCapabilitySupport, PackageCommitDocument, PackageDocumentCommitBinding,
+    PackageImportExpectation, PackageImportStatus, PackageInspectionExpectation,
+    PackageNormalizationEvidence, ReviewedComponentRow, StoredImportState, VersionedJson,
+    canonical_update_target_confirmations, decode_json, i64_from_u64,
+    load_package_import_target_review, load_selected_commit_components,
     package_normalization_evidence_sha256, package_update_target_confirmations_sha256, params,
     read_capability_review, read_import_state, read_source_hash, revision_conflict, sha256_hex,
     storage_corrupted, storage_db_error, validate_binding_snapshot_shape,
@@ -148,29 +148,8 @@ pub(super) fn read_approval_payload(
         .optional()
         .map_err(storage_db_error)?
         .ok_or_else(|| storage_corrupted("approved package import has no approval snapshot"))?;
-    let wrapper: VersionedJson = decode_json("package approval", &payload)?;
     let current = read_import_state(connection, import_id)?;
-    let approved: PackageApprovalPayload = match wrapper.schema_version {
-        1 => serde_json::from_value(wrapper.value).map_err(|error| {
-            storage_corrupted(format!("stored package approval is invalid: {error}"))
-        })?,
-        2 => {
-            let compact: CompactPackageApprovalPayload = serde_json::from_value(wrapper.value)
-                .map_err(|error| {
-                    storage_corrupted(format!("stored package approval is invalid: {error}"))
-                })?;
-            let selection = super::decode_selection(&current.record)?;
-            compact.into_payload(&selection)?
-        }
-        _ => {
-            return Err(storage_corrupted(
-                "stored package approval wrapper schema is unsupported",
-            ));
-        }
-    };
-    approved.plan.verify().map_err(|error| {
-        storage_corrupted(format!("stored package approval is invalid: {error}"))
-    })?;
+    let approved = super::verified_json::approval(&payload, current.record.selection.as_ref())?;
     validate_binding_snapshot_shape(&approved.document_bindings).map_err(|error| {
         storage_corrupted(format!(
             "stored package document binding snapshot is invalid: {}",

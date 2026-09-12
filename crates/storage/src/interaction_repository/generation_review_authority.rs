@@ -1,3 +1,4 @@
+use crate::orchestration::module_plan_documents::{self as documents, Kind};
 use std::collections::{BTreeMap, BTreeSet};
 
 use lorepia_domain::{
@@ -771,11 +772,8 @@ pub(super) fn read_generation_attempt_before_review(
         .24
         .as_deref()
         .map(|json| {
-            let plan: AppliedModuleRuntimePlan = decode_json(
-                "generation attempt applied runtime plan",
-                json,
-                MAX_STATE_JSON_BYTES,
-            )?;
+            let plan: AppliedModuleRuntimePlan =
+                documents::decode(connection, Kind::Runtime, json)?;
             plan.verify().map_err(|error| {
                 storage_corrupted(format!(
                     "generation attempt applied runtime plan is invalid: {error}"

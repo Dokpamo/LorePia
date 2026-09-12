@@ -1,4 +1,5 @@
 import { cleanup, render, waitFor } from '@testing-library/svelte';
+import { tick } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { CharacterRenderProfileDto, LorepiaClient } from '../../lib/ipc/contracts';
@@ -44,6 +45,7 @@ beforeEach(() => {
 afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
 });
 
 async function portableFrame(container: HTMLElement): Promise<HTMLIFrameElement> {
@@ -62,13 +64,167 @@ function frameDocument(frame: HTMLIFrameElement): Document {
 }
 
 function runtimeId(frame: HTMLIFrameElement): string {
-    const script = frameDocument(frame).querySelector('script[nonce]')?.textContent ?? '';
-    const match = /const runtimeId = "([0-9a-f-]{36})";/.exec(script);
-    if (match?.[1] === undefined) throw new Error('portable runtime id is missing');
-    return match[1];
+    const id = frameDocument(frame).querySelector('script[nonce]')?.getAttribute('data-runtime-id');
+    if (!id) throw new Error('portable runtime id is missing');
+    return id;
 }
 
 describe('PortableMessage', () => {
+    it('renders background-only controls and verified assets through the same isolated sanitizer', async () => {
+        const resolveAssetDelivery = vi
+            .fn()
+            .mockResolvedValue({ asset_id: 'asset-expression', sha256: SHA256 });
+        const roomProfile = {
+            ...profile,
+            background_markup:
+                '<style>.floating { position: fixed; top: 0; }</style><div class="floating">{{button::Settings::ToggleSettings}}</div><section id="background-panel">Panel<img=Guide_smile_1.png><script>evil()</script><img src="https://evil.test/pixel" onerror="evil()"></section>',
+        };
+        const client = { resolveAssetDelivery } as unknown as LorepiaClient;
+        const room = render(PortableMessage, {
+            text: 'Plain chat',
+            client,
+            profile: roomProfile,
+            surface: 'room',
+        });
+        const frame = await portableFrame(room.container);
+        const doc = frameDocument(frame);
+        expect(doc.querySelector('[data-portable-action="ToggleSettings"]')).not.toBeNull();
+        expect(doc.querySelector('#background-panel')?.textContent).toContain('Panel');
+        expect(doc.querySelector('#background-panel img')?.getAttribute('src')).toBe(
+            `http://lorepia-asset.localhost/sha256/${SHA256}`,
+        );
+        expect(
+            doc.querySelector('.portable-message script, [onerror], [src^="https://evil.test"]'),
+        ).toBeNull();
+        expect(room.container.querySelector('#background-panel')).toBeNull();
+        expect(frame.getAttribute('sandbox')).toBe('allow-scripts');
+        expect(resolveAssetDelivery).toHaveBeenCalledOnce();
+        const inline = render(PortableMessage, {
+            text: '<div>Inline message</div>',
+            client,
+            profile: roomProfile,
+        });
+        expect(
+            frameDocument(await portableFrame(inline.container)).querySelector('#background-panel'),
+        ).toBeNull();
+        await room.rerender({
+            text: '<p>Chat text</p><div class="floating">Message control</div>',
+            client,
+            profile: roomProfile,
+            surface: 'room',
+        });
+        await waitFor(() =>
+            expect(frameDocument(frame).querySelector('.portable-message')?.textContent).toContain(
+                'Message control',
+            ),
+        );
+        expect(frameDocument(frame).querySelector('#background-panel')).not.toBeNull();
+        expect(frameDocument(frame).querySelector('.portable-message')?.textContent).not.toContain(
+            'Chat text',
+        );
+    });
+
+    it('shares the asset reference budget between room content and background markup', async () => {
+        const resolveAssetDelivery = vi.fn();
+        const client = { resolveAssetDelivery } as unknown as LorepiaClient;
+        const view = render(PortableMessage, {
+            text:
+                '<div>' +
+                Array.from({ length: 70 }, (_, i) => `<img=message-${String(i)}>`).join('') +
+                '</div>',
+            client,
+            profile: {
+                ...profile,
+                background_markup: Array.from(
+                    { length: 70 },
+                    (_, i) => `<img=background-${String(i)}>`,
+                ).join(''),
+            },
+            surface: 'room',
+        });
+        const doc = frameDocument(await portableFrame(view.container));
+        expect(resolveAssetDelivery).not.toHaveBeenCalled();
+        expect(doc.querySelector('.portable-message')?.textContent).toBeTruthy();
+        expect(doc.querySelector('.portable-message img')).toBeNull();
+    });
+
+    it('rebuilds width-dependent markup on frame resize without rebuilding on height-only changes', async () => {
+        let width = 320;
+        let resized: ResizeObserverCallback | undefined;
+        const observe = vi.fn();
+        const disconnect = vi.fn();
+        vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(() => width);
+        vi.stubGlobal(
+            'ResizeObserver',
+            class {
+                constructor(callback: ResizeObserverCallback) {
+                    resized = callback;
+                }
+                observe = observe;
+                disconnect = disconnect;
+            },
+        );
+        const client = { resolveAssetDelivery: vi.fn() } as unknown as LorepiaClient;
+        const view = render(PortableMessage, {
+            text: '<div>{{#if {{? {{screen_width}} <= 600}}}}small{{:else}}wide{{/}}</div>',
+            client,
+            profile,
+        });
+        const frame = await portableFrame(view.container);
+        expect(observe).toHaveBeenCalledWith(frame);
+        await waitFor(() =>
+            expect(frameDocument(frame).querySelector('.portable-message')?.textContent).toBe(
+                'small',
+            ),
+        );
+        const firstRuntime = runtimeId(frame);
+        resized?.([], {} as ResizeObserver);
+        await tick();
+        expect(runtimeId(frame)).toBe(firstRuntime);
+        width = 900;
+        resized?.([], {} as ResizeObserver);
+        await waitFor(() =>
+            expect(frameDocument(frame).querySelector('.portable-message')?.textContent).toBe(
+                'wide',
+            ),
+        );
+        expect(runtimeId(frame)).not.toBe(firstRuntime);
+        view.unmount();
+        expect(disconnect).toHaveBeenCalledOnce();
+    });
+
+    it('keeps imported floating controls only inside the isolated room surface', async () => {
+        const roomProfile = {
+            ...profile,
+            assets: [],
+            background_markup:
+                '<style>.floating { position: fixed; right: 20px; top: 40px; } .panel { position: fixed; height: 100vh; }</style>',
+        };
+        const text =
+            '<p>Chat text</p><div class="floating">{{button::Settings::ToggleSettings}}</div><section class="panel">Panel</section>';
+        const client = { resolveAssetDelivery: vi.fn() } as unknown as LorepiaClient;
+        const inline = render(PortableMessage, { text, client, profile: roomProfile });
+        const inlineDoc = frameDocument(await portableFrame(inline.container));
+        expect(inlineDoc.querySelector('.floating')).toBeNull();
+        expect(inlineDoc.body.textContent).toContain('Chat text');
+        const room = render(PortableMessage, {
+            text,
+            client,
+            profile: roomProfile,
+            surface: 'room',
+        });
+        const frame = await portableFrame(room.container);
+        const roomDoc = frameDocument(frame);
+        expect(frame.getAttribute('sandbox')).toBe('allow-scripts');
+        expect(roomDoc.querySelector('[data-portable-action="ToggleSettings"]')).not.toBeNull();
+        expect(roomDoc.querySelector('.portable-message')?.textContent).not.toContain('Chat text');
+        expect(frame.srcdoc).toContain('position:fixed');
+        expect(
+            roomDoc
+                .querySelector('meta[http-equiv="Content-Security-Policy"]')
+                ?.getAttribute('content'),
+        ).toContain("connect-src 'none'");
+    });
     it('refuses oversized portable source before parsing it as card markup', async () => {
         const resolveAssetDelivery = vi.fn();
         const client = { resolveAssetDelivery } as unknown as LorepiaClient;
@@ -110,6 +266,29 @@ describe('PortableMessage', () => {
             '카드 콘텐츠가 안전 제한을 초과해 표시하지 않았습니다.',
         );
         expect(resolveAssetDelivery).not.toHaveBeenCalled();
+    });
+
+    it('keeps the previous completed frame visible while a replacement resolves', async () => {
+        const client = {
+            resolveAssetDelivery: vi.fn().mockRejectedValue(new Error('unavailable')),
+        } as unknown as LorepiaClient;
+        const view = render(PortableMessage, { text: '<div>First</div>', client, profile });
+        const frame = await portableFrame(view.container);
+        const previous = frame.srcdoc;
+        let rejectDelivery: (reason: Error) => void = vi.fn();
+        const waiting = new Promise<never>((_resolve, reject) => {
+            rejectDelivery = reject;
+        });
+        const resolveAssetDelivery = vi.fn().mockReturnValue(waiting);
+        await view.rerender({
+            text: '<div>Second<img="Guide_smile"></div>',
+            client: { ...client, resolveAssetDelivery },
+            profile,
+        });
+        await waitFor(() => expect(resolveAssetDelivery).toHaveBeenCalledOnce());
+        expect(frame.srcdoc).toBe(previous);
+        rejectDelivery(new Error('unavailable'));
+        await waitFor(() => expect(frame.srcdoc).toContain('Second'));
     });
 
     it('resolves a command prefix to one verified character asset inside the sandbox', async () => {
@@ -200,6 +379,12 @@ describe('PortableMessage', () => {
         expect(frame.getAttribute('sandbox')).not.toContain('allow-same-origin');
         expect(rendered.querySelector('details')).not.toBeNull();
         expect(rendered.querySelectorAll('script')).toHaveLength(1);
+        const bridge = rendered.querySelector('script[nonce]');
+        expect(bridge?.textContent).toBe('');
+        expect(bridge?.getAttribute('src')).toBe(
+            new URL('/src/features/chat/portable-renderer-bridge.js?no-inline', document.baseURI)
+                .href,
+        );
         expect(rendered.querySelector('script[nonce]')?.textContent).not.toContain('bad()');
         expect(rendered.querySelector('[onclick]')).toBeNull();
         expect(rendered.body.textContent).toContain('OK');

@@ -4,6 +4,7 @@ import WorkspaceApp from './WorkspaceApp.svelte';
 import { createPreviewClient } from '../../preview/mock-client';
 import { t } from '../../lib/i18n';
 import type { PersonaDto } from '../../features/personas/persona-contracts';
+import { chatDisplayPreferences } from '../../lib/chat-display';
 
 beforeEach(() =>
     vi.stubGlobal(
@@ -17,6 +18,8 @@ beforeEach(() =>
 );
 afterEach(() => {
     cleanup();
+    chatDisplayPreferences.set({});
+    localStorage.clear();
     vi.unstubAllGlobals();
 });
 
@@ -43,6 +46,7 @@ async function chooseStory(panel: HTMLElement) {
     const opener = within(panel).getByRole('button', { name: t('uiPreview.conversationMode') });
     await fireEvent.click(opener);
     const story = await screen.findByRole('radio', { name: t('uiPreview.storyMode') });
+    expect(screen.getAllByRole('radio')).toHaveLength(3);
     expect(story).toHaveAccessibleDescription(t('uiPreview.storyModeHint'));
     await fireEvent.click(story);
     await waitFor(() => expect(screen.getAllByRole('dialog')).toEqual([panel]));
@@ -122,7 +126,10 @@ it('offers persona creation from an empty catalog while still allowing a start w
         items: [],
         next_cursor: null,
     });
-    const { panel, create, select } = await openSetup(client);
+    const { panel, create, select, container } = await openSetup(client);
+    expect(
+        within(panel).getByRole('button', { name: t('uiPreview.conversationMode') }),
+    ).toHaveTextContent(t('uiPreview.defaultMode'));
     const persona = await within(panel).findByRole('button', { name: t('persona.title') });
     await waitFor(() => expect(persona).toBeEnabled());
     expect(persona).toHaveTextContent(t('workspace.noPersona'));
@@ -136,6 +143,10 @@ it('offers persona creation from an empty catalog while still allowing a start w
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(create).toHaveBeenCalledTimes(1);
     expect(select).not.toHaveBeenCalled();
+    expect(container.querySelector('.ui-chat')).toHaveAttribute(
+        'data-conversation-mode',
+        'default',
+    );
 });
 
 it('creates a saved persona through the full-screen editor and carries its exact identity into Start', async () => {

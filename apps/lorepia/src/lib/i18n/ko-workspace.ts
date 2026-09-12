@@ -1,5 +1,6 @@
 export const koWorkspace = {
     'workspace.loading': '불러오는 중이에요',
+    'workspace.assetWaiting': '잠시 후 다시 불러올게요',
     'workspace.emptyLibrary': '대화할 캐릭터를 추가해 주세요',
     'workspace.importCard': '캐릭터 카드 가져오기',
     'workspace.chooseChat': '채팅 내역을 선택하거나 새 대화를 시작해 주세요',

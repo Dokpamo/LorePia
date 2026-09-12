@@ -4,6 +4,7 @@ import {
     type PortableRegexWorkerFailureReason,
     type PortableRegexWorkerResult,
 } from './portable-regex-protocol';
+import { renderPortableMacros } from './portable-display';
 
 export type PortableRegexFailureReason =
     | PortableRegexWorkerFailureReason
@@ -35,6 +36,9 @@ const DEFAULT_TIMEOUT_MS = 75;
 const MAX_CONCURRENT_WORKERS = 4;
 const MAX_QUEUED_OPERATIONS = 256;
 const MAX_DISABLED_RULES = 512;
+const WORKER_STARTUP_TIMEOUT_MS = 1_000;
+const WORKER_IDLE_TIMEOUT_MS = 30_000;
+const idleWorkers: { worker: Worker; timer: ReturnType<typeof globalThis.setTimeout> }[] = [];
 let workerFactoryOverride: PortableRegexWorkerFactory | null = null;
 let activeWorkers = 0;
 interface WorkerWaiter {
@@ -117,7 +121,17 @@ export async function inspectPortableRegexRules(
             const rule = rules[index];
             if (rule === undefined) continue;
             const result = await runPortableRegex(
-                { operation: 'compile', pattern: rule.pattern, flags: rule.flags },
+                {
+                    operation: 'compile',
+                    pattern: rule.flags.includes('<cbs>')
+                        ? renderPortableMacros(
+                              rule.pattern,
+                              { variables: {}, lastMessageId: -1, chatIndex: -1 },
+                              '',
+                          )
+                        : rule.pattern,
+                    flags: rule.flags,
+                },
                 {
                     timeoutMs: DEFAULT_TIMEOUT_MS,
                     ruleKey: portableRegexRuleKey(
@@ -153,42 +167,79 @@ async function runPortableRegexWorker(
     request: PortableRegexRequest,
     timeoutMs: number,
 ): Promise<PortableRegexResult> {
+    const cached = idleWorkers.pop();
+    if (cached !== undefined) globalThis.clearTimeout(cached.timer);
     let worker: Worker;
     try {
-        worker = (workerFactoryOverride ?? createPortableRegexWorker)();
+        worker = cached?.worker ?? (workerFactoryOverride ?? createPortableRegexWorker)();
     } catch {
         return { ok: false, reason: 'worker_error' };
     }
     const id = globalThis.crypto.randomUUID();
     return await new Promise<PortableRegexResult>((resolve) => {
         let settled = false;
-        const finish = (result: PortableRegexResult): void => {
+        let started = false;
+        let timeout: ReturnType<typeof globalThis.setTimeout>;
+        const finish = (result: PortableRegexResult, reusable = false): void => {
             if (settled) return;
             settled = true;
             globalThis.clearTimeout(timeout);
             worker.removeEventListener('message', onMessage);
             worker.removeEventListener('error', onError);
-            worker.terminate();
+            if (reusable) retainIdleWorker(worker);
+            else worker.terminate();
             resolve(result);
         };
+        const start = (): void => {
+            if (started || settled) return;
+            started = true;
+            globalThis.clearTimeout(timeout);
+            // Preserve the execution budget. Worker boot is separately bounded and
+            // cannot incorrectly disable a rule before that rule has even run.
+            timeout = globalThis.setTimeout(
+                () => finish({ ok: false, reason: 'execution_timeout', timedOut: true }),
+                boundedTimeout(timeoutMs),
+            );
+            try {
+                worker.postMessage({ id, request });
+            } catch {
+                finish({ ok: false, reason: 'worker_error' });
+            }
+        };
         const onMessage = (event: MessageEvent<unknown>): void => {
-            if (!isPortableRegexWorkerResponse(event.data) || event.data.id !== id) return;
-            const response = event.data;
-            finish(response.result);
+            if (event.data === 'portable_regex_ready') {
+                start();
+                return;
+            }
+            if (!started || !isPortableRegexWorkerResponse(event.data) || event.data.id !== id)
+                return;
+            finish(event.data.result, true);
         };
         const onError = (): void => finish({ ok: false, reason: 'worker_error' });
-        const timeout = globalThis.setTimeout(
-            () => finish({ ok: false, reason: 'execution_timeout', timedOut: true }),
-            boundedTimeout(timeoutMs),
-        );
+        timeout = globalThis.setTimeout(onError, WORKER_STARTUP_TIMEOUT_MS);
         worker.addEventListener('message', onMessage);
         worker.addEventListener('error', onError);
-        try {
-            worker.postMessage({ id, request });
-        } catch {
-            finish({ ok: false, reason: 'worker_error' });
-        }
+        if (cached !== undefined) start();
     });
+}
+
+function retainIdleWorker(worker: Worker): void {
+    const entry = {
+        worker,
+        timer: globalThis.setTimeout(() => {
+            const index = idleWorkers.indexOf(entry);
+            if (index >= 0) idleWorkers.splice(index, 1);
+            worker.terminate();
+        }, WORKER_IDLE_TIMEOUT_MS),
+    };
+    idleWorkers.push(entry);
+}
+
+function clearIdleWorkers(): void {
+    for (const { worker, timer } of idleWorkers.splice(0)) {
+        globalThis.clearTimeout(timer);
+        worker.terminate();
+    }
 }
 
 async function acquireWorkerSlot(
@@ -268,9 +319,11 @@ function portableRegexReviewStatus(
 export function setPortableRegexWorkerFactoryForTests(
     factory: PortableRegexWorkerFactory,
 ): () => void {
+    clearIdleWorkers();
     const previous = workerFactoryOverride;
     workerFactoryOverride = factory;
     return () => {
+        clearIdleWorkers();
         workerFactoryOverride = previous;
     };
 }

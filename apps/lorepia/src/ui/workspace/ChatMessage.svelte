@@ -9,8 +9,15 @@
     import { useTextEditor } from './text-editor.svelte';
     import type { SampleCharacter, SampleMessage } from './view-types';
     import type { ChatSession } from './chat-session';
+    import type { LorepiaClient } from '../../lib/ipc/contracts';
+    import type { ChatDisplayMode } from '../../lib/chat-display';
+    import MessageSpeaker from './MessageSpeaker.svelte';
+    import MessageTools from './MessageTools.svelte';
     let {
         message,
+        client,
+        personaName,
+        mode = 'chat',
         character,
         session,
         renderMessage,
@@ -23,6 +30,9 @@
         onnotice,
     }: {
         message: SampleMessage;
+        client?: Pick<LorepiaClient, 'resolveAssetDelivery'>;
+        personaName?: string;
+        mode?: ChatDisplayMode;
         character: SampleCharacter;
         session: ChatSession;
         messageIndex?: number;
@@ -36,14 +46,21 @@
     } = $props();
     const editor = useTextEditor();
     let body = $state<HTMLDivElement>();
+    let menuAnchor = $state<HTMLElement>();
+    let menuView = $state<'actions' | 'branches'>('actions');
     let copyAttempt = 0;
     let mounted = true;
     onDestroy(() => {
         mounted = false;
     });
     function closeMenu(restoreFocus: boolean) {
-        if (restoreFocus) body?.focus({ preventScroll: true });
+        if (restoreFocus) (menuAnchor ?? body)?.focus({ preventScroll: true });
         onclose();
+    }
+    function openMenu(view: 'actions' | 'branches' = 'actions', anchor?: HTMLButtonElement) {
+        menuView = view;
+        menuAnchor = anchor ?? body;
+        onactivate();
     }
     async function copy() {
         const attempt = ++copyAttempt;
@@ -75,11 +92,14 @@
     }
 </script>
 
+{#if mode === 'default'}
+    <MessageSpeaker {client} {character} {personaName} user={message.role === 'user'} />
+{/if}
 <div
     class="ui-message-body ui-message"
     bind:this={body}
     data-ui-selectable
-    use:messagePress={onactivate}
+    use:messagePress={() => openMenu()}
     role="button"
     tabindex="0"
     aria-label={$tr('uiPreview.messageMenu')}
@@ -89,18 +109,20 @@
     onclick={(event) => {
         if (event.target instanceof Element && event.target.closest('a, button')) return;
         // Keyboard/assistive activation has no pointer click count.
-        if (event.detail === 0) onactivate();
+        if (event.detail === 0) openMenu();
     }}
     onkeydown={(event) => {
         if (event.target !== event.currentTarget) return;
         if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
-            onactivate();
+            openMenu();
         }
         if (event.key === 'Escape') onclose();
     }}
 >
-    <span class="ui-sr">{message.role === 'user' ? $tr('uiPreview.you') : character.name}</span>
+    <span class="ui-sr"
+        >{message.role === 'user' ? (personaName ?? $tr('uiPreview.you')) : character.name}</span
+    >
     <div id={'ui-message-text-' + message.id}>
         {#if renderMessage}{@render renderMessage(message, messageIndex)}{:else}<MarkdownText
                 text={message.text}
@@ -117,19 +139,32 @@
     busy={session.busy}
     onretry={() => mutate(() => session.regenerate(message.id, true))}
 />
-{#if active && body}
-    <MessageMenu
-        anchor={body}
-        {message}
+{#if mode === 'default'}
+    <MessageTools
+        user={message.role === 'user'}
         busy={session.busy}
-        branches={session.branches()}
-        {branchId}
-        onclose={closeMenu}
         oncopy={() => void copy()}
         onedit={edit}
-        onfork={() => mutate(() => session.fork(message.id))}
-        onbranch={(id: string) => mutate(() => session.selectBranch(id))}
-        onremove={() => mutate(() => session.removeFrom(message.id))}
         onregenerate={() => mutate(() => session.regenerate(message.id))}
+        onmenu={openMenu}
     />
+{/if}
+{#if active && body}
+    {#key menuView}
+        <MessageMenu
+            anchor={menuAnchor ?? body}
+            initialView={menuView}
+            {message}
+            busy={session.busy}
+            branches={session.branches()}
+            {branchId}
+            onclose={closeMenu}
+            oncopy={() => void copy()}
+            onedit={edit}
+            onfork={() => mutate(() => session.fork(message.id))}
+            onbranch={(id: string) => mutate(() => session.selectBranch(id))}
+            onremove={() => mutate(() => session.removeFrom(message.id))}
+            onregenerate={() => mutate(() => session.regenerate(message.id))}
+        />
+    {/key}
 {/if}

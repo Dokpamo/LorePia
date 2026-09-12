@@ -8,14 +8,12 @@ use lorepia_orchestration::{
     AppliedModuleRuntimePlan, ModuleActivationReview, ModuleResolutionContext,
     ModuleRevisionSnapshot, review_module_merge,
 };
-use lorepia_storage::{
-    ActiveContentModuleRevision, ModuleRevisionComponentSnapshot, StoredRevision,
-};
+use lorepia_storage::{ActiveContentModuleRevision, StoredRevision};
 
 use super::{
-    ApprovedContentModuleComponent, CAPABILITIES, ContentModuleRuntimeBindingDisposition,
-    ContentModuleRuntimeBindingSummary, insert_revision_snapshot, module_import_approval_evidence,
-    module_merge_error, module_snapshot, validate_module_binding_variables,
+    CAPABILITIES, ContentModuleRuntimeBindingDisposition, ContentModuleRuntimeBindingSummary,
+    insert_revision_snapshot, module_import_approval_evidence, module_merge_error, module_snapshot,
+    validate_module_binding_variables,
 };
 use crate::Core;
 
@@ -67,10 +65,11 @@ impl Core {
     /// Loads one immutable child revision named by an already verified applied
     /// plan. The parent revision source hash and component hash are rechecked
     /// by storage before any runtime overlay is returned.
+    #[cfg(test)]
     pub(crate) fn load_approved_content_module_component(
         &self,
-        approved: &ApprovedContentModuleComponent,
-    ) -> CoreResult<ModuleRevisionComponentSnapshot> {
+        approved: &super::ApprovedContentModuleComponent,
+    ) -> CoreResult<lorepia_storage::ModuleRevisionComponentSnapshot> {
         self.storage().get_module_revision_component(
             &approved.selected_source,
             &approved.component,

@@ -20,12 +20,18 @@ DB의 승인 descriptor와 고정 media allowlist를 확인하고 다음 규칙�
    검증한다.
 3. hash 시작 전에 file identity를 봉인하고 hash·signature 뒤와 cache 삽입 직전에 다시
    비교한다.
-4. 검증된 handle은 최대 16개, 30초의 process-local LRU lease에만 보관한다. cache miss
-   전체 검증은 분당 32회로 제한해 순환 eviction hash 증폭을 막는다.
+4. 검증된 handle은 최대 128개, 1분의 process-local LRU lease에만 보관한다. 이는
+   PortableMessage의 최대 128개 참조를 descriptor resolve부터 protocol read까지
+   같은 handle로 처리하기 위한 상한이다. 캐시 hit는 매번 identity를 검사한다.
 5. cache hit마다 file identity를 range read 전후에 비교하고, 달라지면 응답하지 않는다.
 6. 요청한 range만 같은 handle에서 seek/read한다. protocol range는 최대 1MiB이며 전체
    renderer asset은 64MiB, 이미지는 16MiB로 제한한다.
 7. 동시에 유지할 응답 수와 body memory는 native admission gate로 제한한다.
+8. cold 검증 작업은 파일 크기로 과금하되 작은 파일도 최소 128KiB를 차감한다.
+   초기·최대 작업량은 64MiB, 보충 속도는 초당 8MiB이며 monotonic time을 쓴다.
+   descriptor 크기가 이미지 16MiB 또는 다른 미디어 64MiB를 넘으면 hash 전에
+   재시도 불가능한 오류로 거부한다. 거부한 재시도는 보충 시각을 뒤로 미루거나
+   소수 시간의 작업량을 버리지 않는다. 긴 유휴 시간에도 burst 상한은 늘지 않는다.
 
 경로가 lease 중 교체되어도 열린 verified handle의 기존 bytes만 제공하며, lease 만료 뒤에는
 새 경로를 다시 전체 검증한다. 같은 inode의 변경과 hard-link alias는 fail-closed한다.
@@ -42,11 +48,24 @@ absolute path, logical package path와 raw bytes는 invoke DTO를 통과하지 �
 재검증 간격이 생기지만, 열린 handle과 전후 identity 검사가 교체·변조된 bytes의 전달을
 막는다. cache lock poisoning과 identity 변화는 정상 데이터로 복구하지 않는다.
 
+2026-09-11의 작업량 계산 변경은 파일 수를 고정한 1분 대기 구간을 없애고 자원 상한을
+다시 명시한다. 기존 구현의 128회 × 최대 64MiB = 최대 8GiB/분 대신, 완전히 충전된
+시점부터도 임의의 60초 동안 최대 544MiB의 검증 작업만 허용한다. 아주 작은 파일도
+처음 512개, 이후 초당 64개를 넘는 속도로 검증할 수 없다. 파일 내용·승인·경로·MIME·
+identity 검증을 생략하거나 renderer에 승인 결과를 캐시하는 변경은 아니다.
+
 ## 성능 영향
 
 한 lease 안의 반복 Range 요청은 전체 hash를 한 번만 수행하고 이후에는 요청 범위만 읽는다.
 동일 cache의 file seek는 직렬화되지만 범위가 1MiB로 제한되어 있고 open handle 수가
 고정된다. 실제 WebView 연속 seek 처리량은 플랫폼 benchmark로 계속 측정한다.
+
+수십 KiB인 갤러리 이미지와 64MiB 미디어를 동일한 한 건으로 세던 제한은 정상적인
+278장 앨범도 129번째 cold 검증부터 막았다. 실제 크기와 최소 작업량으로 계산하면
+작은 앨범은 곧바로 처리하고, 큰 파일을 반복 읽는 부하는 더 낮은 I/O 상한으로 제어한다.
+대기 중 앱으로 돌아오면 renderer는 즉시 재시도하며, 응답이 끝나지 않는 경우에도
+표시 상태를 무한 대기로 남기지 않는다. timeout이 나도 실제 native 요청의 동시 실행
+슬롯은 응답이 돌아올 때까지 유지한다.
 
 ## 마이그레이션 전략
 
@@ -60,3 +79,25 @@ tamper 검출, Tauri protocol의 exact range/HEAD/admission/URI parser 테스트
 
 문제가 생기면 lease TTL을 0으로 바꿔 요청마다 재검증하도록 되돌릴 수 있다. opaque digest,
 no-follow open, 동일 handle 검증·read, 크기 제한과 admission gate는 유지한다.
+
+## 완료된 패키지 승인 재검증의 handle 상한 (2026-09-11)
+
+모듈 적용을 위한 완료된 패키지 승인 재검증은 renderer range 전달과 별도다.
+기존 방식은 에셋마다 열린 handle을 유지하여 3,172개 모듈이 macOS 기본
+256개 descriptor 한도를 소진했다. 이 경로는 CAS mutation lock 아래에서
+각 파일을 no-follow로 열어 같은 handle로 전체 hash를 검증하고, 파일 identity를
+봉인한 뒤 handle을 닫는다. 원래 DB 승인 snapshot의 재확인 후 canonical 경로를
+하나씩 다시 열어 동일 identity인지 확인한다. DB lock 중에는 hash하지 않는다.
+경로·inode·길이·mtime/ctime 등 identity가 바뀌면 같은 bytes라도 거부한다.
+
+이 증명은 완료된 package의 native 승인 검증에만 쓰인다. renderer로 bytes를
+전달하는 descriptor/range 경로는 기존처럼 검증된 동일 열린 handle을 유지한다.
+DB snapshot race, 동일 bytes의 inode 교체, descriptor 한도 128 아래에서 512개
+asset 승인 검사와 이후 변조 거부를 회귀 테스트로 확인한다.
+
+큰 원본 아카이브의 연속 검사에는 최대 4개, 1분짜리 별도 verified-handle lease를
+사용한다. 매 요청마다 canonical 경로를 no-follow로 새로 열고 size/link/identity를
+검사한 뒤, 아직 열린 검증 handle과 일치할 때만 그 handle을 복제한다. 바뀐 identity는
+전체 hash를 다시 거치며, 검사 도중 변경은 실패한다. DB 승인 snapshot은 캐시하지 않고
+각 transaction에서 다시 비교한다. 반복 asset 검증은 위의 bounded-descriptor 경로를
+유지한다. warm source를 같은 크기의 다른 bytes로 덮어쓴 뒤에도 거부하는 테스트를 추가했다.

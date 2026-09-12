@@ -80,4 +80,24 @@ it('keeps swipes, keyboard and original-image viewing available without a thumbn
     await pointer('pointermove', 100, 160);
     await pointer('pointerup', 100, 200);
     expect(image(2)).toBeVisible();
+
+    await fireEvent.keyDown(image(2), { key: 'End' });
+    const jump = carousel.querySelector('.seed-profile-carousel-jump');
+    if (jump) await fireEvent.animationEnd(jump);
+    await pointer('pointerdown', 300, 500);
+    await pointer('pointermove', 100, 650);
+    const track = carousel.querySelector<HTMLElement>('.seed-profile-carousel-track');
+    const blur = container.querySelector<HTMLElement>('.seed-profile-blur');
+    const offset = Number(blur?.style.transform.match(/translateX\(([-.\d]+)px\)/)?.[1]);
+    expect(offset).toBeLessThan(0);
+    expect(offset).toBeGreaterThan(-40);
+    expect(track?.style.transform).toContain(`${String(offset)}px`);
+    expect(
+        [...carousel.querySelectorAll('.seed-profile-image')].every((photo) =>
+            track?.contains(photo),
+        ),
+    ).toBe(true);
+    await pointer('pointerup', 100, 700);
+    expect(blur?.style.transform).toBe('translateX(0px)');
+    expect(image(29)).toBeVisible();
 });

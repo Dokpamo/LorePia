@@ -409,6 +409,8 @@ fn safe_suffix(display_name: &str) -> &'static str {
         Some("charx") => ".charx",
         Some("zip") => ".zip",
         Some("json") => ".json",
+        Some("risup") => ".risup",
+        Some("risum") => ".risum",
         _ => ".pending",
     }
 }
@@ -447,6 +449,28 @@ mod tests {
         );
         assert!(read_staged_file(&staged, 8).is_err());
         assert!(stage_file(&source, &staging, 8).is_err());
+    }
+
+    #[test]
+    fn staging_preserves_import_format_without_exposing_source_names() {
+        let root = tempdir().expect("root");
+        let staging = root.path().join("staging");
+        std::fs::create_dir(&staging).expect("create staging");
+        for (name, extension) in [
+            ("preset.risup", "risup"),
+            ("module.RISUM", "risum"),
+            ("unknown.executable", "pending"),
+        ] {
+            let source = root.path().join(name);
+            std::fs::write(&source, b"synthetic").expect("source");
+            let staged = stage_file(&source, &staging, 9).expect("stage");
+            assert_eq!(
+                staged.path().extension().and_then(|value| value.to_str()),
+                Some(extension)
+            );
+            assert_ne!(staged.path().file_stem(), source.file_stem());
+            assert_eq!(read_staged_file(&staged, 9).expect("read"), b"synthetic");
+        }
     }
 
     #[test]

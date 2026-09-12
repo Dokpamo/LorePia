@@ -1,4 +1,5 @@
 import type { MessageDto } from '../../lib/ipc/contracts';
+import type { ChatDisplayMode } from '../../lib/chat-display';
 
 export interface SampleMessage {
     id: string;
@@ -20,7 +21,7 @@ export interface SampleConversation {
     title: string;
     date: string;
     messages: SampleMessage[];
-    mode?: 'chat' | 'story';
+    mode?: ChatDisplayMode;
     branches?: SampleBranch[];
     activeBranchId?: string;
     responsePreview?: 'complete' | 'failed' | 'slow';
@@ -47,6 +48,6 @@ export interface UiFormValues {
     description: string;
     title: string;
     subpage: boolean;
-    mode?: 'chat' | 'story';
+    mode?: ChatDisplayMode;
     responsePreview?: 'complete' | 'failed' | 'slow';
 }

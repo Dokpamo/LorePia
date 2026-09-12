@@ -72,6 +72,21 @@ function drag(node: HTMLElement, distance: number) {
 }
 
 describe('overlay back gestures', () => {
+    it('keeps native disclosure summaries clickable without capturing their pointer', () => {
+        const { node, onback } = setup();
+        const details = document.createElement('details');
+        const summary = document.createElement('summary');
+        summary.textContent = 'Settings';
+        details.append(summary);
+        node.append(details);
+        const down = pointer(summary, 'pointerdown', 90, 0);
+        expect(down.defaultPrevented).toBe(false);
+        expect(node.hasPointerCapture(1)).toBe(false);
+        pointer(window, 'pointerup', 90, 100);
+        summary.click();
+        expect(details.open).toBe(true);
+        expect(onback).not.toHaveBeenCalled();
+    });
     it('finishes leaving before asking about edits, then resumes from the right only on keep', async () => {
         const confirm = vi.fn<(resume: () => Promise<void>) => void>();
         const { node, parent, animation, animations, onback, options, action } = setup({

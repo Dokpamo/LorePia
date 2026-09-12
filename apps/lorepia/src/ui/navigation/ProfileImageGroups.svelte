@@ -43,7 +43,9 @@
             <div class="seed-profile-group-grid">
                 {#each section.groups as group (group.id)}
                     <button
+                        type="button"
                         class="ui-pressable"
+                        data-press-feedback="scale"
                         aria-label={$tr('navigation.imageGroupOpen', {
                             name: group.title,
                             number: group.images.length,

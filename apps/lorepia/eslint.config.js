@@ -23,7 +23,11 @@ export default defineConfig(
                 extraFileExtensions: ['.svelte'],
                 parser: tseslint.parser,
                 projectService: {
-                    allowDefaultProject: ['eslint.config.js', 'svelte.config.js'],
+                    allowDefaultProject: [
+                        'eslint.config.js',
+                        'svelte.config.js',
+                        'src/features/chat/portable-renderer-bridge.js',
+                    ],
                 },
             },
         },

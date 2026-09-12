@@ -521,6 +521,13 @@ pub(crate) fn apply_migrations(connection: &mut Connection) -> CoreResult<()> {
         sql::MIGRATION_0041,
         "portable runtime package capability",
     )?;
+    apply_checked_migration(
+        connection,
+        current_version,
+        42,
+        sql::MIGRATION_0042,
+        "chunked module authority documents",
+    )?;
     read_current_schema_version(connection)?;
     Ok(())
 }

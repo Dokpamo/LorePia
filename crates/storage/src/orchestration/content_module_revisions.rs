@@ -52,6 +52,46 @@ impl Storage {
         get_module_revision_component(self, source, component, expected_component_sha256)
     }
 
+    /// Loads complete, ordered component material in one read transaction.
+    /// Each immutable parent is verified once; every requested child keeps the
+    /// same source, digest and payload checks as the single-component reader.
+    pub fn get_module_revision_components(
+        &self,
+        components: &[lorepia_orchestration::ResolvedModuleComponent],
+    ) -> CoreResult<Vec<ModuleRevisionComponentSnapshot>> {
+        if components.len() > 8192 {
+            return Err(CoreError::invalid(
+                "module component batch exceeds its limit",
+            ));
+        }
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction().map_err(storage_db_error)?;
+        let mut parents = std::collections::BTreeMap::new();
+        components
+            .iter()
+            .map(|component| {
+                let source = &component.selected_source;
+                let key = (source.module_id.clone(), source.revision_id.clone());
+                if let std::collections::btree_map::Entry::Vacant(entry) =
+                    parents.entry(key.clone())
+                {
+                    entry.insert(load_content_module_revision(
+                        &transaction,
+                        &source.module_id,
+                        source.revision_id.as_str(),
+                    )?);
+                }
+                read_module_revision_component(
+                    &transaction,
+                    &parents[&key],
+                    source,
+                    &component.component,
+                    &component.sha256,
+                )
+            })
+            .collect()
+    }
+
     pub fn list_content_module_revisions(
         &self,
         id: &ContentModuleId,
@@ -455,6 +495,22 @@ fn get_module_revision_component(
     let connection = storage.connection()?;
     let parent =
         load_content_module_revision(&connection, &source.module_id, source.revision_id.as_str())?;
+    read_module_revision_component(
+        &connection,
+        &parent,
+        source,
+        component,
+        expected_component_sha256,
+    )
+}
+
+fn read_module_revision_component(
+    connection: &Connection,
+    parent: &ActiveContentModuleRevision,
+    source: &lorepia_orchestration::ModuleCandidateSource,
+    component: &lorepia_domain::ModuleComponentRef,
+    expected_component_sha256: &lorepia_domain::Sha256Digest,
+) -> CoreResult<ModuleRevisionComponentSnapshot> {
     if parent.module_revision.source_hash != source.revision_source_sha256 {
         return Err(CoreError::invalid("module candidate source hash is stale"));
     }
@@ -471,7 +527,7 @@ fn get_module_revision_component(
     }
     let expected_kind = module_component_storage_key(component).0;
     let row =
-        load_module_revision_component_row(&connection, source.revision_id.as_str(), component)?;
+        load_module_revision_component_row(connection, source.revision_id.as_str(), component)?;
     if row.0 != expected_component_sha256.as_str() {
         return Err(storage_corrupted(format!(
             "stored {expected_kind} component hash differs from its parent revision"
@@ -494,7 +550,7 @@ fn get_module_revision_component(
         .map(ModuleRevisionComponentSnapshot::Control),
         lorepia_domain::ModuleComponentRef::KnowledgeBook { .. } => {
             load_linked_module_component_revision::<KnowledgeBook>(
-                &connection,
+                connection,
                 row.2.as_deref(),
                 "knowledge_book",
                 &row.0,
@@ -505,7 +561,7 @@ fn get_module_revision_component(
         }
         lorepia_domain::ModuleComponentRef::TransformSet { .. } => {
             load_linked_module_component_revision::<TransformSet>(
-                &connection,
+                connection,
                 row.2.as_deref(),
                 "transform_set",
                 &row.0,
@@ -516,7 +572,7 @@ fn get_module_revision_component(
         }
         lorepia_domain::ModuleComponentRef::InteractionRuleSet { .. } => {
             load_linked_module_component_revision::<InteractionRuleSet>(
-                &connection,
+                connection,
                 row.2.as_deref(),
                 "interaction_rule_set",
                 &row.0,

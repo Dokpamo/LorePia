@@ -102,6 +102,16 @@ pub(super) fn validate_json_bounds(label: &str, json: &str) -> CoreResult<()> {
     } else {
         MAX_ORCHESTRATION_JSON_NODES
     };
+    validate_json_limits(label, json, max_bytes, max_chars, max_nodes)
+}
+
+pub(super) fn validate_json_limits(
+    label: &str,
+    json: &str,
+    max_bytes: usize,
+    max_chars: usize,
+    max_nodes: usize,
+) -> CoreResult<()> {
     if json.len() > max_bytes || json.chars().count() > max_chars {
         return Err(CoreError::invalid(format!(
             "{label} exceeds its JSON storage limit"

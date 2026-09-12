@@ -1,7 +1,4 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    fmt::Write as _,
-};
+use std::collections::{BTreeMap, BTreeSet};
 
 use lorepia_domain::{
     ActivationRule, AssetDescriptor, AssetId, CharacterContentV1, CharacterKnowledgeBookRef,
@@ -14,7 +11,6 @@ use lorepia_orchestration::{
     AppliedModuleRuntimePlan, ModuleMergeReview, ModuleResolutionContext, ResolvedModuleComponent,
 };
 use lorepia_storage::{ModuleRevisionComponentSnapshot, ObjectRevision};
-use sha2::{Digest, Sha256};
 
 use crate::{Core, Revisioned};
 
@@ -42,6 +38,7 @@ pub(super) struct ApprovedRuntimeAsset {
 impl Core {
     /// Returns the exact character content visible to one approved room,
     /// including portable runtime and assets from its current module plan.
+    /// `revision_id` remains the underlying persisted character revision.
     pub fn get_effective_character_content(
         &self,
         character_id: &str,
@@ -60,25 +57,9 @@ impl Core {
         let mut content = self.get_character_content(character_id)?;
         let runtime = self.resolve_runtime_modules(conversation_id, branch_id)?;
         merge_portable_module_runtime(&mut content.value, &runtime)?;
-        if let Some(plan_sha256) = runtime.plan_sha256.as_deref() {
-            let mut digest = Sha256::new();
-            digest.update(b"effective-character-runtime-v1\0");
-            digest.update(
-                content
-                    .revision_id
-                    .as_deref()
-                    .unwrap_or("legacy")
-                    .as_bytes(),
-            );
-            digest.update([0]);
-            digest.update(plan_sha256.as_bytes());
-            let mut revision_id = String::with_capacity(64);
-            for byte in digest.finalize() {
-                write!(&mut revision_id, "{byte:02x}")
-                    .expect("writing a digest into a String cannot fail");
-            }
-            content.revision_id = Some(revision_id);
-        }
+        // This is a storage revision identity, not an effective-content hash.
+        // Runtime state and model audits must still bind to the real card row.
+        // UI grants independently hash the complete merged profile/capabilities.
         Ok(content)
     }
 
@@ -217,8 +198,19 @@ impl Core {
                 runtime.portable_runtimes.push(profile);
             }
         }
-        for component in &approved.plan.components {
-            self.materialize_runtime_component(&mut runtime, component)?;
+        let snapshots = approved
+            .plan
+            .components
+            .chunks(8192)
+            .map(|components| self.storage().get_module_revision_components(components))
+            .collect::<CoreResult<Vec<_>>>()?;
+        for (component, snapshot) in approved
+            .plan
+            .components
+            .iter()
+            .zip(snapshots.into_iter().flatten())
+        {
+            Self::materialize_runtime_component(&mut runtime, component, snapshot)?;
         }
         runtime.variables.validate().map_err(|error| {
             CoreError::invalid(format!("module variables are invalid: {error}"))
@@ -233,18 +225,10 @@ impl Core {
     }
 
     fn materialize_runtime_component(
-        &self,
         runtime: &mut ResolvedModuleRuntime,
         component: &ResolvedModuleComponent,
+        snapshot: ModuleRevisionComponentSnapshot,
     ) -> CoreResult<()> {
-        let snapshot = self.load_approved_content_module_component(
-            &crate::module_orchestration::ApprovedContentModuleComponent {
-                component: component.component.clone(),
-                component_sha256: component.sha256.clone(),
-                selected_source: component.selected_source.clone(),
-                runtime_enabled: component.runtime_enabled,
-            },
-        )?;
         match (&component.component, snapshot) {
             (
                 ModuleComponentRef::TransformSet { .. },

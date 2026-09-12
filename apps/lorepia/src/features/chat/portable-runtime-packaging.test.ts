@@ -6,6 +6,8 @@ import releaseCapability from '../../../src-tauri/capabilities/main-release.json
 import devConfig from '../../../src-tauri/tauri.dev.conf.json';
 import kernelSource from './portable-runtime-kernel.ts?raw';
 import portableMessageSource from './PortableMessage.svelte?raw';
+import portableFrameSource from './portable-renderer-frame.ts?raw';
+import portableBridgeSource from './portable-renderer-bridge.js?raw';
 import runtimeSource from './portable-runtime.ts?raw';
 import workerSource from './portable-runtime.worker.ts?raw';
 import workerClientSource from './portable-runtime-worker-client.ts?raw';
@@ -48,7 +50,12 @@ describe('portable runtime packaging', () => {
         expect(portableMessageSource).not.toContain('allow-same-origin');
         expect(portableMessageSource).toContain("event.origin !== 'null'");
         expect(portableMessageSource).toContain('event.source !== target.contentWindow');
-        expect(portableMessageSource).toContain("connect-src 'none'");
-        expect(portableMessageSource).toContain("form-action 'none'");
+        expect(portableFrameSource).toContain("connect-src 'none'");
+        expect(portableFrameSource).toContain("form-action 'none'");
+        expect(portableFrameSource).toContain('portable-renderer-bridge.js?url&no-inline');
+        expect(portableFrameSource).toContain("script-src 'nonce-");
+        expect(portableBridgeSource).toContain('!event.isTrusted');
+        expect(portableBridgeSource).toContain('document.currentScript');
+        expect(portableBridgeSource).not.toMatch(/__TAURI|invoke\s*\(|fetch\s*\(|XMLHttpRequest/);
     });
 });
