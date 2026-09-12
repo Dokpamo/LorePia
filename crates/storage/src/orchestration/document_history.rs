@@ -112,6 +112,16 @@ pub(super) fn validate_json_limits(
     max_chars: usize,
     max_nodes: usize,
 ) -> CoreResult<()> {
+    parse_json_limits(label, json, max_bytes, max_chars, max_nodes).map(|_| ())
+}
+
+pub(super) fn parse_json_limits(
+    label: &str,
+    json: &str,
+    max_bytes: usize,
+    max_chars: usize,
+    max_nodes: usize,
+) -> CoreResult<Value> {
     if json.len() > max_bytes || json.chars().count() > max_chars {
         return Err(CoreError::invalid(format!(
             "{label} exceeds its JSON storage limit"
@@ -145,7 +155,7 @@ pub(super) fn validate_json_limits(
             _ => {}
         }
     }
-    Ok(())
+    Ok(value)
 }
 
 fn is_forbidden_secret_key(key: &str) -> bool {

@@ -1,3 +1,8 @@
+import {
+    loadRecentBranchMessages,
+    retainMessageWindow,
+    RUNTIME_HISTORY_MESSAGES,
+} from './recent-branch-messages';
 import type {
     ConversationBranchDto,
     ConversationStateDto,
@@ -81,13 +86,24 @@ export async function loadReconciledMessages(
                     generationId,
                     branch.head_message_id,
                 );
-                if (merged !== null) return merged;
+                if (merged !== null) {
+                    const previous = current.messages;
+                    if (previous.start_index === undefined || previous.total_messages === undefined)
+                        return merged;
+                    const total = previous.total_messages + merged.length - previous.items.length;
+                    const retained = merged.slice(-RUNTIME_HISTORY_MESSAGES);
+                    return retainMessageWindow(retained, {
+                        start_index: total - retained.length,
+                        total_messages: total,
+                        head_message_id: branch.head_message_id,
+                    });
+                }
             } catch {
                 // Recovery still reloads and verifies the complete branch on any mismatch.
             }
         }
     }
-    return client.listBranchMessages(next.active_branch_id);
+    return loadRecentBranchMessages(client, next.active_branch_id);
 }
 
 export function pendingAssistantMessage(

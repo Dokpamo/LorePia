@@ -520,14 +520,11 @@ fn decode_record(
     })
 }
 
-fn encode_payload(payload: &PortableRuntimeStatePayload) -> CoreResult<String> {
-    validate_payload(payload)?;
-    serde_json::to_string(&payload.value).map_err(|error| {
-        CoreError::invalid(format!("portable runtime payload is invalid: {error}"))
-    })
+fn validate_payload(payload: &PortableRuntimeStatePayload) -> CoreResult<()> {
+    encode_payload(payload).map(|_| ())
 }
 
-fn validate_payload(payload: &PortableRuntimeStatePayload) -> CoreResult<()> {
+fn encode_payload(payload: &PortableRuntimeStatePayload) -> CoreResult<String> {
     if payload.schema_version != PORTABLE_RUNTIME_STATE_SCHEMA_VERSION {
         return Err(CoreError::invalid(format!(
             "portable runtime payload schema version must be {PORTABLE_RUNTIME_STATE_SCHEMA_VERSION}",
@@ -595,7 +592,7 @@ fn validate_payload(payload: &PortableRuntimeStatePayload) -> CoreResult<()> {
             "portable runtime payload exceeds its {MAX_PORTABLE_RUNTIME_STATE_BYTES}-byte limit"
         )));
     }
-    Ok(())
+    Ok(json)
 }
 
 fn required_field<'a>(

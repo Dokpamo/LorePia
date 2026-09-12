@@ -340,8 +340,8 @@
       "lines": 813
     },
     "crates/storage/src/memory_queue.rs": {
-      "bytes": 231062,
-      "lines": 6110
+      "bytes": 228812,
+      "lines": 6049
     },
     "crates/storage/src/model_sync.rs": {
       "bytes": 129970,

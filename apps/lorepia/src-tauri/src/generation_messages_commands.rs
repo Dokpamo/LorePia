@@ -1,7 +1,8 @@
 //! Verified message presentation commands, including bounded terminal refresh.
-use lorepia_shell_api::MessageDto;
+use lorepia_shell_api::{BranchMessagesPageDto, ListBranchMessagesPageInput, MessageDto};
 use serde::Deserialize;
 use tauri::State;
+use tokio::sync::Semaphore;
 
 use crate::{
     error::{CommandError, CommandResult},
@@ -18,6 +19,38 @@ pub struct ConversationRequest {
 #[serde(deny_unknown_fields)]
 pub struct BranchMessagesRequest {
     pub branch_id: String,
+}
+
+static HISTORY_ADMISSIONS: Semaphore = Semaphore::const_new(8);
+static HISTORY_WORKERS: Semaphore = Semaphore::const_new(2);
+
+#[tauri::command]
+pub async fn list_branch_messages_page(
+    state: State<'_, AppState>,
+    request: ListBranchMessagesPageInput,
+) -> CommandResult<BranchMessagesPageDto> {
+    let shell = state.shell()?;
+    run_history_page_work(move || shell.list_branch_messages_page(request)).await
+}
+
+async fn run_history_page_work<T: Send + 'static>(
+    work: impl FnOnce() -> lorepia_shell_api::ShellResult<T> + Send + 'static,
+) -> CommandResult<T> {
+    let admission = HISTORY_ADMISSIONS
+        .try_acquire()
+        .map_err(|_| CommandError::busy())?;
+    let worker = HISTORY_WORKERS
+        .acquire()
+        .await
+        .map_err(|_| CommandError::internal())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        // Keep both permits until native work ends even if the caller goes away.
+        let (_admission, _worker) = (admission, worker);
+        work()
+    })
+    .await
+    .map_err(|_| CommandError::internal())?
+    .map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -83,5 +116,41 @@ mod tests {
         ] {
             assert!(serde_json::from_str::<GenerationMessagesRequest>(invalid).is_err());
         }
+    }
+
+    #[tokio::test]
+    async fn history_work_is_bounded_and_cancelled_callers_keep_native_permits() {
+        use super::{HISTORY_ADMISSIONS, HISTORY_WORKERS, run_history_page_work};
+        let full = HISTORY_ADMISSIONS
+            .try_acquire_many(8)
+            .expect("reserve admission");
+        assert_eq!(
+            run_history_page_work(|| Ok(())).await.unwrap_err().code,
+            "busy"
+        );
+        drop(full);
+
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let (release, wait) = std::sync::mpsc::channel();
+        let task = tokio::spawn(run_history_page_work(move || {
+            started.send(()).expect("notify worker entry");
+            wait.recv().expect("release native work");
+            Ok(())
+        }));
+        ready.await.expect("native worker started");
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        assert_eq!(HISTORY_ADMISSIONS.available_permits(), 7);
+        assert_eq!(HISTORY_WORKERS.available_permits(), 1);
+        release.send(()).expect("finish work");
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while HISTORY_ADMISSIONS.available_permits() != 8
+                || HISTORY_WORKERS.available_permits() != 2
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("finished work releases permits");
     }
 }

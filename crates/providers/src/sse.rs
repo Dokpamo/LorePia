@@ -37,6 +37,7 @@ impl SseEventBuffer {
         if bytes.is_empty() {
             return None;
         }
+        self.compact_if_worthwhile();
         self.extend_from_slice(bytes);
         // A newline-free byte can still confirm a CR-ending separator that was
         // deliberately deferred at the preceding chunk edge.
@@ -94,17 +95,13 @@ impl SseEventBuffer {
         None
     }
 
-    pub(crate) fn take_event(&mut self, boundary: SseEventBoundary) -> Vec<u8> {
-        let event_end = self.start + boundary.event_len;
-        let event = self.bytes[self.start..event_end].to_vec();
+    /// Borrow until processing ends; the next nonempty append may compact.
+    pub(crate) fn take_event(&mut self, boundary: SseEventBoundary) -> &[u8] {
+        let event_start = self.start;
+        let event_end = event_start + boundary.event_len;
         self.start = event_end + boundary.separator_len;
         self.scan_from = self.start;
-        #[cfg(test)]
-        {
-            self.framing_work_units += event.len();
-        }
-        self.compact_if_worthwhile();
-        event
+        &self.bytes[event_start..event_end]
     }
 
     fn compact_if_worthwhile(&mut self) {
@@ -242,3 +239,6 @@ pub(crate) fn assert_crcrlf_split_consumes_the_continuation_lf(separators: &[&[u
     assert_eq!(pending.take_event(boundary), b"data: terminal");
     assert!(pending.is_empty());
 }
+
+#[cfg(test)]
+mod tests;

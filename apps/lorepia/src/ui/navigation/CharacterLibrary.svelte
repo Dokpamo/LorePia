@@ -2,17 +2,19 @@
     import { Plus, Search, Users } from '@lucide/svelte';
     import type { LorepiaClient } from '../../lib/ipc/contracts';
     import type { SampleCharacter } from '../workspace/view-types';
-    import CharacterImage from '../workspace/CharacterImage.svelte';
+    import ProfileThumbnail from './ProfileThumbnail.svelte';
     import IconButton from '../workspace/IconButton.svelte';
     import LibraryScreen from './LibraryScreen.svelte';
     import LibrarySort from './LibrarySort.svelte';
     import { queryCharacterLibrary, type CharacterLibrarySort } from './character-library-query';
     import { tr } from '../../lib/i18n';
+    import LoadingState from '../workspace/LoadingState.svelte';
     let {
         characters,
         client,
         ready,
         loaded = ready,
+        loading = !loaded,
         onselect,
         onadd,
         ondetail,
@@ -21,14 +23,15 @@
         client: LorepiaClient;
         ready: boolean;
         loaded?: boolean;
+        loading?: boolean;
         onselect: (id: string) => void;
         onadd: () => void;
         ondetail: (active: boolean) => void;
     } = $props();
     let query = $state('');
     let sort = $state<CharacterLibrarySort>('newest');
-    const filtered = $derived(queryCharacterLibrary(characters, query, sort));
     const library = $derived(queryCharacterLibrary(characters, '', sort));
+    const filtered = $derived(query ? queryCharacterLibrary(characters, query, sort) : library);
 </script>
 
 {#snippet cards(items: SampleCharacter[])}
@@ -42,7 +45,7 @@
             >
                 <span class="ui-press-visual">
                     <span class="seed-character-thumbnail">
-                        {#if item.avatarAssetId}<CharacterImage
+                        {#if item.avatarAssetId}<ProfileThumbnail
                                 {client}
                                 name={item.name}
                                 assetId={item.avatarAssetId}
@@ -68,7 +71,11 @@
         <LibrarySort bind:value={sort} label={$tr('navigation.sortCharacters')} />
     {/snippet}
     {#snippet results()}
-        {#if filtered.length > 0}{@render cards(filtered)}{:else}
+        {#if loading && !characters.length}<LoadingState
+                label={$tr('ux.loading.characters')}
+                cards
+            />
+        {:else if filtered.length > 0}{@render cards(filtered)}{:else}
             <div class="seed-empty">
                 <Search aria-hidden="true" />
                 <h3>{$tr('navigation.noResults')}</h3>
@@ -89,6 +96,8 @@
                     ><Plus aria-hidden="true" />{$tr('workspace.importCard')}</span
                 ></button
             >
+        {:else if loading}
+            <LoadingState label={$tr('ux.loading.characters')} cards />
         {/if}
     </div>
 </LibraryScreen>

@@ -55,6 +55,7 @@
     "allow-select-conversation-persona",
     "allow-clear-conversation-persona",
     "allow-list-branch-messages",
+    "allow-list-branch-messages-page",
     "allow-list-generation-messages",
     "allow-list-messages",
     "allow-generate-runtime-text",

@@ -322,6 +322,15 @@
     transform: translate3d(0, 0, 0);
     visibility: visible;
 }
+.seed-detail-page[data-forward-preview='true'] {
+    visibility: visible;
+    transform: translate3d(var(--ui-forward-offset, 100%), 0, 0);
+    transition: none;
+    pointer-events: none;
+}
+.seed-detail-page > .ui-chat {
+    touch-action: pan-y pinch-zoom;
+}
 .seed-detail-page > .ui-page {
     transform: translate3d(var(--ui-back-offset, 0px), 0, 0);
     width: 100%;

@@ -15,6 +15,7 @@ mod generation_append;
 mod generation_presets;
 mod health;
 mod interrupted_generation_recovery;
+mod message_pages;
 mod messages;
 mod migration_provider_v4;
 mod migration_registry;
@@ -76,6 +77,7 @@ pub use asset_delivery::ApprovedAssetRange;
 pub(crate) use connection_metrics::DatabaseConnectionGuard;
 use connection_metrics::DatabaseConnectionMetricState;
 pub use connection_metrics::DatabaseConnectionMetrics;
+pub use message_pages::BranchMessagePage;
 pub use messages::{MessageGenerationAction, MessageGenerationActionContext};
 pub use stats::DatabaseStats;
 
@@ -194,12 +196,9 @@ const MAX_CAPABILITY_ENUM_VALUES: usize = 128;
 const PROVIDER_API_CAPABILITY_FRESHNESS: chrono::Duration = chrono::Duration::hours(24);
 pub struct Storage {
     root: PathBuf,
-    /// Serializes mutation of the shared source/asset CAS.
-    ///
-    /// Lock order is always `cas_mutation` -> `connection`. A CAS mutation
-    /// must never be started while the connection mutex is held. Startup
-    /// recovery mutates the same CAS before `Storage` becomes observable and
-    /// is additionally protected by the exclusive data-root owner lock.
+    /// Serializes source/asset CAS mutation; lock order: `cas_mutation` -> `connection`.
+    /// Never start CAS mutation while holding the connection mutex. Startup recovery
+    /// mutates CAS before Storage is observable, under the exclusive data-root owner lock.
     cas_mutation: Mutex<()>,
     connection_metrics: DatabaseConnectionMetricState,
     pub(crate) connection: Mutex<Connection>,

@@ -253,7 +253,7 @@ async fn consume_response_stream(
                         ensure_event_size(boundary.event_len())?;
                         let event = pending.take_event(boundary);
                         if process_event(
-                            &event,
+                            event,
                             sink,
                             &mut usage,
                             &mut tool_calls,
@@ -278,7 +278,7 @@ async fn consume_response_stream(
         ensure_event_size(boundary.event_len())?;
         let event = pending.take_event(boundary);
         if process_event(
-            &event,
+            event,
             sink,
             &mut usage,
             &mut tool_calls,

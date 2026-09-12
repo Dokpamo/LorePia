@@ -11,6 +11,8 @@
     import type { SampleCharacter, SampleConversation } from './view-types';
     import type { ChatSession } from './chat-session';
     import type { LorepiaClient } from '../../lib/ipc/contracts';
+    import LoadingState from './LoadingState.svelte';
+    import { observeTranscriptUnderfill } from './transcript-underfill';
     let {
         character,
         client,
@@ -25,6 +27,12 @@
         onactive,
         onnotice,
         onwrite,
+        loading = false,
+        loadError = null,
+        onretry,
+        onhistoryedge,
+        onunderfill,
+        historyLoading = false,
     }: {
         character: SampleCharacter;
         client?: Pick<LorepiaClient, 'resolveAssetDelivery'>;
@@ -39,6 +47,12 @@
         onactive: (id: string | null) => void;
         onnotice: (text: string, retry?: () => void) => void;
         onwrite: () => void;
+        loading?: boolean;
+        loadError?: string | null;
+        onretry?: () => void;
+        onhistoryedge?: () => void;
+        onunderfill?: (value: boolean) => void;
+        historyLoading?: boolean;
     } = $props();
     const viewport = $derived(scroll.virtualWindow());
     const visible = $derived(conversation.messages.slice(viewport.start, viewport.end));
@@ -53,10 +67,25 @@
 <div
     class="ui-messages"
     bind:this={scroll.scroller}
+    use:observeTranscriptUnderfill={{
+        scope: `${conversation.id}:${conversation.activeBranchId ?? ''}`,
+        start: conversation.messageOffset ?? 0,
+        count: conversation.messages.length,
+        first: conversation.messages[0]?.id,
+        last: conversation.messages.at(-1)?.id,
+        busy: loading || historyLoading || loadError !== null,
+        check: onhistoryedge,
+        onunderfill,
+    }}
     role="log"
     tabindex="-1"
     aria-label={$tr('uiPreview.messages')}
-    onscroll={(event) => scroll.handleScroll(event)}
+    aria-busy={loading || historyLoading}
+    onscroll={(event) => {
+        scroll.handleScroll(event);
+        const node = event.currentTarget;
+        if (node.clientHeight > 0 && node.scrollHeight > node.clientHeight + 1) onhistoryedge?.();
+    }}
     onpointerdown={(event) => {
         if (!(event.target instanceof Element) || !event.target.closest('[data-message-id]'))
             activate(null);
@@ -69,7 +98,13 @@
             String(22 + viewport.bottomSpacer) +
             'px + var(--ui-composer-overlay, 84px))'}
     >
-        {#if conversation.messages.length === 0}<div class="ui-result-empty">
+        {#if loadError}<div class="ui-result-empty" role="alert">
+                <p>{$tr('ux.loading.failed')}</p>
+                <button class="ui-result-action" onclick={onretry}>{$tr('workspace.retry')}</button>
+            </div>
+        {:else if loading && conversation.messages.length === 0}
+            <LoadingState label={$tr('ux.loading.conversation')} />
+        {:else if !loading && conversation.messages.length === 0}<div class="ui-result-empty">
                 <p>{$tr('uiPreview.emptyChat')}</p>
                 <button class="ui-result-action ui-pressable" onclick={onwrite}
                     ><span class="ui-press-visual">{$tr('uiPreview.writeMessage')}</span></button
@@ -82,8 +117,8 @@
                 data-message-id={message.id}
                 data-active={active === message.id}
                 tabindex="-1"
-                aria-posinset={viewport.start + index + 1}
-                aria-setsize={collection.items.length}
+                aria-posinset={(conversation.messageOffset ?? 0) + viewport.start + index + 1}
+                aria-setsize={conversation.totalMessages ?? collection.items.length}
                 use:measure={{
                     messageId: message.id,
                     epoch: scroll.measurementEpoch,
@@ -98,7 +133,7 @@
                     {character}
                     {session}
                     {renderMessage}
-                    messageIndex={viewport.start + index}
+                    messageIndex={(conversation.messageOffset ?? 0) + viewport.start + index}
                     active={active === message.id}
                     branchId={conversation.activeBranchId}
                     onactivate={() => activate(message.id)}
@@ -108,6 +143,9 @@
                 />
             </article>
         {/each}
+        {#if (loading || historyLoading) && conversation.messages.length > 0}<p role="status">
+                {$tr('ux.loading.conversation')}
+            </p>{/if}
         {#if extras}<div class="ui-transcript-extras">{@render extras()}</div>{/if}
     </div>
 </div>

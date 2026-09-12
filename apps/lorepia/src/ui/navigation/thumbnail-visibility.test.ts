@@ -136,3 +136,23 @@ it('ignores stale deliveries after cleanup and releases the shared observer with
     stop[1]?.();
     expect(observer().disconnect).toHaveBeenCalledOnce();
 });
+
+it('reads the shared viewport once for a large observer delivery', () => {
+    const { root, observer, tile } = viewport();
+    const measure = vi.spyOn(root, 'getBoundingClientRect');
+    const updates: number[] = [];
+    const tiles = Array.from({ length: 200 }, (_, index) =>
+        tile((near) => {
+            if (near) updates.push(index);
+        }),
+    );
+    observer().deliver(
+        tiles.map((target, index) => ({
+            target,
+            near: true,
+            top: 1000 + (200 - index) * 100,
+        })),
+    );
+    expect(measure).toHaveBeenCalledOnce();
+    expect(updates).toEqual(Array.from({ length: 200 }, (_, index) => 199 - index));
+});

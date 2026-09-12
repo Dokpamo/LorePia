@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { onDestroy, tick, untrack } from 'svelte';
+    import { onDestroy, tick, untrack, type Snippet } from 'svelte';
     import { get } from 'svelte/store';
     import type { LorepiaAppController, LorepiaAppState } from '../app-controller';
     import type { LorepiaClient } from '../../lib/ipc/contracts';
@@ -36,6 +36,7 @@
         onproviders,
         onadvanced,
         covered = false,
+        cardSettings,
     }: {
         kind: Overlay;
         appState: LorepiaAppState;
@@ -46,6 +47,7 @@
         onproviders: () => void;
         onadvanced: () => void;
         covered?: boolean;
+        cardSettings?: Snippet;
     } = $props();
     const formId = $props.id();
     const characterId = untrack(() => appState.selected_character?.id);
@@ -208,6 +210,7 @@
     bind:this={panel}
     {title}
     {kind}
+    sheet={kind === 'room-settings'}
     {onclose}
     {beforeback}
     disabled={busy}
@@ -276,6 +279,7 @@
                 </button>{/if}
         </form>
         {#if kind === 'room-settings'}
+            {#if cardSettings}{@render cardSettings()}{/if}
             <section class="ui-settings-group">
                 <SettingsRow
                     label={$tr('workspace.aiSettings')}

@@ -69,7 +69,14 @@ describe('root swipe integration', () => {
         expect(tab(t('navigation.create'))).toHaveAttribute('aria-current', 'page');
         await swipe(create(), -1);
         expect(tab(t('navigation.settings'))).toHaveAttribute('aria-current', 'page');
-        await swipe(screen.getByRole('button', { name: t('uiPreview.aiConnection') }), 1);
+        await swipe(
+            await screen.findByRole(
+                'button',
+                { name: t('uiPreview.aiConnection') },
+                { timeout: 5000 },
+            ),
+            1,
+        );
         expect(tab(t('navigation.create'))).toHaveAttribute('aria-current', 'page');
         await swipe(create(), 1);
         expect(tab(t('navigation.chats'))).toHaveAttribute('aria-current', 'page');
@@ -88,7 +95,13 @@ describe('root swipe integration', () => {
         const { container } = render(WorkspaceApp, { client });
         const roots = rootGeometry(container);
         await fireEvent.click(tab(t('navigation.settings')));
-        await fireEvent.click(screen.getByRole('button', { name: t('uiPreview.aiConnection') }));
+        await fireEvent.click(
+            await screen.findByRole(
+                'button',
+                { name: t('uiPreview.aiConnection') },
+                { timeout: 5000 },
+            ),
+        );
         const ai = await screen.findByRole('dialog', { name: t('workspaceAi.title') });
         expect(roots).toHaveAttribute('data-root-swipe-enabled', 'false');
         await swipe(ai, -1);

@@ -131,7 +131,7 @@ describe('portable renderer policy', () => {
                     channel: PORTABLE_RENDERER_CHANNEL,
                     type: 'portable_resize',
                     runtimeId,
-                    height: 721,
+                    height: 65_537,
                 },
                 runtimeId,
             ),

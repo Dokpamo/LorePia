@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { MessageDto } from '../../lib/ipc/contracts';
 import {
@@ -132,4 +132,96 @@ describe('portable runtime chat context', () => {
         expect(source).not.toContain('message-2\n');
         expect(source.endsWith('virtual-newest')).toBe(true);
     });
+});
+
+describe('portable runtime context work bounds', () => {
+    it('serializes retained messages only once while preserving the final byte budget', () => {
+        const messages = Array.from({ length: 127 }, (_, index) => message(index));
+        const encode = vi.spyOn(TextEncoder.prototype, 'encode');
+        let context: ReturnType<typeof bounded>;
+        try {
+            context = bounded(messages, virtualMessage());
+            expect(encode).toHaveBeenCalledTimes(128);
+        } finally {
+            encode.mockRestore();
+        }
+        expect(contextBytes(context)).toBeLessThanOrEqual(MAX_RUNTIME_CONTEXT_BYTES);
+        expect(context.messages).toHaveLength(127);
+    });
+
+    it('matches full join/slice for empty messages, Unicode, separators and unusual limits', () => {
+        const values = ['', 'a', '\ud83d\ude42', '\ud800', '\udc00', 'a\nb', '"\\\n'];
+        const limits = [-10, -1, -0.5, 0, 0.5, 1, 2, 3, 7, 30, NaN, Infinity, -Infinity];
+        for (const first of values) {
+            for (const last of values) {
+                for (const virtual of [null, virtualMessage(''), virtualMessage(last)]) {
+                    const context = {
+                        messages: [virtualMessage(first), virtualMessage(''), virtualMessage(last)],
+                        virtualMessage: virtual,
+                    };
+                    const all = [
+                        ...context.messages.map((item) => item.data),
+                        ...(virtual ? [virtual.data] : []),
+                    ].join('\n');
+                    for (const limit of limits)
+                        expect(portableRuntimeChatContextSource(context, limit)).toBe(
+                            all.slice(-limit),
+                        );
+                }
+            }
+        }
+        expect(portableRuntimeChatContextSource({ messages: [], virtualMessage: null }, 10)).toBe(
+            '',
+        );
+    });
+
+    it('does not visit older text when the newest message covers the lore suffix', () => {
+        const older = virtualMessage('old');
+        Object.defineProperty(older, 'data', { get: () => 'old', configurable: true });
+        const read = vi.spyOn(older, 'data', 'get');
+        const context = {
+            messages: [older, virtualMessage('x'.repeat(262_144))],
+            virtualMessage: null,
+        };
+        expect(portableRuntimeChatContextSource(context, 1024)).toBe('x'.repeat(1024));
+        expect(read).not.toHaveBeenCalled();
+        read.mockRestore();
+    });
+});
+
+it('keeps global suffix indices and budgets optional paging metadata', () => {
+    const messages = Array.from({ length: 200 }, (_, index) => message(index));
+    const context = boundedPortableRuntimeChatContext(messages, null, (item) => item.content, {
+        start_index: 800,
+        total_messages: 1000,
+        head_message_id: 'message-199',
+    });
+    expect(context.messages).toHaveLength(128);
+    expect(context.messageWindow).toEqual({
+        start_index: 872,
+        total_messages: 1000,
+        head_message_id: 'message-199',
+    });
+    const large = boundedPortableRuntimeChatContext(
+        [message(999, 'x'.repeat(MAX_RUNTIME_CONTEXT_BYTES))],
+        null,
+        (item) => item.content,
+        {
+            start_index: 999,
+            total_messages: 1000,
+            head_message_id: 'message-999',
+        },
+    );
+    expect(portableRuntimeMessageByteLength(large)).toBeLessThanOrEqual(MAX_RUNTIME_CONTEXT_BYTES);
+    expect(large.messageWindow?.start_index).toBe(999);
+});
+
+it('rejects metadata that alone exceeds the context budget before returning a window', () => {
+    expect(() =>
+        boundedPortableRuntimeChatContext([], null, (item) => item.content, {
+            start_index: 0,
+            total_messages: 0,
+            head_message_id: 'x'.repeat(MAX_RUNTIME_CONTEXT_BYTES),
+        }),
+    ).toThrow('portable runtime window metadata exceeds the context byte limit');
 });

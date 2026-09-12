@@ -3,11 +3,7 @@
     import { convertFileSrc } from '@tauri-apps/api/core';
     import { SvelteMap, SvelteSet, SvelteURL } from 'svelte/reactivity';
 
-    import type {
-        CharacterRenderAssetDto,
-        CharacterRenderProfileDto,
-        LorepiaClient,
-    } from '../../lib/ipc/contracts';
+    import type { CharacterRenderProfileDto, LorepiaClient } from '../../lib/ipc/contracts';
     import { t } from '../../lib/i18n';
     import MarkdownText from './MarkdownText.svelte';
     import { escapeHtml, portableFrameDocument } from './portable-renderer-frame';
@@ -20,26 +16,19 @@
         renderPortableMacros,
     } from './portable-display';
     import { selectPortableRoomMarkup } from './portable-room-markup';
+    import { createPortableAssetSelector } from './portable-asset-selection';
+    import { applyPortableFrameLayout } from './portable-frame-layout';
     import {
         type PortableSurface,
         sanitizePortableCss,
         sanitizePortableTree,
     } from './portable-renderer-policy';
-    import {
-        isPortableRendererMessage,
-        MIN_PORTABLE_RENDERER_HEIGHT,
-    } from './portable-renderer-protocol';
+    import { isPortableRendererMessage } from './portable-renderer-protocol';
 
     const MAX_PORTABLE_SOURCE_CHARS = 262_144;
     const MAX_PORTABLE_MARKUP_TAGS = 4_096;
     const MAX_PORTABLE_ASSET_REFERENCES = 128;
-    const MAX_PORTABLE_ASSET_ALIASES = 32_768;
     const MAX_PORTABLE_ASSET_CONCURRENCY = 8;
-
-    interface IndexedAssetAlias {
-        asset: CharacterRenderAssetDto;
-        alias: string;
-    }
 
     interface Props {
         text: string;
@@ -47,6 +36,7 @@
         profile: CharacterRenderProfileDto | null;
         enabled?: boolean;
         surface?: PortableSurface;
+        floating?: boolean;
         expandMacros?: boolean;
         messageIndex?: number;
         lastMessageId?: number;
@@ -64,6 +54,7 @@
         profile,
         enabled = true,
         surface = 'message',
+        floating = false,
         expandMacros = enabled,
         messageIndex,
         lastMessageId,
@@ -174,6 +165,7 @@
         const activeLastMessageId = lastMessageId;
         const active = usesPortableMarkup;
         const activeSurface = surface;
+        const floatingRoom = floating;
         const screenWidth = frameWidth;
         void displayVariablesKey;
         const activeVariables = untrack(() => displayVariables);
@@ -198,7 +190,7 @@
                 onAction?.(event.data.action);
                 return;
             }
-            if (activeSurface === 'message') target.style.height = `${String(event.data.height)}px`;
+            applyPortableFrameLayout(target, event.data, activeSurface === 'room', floatingRoom);
         };
         globalThis.addEventListener('message', handleMessage);
         void buildPortableDocument(
@@ -233,8 +225,6 @@
                 activeSurface,
             );
             if (isCancelled()) return;
-            if (activeSurface === 'message')
-                target.style.height = `${String(MIN_PORTABLE_RENDERER_HEIGHT)}px`;
             target.srcdoc = portableFrameDocument(
                 rendered,
                 importedStyle,
@@ -312,14 +302,14 @@
         const references = collectAssetReferences(assetSource);
         if (references === null) return portableLimitMarkup();
         const resolved = new SvelteMap<string, string | null>();
-        const aliases = indexAssetAliases(activeProfile.assets);
+        const selectAsset = createPortableAssetSelector(activeProfile.assets, displaySource);
         for (let offset = 0; offset < references.length; offset += MAX_PORTABLE_ASSET_CONCURRENCY) {
             if (isCancelled()) return '';
             await Promise.all(
                 references
                     .slice(offset, offset + MAX_PORTABLE_ASSET_CONCURRENCY)
                     .map(async (reference) => {
-                        const asset = selectAsset(aliases, reference, displaySource);
+                        const asset = selectAsset(reference);
                         if (asset === null) {
                             resolved.set(reference, null);
                             return;
@@ -419,49 +409,6 @@
         return [...references];
     }
 
-    function selectAsset(
-        aliases: readonly IndexedAssetAlias[],
-        reference: string,
-        source: string,
-    ): CharacterRenderAssetDto | null {
-        const wanted = normalizedAlias(reference);
-        if (wanted === '') return null;
-        let ranked = aliases.filter(
-            ({ alias }) =>
-                alias === wanted ||
-                alias.startsWith(`${wanted}_`) ||
-                alias.startsWith(`${wanted}.`),
-        );
-        if (ranked.length === 0 && wanted.includes('_')) {
-            const fallback = `${wanted.slice(0, wanted.indexOf('_'))}_default`;
-            ranked = aliases.filter(
-                ({ alias }) => alias === fallback || alias.startsWith(`${fallback}.`),
-            );
-        }
-        ranked = ranked.sort(
-            (left, right) =>
-                left.alias.length - right.alias.length ||
-                left.alias.localeCompare(right.alias) ||
-                left.asset.asset_id.localeCompare(right.asset.asset_id),
-        );
-        if (ranked.length === 0) return null;
-        const exact = ranked.filter(({ alias }) => alias === wanted);
-        const candidates = exact.length > 0 ? exact : ranked;
-        return candidates[stableIndex(`${source}\0${reference}`, candidates.length)]?.asset ?? null;
-    }
-
-    function indexAssetAliases(assets: readonly CharacterRenderAssetDto[]): IndexedAssetAlias[] {
-        const aliases: IndexedAssetAlias[] = [];
-        for (const asset of assets) {
-            for (const sourceAlias of asset.aliases) {
-                const alias = normalizedAlias(sourceAlias);
-                if (alias !== '') aliases.push({ asset, alias });
-                if (aliases.length >= MAX_PORTABLE_ASSET_ALIASES) return aliases;
-            }
-        }
-        return aliases;
-    }
-
     function markupTagCount(value: string): number {
         let count = 0;
         for (const character of value) {
@@ -472,27 +419,6 @@
 
     function portableLimitMarkup(): string {
         return `<div class="portable-message">${escapeHtml(t('chat.portable.content_too_large'))}</div>`;
-    }
-
-    function normalizedAlias(value: string): string {
-        return (
-            value
-                .trim()
-                .replace(/^['"]|['"]$/g, '')
-                .replaceAll('\\', '/')
-                .split('/')
-                .at(-1)
-                ?.toLocaleLowerCase() ?? ''
-        );
-    }
-
-    function stableIndex(value: string, length: number): number {
-        let hash = 2166136261;
-        for (let index = 0; index < value.length; index += 1) {
-            hash ^= value.charCodeAt(index);
-            hash = Math.imul(hash, 16777619);
-        }
-        return length === 0 ? 0 : (hash >>> 0) % length;
     }
 
     function rendererAssetUrl(sha256: string): string | null {
@@ -537,6 +463,7 @@
     <div class="portable-boundary" class:portable-room={surface === 'room'}>
         <iframe
             class="portable-frame"
+            class:portable-floating={floating}
             bind:this={frame}
             title="카드 콘텐츠"
             sandbox="allow-scripts"
@@ -558,8 +485,7 @@
         contain: layout paint style;
         isolation: isolate;
         max-width: 100%;
-        max-height: min(70vh, 720px);
-        overflow: auto;
+        overflow: clip;
     }
 
     .portable-room {
@@ -579,6 +505,9 @@
         max-width: 100%;
         border: 0;
         overflow: hidden;
+    }
+    .portable-floating {
+        clip-path: path('M0,0Z');
     }
 
     .portable-regex-warning {

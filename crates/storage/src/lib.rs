@@ -30,8 +30,8 @@ pub use catalog::{
 };
 pub use content_export::VerifiedContentSource;
 pub use database::{
-    ApprovedAssetRange, DatabaseConnectionMetrics, DatabaseStats, MessageGenerationAction,
-    MessageGenerationActionContext, StagedAssetImport, Storage,
+    ApprovedAssetRange, BranchMessagePage, DatabaseConnectionMetrics, DatabaseStats,
+    MessageGenerationAction, MessageGenerationActionContext, StagedAssetImport, Storage,
 };
 pub use discovery::{DurableOperationOutcome, PersistDiscoveryTransition};
 pub use discovery_repository::{

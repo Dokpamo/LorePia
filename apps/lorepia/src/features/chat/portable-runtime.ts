@@ -23,6 +23,7 @@ import {
     type PortableRuntimeWorkerContext,
     type PortableRuntimeWorkerOperation,
     type PortableRuntimeWorkerResult,
+    type PortableRuntimeMessageWindow as MessageWindow,
     type PortableRuntimeWorkerSnapshot,
     type PortableRuntimeWorkerValue,
 } from './portable-runtime-protocol';
@@ -42,6 +43,11 @@ import {
     PortableRuntimeWorkerError,
     type PortableRuntimeWorkerFactory,
 } from './portable-runtime-worker-client';
+import {
+    pruneMessageOverrides,
+    removeProvenMessageOverrides,
+    runtimeStateScopeEquals,
+} from './portable-runtime-window';
 import { portableRegexRuleKey, runPortableRegex } from './portable-regex';
 import {
     beginPortableRuntimeModelCall,
@@ -274,6 +280,7 @@ export class PortableCharacterRuntime {
     private readonly modelBudgetScope: string;
     private activeLoreEntries: CharacterRuntimeKnowledgeDto[] = [];
     private messages: MessageDto[] = [];
+    private messageWindow: MessageWindow | undefined;
     private virtualMessage: PortableRuntimeChatMessage | null = null;
     private displayCache = new Map<string, string>();
     private worker: PortableRuntimeWorkerClient | null = null;
@@ -404,18 +411,22 @@ export class PortableCharacterRuntime {
         return portableRuntimeModelBudgetSnapshot(this.modelBudgetScope);
     }
 
-    setMessages(messages: MessageDto[]): void {
+    setMessages(messages: MessageDto[], window?: MessageWindow): void {
         this.messages = messages;
-        const retained = new Set(messages.map((message) => message.id));
-        const messageOverrides = Object.fromEntries(
-            Object.entries(this.persisted.messageOverrides).filter(([id]) => retained.has(id)),
-        );
-        if (
-            Object.keys(messageOverrides).length !==
-            Object.keys(this.persisted.messageOverrides).length
-        ) {
-            this.commitPersisted({ ...this.persisted, messageOverrides });
-        }
+        this.messageWindow = window;
+        const pruned = pruneMessageOverrides(this.persisted, messages, window);
+        if (pruned) this.commitPersisted(pruned);
+    }
+
+    get messageOverrideIds(): string[] {
+        return Object.keys(this.persisted.messageOverrides);
+    }
+
+    async forgetDeletedMessages(ids: readonly string[]): Promise<void> {
+        this.close();
+        const next = removeProvenMessageOverrides(this.persisted, ids);
+        if (next) this.commitPersisted(next);
+        await this.flushSqliteWrites();
     }
 
     effectiveText(message: MessageDto): string {
@@ -519,10 +530,10 @@ export class PortableCharacterRuntime {
         });
     }
 
-    async afterOutput(messages: MessageDto[]): Promise<void> {
+    async afterOutput(messages: MessageDto[], window?: MessageWindow): Promise<void> {
         this.assertOpen();
         await this.runWithEventDeadline(async (workerVersion) => {
-            this.setMessages(messages);
+            this.setMessages(messages, window);
             await this.refreshActiveLore();
             const result = await this.requestWorker(
                 {
@@ -836,6 +847,7 @@ export class PortableCharacterRuntime {
             this.messages,
             this.virtualMessage,
             (message) => this.effectiveText(message),
+            this.messageWindow,
         );
         return {
             persisted: this.persisted,
@@ -1179,7 +1191,7 @@ export class PortableCharacterRuntime {
         try {
             this.storage?.removeItem(storageKey);
         } catch {
-            // SQLite is already verified durable. A stale legacy copy is ignored on future reads.
+            // SQLite is durable; future reads ignore a stale legacy copy.
         }
         this.legacyMigrationPending = false;
         this.legacyMigrationStorageKey = null;
@@ -1530,18 +1542,6 @@ function browserStorage(): Storage | undefined {
     } catch {
         return undefined;
     }
-}
-
-function runtimeStateScopeEquals(
-    left: PortableRuntimeStateScopeInput,
-    right: PortableRuntimeStateScopeInput,
-): boolean {
-    return (
-        left.character_id === right.character_id &&
-        left.character_content_revision_id === right.character_content_revision_id &&
-        left.conversation_id === right.conversation_id &&
-        left.branch_id === right.branch_id
-    );
 }
 
 function serializedJsonSemanticallyEquals(left: string, right: string): boolean {

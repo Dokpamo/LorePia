@@ -5,6 +5,10 @@
 //! transitions use `SQLite` compare-and-swap inside `BEGIN IMMEDIATE`, so local
 //! workers cannot exceed persisted task limits.
 
+mod embedding_scoring;
+
+use embedding_scoring::{decode_memory_embedding_vector, score_memory_embedding_candidates};
+
 use std::collections::BTreeSet;
 
 use chrono::{DateTime, Utc};
@@ -963,6 +967,7 @@ impl Storage {
         )?;
         ensure_memory_embedding_context_is_visible(&connection, query)?;
         let candidates = load_memory_embedding_candidates(&connection, query)?;
+        drop(connection);
         let mut matches = score_memory_embedding_candidates(query, query_norm, candidates)?;
         matches.sort_by(|left, right| {
             right
@@ -1395,40 +1400,6 @@ fn load_memory_embedding_candidates(
         .map_err(storage_db_error)?;
     drop(statement);
     Ok(candidates)
-}
-
-fn score_memory_embedding_candidates(
-    query: &MemoryEmbeddingQuery,
-    query_norm: f64,
-    candidates: Vec<MemoryEmbeddingCandidate>,
-) -> CoreResult<Vec<MemoryEmbeddingMatch>> {
-    let mut matches = Vec::with_capacity(candidates.len());
-    for candidate in candidates {
-        let values = decode_memory_embedding_vector(
-            query.dimensions,
-            &candidate.vector_blob,
-            &candidate.vector_sha256,
-        )?;
-        let candidate_norm = vector_squared_norm(&values);
-        if !candidate_norm.is_finite() || candidate_norm <= f64::EPSILON {
-            continue;
-        }
-        let dot = query
-            .values
-            .iter()
-            .zip(&values)
-            .map(|(left, right)| f64::from(*left) * f64::from(*right))
-            .sum::<f64>();
-        let similarity = (dot / (query_norm * candidate_norm).sqrt()).clamp(-1.0, 1.0);
-        matches.push(MemoryEmbeddingMatch {
-            embedding_id: candidate.embedding_id,
-            memory_record_id: MemoryRecordId::from(candidate.record_id),
-            memory_record_revision_id: candidate.revision_id,
-            vector_sha256: candidate.vector_sha256,
-            similarity_millionths: similarity_millionths(similarity)?,
-        });
-    }
-    Ok(matches)
 }
 
 fn validate_new_memory_summary_record(record: &MemoryRecord) -> CoreResult<()> {
@@ -2593,38 +2564,6 @@ fn encode_memory_embedding_vector(
     }
     let sha256 = hex::encode(Sha256::digest(&bytes));
     Ok((bytes, sha256))
-}
-
-fn decode_memory_embedding_vector(
-    dimensions: u32,
-    bytes: &[u8],
-    expected_sha256: &str,
-) -> CoreResult<Vec<f32>> {
-    let dimensions = validate_memory_embedding_dimensions(dimensions).map_err(|error| {
-        corrupted(format!(
-            "stored memory embedding dimensions are invalid: {}",
-            error.message
-        ))
-    })?;
-    let expected_len = dimensions
-        .checked_mul(4)
-        .ok_or_else(|| corrupted("stored memory embedding byte size overflow"))?;
-    if bytes.len() != expected_len {
-        return Err(corrupted("stored memory embedding byte length is invalid"));
-    }
-    if hex::encode(Sha256::digest(bytes)) != expected_sha256 {
-        return Err(corrupted("stored memory embedding digest is invalid"));
-    }
-    let values = bytes
-        .chunks_exact(4)
-        .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
-        .collect::<Vec<_>>();
-    if values.iter().any(|value| !value.is_finite()) {
-        return Err(corrupted(
-            "stored memory embedding contains a non-finite value",
-        ));
-    }
-    Ok(values)
 }
 
 fn vector_squared_norm(values: &[f32]) -> f64 {

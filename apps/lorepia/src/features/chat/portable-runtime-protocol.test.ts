@@ -50,3 +50,31 @@ describe('portable runtime worker protocol', () => {
         );
     });
 });
+
+it('accepts bounded global windows and rejects malformed or overflowing offsets', () => {
+    const context = {
+        persisted: {},
+        messages: [],
+        virtualMessage: null,
+        activeLoreEntries: [],
+        stopped: false,
+    };
+    const request = (messageWindow: unknown) => ({
+        channel: 'lorepia-portable-runtime-v1',
+        type: 'request',
+        requestId: 'runtime-1',
+        operation: { type: 'refresh-display', context: { ...context, messageWindow } },
+    });
+    expect(
+        isPortableRuntimeMainMessage(
+            request({ start_index: 200, total_messages: 200, head_message_id: 'last' }),
+        ),
+    ).toBe(true);
+    for (const start_index of [-1, 201, 1.5, Infinity, '1', Number.MAX_SAFE_INTEGER + 1]) {
+        expect(
+            isPortableRuntimeMainMessage(
+                request({ start_index, total_messages: 200, head_message_id: null }),
+            ),
+        ).toBe(false);
+    }
+});

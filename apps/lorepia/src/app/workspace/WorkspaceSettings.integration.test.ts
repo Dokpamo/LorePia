@@ -24,6 +24,7 @@ async function openSettings() {
     render(WorkspaceApp, { client });
     await screen.findByText(t('workspace.emptyLibrary'));
     await fireEvent.click(screen.getByRole('button', { name: t('navigation.settings') }));
+    await screen.findByRole('region', { name: t('navigation.settings') }, { timeout: 5000 });
     return client;
 }
 describe('live workspace settings entry', () => {
@@ -111,11 +112,11 @@ describe('live workspace settings entry', () => {
         await fireEvent.click(
             await screen.findByRole('button', { name: t('uiPreview.roomSettings') }),
         );
-        await fireEvent.click(screen.getByRole('button', { name: t('uiPreview.back') }));
+        await fireEvent.click(screen.getByRole('button', { name: t('uiPreview.closeChoices') }));
         await fireEvent.click(screen.getByRole('button', { name: t('uiPreview.openManagement') }));
         await fireEvent.click(screen.getByRole('button', { name: t('navigation.settings') }));
         await fireEvent.click(
-            screen.getByRole('button', { name: t('settings.section.persona.title') }),
+            await screen.findByRole('button', { name: t('settings.section.persona.title') }),
         );
         await fireEvent.click(
             await screen.findByRole('button', { name: t('settingsLive.personaForRoom') }),

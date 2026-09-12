@@ -180,6 +180,7 @@ pub fn run() {
             persona_commands::select_conversation_persona,
             persona_commands::clear_conversation_persona,
             generation_messages_commands::list_branch_messages,
+            generation_messages_commands::list_branch_messages_page,
             generation_messages_commands::list_messages,
             generation_messages_commands::list_generation_messages,
             commands::generate_runtime_text,

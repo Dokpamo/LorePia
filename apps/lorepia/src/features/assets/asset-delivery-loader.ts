@@ -9,23 +9,36 @@ import type { AssetLoadPriority } from './asset-load-priority';
 const pending = new Map<() => void, AssetLoadPriority>();
 let active = 0;
 let backgroundDrainQueued = false;
+let draining = false;
+let queueVersion = 0;
 const MAX_ACTIVE = 4;
 const LOAD_TIMEOUT_MS = 30_000;
 
 function drain() {
-    while (active < MAX_ACTIVE) {
-        let next: (() => void) | undefined;
-        let nearest = Infinity;
-        for (const [start, priority] of pending) {
-            const distance = priority();
-            if (!next || distance < nearest) {
-                next = start;
-                nearest = distance;
+    if (draining) return;
+    draining = true;
+    try {
+        while (active < MAX_ACTIVE && pending.size > 0) {
+            const batchVersion = queueVersion;
+            const slots = MAX_ACTIVE - active;
+            const next: { start: () => void; distance: number }[] = [];
+            // Each priority can read layout. Measure once for this batch and
+            // keep only the best four, preserving insertion order on ties.
+            for (const [start, priority] of pending) {
+                const candidate = { start, distance: priority() };
+                const index = next.findIndex((item) => candidate.distance < item.distance);
+                if (index >= 0) next.splice(index, 0, candidate);
+                else if (next.length < slots) next.push(candidate);
+                if (next.length > slots) next.pop();
+            }
+            for (const { start } of next) {
+                if (batchVersion !== queueVersion) break;
+                // A previous start can synchronously cancel another consumer.
+                if (active < MAX_ACTIVE && pending.delete(start)) start();
             }
         }
-        if (!next) return;
-        pending.delete(next);
-        next();
+    } finally {
+        draining = false;
     }
 }
 
@@ -155,7 +168,7 @@ function enqueueAssetDelivery(
                     // A timed-out/cancelled consumer cannot release a native
                     // concurrency slot before the underlying call actually ends.
                     active--;
-                    drain();
+                    scheduleBackgroundDrain();
                 });
         }
         const timer = setTimeout(() => complete(() => reject(timeoutError())), timeoutMs);
@@ -163,6 +176,7 @@ function enqueueAssetDelivery(
         if (signal.aborted) cancel();
         else {
             pending.set(start, priority);
+            if (draining) queueVersion++;
             if (priority() <= 0) drain();
             else scheduleBackgroundDrain();
         }

@@ -176,6 +176,8 @@ export class PortableRuntimeKernel {
     private personaDescription = '';
     private persisted: PortableRuntimePersistedState | null = null;
     private messages: PortableRuntimeChatMessage[] = [];
+    private messageStartIndex = 0;
+    private messageTotal = 0;
     private virtualMessage: PortableRuntimeChatMessage | null = null;
     private activeLoreEntries: CharacterRuntimeKnowledgeDto[] = [];
     private stopped = false;
@@ -376,6 +378,8 @@ export class PortableRuntimeKernel {
         if (persisted === null) throw new Error('portable runtime state is invalid');
         this.persisted = persisted;
         this.messages = context.messages.map((message) => ({ ...message }));
+        this.messageStartIndex = context.messageWindow?.start_index ?? 0;
+        this.messageTotal = context.messageWindow?.total_messages ?? context.messages.length;
         this.virtualMessage =
             context.virtualMessage === null ? null : { ...context.virtualMessage };
         this.activeLoreEntries = context.activeLoreEntries.map((entry) => structuredClone(entry));
@@ -414,7 +418,7 @@ export class PortableRuntimeKernel {
             set('log', () => undefined);
         }
         if (this.capabilities.has('chat:read')) {
-            set('getChatLength', () => this.runtimeMessages().length);
+            set('getChatLength', () => this.messageTotal + (this.virtualMessage === null ? 0 : 1));
             set('getChat', (_triggerId: unknown, index: unknown) =>
                 luaNullable(this.runtimeChatAt(index)),
             );
@@ -447,10 +451,7 @@ export class PortableRuntimeKernel {
                 return true;
             });
             set('removeChat', (_triggerId: unknown, index: unknown) => {
-                const messages = this.runtimeMessages();
-                const resolved = resolveRuntimeIndex(index, messages.length);
-                if (resolved === null) return false;
-                if (messages[resolved]?.virtual) {
+                if (this.runtimeMessageAt(index)?.virtual) {
                     this.virtualMessage = null;
                     this.notifyChanged();
                     return true;
@@ -559,7 +560,7 @@ export class PortableRuntimeKernel {
                     callback(
                         TRIGGER_ID,
                         typeof display === 'string' ? display : runtimeMessage.data,
-                        { index },
+                        { index: this.messageStartIndex + index },
                     ),
                 );
             }
@@ -691,9 +692,13 @@ export class PortableRuntimeKernel {
     }
 
     private runtimeMessageAt(index: unknown): PortableRuntimeChatMessage | undefined {
-        const messages = this.runtimeMessages();
-        const resolved = resolveRuntimeIndex(index, messages.length);
-        return resolved === null ? undefined : messages[resolved];
+        const resolved = resolveRuntimeIndex(
+            index,
+            this.messageTotal + (this.virtualMessage === null ? 0 : 1),
+        );
+        if (resolved === null) return undefined;
+        if (resolved === this.messageTotal) return this.virtualMessage ?? undefined;
+        return this.messages[resolved - this.messageStartIndex];
     }
 
     private runtimeChatAt(index: unknown): ReturnType<typeof runtimeMessageValue> | undefined {
@@ -756,8 +761,12 @@ export class PortableRuntimeKernel {
                 variables: {},
                 globalVariables,
                 localVariables,
-                chatIndex: mayReadChat ? Math.max(0, messages.length - 1) : undefined,
-                lastMessageId: mayReadChat ? Math.max(0, messages.length - 1) : undefined,
+                chatIndex: mayReadChat
+                    ? Math.max(0, this.messageTotal - (this.virtualMessage === null ? 1 : 0))
+                    : undefined,
+                lastMessageId: mayReadChat
+                    ? Math.max(0, this.messageTotal - (this.virtualMessage === null ? 1 : 0))
+                    : undefined,
                 lastCharacterMessage: lastCharacter ?? '',
                 characterName: mayReadProfile ? this.characterName : '',
                 userName: mayReadProfile ? this.personaName : '',

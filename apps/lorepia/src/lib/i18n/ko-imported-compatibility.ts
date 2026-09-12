@@ -1,6 +1,8 @@
 export const koImportedCompatibility = {
-    'chat.runtime.openRoom': '캐릭터 설정 열기',
-    'chat.runtime.roomTitle': '캐릭터 설정',
+    'chat.runtime.openRoom': '카드 화면 열기',
+    'chat.runtime.roomTitle': '카드 화면',
+    'chat.runtime.settingsHint':
+        '채팅방 설정에서 카드 기능을 켜면 이곳과 채팅 화면에 함께 표시돼요.',
     'chat.runtime.profileFailed': '캐릭터 기능을 불러오지 못했어요. 다시 불러와 주세요.',
     'chat.runtime.profileLoading': '캐릭터 기능을 불러오고 있어요.',
     'chat.runtime.retryProfile': '다시 불러오기',

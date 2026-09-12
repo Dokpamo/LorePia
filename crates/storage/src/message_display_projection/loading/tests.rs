@@ -58,6 +58,22 @@ fn fixture() -> rusqlite::Connection {
 }
 
 #[test]
+fn identity_only_batch_does_not_prepare_or_read_transform_diagnostics() {
+    let connection = fixture();
+    // A diagnostic query could not execute in this deliberately minimal read
+    // fixture. Absence of projections needs only the projection lookup.
+    connection
+        .execute_batch("DROP TABLE transform_application_logs; DROP TABLE transform_set_revisions;")
+        .expect("remove unrelated read fixtures");
+    let message = assistant(0);
+    assert!(
+        read_batch(&connection, &[&message])
+            .expect("identity projection")
+            .is_empty()
+    );
+}
+
+#[test]
 fn bulk_verification_preserves_requested_order_and_rejects_tampered_content_or_ownership() {
     let connection = fixture();
     let messages = (0..64).map(assistant).collect::<Vec<_>>();

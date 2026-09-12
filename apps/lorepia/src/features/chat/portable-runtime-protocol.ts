@@ -40,7 +40,14 @@ export interface PortableRuntimeChatMessage {
     virtual: boolean;
 }
 
+export interface PortableRuntimeMessageWindow {
+    start_index: number;
+    total_messages: number;
+    head_message_id: string | null;
+}
+
 export interface PortableRuntimeWorkerContext {
+    messageWindow?: PortableRuntimeMessageWindow;
     persisted: PortableRuntimePersistedState;
     messages: PortableRuntimeChatMessage[];
     virtualMessage: PortableRuntimeChatMessage | null;
@@ -266,6 +273,15 @@ function isPortableRuntimeWorkerContext(value: unknown): value is PortableRuntim
         isRecord(value.persisted) &&
         Array.isArray(value.messages) &&
         value.messages.every(isPortableRuntimeChatMessage) &&
+        (value.messageWindow === undefined ||
+            (isRecord(value.messageWindow) &&
+                Number.isSafeInteger(value.messageWindow.start_index) &&
+                Number.isSafeInteger(value.messageWindow.total_messages) &&
+                Number(value.messageWindow.start_index) >= 0 &&
+                Number(value.messageWindow.total_messages) >=
+                    Number(value.messageWindow.start_index) + value.messages.length &&
+                (value.messageWindow.head_message_id === null ||
+                    typeof value.messageWindow.head_message_id === 'string'))) &&
         (value.virtualMessage === null || isPortableRuntimeChatMessage(value.virtualMessage)) &&
         Array.isArray(value.activeLoreEntries) &&
         value.activeLoreEntries.every(isRecord) &&

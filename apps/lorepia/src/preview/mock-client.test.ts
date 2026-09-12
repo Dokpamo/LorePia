@@ -1,6 +1,6 @@
 import { get } from 'svelte/store';
 import { cleanup, fireEvent, screen } from '@testing-library/svelte';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { openWorkspaceChat } from '../tests/workspace-chat';
 import { LorepiaAppController } from '../app/app-controller';
@@ -194,4 +194,97 @@ it('returns independent character-specific plugin bindings from the preview clie
     const again = await client.listContentModuleBindings({ content_module_id: module.value.id });
     expect(again[0]?.value.enabled).toBe(true);
     expect(await client.listContentModuleBindings({ content_module_id: 'unknown' })).toEqual([]);
+});
+
+it('pages preview ancestry with exclusive anchors, absolute offsets and cloned values', async () => {
+    const client = createPreviewClient();
+    const state = await client.getConversationState(DEMO_INITIAL_CONVERSATION_ID);
+    const all = await client.listBranchMessages(state.active_branch_id);
+    if (!client.listBranchMessagesPage) throw new Error('Page API missing');
+    const input = { branch_id: state.active_branch_id, limit: 2 };
+    const latest = await client.listBranchMessagesPage(input);
+    expect(latest.messages).toEqual(all.slice(-2));
+    expect(latest.start_index).toBe(Math.max(0, all.length - 2));
+    expect(latest.total_messages).toBe(all.length);
+    const first = latest.messages[0];
+    if (!first) throw new Error('Message fixture missing');
+    const older = await client.listBranchMessagesPage({ ...input, before_message_id: first.id });
+    expect(older.messages.map((item) => item.id)).not.toContain(first.id);
+    const predecessor = older.messages.at(-1);
+    if (predecessor) {
+        const newer = await client.listBranchMessagesPage({
+            ...input,
+            after_message_id: predecessor.id,
+        });
+        expect(newer.messages).toEqual(latest.messages);
+    }
+    first.content = 'changed clone';
+    expect((await client.listBranchMessagesPage(input)).messages).toEqual(all.slice(-2));
+    await expect(
+        client.listBranchMessagesPage({
+            ...input,
+            before_message_id: first.id,
+            after_message_id: first.id,
+        }),
+    ).rejects.toThrow();
+});
+
+it('returns explicit bounded membership proofs preserving input order and duplicates', async () => {
+    const client = createPreviewClient();
+    const state = await client.getConversationState(DEMO_INITIAL_CONVERSATION_ID);
+    const all = await client.listBranchMessages(state.active_branch_id);
+    const id = all[0]?.id;
+    if (!id || !client.listBranchMessagesPage) throw new Error('Missing page fixture');
+    const input = { branch_id: state.active_branch_id, limit: 1 };
+    expect((await client.listBranchMessagesPage(input)).retained_message_ids).toBeUndefined();
+    expect(
+        (await client.listBranchMessagesPage({ ...input, check_message_ids: [id, 'deleted', id] }))
+            .retained_message_ids,
+    ).toEqual([id, id]);
+    expect(
+        (await client.listBranchMessagesPage({ ...input, check_message_ids: [] }))
+            .retained_message_ids,
+    ).toEqual([]);
+    await expect(
+        client.listBranchMessagesPage({
+            ...input,
+            check_message_ids: Array.from({ length: 257 }, () => id),
+        }),
+    ).rejects.toThrow();
+});
+
+it('loads only an out-of-page last assistant aggregate when requested', async () => {
+    const client = createPreviewClient();
+    const state = await client.getConversationState(DEMO_INITIAL_CONVERSATION_ID);
+    const all = await client.listBranchMessages(state.active_branch_id);
+    const seed = all[0];
+    if (!seed || !client.listBranchMessagesPage) throw new Error('Missing history fixture');
+    const assistant = {
+        ...seed,
+        id: 'old-assistant',
+        role: 'assistant' as const,
+        content: 'older reply',
+    };
+    const users = Array.from({ length: 128 }, (_, index) => ({
+        ...seed,
+        id: `user-${String(index)}`,
+        role: 'user' as const,
+    }));
+    vi.spyOn(client, 'listBranchMessages').mockResolvedValue([assistant, ...users]);
+    const input = { branch_id: state.active_branch_id, limit: 128 };
+    expect((await client.listBranchMessagesPage(input)).last_assistant_message).toBeUndefined();
+    const page = await client.listBranchMessagesPage({ ...input, include_last_assistant: true });
+    expect(page.messages).toEqual(users);
+    expect(page.last_assistant_message).toEqual(assistant);
+    if (page.last_assistant_message) page.last_assistant_message.content = 'changed clone';
+    expect(assistant.content).toBe('older reply');
+    expect(
+        (
+            await client.listBranchMessagesPage({
+                ...input,
+                include_last_assistant: true,
+                before_message_id: users[0]?.id,
+            })
+        ).last_assistant_message,
+    ).toBeUndefined();
 });

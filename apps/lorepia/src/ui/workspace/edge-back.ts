@@ -310,7 +310,7 @@ export function edgeBack(node: HTMLElement, initial: BackOptions) {
         close();
     }
     const wheel = horizontalWheel(node, {
-        accepts: () => !unavailable(),
+        accepts: (event) => !unavailable() && (event.deltaX <= 0 || pointer?.id === -1),
         move(distance) {
             const bounds = node.getBoundingClientRect();
             if (!pointer) {

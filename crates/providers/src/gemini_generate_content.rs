@@ -676,7 +676,7 @@ async fn consume_sse(
                         ensure_event_size(boundary.event_len())?;
                         let event = pending.take_event(boundary);
                         process_sse_event(
-                            &event,
+                            event,
                             sink,
                             cancelled,
                             cancellation_open,
@@ -693,7 +693,7 @@ async fn consume_sse(
     while let Some(boundary) = pending.next_boundary(&SSE_EVENT_SEPARATORS, true) {
         ensure_event_size(boundary.event_len())?;
         let event = pending.take_event(boundary);
-        process_sse_event(&event, sink, cancelled, cancellation_open, &mut state).await?;
+        process_sse_event(event, sink, cancelled, cancellation_open, &mut state).await?;
     }
     ensure_pending_size(pending.active_bytes(), true)?;
     if !pending.is_empty() {

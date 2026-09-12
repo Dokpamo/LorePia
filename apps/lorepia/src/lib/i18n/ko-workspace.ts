@@ -1,4 +1,11 @@
 export const koWorkspace = {
+    'ux.loading.characters': '캐릭터를 불러오고 있어요',
+    'ux.loading.conversation': '대화를 불러오고 있어요',
+    'ux.loading.conversations': '채팅 내역을 불러오고 있어요',
+    'ux.loading.failed': '대화를 불러오지 못했어요. 다시 시도해 주세요.',
+    'ux.loading.settings': '설정을 준비하고 있어요',
+    'ux.loading.settingsFailed': '설정을 열지 못했어요',
+    'ux.sending': '메시지를 보내고 있어요',
     'workspace.loading': '불러오는 중이에요',
     'workspace.assetWaiting': '잠시 후 다시 불러올게요',
     'workspace.emptyLibrary': '대화할 캐릭터를 추가해 주세요',

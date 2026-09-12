@@ -42,7 +42,11 @@ struct Manifest {
 }
 
 pub(crate) fn validate(json: &str) -> CoreResult<()> {
-    super::document_history::validate_json_limits(
+    parse_validated(json).map(|_| ())
+}
+
+fn parse_validated(json: &str) -> CoreResult<serde_json::Value> {
+    super::document_history::parse_json_limits(
         "module authority composition",
         json,
         MAX_BYTES,
@@ -106,9 +110,8 @@ pub(crate) fn expand<'a>(
 ) -> CoreResult<Cow<'a, str>> {
     // Legacy generation snapshots permitted larger inline authority than
     // ordinary documents. Read both forms within the aggregate bound.
-    validate(stored).map_err(|_| storage_corrupted("stored module document exceeds limits"))?;
-    let value: serde_json::Value = serde_json::from_str(stored)
-        .map_err(|_| storage_corrupted("invalid module document JSON"))?;
+    let value = parse_validated(stored)
+        .map_err(|_| storage_corrupted("stored module document exceeds limits"))?;
     if value.get("lorepia_module_document").is_none() {
         return Ok(Cow::Borrowed(stored));
     }

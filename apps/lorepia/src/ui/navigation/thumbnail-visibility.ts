@@ -12,8 +12,7 @@ function thumbnailRoot(element: HTMLElement) {
     return element.closest('.ui-overlay-body, .seed-image-strip, .seed-scroll');
 }
 
-function distanceFromViewport(rect: DOMRectReadOnly, root: Element | null): number {
-    const bounds = root?.getBoundingClientRect();
+function distanceFromViewport(rect: DOMRectReadOnly, bounds?: DOMRectReadOnly): number {
     return Math.max(
         (bounds?.top ?? 0) - rect.bottom,
         rect.top - (bounds?.bottom ?? window.innerHeight),
@@ -26,7 +25,10 @@ function distanceFromViewport(rect: DOMRectReadOnly, root: Element | null): numb
 /** Re-evaluated when an IPC slot opens, so a scroll can overtake queued preloads. */
 export function thumbnailDistance(element: HTMLElement): number {
     if (!element.isConnected || element.closest('[inert], [aria-hidden="true"]')) return Infinity;
-    return distanceFromViewport(element.getBoundingClientRect(), thumbnailRoot(element));
+    return distanceFromViewport(
+        element.getBoundingClientRect(),
+        thumbnailRoot(element)?.getBoundingClientRect(),
+    );
 }
 
 function preparationMargin(root: Element | null): string {
@@ -47,10 +49,11 @@ function createViewport(root: Element | null): ThumbnailViewport {
         const entering = latest.filter((entry) => entry.isIntersecting);
         for (const entry of entering) releaseThumbnail(entry.target as HTMLElement);
         // Request currently visible rows before the nearby rows.
+        const bounds = entering.length > 1 ? root?.getBoundingClientRect() : undefined;
         entering.sort(
             (a, b) =>
-                distanceFromViewport(a.boundingClientRect, root) -
-                distanceFromViewport(b.boundingClientRect, root),
+                distanceFromViewport(a.boundingClientRect, bounds) -
+                distanceFromViewport(b.boundingClientRect, bounds),
         );
         for (const entry of entering) targets.get(entry.target)?.(true);
         for (const entry of latest) if (!entry.isIntersecting) targets.get(entry.target)?.(false);

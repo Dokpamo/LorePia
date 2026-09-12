@@ -153,7 +153,7 @@ pub use lorepia_storage::{
     ProviderCredentialSlotGarbageStatus, RetryableGenerationAttemptProjection,
     package_update_target_confirmations_sha256, provider_credential_binding_sha256_for_connection,
 };
-pub use message_display_projection::MessagePresentation;
+pub use message_display_projection::{MessagePresentation, MessagePresentationPage};
 pub use module_orchestration::{
     ApprovedContentModuleComponent, ContentModuleActivationReceipt,
     ContentModuleActivationReceiptPreflight, ContentModuleActivationRequest,

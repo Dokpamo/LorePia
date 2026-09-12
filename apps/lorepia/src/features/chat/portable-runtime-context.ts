@@ -2,12 +2,14 @@ import type { MessageDto } from '../../lib/ipc/contracts';
 import {
     portableRuntimeMessageByteLength,
     type PortableRuntimeChatMessage,
+    type PortableRuntimeMessageWindow,
 } from './portable-runtime-protocol';
 
 export const MAX_RUNTIME_CONTEXT_MESSAGES = 128;
 export const MAX_RUNTIME_CONTEXT_BYTES = 512 * 1024;
 
 export interface PortableRuntimeBoundedChatContext {
+    messageWindow?: PortableRuntimeMessageWindow;
     messages: PortableRuntimeChatMessage[];
     virtualMessage: PortableRuntimeChatMessage | null;
 }
@@ -22,17 +24,30 @@ export function boundedPortableRuntimeChatContext(
     messages: readonly MessageDto[],
     virtualMessage: PortableRuntimeChatMessage | null,
     effectiveText: (message: MessageDto) => string,
+    window?: PortableRuntimeMessageWindow,
 ): PortableRuntimeBoundedChatContext {
-    let contextBytes = EMPTY_CONTEXT_BYTES;
+    // Reserve the largest possible offset representation before selecting a suffix.
+    let contextBytes =
+        window === undefined
+            ? EMPTY_CONTEXT_BYTES
+            : (portableRuntimeMessageByteLength({
+                  messages: [],
+                  virtualMessage: null,
+                  messageWindow: { ...window, start_index: window.start_index + messages.length },
+              }) ?? Number.POSITIVE_INFINITY);
+    if (contextBytes > MAX_RUNTIME_CONTEXT_BYTES) {
+        throw new RangeError('portable runtime window metadata exceeds the context byte limit');
+    }
     let boundedVirtualMessage: PortableRuntimeChatMessage | null = null;
 
     if (virtualMessage !== null) {
         const candidate = { ...virtualMessage };
-        boundedVirtualMessage = fitMessageSuffix(candidate, (messageBytes) => {
+        const bounded = fitMessageSuffix(candidate, (messageBytes) => {
             return contextBytes + messageBytes - NULL_JSON_BYTES <= MAX_RUNTIME_CONTEXT_BYTES;
         });
-        if (boundedVirtualMessage !== null) {
-            contextBytes += messageBytes(boundedVirtualMessage) - NULL_JSON_BYTES;
+        if (bounded !== null) {
+            boundedVirtualMessage = bounded.message;
+            contextBytes += bounded.bytes - NULL_JSON_BYTES;
         }
     }
 
@@ -54,13 +69,22 @@ export function boundedPortableRuntimeChatContext(
             return contextBytes + separatorBytes + candidateBytes <= MAX_RUNTIME_CONTEXT_BYTES;
         });
         if (bounded === null) break;
-        selectedNewestFirst.push(bounded);
+        selectedNewestFirst.push(bounded.message);
         logicalMessages += 1;
-        contextBytes += separatorBytes + messageBytes(bounded);
-        if (bounded.data !== candidate.data) break;
+        contextBytes += separatorBytes + bounded.bytes;
+        if (bounded.message.data !== candidate.data) break;
     }
 
     return {
+        ...(window === undefined
+            ? {}
+            : {
+                  messageWindow: {
+                      ...window,
+                      start_index:
+                          window.start_index + messages.length - selectedNewestFirst.length,
+                  },
+              }),
         messages: selectedNewestFirst.reverse(),
         virtualMessage: boundedVirtualMessage,
     };
@@ -70,17 +94,37 @@ export function portableRuntimeChatContextSource(
     context: PortableRuntimeBoundedChatContext,
     maximumCharacters: number,
 ): string {
-    const sourceParts = context.messages.map((message) => message.data);
-    if (context.virtualMessage !== null) sourceParts.push(context.virtualMessage.data);
-    return sourceParts.join('\n').slice(-maximumCharacters);
+    // Preserve String.slice semantics for unusual limits; normal lore budgets are positive integers.
+    if (!Number.isSafeInteger(maximumCharacters) || maximumCharacters <= 0) {
+        const sourceParts = context.messages.map((message) => message.data);
+        if (context.virtualMessage !== null) sourceParts.push(context.virtualMessage.data);
+        return sourceParts.join('\n').slice(-maximumCharacters);
+    }
+    const parts: string[] = [];
+    let remaining = maximumCharacters;
+    const count = context.messages.length + (context.virtualMessage === null ? 0 : 1);
+    for (let index = count - 1; index >= 0 && remaining > 0; index -= 1) {
+        const data =
+            index === context.messages.length
+                ? (context.virtualMessage?.data ?? '')
+                : (context.messages[index]?.data ?? '');
+        const suffix = data.slice(-remaining);
+        parts.push(suffix);
+        remaining -= suffix.length;
+        if (index > 0 && remaining > 0) {
+            parts.push('\n');
+            remaining -= 1;
+        }
+    }
+    return parts.reverse().join('');
 }
 
 function fitMessageSuffix(
     message: PortableRuntimeChatMessage,
     fits: (messageBytes: number) => boolean,
-): PortableRuntimeChatMessage | null {
+): { message: PortableRuntimeChatMessage; bytes: number } | null {
     const fullBytes = messageBytes(message);
-    if (fits(fullBytes)) return message;
+    if (fits(fullBytes)) return { message, bytes: fullBytes };
     const empty = { ...message, data: '' };
     if (!fits(messageBytes(empty))) return null;
 
@@ -96,17 +140,23 @@ function fitMessageSuffix(
     let start = low;
     if (startsInsideSurrogatePair(message.data, start)) start += 1;
     let candidate = { ...message, data: message.data.slice(start) };
-    while (!fits(messageBytes(candidate)) && start < message.data.length) {
+    let candidateBytes = messageBytes(candidate);
+    while (!fits(candidateBytes) && start < message.data.length) {
         start = nextCodePointBoundary(message.data, start);
         candidate = { ...message, data: message.data.slice(start) };
+        candidateBytes = messageBytes(candidate);
     }
 
     const previous = previousCodePointBoundary(message.data, start);
     if (previous !== null) {
         const longer = { ...message, data: message.data.slice(previous) };
-        if (fits(messageBytes(longer))) candidate = longer;
+        const longerBytes = messageBytes(longer);
+        if (fits(longerBytes)) {
+            candidate = longer;
+            candidateBytes = longerBytes;
+        }
     }
-    return candidate;
+    return { message: candidate, bytes: candidateBytes };
 }
 
 function messageBytes(message: PortableRuntimeChatMessage): number {
