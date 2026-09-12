@@ -282,7 +282,7 @@ impl Provider for AnthropicMessagesProvider {
                             ensure_event_size(boundary.event_len())?;
                             let event = pending.take_event(boundary);
                             if process_event(
-                                &event,
+                                event,
                                 &sink,
                                 &mut usage,
                                 &mut state,
@@ -309,7 +309,7 @@ impl Provider for AnthropicMessagesProvider {
             ensure_event_size(boundary.event_len())?;
             let event = pending.take_event(boundary);
             if process_event(
-                &event,
+                event,
                 &sink,
                 &mut usage,
                 &mut state,

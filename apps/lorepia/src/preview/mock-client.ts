@@ -414,6 +414,57 @@ export function createPreviewClient(): PreviewClient {
             return Promise.resolve(clone(conversationState(conversationId)));
         },
         listBranchMessages: (branchId) => Promise.resolve(clone(messagesForBranch(branchId))),
+        listBranchMessagesPage: async (input) => {
+            if (
+                !client.listBranchMessages ||
+                !Number.isInteger(input.limit) ||
+                input.limit < 1 ||
+                input.limit > 128 ||
+                (input.check_message_ids !== undefined && input.check_message_ids.length > 256) ||
+                (input.before_message_id != null && input.after_message_id != null)
+            )
+                throw new Error('Invalid history page');
+            const all = await client.listBranchMessages(input.branch_id);
+            const before =
+                input.before_message_id == null
+                    ? all.length
+                    : all.findIndex((item) => item.id === input.before_message_id);
+            const after =
+                input.after_message_id == null
+                    ? null
+                    : all.findIndex((item) => item.id === input.after_message_id);
+            if (before < 0 || (after !== null && after < 0))
+                throw new Error('History anchor missing');
+            const start = after === null ? Math.max(0, before - input.limit) : after + 1;
+            const end = after === null ? before : Math.min(all.length, start + input.limit);
+            let lastAssistant: (typeof all)[number] | null = null;
+            if (input.include_last_assistant) {
+                for (let index = all.length - 1; index >= 0; index -= 1) {
+                    const candidate = all[index];
+                    if (candidate?.role !== 'assistant') continue;
+                    if (index < start || index >= end) lastAssistant = candidate;
+                    break;
+                }
+            }
+            return {
+                messages: clone(all.slice(start, end)),
+                start_index: start,
+                total_messages: all.length,
+                head_message_id: all.at(-1)?.id ?? null,
+                ...(input.check_message_ids === undefined
+                    ? {}
+                    : {
+                          retained_message_ids: input.check_message_ids.filter((id) =>
+                              all.some((message) => message.id === id),
+                          ),
+                      }),
+                ...(input.include_last_assistant && lastAssistant
+                    ? { last_assistant_message: clone(lastAssistant) }
+                    : {}),
+                has_older: start > 0,
+                has_newer: end < all.length,
+            };
+        },
         listMessages: (conversationId) =>
             Promise.resolve(
                 clone(messages.filter((message) => message.conversation_id === conversationId)),

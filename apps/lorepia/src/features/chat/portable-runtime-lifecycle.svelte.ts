@@ -1,3 +1,5 @@
+import { verifiedDeletedMessageIds } from './portable-runtime-window';
+import type { PortableRuntimeMessageWindow } from './portable-runtime-protocol';
 import type {
     CharacterRenderProfileDto,
     GenerationSelectionInput,
@@ -27,6 +29,8 @@ export type PortableRuntimePhase = 'idle' | 'blocked' | 'loading' | 'ready' | 'b
 
 interface PortableRuntimeLifecycleOptions {
     currentMessages: () => MessageDto[];
+    currentMessageWindow?: () => PortableRuntimeMessageWindow | undefined;
+    currentLastAssistantMessage?: () => MessageDto | null | undefined;
     displayMessages: () => MessageDto[];
     providerWorkspace: () => ProviderWorkspaceDto;
     primarySelection: () => GenerationSelectionInput | null;
@@ -103,6 +107,12 @@ export class PortableRuntimeLifecycle {
     #resetEpoch = $state(0);
     #lastOutputKey = '';
     #actionCount = 0;
+    #pendingDeletion: {
+        scope: string;
+        branchId: string;
+        head: string | null;
+        isCurrent: () => boolean;
+    } | null = null;
     #persona = Promise.resolve({ name: t('chat.runtime.persona.default'), description: '' });
 
     constructor(private readonly options: PortableRuntimeLifecycleOptions) {}
@@ -135,10 +145,17 @@ export class PortableRuntimeLifecycle {
     lastCharacterMessage = $derived.by(() => {
         void this.revision;
         if (!this.canReadChat) return '';
-        const message = [...this.options.displayMessages()]
-            .reverse()
-            .find((candidate) => candidate.role === 'assistant');
-        return message === undefined ? '' : this.effectiveText(message);
+        const display = this.options.displayMessages();
+        const message = [...display].reverse().find((candidate) => candidate.role === 'assistant');
+        if (message !== undefined) return this.effectiveText(message);
+        const fallback = this.options.currentLastAssistantMessage?.();
+        if (
+            fallback?.role !== 'assistant' ||
+            (this.options.currentMessages().some((candidate) => candidate.id === fallback.id) &&
+                !display.some((candidate) => candidate.id === fallback.id))
+        )
+            return '';
+        return this.effectiveText(fallback);
     });
 
     auxiliaryModelOptions = $derived.by(() => {
@@ -338,9 +355,21 @@ export class PortableRuntimeLifecycle {
                     return;
                 }
                 createdRuntime = runtime;
+                const deletion = this.#pendingDeletion;
+                if (deletion?.scope === `${conversationId}:${branchId}`) {
+                    runtime.close();
+                    await this.#finishDeletedMessages(runtime, deletion, client);
+                    if (this.#pendingDeletion === deletion) this.#pendingDeletion = null;
+                    if (runtimeIsCurrent()) this.resetScope();
+                    return;
+                }
                 const messages = this.options.currentMessages();
-                runtime.setMessages(messages);
+                runtime.setMessages(messages, this.options.currentMessageWindow?.());
                 await runtime.refreshDisplay();
+                if (!runtimeIsCurrent()) {
+                    runtime.close();
+                    return;
+                }
                 this.#lastOutputKey = runtimeOutputKey(messages);
                 this.runtime = runtime;
                 this.phase = 'ready';
@@ -361,7 +390,8 @@ export class PortableRuntimeLifecycle {
     syncMessages(context: PortableRuntimeMessageContext): void {
         const runtime = this.runtime;
         if (runtime === null) return;
-        runtime.setMessages(context.messages);
+        const window = this.options.currentMessageWindow?.();
+        runtime.setMessages(context.messages, window);
         const outputKey = runtimeOutputKey(context.messages);
         if (
             outputKey !== '' &&
@@ -373,7 +403,7 @@ export class PortableRuntimeLifecycle {
             this.phase = 'busy';
             this.error = null;
             void runtime
-                .afterOutput(context.messages)
+                .afterOutput(context.messages, window)
                 .then(() => {
                     if (runtime !== this.runtime) return;
                     this.phase = 'ready';
@@ -399,7 +429,12 @@ export class PortableRuntimeLifecycle {
     }
 
     get lastMessageIndex(): number {
-        return this.canReadChat ? this.options.displayMessages().length - 1 : -1;
+        if (!this.canReadChat) return -1;
+        const displayCount = this.options.displayMessages().length;
+        const window = this.options.currentMessageWindow?.();
+        return window === undefined
+            ? displayCount - 1
+            : window.total_messages - (this.options.currentMessages().length - displayCount) - 1;
     }
 
     async approveDisplay(): Promise<void> {
@@ -445,6 +480,48 @@ export class PortableRuntimeLifecycle {
         this.phase = 'blocked';
         this.error = null;
         this.revision += 1;
+    }
+
+    async forgetDeletedMessages(
+        scope: string,
+        branchId: string,
+        head: string | null,
+        client: InteractionRoomCapableClient,
+        isCurrent: () => boolean,
+    ): Promise<void> {
+        const deletion = { scope, branchId, head, isCurrent };
+        this.#pendingDeletion = deletion;
+        const epoch = ++this.#creationEpoch;
+        const runtime = this.runtime;
+        this.runtime = null;
+        if (runtime === null) {
+            this.resetScope();
+            return;
+        }
+        runtime.close();
+        await this.#finishDeletedMessages(runtime, deletion, client);
+        if (this.#pendingDeletion === deletion) this.#pendingDeletion = null;
+        if (this.#creationEpoch === epoch) this.resetScope();
+    }
+
+    async #finishDeletedMessages(
+        runtime: PortableCharacterRuntime,
+        deletion: {
+            scope: string;
+            branchId: string;
+            head: string | null;
+            isCurrent: () => boolean;
+        },
+        client: InteractionRoomCapableClient,
+    ): Promise<void> {
+        const ids = await verifiedDeletedMessageIds(
+            client,
+            deletion.branchId,
+            deletion.head,
+            runtime.messageOverrideIds,
+        );
+        if (ids !== null && this.#pendingDeletion === deletion && deletion.isCurrent())
+            await runtime.forgetDeletedMessages(ids);
     }
 
     resetScope(): void {

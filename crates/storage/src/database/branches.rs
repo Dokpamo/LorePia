@@ -35,7 +35,7 @@ impl Storage {
     ) -> CoreResult<Vec<ConversationBranch>> {
         let connection = self.connection()?;
         let mut statement = connection
-            .prepare(
+            .prepare_cached(
                 "SELECT id, conversation_id, title, fork_message_id, head_message_id,
                         created_at, updated_at
                  FROM conversation_branches

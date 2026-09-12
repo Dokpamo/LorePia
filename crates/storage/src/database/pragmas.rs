@@ -4,6 +4,11 @@ use sha2::{Digest, Sha256};
 
 use super::{storage_corrupted, storage_db_error};
 
+// Keep ordinary WAL reuse cheap, but reclaim a large import's excess space on
+// the next SQLite-managed reset. This never caps live WAL data or forces a
+// checkpoint on a user action; FULL durability and auto-checkpointing remain.
+const MAX_RETAINED_JOURNAL_BYTES: i64 = 8 * 1024 * 1024;
+
 pub(super) fn configure_connection(connection: &Connection) -> CoreResult<()> {
     register_integrity_functions(connection)?;
     connection
@@ -15,8 +20,14 @@ pub(super) fn configure_connection(connection: &Connection) -> CoreResult<()> {
     connection
         .pragma_update(None, "synchronous", "FULL")
         .map_err(storage_db_error)?;
+    connection
+        .pragma_update(None, "journal_size_limit", MAX_RETAINED_JOURNAL_BYTES)
+        .map_err(storage_db_error)?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;
 
 pub(crate) fn register_integrity_functions(connection: &Connection) -> CoreResult<()> {
     let flags = FunctionFlags::SQLITE_UTF8

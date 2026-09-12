@@ -28,12 +28,15 @@
     import ChatPage from '../../ui/workspace/ChatPage.svelte';
     import IconButton from '../../ui/workspace/IconButton.svelte';
     import WorkspaceSettings from './WorkspaceSettings.svelte';
-    import WorkspaceFeatures from './WorkspaceFeatures.svelte';
+    import WorkspaceFeatures from './DeferredWorkspaceFeatures.svelte';
     import WorkspaceCreator from './WorkspaceCreator.svelte';
+    import CardRoomSurface from './runtime/CardRoomSurface.svelte';
+    import CardRuntimeSettings from './runtime/CardRuntimeSettings.svelte';
     import WorkspaceChatExtras from './WorkspaceChatExtras.svelte';
     import type { SampleMessage, Overlay, Page } from '../../ui/workspace/view-types';
+    import { MessageHistoryController } from '../controllers/message-history-controller';
     import { LiveChatSession } from './live-chat-session.svelte';
-    import { characterViews, conversationView } from './workspace-projection';
+    import { characterViews, ConversationProjection } from './workspace-projection';
     import { workspaceFeedback } from './workspace-feedback';
 
     let {
@@ -47,10 +50,41 @@
     const controller = new LorepiaAppController(appClient);
     let appState = $state.raw<LorepiaAppState>(structuredClone(INITIAL_APP_STATE));
     let refreshEpoch = $state(0);
-    const session = new LiveChatSession(controller, () => appState, {
-        onMutation: () => (refreshEpoch += 1),
-        onRemoved: () => runtime.resetScope(),
+    const messageHistory = new MessageHistoryController(appClient);
+    const history = messageHistory.state;
+    $effect(() => {
+        const state = appState;
+        untrack(() => messageHistory.sync(state));
     });
+    const session = new LiveChatSession(
+        controller,
+        () => appState,
+        {
+            onMutation: () => (refreshEpoch += 1),
+            onRemoved: async (scope) => {
+                const branch = appState.branches.find(
+                    (item) => item.id === appState.conversation_state?.active_branch_id,
+                );
+                if (branch) {
+                    const branchId = branch.id;
+                    const head = branch.head_message_id;
+                    await runtime.forgetDeletedMessages(
+                        scope,
+                        branchId,
+                        head,
+                        appClient,
+                        () =>
+                            session.scope === scope &&
+                            appState.branches.some(
+                                (current) =>
+                                    current.id === branchId && current.head_message_id === head,
+                            ),
+                    );
+                } else runtime.resetScope();
+            },
+        },
+        messageHistory,
+    );
     let page = $state<Page>(0);
     let rootTab = $state<RootTab>('home');
     let overview = $state(false);
@@ -58,17 +92,7 @@
     let featureSection = $state<'plugins' | undefined>();
     const navigation = new WorkspaceNavigationController(appClient, controller, () => appState);
     const catalog = navigation.state;
-    const allConversations = $derived(
-        $catalog.items.map((item) => ({
-            id: item.id,
-            characterId: item.character_id,
-            characterName:
-                characters.find((character) => character.id === item.character_id)?.name ?? '',
-            title: item.title,
-            date: formatMessageDay(item.updated_at),
-            updatedAt: item.updated_at,
-        })),
-    );
+    const catalogItems = $derived($catalog.items);
     let overlay = $state<Overlay | 'providers' | 'studio' | null>(null);
     let featureOverlay = $state<'providers' | 'studio' | null>(null);
     let returnPage: Page = 0;
@@ -76,11 +100,10 @@
     let notice = $state('');
     let mounted = true;
     const runtime = new PortableRuntimeLifecycle({
-        currentMessages: () => appState.messages.items,
-        displayMessages: () =>
-            appState.messages.items.filter(
-                (item) => item.id !== appState.chat.live_assistant_message_id,
-            ),
+        currentMessages: () => runtimeMessages,
+        currentMessageWindow: () => runtimeMessageWindow,
+        currentLastAssistantMessage: () => runtimeLastAssistantMessage,
+        displayMessages: () => runtimeDisplayMessages,
         providerWorkspace: () => appState.providers.workspace,
         primarySelection: () => controller.runtimeGenerationSelection(),
         sendMessage: (...args) => controller.sendMessage(...args),
@@ -95,13 +118,48 @@
                     runtime.profile.display_transforms.length > 0 ||
                     runtime.profile.output_transforms.length > 0)),
     );
-    const characters = $derived(characterViews(appState, subpage));
+    const library = $derived(appState.library);
+    const selectedCharacter = $derived(appState.selected_character);
+    const characterConversations = $derived(appState.conversations);
+    const characters = $derived(
+        characterViews(
+            {
+                library,
+                selected_character: selectedCharacter,
+                conversations: characterConversations,
+            },
+            subpage,
+        ),
+    );
     const character = $derived(
         characters.find((item) => item.id === appState.selected_character?.id),
     );
+    const characterNames = $derived(new Map(characters.map((item) => [item.id, item.name])));
+    const allConversations = $derived(
+        catalogItems.map((item) => ({
+            id: item.id,
+            characterId: item.character_id,
+            characterName: characterNames.get(item.character_id) ?? '',
+            title: item.title,
+            date: formatMessageDay(item.updated_at),
+            updatedAt: item.updated_at,
+        })),
+    );
+    const projection = new ConversationProjection();
     const conversation = $derived(
-        conversationView(
-            appState,
+        projection.project(
+            {
+                ...appState,
+                messages: {
+                    ...appState.messages,
+                    items: $history.items,
+                    start_index: $history.paged ? $history.start_index : undefined,
+                    total_messages: $history.paged ? $history.total_messages : undefined,
+                },
+                chat: $history.has_newer
+                    ? { ...appState.chat, live_assistant_message_id: null }
+                    : appState.chat,
+            },
             conversationDisplayMode(
                 appState.selected_conversation?.id,
                 appState.conversation_state?.selected_mode ?? 'chat',
@@ -123,25 +181,50 @@
             mounted = false;
             unsubscribe();
             navigation.destroy();
+            messageHistory.dispose();
             controller.destroy();
         };
     });
-    async function start() {
-        await controller.start();
-        const state = get(controller.state);
-        if (mounted && !state.selected_character && state.library.characters[0])
-            await controller.selectCharacter(state.library.characters[0], true);
+    function start() {
+        return controller.start();
     }
+    $effect(() => {
+        const first = appState.library.characters[0];
+        if (appState.library.phase === 'ready' && first)
+            untrack(() => {
+                if (mounted && !get(controller.state).selected_character)
+                    void controller.selectCharacter(first, true);
+            });
+    });
     // Root store publications include streaming and unrelated workspace updates.
     // Track stable scope values so they cannot reload the large profile or revoke
     // the current runtime grant on every publication.
     const runtimeCharacterId = $derived(appState.selected_character?.id ?? null);
+    const runtimeReady = $derived(
+        appState.messages.phase === 'ready' ||
+            (appState.messages.total_messages !== undefined &&
+                appState.messages.items.length === Math.min(128, appState.messages.total_messages)),
+    );
     const runtimeConversationId = $derived(appState.selected_conversation?.id ?? null);
     const runtimeBranchId = $derived(appState.conversation_state?.active_branch_id ?? null);
     const runtimeCharacterName = $derived(appState.selected_character?.name ?? '');
     const runtimeCharacterDescription = $derived(appState.selected_character?.description ?? '');
+    const runtimeScope = $derived(
+        runtimeConversationId && runtimeBranchId
+            ? {
+                  characterId: runtimeCharacterId,
+                  conversationId: runtimeConversationId,
+                  branchId: runtimeBranchId,
+              }
+            : null,
+    );
     $effect(() =>
-        runtime.loadProfile(appClient, runtimeCharacterId, runtimeConversationId, runtimeBranchId),
+        runtime.loadProfile(
+            appClient,
+            runtimeScope?.characterId ?? null,
+            runtimeScope?.conversationId ?? null,
+            runtimeScope?.branchId ?? null,
+        ),
     );
     $effect(() =>
         runtime.recreate({
@@ -153,24 +236,42 @@
                           name: runtimeCharacterName,
                           description: runtimeCharacterDescription,
                       },
-            conversationId: runtimeConversationId,
-            branchId: runtimeBranchId,
+            conversationId: runtimeReady ? runtimeConversationId : null,
+            branchId: runtimeReady ? runtimeBranchId : null,
         }),
     );
     const runtimeMessages = $derived(appState.messages.items);
+    const runtimeLastAssistantMessage = $derived(appState.messages.last_assistant_message);
+    const runtimeWindowStart = $derived(appState.messages.start_index);
+    const runtimeWindowTotal = $derived(appState.messages.total_messages);
+    const runtimeWindowHead = $derived(appState.messages.head_message_id);
+    const runtimeMessageWindow = $derived(
+        runtimeWindowStart !== undefined && runtimeWindowTotal !== undefined
+            ? {
+                  start_index: runtimeWindowStart,
+                  total_messages: runtimeWindowTotal,
+                  head_message_id: runtimeWindowHead ?? null,
+              }
+            : undefined,
+    );
+    const runtimeLiveMessage = $derived(appState.chat.live_assistant_message_id);
+    const runtimeDisplayMessages = $derived(
+        runtimeMessages.filter((item) => item.id !== runtimeLiveMessage),
+    );
     const runtimeGeneration = $derived(appState.chat.active_generation_id);
     const runtimeStreaming = $derived(
         appState.chat.live_assistant_message_id !== null ||
             !!appState.chat.streaming_text ||
             !!appState.chat.reasoning_text,
     );
-    $effect(() =>
-        runtime.syncMessages({
-            messages: runtimeMessages,
-            activeGenerationId: runtimeGeneration,
-            hasStreamingPresentation: runtimeStreaming,
-        }),
-    );
+    $effect(() => {
+        if (runtimeReady)
+            runtime.syncMessages({
+                messages: runtimeMessages,
+                activeGenerationId: runtimeGeneration,
+                hasStreamingPresentation: runtimeStreaming,
+            });
+    });
     $effect(() => {
         if (!subpage && page === 2) page = 1;
     });
@@ -196,7 +297,8 @@
     });
     $effect(() => {
         if (appState.bootstrap.phase === 'ready') {
-            void appState.conversations.items;
+            void refreshEpoch;
+            void appState.library.characters;
             untrack(() => void navigation.load());
         }
     });
@@ -239,6 +341,7 @@
     appearance={$themePreference}
     textScale={$chatTextSize === 'large' ? 1.1 : 1}
     conversationMode={conversation?.mode ?? 'chat'}
+    rightPageAvailable={subpage && conversation !== null}
 >
     {#snippet home()}
         <CharacterLibrary
@@ -247,6 +350,7 @@
             ondetail={(active: boolean) => (rootDetails.home = active)}
             ready={appState.bootstrap.phase === 'ready'}
             loaded={appState.library.phase === 'ready'}
+            loading={appState.library.phase === 'loading' || appState.bootstrap.phase === 'loading'}
             onselect={(id: string) => void selectCharacter(id)}
             onadd={() => void controller.beginImport()}
         />
@@ -281,6 +385,7 @@
     {#snippet settings()}
         <WorkspaceFeatures
             root
+            active={rootTab === 'settings' && page === 0 && !overview && overlay === null}
             mode="app-settings"
             client={appClient}
             {appState}
@@ -346,7 +451,11 @@
                 }}
                 onproviders={() => (featureOverlay = 'providers')}
                 onadvanced={() => (featureOverlay = 'studio')}
-            />
+            >
+                {#snippet cardSettings()}{#if subpage}<CardRuntimeSettings
+                            {runtime}
+                        />{/if}{/snippet}
+            </WorkspaceSettings>
         {/if}
         {#if featureOverlay}
             <WorkspaceFeatures
@@ -370,6 +479,13 @@
                 {character}
                 {conversation}
                 {session}
+                history={$history}
+                loading={appState.messages.phase === 'loading'}
+                loadError={appState.messages.error}
+                onretry={() => {
+                    if (appState.selected_conversation)
+                        void controller.selectConversation(appState.selected_conversation);
+                }}
                 externalNotice={workspaceFeedback(appState.announcement)}
                 draft={session.draft}
                 {managementVisible}
@@ -398,7 +514,8 @@
                         characterName={character?.name}
                         messageIndex={runtime.canReadChat ? messageIndex : undefined}
                         lastMessageId={runtime.canReadChat
-                            ? (conversation?.messages.length ?? 1) - 1
+                            ? (conversation?.totalMessages ?? conversation?.messages.length ?? 1) -
+                              1
                             : undefined}
                         onAction={(action: string) => void runtime.handleAction(action)}
                     />
@@ -410,6 +527,11 @@
                         {refreshEpoch}
                         onnotice={(value: string) => (notice = value)}
                     />{/snippet}
+                {#snippet cardSurface()}{#if page === 1}<CardRoomSurface
+                            {runtime}
+                            client={appClient}
+                            floating
+                        />{/if}{/snippet}
             </ChatPage>
             {#if error ?? (notice !== '' ? notice : appState.chat.reconcile_notice)}<div
                     class="ui-live-error"
@@ -450,7 +572,9 @@
     {#snippet creator(navigate: (page: Page) => void)}<WorkspaceCreator
             {runtime}
             client={appClient}
+            active={page === 2}
             onback={() => navigate(1)}
+            onsettings={(trigger: HTMLButtonElement) => open('room-settings', trigger)}
         />{/snippet}
 </ApplicationFrame>
 <div class="sr-only" role="status" aria-live="polite">{appState.announcement}</div>

@@ -8,6 +8,7 @@
     import LibraryScreen from './LibraryScreen.svelte';
     import NewConversationButton from './NewConversationButton.svelte';
     import LastChatTime from './LastChatTime.svelte';
+    import LoadingState from '../workspace/LoadingState.svelte';
     let {
         conversations,
         characters,
@@ -29,8 +30,10 @@
     } = $props();
     let query = $state('');
     let sort = $state<LibrarySortOrder>('newest');
-    const filtered = $derived(queryConversationLibrary(conversations, query, '', sort));
     const library = $derived(queryConversationLibrary(conversations, '', '', sort));
+    const filtered = $derived(
+        query ? queryConversationLibrary(conversations, query, '', sort) : library,
+    );
 </script>
 
 {#snippet conversationRows(items: ConversationListItem[], searching: boolean)}
@@ -40,9 +43,9 @@
                 ><span class="ui-press-visual">{$tr('workspace.retry')}</span></button
             >
         </div>{/if}
-    {#if loading && !conversations.length}<p class="seed-secondary-text" role="status">
-            {$tr('workspace.loading')}
-        </p>{/if}
+    {#if loading && !conversations.length}<LoadingState
+            label={$tr('ux.loading.conversations')}
+        />{/if}
     {#each items as item (item.id)}
         <div class="seed-conversation-row">
             <button

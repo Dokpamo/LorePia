@@ -21,7 +21,13 @@ it('keeps a prompt draft editable after Rust rejects the save and does not repor
     render(WorkspaceApp, { client });
     await screen.findByText(t('workspace.emptyLibrary'));
     await fireEvent.click(screen.getByRole('button', { name: t('navigation.settings') }));
-    await fireEvent.click(screen.getByRole('button', { name: t('settings.section.prompt.title') }));
+    await fireEvent.click(
+        await screen.findByRole(
+            'button',
+            { name: t('settings.section.prompt.title') },
+            { timeout: 5000 },
+        ),
+    );
     await fireEvent.click(await screen.findByRole('button', { name: t('settingsUi.addPrompt') }));
     await fireEvent.click(screen.getByRole('button', { name: t('settingsUi.promptName') }));
     await fireEvent.input(

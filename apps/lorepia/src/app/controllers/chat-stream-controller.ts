@@ -1,3 +1,4 @@
+import { loadRecentBranchMessages, messageWindowMetadata } from './recent-branch-messages';
 import type { ChatEventDto, ChatStreamItemDto, MessageDto } from '../../lib/ipc/contracts';
 import { t } from '../../lib/i18n';
 import { normalizeClientError } from '../../lib/ipc/errors';
@@ -29,7 +30,6 @@ function reattachmentUnavailableChatState(generationId: string): ChatState {
 export class ChatStreamController {
     private readonly streamEpoch = new EpochGuard();
     private reconcileInFlight: symbol | null = null;
-    private reconcileBufferedItems: ChatStreamItemDto[] = [];
     private streamVerifier: ChatStreamVerifier | null = null;
     private activeStreamId: string | null = null;
     private deltaFlushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -244,7 +244,7 @@ export class ChatStreamController {
                 await this.context.client.getConversationState(conversationId);
             const [branches, messages] = await Promise.all([
                 this.context.client.listBranches(conversationId),
-                this.context.client.listBranchMessages(conversationState.active_branch_id),
+                loadRecentBranchMessages(this.context.client, conversationState.active_branch_id),
             ]);
             if (
                 !this.streamEpoch.isCurrent(epoch) ||
@@ -254,13 +254,17 @@ export class ChatStreamController {
             }
             if (this.pendingAssistantMessage(messages, generationId) !== null) return false;
             this.streamVerifier = null;
-            this.reconcileBufferedItems = [];
             this.cancelPendingDeltas();
             this.context.update((state) => ({
                 ...state,
                 conversation_state: conversationState,
                 branches,
-                messages: { phase: 'ready', error: null, items: messages },
+                messages: {
+                    phase: 'ready',
+                    error: null,
+                    items: messages,
+                    ...messageWindowMetadata(messages),
+                },
                 chat: {
                     ...state.chat,
                     phase: 'idle',
@@ -285,9 +289,8 @@ export class ChatStreamController {
 
     acceptStreamItem(item: ChatStreamItemDto, epoch: number, streamId: string): void {
         if (this.reconcileInFlight !== null) {
-            if (this.streamEpoch.isCurrent(epoch) && this.activeStreamId === streamId) {
-                this.reconcileBufferedItems.push(item);
-            }
+            // Reconciliation reloads authoritative state and installs a new receiver.
+            // Events from the retired receiver were never replayed; do not retain their payloads.
             return;
         }
         if (this.streamVerifier === null) return;
@@ -445,7 +448,6 @@ export class ChatStreamController {
         }
         const reconciliation = Symbol('generation-reconciliation');
         this.reconcileInFlight = reconciliation;
-        this.reconcileBufferedItems = [];
         this.context.update((state) => ({
             ...state,
             chat: {
@@ -475,7 +477,12 @@ export class ChatStreamController {
                 ...state,
                 conversation_state: conversationState,
                 branches,
-                messages: { phase: 'ready', error: null, items: messages },
+                messages: {
+                    phase: 'ready',
+                    error: null,
+                    items: messages,
+                    ...messageWindowMetadata(messages),
+                },
                 chat:
                     pendingAssistant === null
                         ? {
@@ -500,11 +507,9 @@ export class ChatStreamController {
                           },
             }));
             if (pendingAssistant === null) {
-                this.reconcileBufferedItems = [];
                 this.context.announce(t('chat.notice.synced'));
                 return;
             }
-            this.reconcileBufferedItems = [];
             const nextStreamId = this.activateStreamReceiver();
             void this.subscribePendingGeneration(
                 generationId,
@@ -550,7 +555,6 @@ export class ChatStreamController {
         this.streamEpoch.advance();
         this.streamVerifier = null;
         this.reconcileInFlight = null;
-        this.reconcileBufferedItems = [];
         this.cancelPendingDeltas();
         if (streamId !== null) void this.disposeStream(streamId);
     }

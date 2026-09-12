@@ -162,7 +162,9 @@ impl Storage {
     ) -> CoreResult<(AssetDescriptor, String)> {
         let row = self
             .connection()?
-            .query_row(query, [key], |row| {
+            .prepare_cached(query)
+            .map_err(storage_db_error)?
+            .query_row([key], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,

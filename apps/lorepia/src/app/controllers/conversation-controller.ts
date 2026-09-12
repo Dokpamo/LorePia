@@ -1,3 +1,4 @@
+import { loadRecentBranchMessages, messageWindowMetadata } from './recent-branch-messages';
 import type {
     CharacterDto,
     CharacterGreetingCatalogDto,
@@ -38,6 +39,7 @@ function firstEnabledGreetingId(catalog: CharacterGreetingCatalogDto): string | 
 
 export class ConversationController {
     private readonly epoch = new EpochGuard();
+    private readonly characterEpoch = new EpochGuard();
     private modeRequest = 0;
     private starting = false;
     private pendingStart: LorepiaAppState['pending_conversation_start'] = null;
@@ -49,6 +51,7 @@ export class ConversationController {
 
     async selectCharacter(character: CharacterDto, openLatest = false): Promise<void> {
         const epoch = this.epoch.advance();
+        const characterEpoch = this.characterEpoch.advance();
         this.pendingStart = null;
         this.hooks.detachStream();
         this.context.update((state) => ({
@@ -79,27 +82,38 @@ export class ConversationController {
         const conversationsRequest = this.context.client
             .listConversations(character.id)
             .then((items) => {
-                if (!this.epoch.isCurrent(epoch)) return;
-                this.context.update((state) => ({
-                    ...state,
-                    conversations: { phase: 'ready', error: null, items },
-                }));
+                if (!this.characterEpoch.isCurrent(characterEpoch)) return;
+                this.context.update((state) => {
+                    const known = new Map(state.conversations.items.map((item) => [item.id, item]));
+                    const listed = new Set(items.map((item) => item.id));
+                    return {
+                        ...state,
+                        conversations: {
+                            phase: 'ready',
+                            error: null,
+                            items: [
+                                ...state.conversations.items.filter((item) => !listed.has(item.id)),
+                                ...items.map((item) => known.get(item.id) ?? item),
+                            ],
+                        },
+                    };
+                });
             })
             .catch((error: unknown) => {
-                if (!this.epoch.isCurrent(epoch)) return;
+                if (!this.characterEpoch.isCurrent(characterEpoch)) return;
                 this.context.update((state) => ({
                     ...state,
                     conversations: {
                         phase: 'error',
                         error: this.context.errorLabel(error),
-                        items: [],
+                        items: state.conversations.items,
                     },
                 }));
             });
         const greetingCatalogRequest = this.context.client
             .getCharacterGreetingCatalog(character.id)
             .then((catalog) => {
-                if (!this.epoch.isCurrent(epoch)) return;
+                if (!this.characterEpoch.isCurrent(characterEpoch)) return;
                 if (catalog.character_id !== character.id) {
                     this.context.update((state) => ({
                         ...state,
@@ -123,7 +137,7 @@ export class ConversationController {
                 }));
             })
             .catch((error: unknown) => {
-                if (!this.epoch.isCurrent(epoch)) return;
+                if (!this.characterEpoch.isCurrent(characterEpoch)) return;
                 this.context.update((state) => ({
                     ...state,
                     greeting_catalog: {
@@ -290,9 +304,11 @@ export class ConversationController {
                 selected_conversation: opened,
                 conversations: {
                     ...state.conversations,
-                    items: state.conversations.items.map((item) =>
-                        item.id === opened.id ? opened : item,
-                    ),
+                    items: state.conversations.items.some((item) => item.id === opened.id)
+                        ? state.conversations.items.map((item) =>
+                              item.id === opened.id ? opened : item,
+                          )
+                        : [opened, ...state.conversations.items],
                 },
             }));
             return await this.loadPreparedConversation(opened, epoch);
@@ -334,12 +350,17 @@ export class ConversationController {
                 conversation.id,
                 branchId,
             );
-            const messages = await this.context.client.listBranchMessages(branchId);
+            const messages = await loadRecentBranchMessages(this.context.client, branchId);
             if (!this.epoch.isCurrent(epoch)) return;
             this.context.update((state) => ({
                 ...state,
                 conversation_state: conversationState,
-                messages: { phase: 'ready', error: null, items: messages },
+                messages: {
+                    phase: 'ready',
+                    error: null,
+                    items: messages,
+                    ...messageWindowMetadata(messages),
+                },
             }));
             void this.hooks.refreshMemoryQueryRetries();
             this.hooks.resumePendingGeneration(messages);
@@ -443,7 +464,7 @@ export class ConversationController {
                 return { mutationCommitted: true, messagesRefreshed: false, scopeKey };
             }
             try {
-                const messages = await this.context.client.listBranchMessages(branchId);
+                const messages = await loadRecentBranchMessages(this.context.client, branchId);
                 if (!isCurrentBranchSnapshot(this.context.readState())) {
                     return { mutationCommitted: true, messagesRefreshed: false, scopeKey };
                 }
@@ -452,7 +473,12 @@ export class ConversationController {
                     branches: current.branches.map((item) =>
                         item.id === branchId ? branch : item,
                     ),
-                    messages: { phase: 'ready', error: null, items: messages },
+                    messages: {
+                        phase: 'ready',
+                        error: null,
+                        items: messages,
+                        ...messageWindowMetadata(messages),
+                    },
                 }));
                 this.context.announce(t('chat.notice.removed'));
                 return { mutationCommitted: true, messagesRefreshed: true, scopeKey };
@@ -480,6 +506,7 @@ export class ConversationController {
 
     destroy(): void {
         this.epoch.advance();
+        this.characterEpoch.advance();
     }
 
     private prepareConversationLoad(conversation: ConversationDto): void {
@@ -508,20 +535,57 @@ export class ConversationController {
         epoch: number,
     ): Promise<boolean> {
         try {
-            const [conversationState, branches] = await Promise.all([
-                this.context.client.getConversationState(conversation.id),
-                this.context.client.listBranches(conversation.id),
-            ]);
-            const messages = await this.context.client.listBranchMessages(
+            // Observe failures immediately, but do not put branch metadata in
+            // front of the message read. Mutations stay gated until both finish.
+            const stateRequest = this.context.client.getConversationState(conversation.id);
+            const branchRequest = this.context.client.listBranches(conversation.id).then(
+                (branches) => ({ branches, error: null }),
+                (error: unknown) => ({ branches: null, error }),
+            );
+            const conversationState = await stateRequest;
+            if (!this.epoch.isCurrent(epoch)) return false;
+            const messages = await loadRecentBranchMessages(
+                this.context.client,
                 conversationState.active_branch_id,
+                (initial) => {
+                    if (!this.epoch.isCurrent(epoch)) return false;
+                    this.context.update((state) => ({
+                        ...state,
+                        conversation_state: conversationState,
+                        messages: {
+                            phase: 'loading',
+                            error: null,
+                            items: initial,
+                            ...messageWindowMetadata(initial),
+                        },
+                    }));
+                },
             );
             if (!this.epoch.isCurrent(epoch)) return false;
             this.context.update((state) => ({
                 ...state,
+                conversation_state: conversationState,
+                messages: {
+                    phase: 'loading',
+                    error: null,
+                    items: messages,
+                    ...messageWindowMetadata(messages),
+                },
+            }));
+            const result = await branchRequest;
+            if (!this.epoch.isCurrent(epoch)) return false;
+            if (result.branches === null) throw result.error;
+            this.context.update((state) => ({
+                ...state,
                 selected_conversation: conversation,
                 conversation_state: conversationState,
-                branches,
-                messages: { phase: 'ready', error: null, items: messages },
+                branches: result.branches,
+                messages: {
+                    phase: 'ready',
+                    error: null,
+                    items: messages,
+                    ...messageWindowMetadata(messages),
+                },
             }));
             void this.hooks.refreshMemoryQueryRetries();
             this.hooks.resumePendingGeneration(messages);
@@ -531,9 +595,9 @@ export class ConversationController {
             this.context.update((state) => ({
                 ...state,
                 messages: {
+                    ...state.messages,
                     phase: 'error',
                     error: this.context.errorLabel(error),
-                    items: [],
                 },
             }));
             return false;

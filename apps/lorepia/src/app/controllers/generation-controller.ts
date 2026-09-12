@@ -1,3 +1,4 @@
+import { loadRecentBranchMessages, messageWindowMetadata } from './recent-branch-messages';
 import type {
     ChatStreamItemDto,
     GenerationSelectionInput,
@@ -410,7 +411,7 @@ export class GenerationController {
                 conversation.id,
                 started.branch.id,
             );
-            const messages = await this.context.client.listBranchMessages(started.branch.id);
+            const messages = await loadRecentBranchMessages(this.context.client, started.branch.id);
             if (!this.stream.isEpochCurrent(epoch) || !this.stream.hasActiveStream(streamId)) {
                 void this.stream.disposeStream(streamId);
                 return false;
@@ -433,7 +434,12 @@ export class GenerationController {
                     started.branch,
                     ...current.branches.filter((item) => item.id !== started.branch.id),
                 ],
-                messages: { phase: 'ready', error: null, items: messages },
+                messages: {
+                    phase: 'ready',
+                    error: null,
+                    items: messages,
+                    ...messageWindowMetadata(messages),
+                },
                 memory_query_retries: {
                     phase: 'idle',
                     error: null,

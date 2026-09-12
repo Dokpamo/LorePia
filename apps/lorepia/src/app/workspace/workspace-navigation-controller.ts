@@ -15,12 +15,29 @@ export class WorkspaceNavigationController {
     private loadEpoch = 0;
     private navigationEpoch = 0;
     private destroyed = false;
+    private loading: Promise<void> | null = null;
+    private reload = false;
     constructor(
         private client: LorepiaClient,
         private app: LorepiaAppController,
         private current: () => LorepiaAppState,
     ) {}
-    async load() {
+    load(): Promise<void> {
+        if (this.destroyed) return Promise.resolve();
+        if (this.loading) {
+            this.reload = true;
+            return this.loading;
+        }
+        this.loading = this.loadLatest().finally(() => (this.loading = null));
+        return this.loading;
+    }
+    private async loadLatest(): Promise<void> {
+        do {
+            this.reload = false;
+            await this.loadOnce();
+        } while (this.shouldReload());
+    }
+    private async loadOnce() {
         const epoch = ++this.loadEpoch;
         this.state.update((state) => ({ ...state, loading: true, error: null }));
         try {
@@ -36,6 +53,9 @@ export class WorkspaceNavigationController {
                 }));
         }
     }
+    private shouldReload() {
+        return this.reload && !this.destroyed;
+    }
     cancelNavigation() {
         this.navigationEpoch += 1;
     }
@@ -44,7 +64,10 @@ export class WorkspaceNavigationController {
         const state = this.current();
         const character = state.library.characters.find((item) => item.id === id);
         if (!character) return false;
-        if (state.selected_character?.id !== id) await this.app.selectCharacter(character, false);
+        // Selection publishes the known card immediately. Its independent
+        // catalog requests continue under the app controller's character epoch.
+        if (state.selected_character?.id !== id) void this.app.selectCharacter(character, false);
+        await Promise.resolve();
         return (
             !this.destroyed &&
             epoch === this.navigationEpoch &&
@@ -57,7 +80,7 @@ export class WorkspaceNavigationController {
             this.current().conversations.items.find((value) => value.id === id);
         if (!item || !(await this.selectCharacter(item.character_id))) return false;
         const epoch = this.navigationEpoch;
-        await this.app.selectConversation(item);
+        void this.app.selectConversation(item);
         return (
             !this.destroyed &&
             epoch === this.navigationEpoch &&

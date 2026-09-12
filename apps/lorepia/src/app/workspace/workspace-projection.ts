@@ -28,41 +28,90 @@ export function conversationView(
     state: LorepiaAppState,
     displayMode?: ChatDisplayMode,
 ): SampleConversation | null {
-    const selected = state.selected_conversation;
-    if (!selected) return null;
-    const liveId = state.chat.live_assistant_message_id;
-    const messages = state.messages.items.filter((item) => item.id !== liveId).map(messageView);
-    if (liveId) {
-        const saved = state.messages.items.find((item) => item.id === liveId);
-        messages.push(
-            messageView({
-                id: liveId,
-                conversation_id: selected.id,
-                parent_id: saved?.parent_id ?? null,
-                role: 'assistant',
-                content: state.chat.streaming_text,
-                status: 'pending',
-                generation_id: state.chat.active_generation_id,
-                created_at: saved?.created_at ?? selected.updated_at,
-            }),
-        );
-    }
-    return {
-        id: selected.id,
-        title: selected.title,
-        date: formatMessageDay(selected.created_at),
-        messages,
-        mode: displayMode ?? state.conversation_state?.selected_mode ?? 'chat',
-        activeBranchId: state.conversation_state?.active_branch_id,
-        branches: state.branches.map((item, index) => ({
-            id: item.id,
-            title: item.title ?? t('workspace.branch', { number: index + 1 }),
-            messages: [],
-        })),
-    };
+    return new ConversationProjection().project(state, displayMode);
 }
 
-export function characterViews(state: LorepiaAppState, subpage = false): SampleCharacter[] {
+/** Per-workspace cache. Stream text never rebuilds saved views or scroll indexes. */
+export class ConversationProjection {
+    private source: MessageDto[] | null = null;
+    private liveId: string | null = null;
+    private conversationId: string | null = null;
+    private messages: SampleMessage[] = [];
+    private scrollMessages: MessageDto[] = [];
+    private savedLive: MessageDto | undefined;
+
+    project(state: LorepiaAppState, displayMode?: ChatDisplayMode): SampleConversation | null {
+        const selected = state.selected_conversation;
+        if (!selected) {
+            this.source = null;
+            this.messages = [];
+            this.scrollMessages = [];
+            this.savedLive = undefined;
+            return null;
+        }
+        const liveId = state.chat.live_assistant_message_id;
+        if (
+            this.source !== state.messages.items ||
+            this.liveId !== liveId ||
+            this.conversationId !== selected.id
+        ) {
+            this.source = state.messages.items;
+            this.liveId = liveId;
+            this.conversationId = selected.id;
+            const saved = state.messages.items.filter((item) => item.id !== liveId);
+            this.messages = saved.map(messageView);
+            this.savedLive = state.messages.items.find((item) => item.id === liveId);
+            this.scrollMessages = saved;
+            if (liveId)
+                this.scrollMessages = [
+                    ...saved,
+                    {
+                        id: liveId,
+                        conversation_id: selected.id,
+                        parent_id: this.savedLive?.parent_id ?? null,
+                        role: 'assistant',
+                        content: '',
+                        status: 'pending',
+                        generation_id: state.chat.active_generation_id,
+                        created_at: this.savedLive?.created_at ?? selected.updated_at,
+                    },
+                ];
+        }
+        const pending = this.scrollMessages.at(-1);
+        const messages =
+            liveId && pending
+                ? [
+                      ...this.messages,
+                      messageView({
+                          ...pending,
+                          content: state.chat.streaming_text,
+                          generation_id: state.chat.active_generation_id,
+                      }),
+                  ]
+                : this.messages;
+        return {
+            id: selected.id,
+            title: selected.title,
+            date: formatMessageDay(selected.created_at),
+            messages,
+            scrollMessages: this.scrollMessages,
+            messageOffset: state.messages.start_index,
+            totalMessages: state.messages.total_messages,
+            mode: displayMode ?? state.conversation_state?.selected_mode ?? 'chat',
+            activeBranchId: state.conversation_state?.active_branch_id,
+            branches: state.branches.map((item, index) => ({
+                id: item.id,
+                title: item.title ?? t('workspace.branch', { number: index + 1 }),
+                messages: [],
+            })),
+        };
+    }
+}
+
+export function characterViews(
+    state: Pick<LorepiaAppState, 'library' | 'selected_character' | 'conversations'>,
+    subpage = false,
+): SampleCharacter[] {
     return state.library.characters.map((item) => ({
         id: item.id,
         name: item.name,

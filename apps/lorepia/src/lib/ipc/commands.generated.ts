@@ -59,6 +59,7 @@ export const LOREPIA_COMMANDS = {
     selectConversationPersona: 'select_conversation_persona',
     clearConversationPersona: 'clear_conversation_persona',
     listBranchMessages: 'list_branch_messages',
+    listBranchMessagesPage: 'list_branch_messages_page',
     listGenerationMessages: 'list_generation_messages',
     listMessages: 'list_messages',
     generateRuntimeText: 'generate_runtime_text',

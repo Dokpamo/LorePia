@@ -113,7 +113,7 @@ impl Storage {
     pub fn list_messages(&self, conversation_id: &ConversationId) -> CoreResult<Vec<Message>> {
         let connection = self.connection()?;
         let mut statement = connection
-            .prepare(
+            .prepare_cached(
                 "SELECT id, conversation_id, parent_id, role, content, status,
                         generation_id, created_at
                  FROM messages WHERE conversation_id = ?1
@@ -133,7 +133,7 @@ impl Storage {
     ) -> CoreResult<Vec<Message>> {
         let connection = self.connection()?;
         let mut statement = connection
-            .prepare(
+            .prepare_cached(
                 "WITH RECURSIVE lineage(
                    id, conversation_id, parent_id, role, content, status,
                    generation_id, created_at, depth
@@ -232,7 +232,7 @@ impl Storage {
             .map_err(|_| CoreError::invalid("character limit exceeds SQLite integer range"))?;
         let connection = self.connection()?;
         let mut statement = connection
-            .prepare(
+            .prepare_cached(
                 "WITH RECURSIVE lineage(
                    id, conversation_id, parent_id, role, content, status,
                    generation_id, created_at, depth
@@ -303,7 +303,7 @@ impl Storage {
             .map_err(|_| CoreError::invalid("character limit exceeds SQLite integer range"))?;
         let connection = self.connection()?;
         let mut statement = connection
-            .prepare(
+            .prepare_cached(
                 "WITH RECURSIVE lineage(
                    id, conversation_id, parent_id, role, content, status,
                    generation_id, created_at, depth
@@ -370,7 +370,7 @@ impl Storage {
         }
         let connection = self.connection()?;
         let mut statement = connection
-            .prepare(
+            .prepare_cached(
                 "SELECT id, conversation_id, parent_id, role, content, status,
                         generation_id, created_at
                  FROM (

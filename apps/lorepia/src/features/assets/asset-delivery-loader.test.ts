@@ -22,6 +22,101 @@ const value: AssetDeliveryDto = {
 };
 const selector = { kind: 'asset_id', asset_id: 'image' } as const;
 
+it('measures each queued priority once when filling four available native slots', async () => {
+    const finish = deferred<AssetDeliveryDto>();
+    const client = {
+        resolveAssetDelivery: vi.fn<LorepiaClient['resolveAssetDelivery']>(() => finish.promise),
+    };
+    const abort = new AbortController();
+    const priorities = Array.from({ length: 200 }, (_, index) => vi.fn(() => 200 - index));
+    const results = Promise.allSettled(
+        priorities.map((priority, index) =>
+            loadAssetDelivery(
+                client,
+                { kind: 'asset_id', asset_id: String(index) },
+                abort.signal,
+                undefined,
+                priority,
+            ),
+        ),
+    );
+    priorities.forEach((priority) => priority.mockClear());
+    await Promise.resolve();
+    expect(client.resolveAssetDelivery).toHaveBeenCalledTimes(4);
+    expect(priorities.every((priority) => priority.mock.calls.length === 1)).toBe(true);
+    expect(client.resolveAssetDelivery.mock.calls.map(([request]) => request.selector)).toEqual(
+        [199, 198, 197, 196].map((index) => ({ kind: 'asset_id', asset_id: String(index) })),
+    );
+    abort.abort();
+    finish.resolve(value);
+    await results;
+});
+
+it('skips a queued consumer cancelled synchronously by another start without losing a slot', async () => {
+    const finish = deferred<AssetDeliveryDto>();
+    const aborts = Array.from({ length: 5 }, () => new AbortController());
+    const client = {
+        resolveAssetDelivery: vi.fn<LorepiaClient['resolveAssetDelivery']>((request) => {
+            if (request.selector.kind === 'asset_id' && request.selector.asset_id === '0')
+                aborts[1]?.abort();
+            return finish.promise;
+        }),
+    };
+    const results = Promise.allSettled(
+        aborts.map((abort, index) =>
+            loadAssetDelivery(
+                client,
+                { kind: 'asset_id', asset_id: String(index) },
+                abort.signal,
+                undefined,
+                () => 100,
+            ),
+        ),
+    );
+    await Promise.resolve();
+    expect(client.resolveAssetDelivery.mock.calls.map(([request]) => request.selector)).toEqual(
+        [0, 2, 3, 4].map((index) => ({ kind: 'asset_id', asset_id: String(index) })),
+    );
+    finish.resolve(value);
+    const settled = await results;
+    expect(settled.filter((result) => result.status === 'fulfilled')).toHaveLength(4);
+    expect(settled[1]?.status).toBe('rejected');
+});
+
+it('reconsiders a batch when starting native work synchronously adds a foreground request', async () => {
+    const finish = deferred<AssetDeliveryDto>();
+    const abort = new AbortController();
+    let foreground: Promise<AssetDeliveryDto> | undefined;
+    const client = {
+        resolveAssetDelivery: vi.fn<LorepiaClient['resolveAssetDelivery']>((request) => {
+            if (request.selector.kind === 'asset_id' && request.selector.asset_id === 'A') {
+                foreground = loadAssetDelivery(
+                    client,
+                    { kind: 'asset_id', asset_id: 'visible' },
+                    abort.signal,
+                );
+            }
+            return finish.promise;
+        }),
+    };
+    const results = ['A', 'B', 'C', 'D'].map((asset_id) =>
+        loadAssetDelivery(
+            client,
+            { kind: 'asset_id', asset_id },
+            abort.signal,
+            undefined,
+            () => 100,
+        ),
+    );
+    await Promise.resolve();
+    expect(client.resolveAssetDelivery.mock.calls.map(([request]) => request.selector)).toEqual(
+        ['A', 'visible', 'B', 'C'].map((asset_id) => ({ kind: 'asset_id', asset_id })),
+    );
+    finish.resolve(value);
+    await Promise.all(results);
+    await foreground;
+});
+
 it('bounds concurrent verification and removes unseen thumbnails from the waiting queue', async () => {
     const requests: ReturnType<typeof deferred<AssetDeliveryDto>>[] = [];
     const client = {

@@ -1,8 +1,7 @@
 //! Exact, immutable semantic vectors for revisioned knowledge entries.
 //!
-//! Query vectors are produced by Core's durable provider intent. Storage only
-//! admits vectors from the same immutable task revision and provider vector
-//! space, then computes deterministic cosine scores in Rust.
+//! Core's durable provider intent supplies the query. Storage admits only the same
+//! immutable task revision and vector space, then scores borrowed f32le bytes in Rust.
 
 use std::collections::BTreeSet;
 
@@ -12,7 +11,7 @@ use lorepia_domain::{
     TaskProfile, ValidateOrchestration,
 };
 use lorepia_orchestration::MAX_GENERATION_KNOWLEDGE_WORK_BYTES;
-use rusqlite::{OptionalExtension, params};
+use rusqlite::{Error::InvalidColumnType, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -507,14 +506,18 @@ fn score_knowledge_embedding_rows(
         let embedding_id = row.get::<_, String>(4).map_err(storage_db_error)?;
         let entry_id = row.get::<_, String>(5).map_err(storage_db_error)?;
         let vector_sha256 = row.get::<_, String>(6).map_err(storage_db_error)?;
-        let bytes = row.get::<_, Vec<u8>>(7).map_err(storage_db_error)?;
+        let vector = row.get_ref(7).map_err(storage_db_error)?;
+        let type_error = || InvalidColumnType(7, "vector_blob".into(), vector.data_type());
+        let bytes = vector
+            .as_blob()
+            .map_err(|_| storage_db_error(type_error()))?;
         if previous_entry_id.as_deref() == Some(entry_id.as_str()) {
             return Err(corrupted(
                 "knowledge entry has ambiguous embeddings in one exact vector space",
             ));
         }
         previous_entry_id = Some(entry_id.clone());
-        let similarity = score_encoded_vector(query, query_norm, &bytes, &vector_sha256)?;
+        let similarity = score_encoded_vector(query, query_norm, bytes, &vector_sha256)?;
         matches.push(KnowledgeEmbeddingMatch {
             embedding_id,
             entry_id: KnowledgeEntryId::from(entry_id),

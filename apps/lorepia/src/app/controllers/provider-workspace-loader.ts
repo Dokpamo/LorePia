@@ -61,13 +61,16 @@ export class ProviderWorkspaceLoader {
             }));
             const legacyIds = new Set(overview.legacy_profiles.map((profile) => profile.id));
             const previousConnections = new Map(
-                previous.connections.map((connection) => [
+                (refreshCredentials ? [] : previous.connections).map((connection) => [
                     connection.id,
                     JSON.stringify(connection),
                 ]),
             );
             const previousProfiles = new Map(
-                previous.legacy_profiles.map((profile) => [profile.id, JSON.stringify(profile)]),
+                (refreshCredentials ? [] : previous.legacy_profiles).map((profile) => [
+                    profile.id,
+                    JSON.stringify(profile),
+                ]),
             );
             const targets: CredentialTargetDto[] = [
                 ...overview.connections

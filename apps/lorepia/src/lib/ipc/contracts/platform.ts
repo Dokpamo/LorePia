@@ -200,7 +200,10 @@ export interface StorageOverviewDto {
     import_jobs: number;
 }
 
+import type { BranchMessagesPageDto, ListBranchMessagesPageInput } from './message-history';
+
 export interface LorepiaClient {
+    listBranchMessagesPage?(input: ListBranchMessagesPageInput): Promise<BranchMessagesPageDto>;
     getStorageOverview?(): Promise<StorageOverviewDto>;
     bootstrapSnapshot(): Promise<BootstrapDto>;
     getMemorySupervisorStatus(): Promise<MemorySupervisorStatusDto>;

@@ -22,7 +22,7 @@ impl Storage {
         Ok(self.get_message_display_projections(&[message])?.pop())
     }
 
-    /// Loads sidecars with two queries per bounded batch, releasing the database
+    /// Loads sidecars with at most two queries per bounded batch, releasing the database
     /// lock before decoding and hashing. All single-message integrity checks remain.
     pub fn get_message_display_projections(
         &self,
@@ -56,7 +56,7 @@ fn read_batch<'a>(
     let ids = serde_json::to_string(&messages.iter().map(|m| &m.id.0).collect::<Vec<_>>())
         .map_err(|_| CoreError::internal("cannot encode projection lookup identities"))?;
     let mut statement = connection
-        .prepare(
+        .prepare_cached(
             "SELECT message_id, generation_id, canonical_content_sha256, display_content,
                 display_content_sha256, pipeline_diagnostics_json, diagnostics_sha256, created_at
          FROM message_display_projections WHERE message_id IN (SELECT value FROM json_each(?1))",
@@ -80,8 +80,12 @@ fn read_batch<'a>(
         .map_err(storage_db_error)?
         .collect::<Result<BTreeMap<_, _>, _>>()
         .map_err(storage_db_error)?;
+    // The diagnostic join below cannot produce rows without a projection.
+    if projections.is_empty() {
+        return Ok(Vec::new());
+    }
     let mut statement = connection
-        .prepare(
+        .prepare_cached(
             "SELECT log.message_id, log.set_revision_id, revision.transform_set_id,
                 log.rule_id, log.phase, log.status, log.before_sha256, log.after_sha256,
                 log.error_code, log.diagnostics_json, log.created_at

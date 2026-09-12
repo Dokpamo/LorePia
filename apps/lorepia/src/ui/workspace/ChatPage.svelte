@@ -1,7 +1,7 @@
 <script lang="ts">
     import type { Snippet } from 'svelte';
     import type { SampleMessage } from './view-types';
-    import { onMount, untrack } from 'svelte';
+    import { onMount, untrack, tick } from 'svelte';
     import { ArrowDown, ArrowLeft, PanelRight } from '@lucide/svelte';
     import { tr } from '../../lib/i18n';
     import type { LorepiaClient, MessageDto } from '../../lib/ipc/contracts';
@@ -10,6 +10,7 @@
         type MessageCollectionSnapshot,
     } from '../../features/chat/chat-scroll.svelte';
     import IconButton from './IconButton.svelte';
+    import type { MessageHistoryState } from '../../app/controllers/message-history-controller';
     import ChatTranscript from './ChatTranscript.svelte';
     import MessageComposer from './MessageComposer.svelte';
     import UiNotice from './UiNotice.svelte';
@@ -23,8 +24,10 @@
         personaName,
         conversation,
         session,
+        history,
         renderMessage,
         extras,
+        cardSurface,
         externalNotice = '',
         draft,
         managementVisible = false,
@@ -34,14 +37,19 @@
         onsend,
         onsettings,
         oninteract,
+        loading = false,
+        loadError = null,
+        onretry,
     }: {
         character: SampleCharacter;
         client?: Pick<LorepiaClient, 'resolveAssetDelivery'>;
         personaName?: string;
         conversation: SampleConversation;
         session: ChatSession;
+        history?: MessageHistoryState;
         renderMessage?: Snippet<[SampleMessage, number]>;
         extras?: Snippet;
+        cardSurface?: Snippet;
         externalNotice?: string;
         draft: string;
         managementVisible?: boolean;
@@ -51,6 +59,9 @@
         onsend: () => void;
         onsettings: (trigger: HTMLButtonElement) => void;
         oninteract: () => void;
+        loading?: boolean;
+        loadError?: string | null;
+        onretry?: () => void;
     } = $props();
     let active = $state<string | null>(null);
     let notice = $state<UiNoticeValue | null>(null);
@@ -63,11 +74,20 @@
             previousNotice = value;
         });
     });
+    $effect(() => {
+        if (history?.error) {
+            const direction = history.failed_direction ?? 'latest';
+            untrack(() =>
+                showNotice($tr('ux.loading.failed'), () => void session.loadHistory?.(direction)),
+            );
+        }
+    });
     function showNotice(text: string, retry?: () => void) {
         notice = { id: ++noticeId, text, retry };
     }
     // The original scroll owner needs identity/date, not a fresh index per stream token.
     const projected = $derived.by(() => {
+        if (conversation.scrollMessages) return conversation.scrollMessages;
         const messages = conversation.messages;
         const id = conversation.id;
         return untrack(() =>
@@ -136,9 +156,23 @@
         else if (active && metrics.editing)
             scroll.applyProgrammaticScrollPosition(log, log.scrollTop + metrics.delta);
     }
-    function sendToTail() {
+    async function latest() {
+        if (history?.has_newer) {
+            await session.loadHistory?.('latest');
+            await tick();
+        }
+    }
+    function prefetchHistory() {
+        const log = scroll.scroller;
+        if (!log || !history || history.loading || history.error) return;
+        if (log.scrollTop < 640 && history.has_older) void session.loadHistory?.('older');
+        else if (log.scrollHeight - log.clientHeight - log.scrollTop < 640 && history.has_newer)
+            void session.loadHistory?.('newer');
+    }
+    async function sendToTail() {
         if (session.busy || !draft.trim()) return;
         activate(null);
+        await latest();
         const log = scroll.scroller;
         if (log) scroll.applyProgrammaticScrollPosition(log, log.scrollHeight);
         onsend();
@@ -158,6 +192,7 @@
             onclick={() => onnavigate(2)}><PanelRight /></IconButton
         >{/if}
 </header>
+{#if cardSurface}{@render cardSurface()}{/if}
 <div class="ui-chat-notices">
     {#if notice}{#key notice.id}<UiNotice {notice} ondismiss={() => (notice = null)} />{/key}{/if}
 </div>
@@ -172,6 +207,11 @@
     {scroll}
     {collection}
     {active}
+    {loading}
+    {loadError}
+    {onretry}
+    historyLoading={history?.loading ?? false}
+    onhistoryedge={prefetchHistory}
     onactive={activate}
     onnotice={showNotice}
     onwrite={() =>
@@ -183,13 +223,14 @@
 <div class="ui-chat-floaters">
     <div
         class="ui-jump-latest"
-        data-visible={!scroll.nearBottom}
-        inert={scroll.nearBottom}
-        aria-hidden={scroll.nearBottom}
+        data-visible={!scroll.nearBottom || history?.has_newer}
+        inert={scroll.nearBottom && !history?.has_newer}
+        aria-hidden={scroll.nearBottom && !history?.has_newer}
     >
         <IconButton
             label={$tr('uiPreview.latestMessage')}
-            onclick={() => {
+            onclick={async () => {
+                await latest();
                 const log = scroll.scroller;
                 if (!log) return;
                 log.focus({ preventScroll: true });
@@ -210,6 +251,9 @@
     {onsettings}
     {oninteract}
     busy={session.busy}
+    stoppable={session.canStop ?? session.busy}
+    inputReady={!loading || conversation.activeBranchId !== undefined}
+    submitting={session.submitting ?? false}
     onstop={() => session.stop()}
     ondock={syncDock}
 />

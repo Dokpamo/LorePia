@@ -59,6 +59,7 @@ const APP_COMMANDS: &[&str] = &[
     "select_conversation_persona",
     "clear_conversation_persona",
     "list_branch_messages",
+    "list_branch_messages_page",
     "list_generation_messages",
     "list_messages",
     "generate_runtime_text",

@@ -8,7 +8,7 @@ impl Storage {
     pub fn list_characters(&self) -> CoreResult<Vec<Character>> {
         let connection = self.connection()?;
         let mut statement = connection
-            .prepare(
+            .prepare_cached(
                 "SELECT id, name, description, source_hash, avatar_asset_hash, created_at
                  FROM characters ORDER BY name COLLATE NOCASE, id",
             )
@@ -45,7 +45,7 @@ impl Storage {
         let revision_id = active_character_content_revision(&connection, character_id)?;
         let greetings = if let Some(revision_id) = revision_id.as_deref() {
             let mut statement = connection
-                .prepare(
+                .prepare_cached(
                     "SELECT greeting_id, kind, enabled
                      FROM character_greetings
                      WHERE character_content_revision_id = ?1

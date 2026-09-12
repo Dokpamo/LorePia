@@ -11,6 +11,43 @@ function element() {
 afterEach(() => {
     elements.forEach(releaseThumbnail);
     elements.length = 0;
+    vi.useRealTimers();
+});
+
+it('releases idle offscreen decoded media after 30 seconds with one shared timer', () => {
+    vi.useFakeTimers();
+    const first = vi.fn();
+    const second = vi.fn();
+    retainThumbnail(element(), 24 * MiB, first);
+    vi.advanceTimersByTime(10_000);
+    retainThumbnail(element(), 24 * MiB, second);
+    expect(vi.getTimerCount()).toBe(1);
+    vi.advanceTimersByTime(19_999);
+    expect(first).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(first).toHaveBeenCalledOnce();
+    expect(second).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(1);
+    vi.advanceTimersByTime(10_000);
+    expect(second).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+});
+
+it('protects returned images and grants a fresh retention window on the next departure', () => {
+    vi.useFakeTimers();
+    const image = element();
+    const evict = vi.fn();
+    retainThumbnail(image, MiB, evict);
+    vi.advanceTimersByTime(20_000);
+    releaseThumbnail(image);
+    expect(vi.getTimerCount()).toBe(0);
+    vi.advanceTimersByTime(20_000);
+    expect(evict).not.toHaveBeenCalled();
+    retainThumbnail(image, MiB, evict);
+    vi.advanceTimersByTime(29_999);
+    expect(evict).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(evict).toHaveBeenCalledOnce();
 });
 
 it('evicts older decoded media at the memory bound and refreshes revisited media', () => {

@@ -1,7 +1,7 @@
 //! UI-safe adapter over Lorepia's existing high-level Core contract.
 //!
 //! This crate deliberately does not redefine product behavior. Collection
-//! methods remain whole-`Vec` operations, message mutations retain
+//! compatibility methods retain whole-`Vec` results, message mutations retain
 //! `expected_head`, and chat events retain Core's current event version and
 //! variants. Host paths and credentials are represented only by
 //! non-serializable Rust boundary types.
@@ -19,6 +19,7 @@ mod discovery;
 mod dto;
 mod error;
 mod interaction;
+mod message_history;
 mod model_sync;
 mod module_lifecycle;
 mod orchestration;
@@ -31,6 +32,7 @@ mod sensitive;
 mod settings;
 mod stream;
 
+pub use message_history::{BranchMessagesPageDto, ListBranchMessagesPageInput};
 pub use settings::StorageOverviewDto;
 
 #[cfg(any(test, feature = "test-support"))]

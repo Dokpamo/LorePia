@@ -136,3 +136,17 @@ fn manifest_version_count_depth_and_aggregate_size_remain_bounded() {
     assert!(validate(&format!("{}0{}", "[".repeat(40), "]".repeat(40))).is_err());
     assert!(validate(r#"{"api_key":"forbidden"}"#).is_err());
 }
+
+#[test]
+fn validated_inline_document_preserves_original_bytes_and_rejects_invalid_authority() {
+    let connection = database();
+    let json = " {\"text\": \"한글\\n\", \"value\": 1, \"value\": 2} ";
+    let expanded = expand(&connection, Kind::Runtime, json).unwrap();
+    assert!(matches!(expanded, Cow::Borrowed(_)));
+    assert_eq!(expanded, json);
+    for invalid in ["{", r#"{"nested":{"api_key":"secret"}}"#] {
+        let error = expand(&connection, Kind::Runtime, invalid).unwrap_err();
+        assert_eq!(error.message, "stored module document exceeds limits");
+        assert_eq!(error.code, lorepia_domain::CoreErrorCode::StorageCorrupted);
+    }
+}

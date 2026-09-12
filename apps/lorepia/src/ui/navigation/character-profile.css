@@ -14,6 +14,9 @@
 }
 .seed-app .ui-overlay[data-kind='character-profile'] > .ui-page-header button {
     pointer-events: auto;
+    color: var(--ui-heading);
+    background: var(--ui-paper);
+    border-radius: 50%;
 }
 .seed-app .ui-overlay[data-kind='character-profile'] > .ui-overlay-body {
     width: 100%;

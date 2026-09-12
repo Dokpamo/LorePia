@@ -272,3 +272,22 @@ describe('provider workspace loading', () => {
         controller.destroy();
     });
 });
+
+it('refreshes credentials without serializing unused previous snapshot comparisons', async () => {
+    const { overview, client, controller } = fixture();
+    await controller.loadProviders();
+    const previous = get(controller.state).providers.workspace;
+    const stringify = vi.spyOn(JSON, 'stringify');
+    vi.mocked(client.credentialStatus).mockClear();
+    try {
+        await controller.loadProviders();
+        const compared = stringify.mock.calls.map(([value]): unknown => value);
+        for (const value of [...previous.connections, ...previous.legacy_profiles])
+            expect(compared).not.toContain(value);
+        expect(client.credentialStatus).toHaveBeenCalled();
+        expect(get(controller.state).providers.workspace.connections).toEqual(overview.connections);
+    } finally {
+        stringify.mockRestore();
+        controller.destroy();
+    }
+});

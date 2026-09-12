@@ -89,6 +89,7 @@ describe('PortableMessage', () => {
         const frame = await portableFrame(room.container);
         const doc = frameDocument(frame);
         expect(doc.querySelector('[data-portable-action="ToggleSettings"]')).not.toBeNull();
+        expect(doc.querySelector('.portable-message')?.textContent).not.toContain('Plain chat');
         expect(doc.querySelector('#background-panel')?.textContent).toContain('Panel');
         expect(doc.querySelector('#background-panel img')?.getAttribute('src')).toBe(
             `http://lorepia-asset.localhost/sha256/${SHA256}`,
@@ -635,7 +636,7 @@ describe('PortableMessage', () => {
                     channel: PORTABLE_RENDERER_CHANNEL,
                     type: 'portable_resize',
                     runtimeId: id,
-                    height: 10_000,
+                    height: 100_000,
                 },
             }),
         );

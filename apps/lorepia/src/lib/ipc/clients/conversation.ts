@@ -27,8 +27,16 @@ import type {
 import { LOREPIA_COMMANDS } from '../commands';
 
 import { ContentImportClient } from './content-import';
+import type {
+    BranchMessagesPageDto,
+    ListBranchMessagesPageInput,
+} from '../contracts/message-history';
 
 export abstract class ConversationClient extends ContentImportClient {
+    listBranchMessagesPage(input: ListBranchMessagesPageInput): Promise<BranchMessagesPageDto> {
+        return this.call(LOREPIA_COMMANDS.listBranchMessagesPage, { request: input });
+    }
+
     listConversations(characterId: string | null): Promise<ConversationDto[]> {
         if (characterId === null) {
             return this.call(LOREPIA_COMMANDS.listConversations);

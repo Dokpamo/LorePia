@@ -12,23 +12,29 @@ export function queryCharacterLibrary(
     sort: CharacterLibrarySort,
 ): SampleCharacter[] {
     const term = normalize(query);
-    return characters
-        .filter((character) =>
-            normalize(`${character.name} ${character.description}`).includes(term),
-        )
-        .sort((left, right) => {
-            const leftDate = Date.parse(left.createdAt ?? '') || 0;
-            const rightDate = Date.parse(right.createdAt ?? '') || 0;
-            const order =
-                sort === 'name'
-                    ? byName.compare(left.name, right.name)
-                    : sort === 'newest'
-                      ? rightDate - leftDate
-                      : leftDate - rightDate;
-            return (
-                order ||
-                byName.compare(left.name, right.name) ||
-                (left.id < right.id ? -1 : left.id > right.id ? 1 : 0)
-            );
-        });
+    const filtered = term
+        ? characters.filter((character) =>
+              normalize(`${character.name} ${character.description}`).includes(term),
+          )
+        : [...characters];
+    const dates = new Map(
+        sort === 'name'
+            ? []
+            : filtered.map((item) => [item.id, Date.parse(item.createdAt ?? '') || 0]),
+    );
+    return filtered.sort((left, right) => {
+        const leftDate = dates.get(left.id) ?? 0;
+        const rightDate = dates.get(right.id) ?? 0;
+        const order =
+            sort === 'name'
+                ? byName.compare(left.name, right.name)
+                : sort === 'newest'
+                  ? rightDate - leftDate
+                  : leftDate - rightDate;
+        return (
+            order ||
+            byName.compare(left.name, right.name) ||
+            (left.id < right.id ? -1 : left.id > right.id ? 1 : 0)
+        );
+    });
 }

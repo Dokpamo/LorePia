@@ -1,6 +1,6 @@
 use lorepia_domain::{
-    ConversationBranchId, ConversationId, CoreResult, GenerationId, Message, MessageRole,
-    MessageStatus, Sha256Digest,
+    ConversationBranchId, ConversationId, CoreResult, GenerationId, Message, MessageId,
+    MessageRole, MessageStatus, Sha256Digest,
 };
 use lorepia_storage::MessageTransformDiagnostic;
 use sha2::{Digest, Sha256};
@@ -21,6 +21,19 @@ pub struct MessagePresentation {
     pub transform_diagnostics: Vec<MessageTransformDiagnostic>,
 }
 
+/// A bounded display window and its position in one branch snapshot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessagePresentationPage {
+    pub messages: Vec<MessagePresentation>,
+    pub has_older: bool,
+    pub has_newer: bool,
+    pub head_message_id: Option<MessageId>,
+    pub total_messages: u64,
+    pub start_index: u64,
+    pub retained_message_ids: Option<Vec<MessageId>>,
+    pub last_assistant_message: Option<MessagePresentation>,
+}
+
 impl MessagePresentation {
     /// Produces the existing product message shape for render-only clients.
     /// This consumes a clone owned by the caller and never mutates storage.
@@ -32,6 +45,47 @@ impl MessagePresentation {
 }
 
 impl Core {
+    /// Reads one bounded page and verifies display sidecars only for its messages.
+    pub fn list_branch_message_presentations_page(
+        &self,
+        branch_id: &ConversationBranchId,
+        before: Option<&MessageId>,
+        after: Option<&MessageId>,
+        limit: u32,
+        check_message_ids: Option<&[MessageId]>,
+        include_last_assistant: bool,
+    ) -> CoreResult<MessagePresentationPage> {
+        let page = self.storage().list_branch_messages_page(
+            branch_id,
+            before,
+            after,
+            limit,
+            check_message_ids,
+            include_last_assistant,
+        )?;
+        let messages = self.present_messages(page.messages)?;
+        let last_assistant_message = match page.last_assistant_message {
+            Some(message) => {
+                if let Some(existing) = messages.iter().find(|item| item.message.id == message.id) {
+                    Some(existing.clone())
+                } else {
+                    self.present_messages(vec![message])?.pop()
+                }
+            }
+            None => None,
+        };
+        Ok(MessagePresentationPage {
+            messages,
+            last_assistant_message,
+            has_older: page.has_older,
+            has_newer: page.has_newer,
+            head_message_id: page.head_message_id,
+            total_messages: page.total_messages,
+            start_index: page.start_index,
+            retained_message_ids: page.retained_message_ids,
+        })
+    }
+
     /// Lists one branch with hash-verified, Core-owned display projections.
     /// Canonical message content remains available on every item.
     pub fn list_branch_message_presentations(

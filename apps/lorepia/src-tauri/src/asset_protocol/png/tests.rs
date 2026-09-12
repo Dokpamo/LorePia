@@ -60,3 +60,64 @@ fn validates_ancillary_chunks_too() {
     bytes[41] ^= 1;
     assert!(!has_valid_chunk_checksums(&bytes));
 }
+
+fn scalar_update(mut crc: u32, bytes: &[u8]) -> u32 {
+    for byte in bytes {
+        crc ^= u32::from(*byte);
+        for _ in 0..8 {
+            crc = (crc >> 1) ^ if crc & 1 == 1 { 0xedb8_8320 } else { 0 };
+        }
+    }
+    crc
+}
+
+#[test]
+fn crc_matches_scalar_across_lengths_alignments_and_split_updates() {
+    let mut seed = 0x92a5_734b_u32;
+    let bytes: Vec<_> = (0..65_552)
+        .map(|_| {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            seed.to_le_bytes()[0]
+        })
+        .collect();
+    for offset in 0..16 {
+        for length in (0..=257).chain([4095, 4096, 16_384, 65_536]) {
+            let input = &bytes[offset..offset + length];
+            let split = length / 3;
+            let intermediate = scalar_update(u32::MAX, &input[..split]);
+            let expected = !scalar_update(intermediate, &input[split..]);
+            assert_eq!(crc32(input), expected, "offset {offset}, length {length}");
+        }
+    }
+    assert_eq!(crc32(&[]), 0);
+    assert_eq!(crc32(b"123456789"), 0xcbf4_3926);
+}
+
+#[test]
+fn arbitrary_chunk_boundaries_preserve_all_payload_corruption_checks() {
+    let valid = valid_test_image();
+    let mut image = valid[..33].to_vec();
+    let mut payload_offsets = Vec::new();
+    for length in [1_usize, 7, 8, 9, 15, 16, 17, 255, 4096] {
+        image.extend_from_slice(&u32::try_from(length).unwrap().to_be_bytes());
+        let checksum_start = image.len();
+        image.extend_from_slice(b"IDAT");
+        payload_offsets.push(image.len());
+        image.extend((0..length).map(|index| index.to_le_bytes()[0]));
+        let checksum = !scalar_update(u32::MAX, &image[checksum_start..]);
+        image.extend_from_slice(&checksum.to_be_bytes());
+    }
+    image.extend_from_slice(&valid[valid.len() - 12..]);
+    // This validator checks container CRC integrity, not pixel decoding.
+    assert!(has_valid_chunk_checksums(&image));
+    for offset in payload_offsets {
+        image[offset] ^= 1;
+        assert!(
+            !has_valid_chunk_checksums(&image),
+            "payload offset {offset}"
+        );
+        image[offset] ^= 1;
+    }
+}

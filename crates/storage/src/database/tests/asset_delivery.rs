@@ -1,4 +1,39 @@
 #[test]
+#[ignore = "manual synthetic read-path measurement, not a wall-clock gate"]
+fn prepared_read_paths_reuse_sql_without_caching_rows() {
+    let root = tempdir().expect("synthetic root");
+    let storage = Storage::open(root.path()).expect("open storage");
+    let missing = AssetId::from("resource-benchmark-missing");
+    for capacity in [0, 16, 0, 16] {
+        storage
+            .connection()
+            .expect("connection")
+            .set_prepared_statement_cache_capacity(capacity);
+        let started = std::time::Instant::now();
+        for _ in 0..2_000 {
+            assert!(storage.list_characters().expect("characters").is_empty());
+            assert!(
+                storage
+                    .list_conversations()
+                    .expect("conversations")
+                    .is_empty()
+            );
+            assert_eq!(
+                storage
+                    .resolve_approved_asset_by_id(&missing)
+                    .expect_err("missing asset")
+                    .code,
+                CoreErrorCode::NotFound
+            );
+        }
+        eprintln!(
+            "6,000 production read calls: statement_cache={capacity}, elapsed_us={}",
+            started.elapsed().as_micros()
+        );
+    }
+}
+
+#[test]
 fn import_commit_observer_proves_cas_durability_precedes_sqlite_commit() {
     let root = tempdir().expect("temp root");
     let mut source = NamedTempFile::new_in(root.path()).expect("source staging");
@@ -283,9 +318,15 @@ fn approved_asset_delivery_rejects_oversized_images_before_hashing() {
         .expect("commit approved asset");
 
     for error in [
-        storage.resolve_approved_asset_by_id(&descriptor.id).unwrap_err(),
-        storage.resolve_approved_asset_by_sha256(&asset_digest).unwrap_err(),
-        storage.read_approved_asset_range(&asset_digest, 0, 1).unwrap_err(),
+        storage
+            .resolve_approved_asset_by_id(&descriptor.id)
+            .unwrap_err(),
+        storage
+            .resolve_approved_asset_by_sha256(&asset_digest)
+            .unwrap_err(),
+        storage
+            .read_approved_asset_range(&asset_digest, 0, 1)
+            .unwrap_err(),
     ] {
         assert_eq!(error.code, CoreErrorCode::UnsafeArchive);
         assert!(!error.recoverable);

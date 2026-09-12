@@ -12,6 +12,9 @@
         onsettings,
         oninteract,
         busy = false,
+        stoppable = busy,
+        inputReady = true,
+        submitting = false,
         onstop,
         ondock,
     }: {
@@ -21,6 +24,9 @@
         onsettings: (trigger: HTMLButtonElement) => void;
         oninteract: () => void;
         busy?: boolean;
+        stoppable?: boolean;
+        inputReady?: boolean;
+        submitting?: boolean;
         onstop?: () => void;
         ondock?: (metrics: ComposerDockMetrics) => void;
     } = $props();
@@ -34,7 +40,7 @@
     const expanded = $derived(focused || draft.trim().length > 0);
     const canFullscreen = $derived(draft.trim().length > 0 && (lines >= 2 || overflows));
     function send() {
-        if (busy || composing || !draft.trim()) return;
+        if (busy || !inputReady || composing || !draft.trim()) return;
         onsend();
         input.focus({ preventScroll: true });
     }
@@ -76,6 +82,7 @@
     class="ui-compose"
     aria-label={$tr('uiPreview.compose')}
     data-ui-no-swipe
+    aria-busy={submitting}
     onsubmit={(event) => {
         event.preventDefault();
         send();
@@ -109,6 +116,7 @@
                 aria-label={$tr('uiPreview.message')}
                 placeholder={$tr('uiPreview.messagePlaceholder')}
                 rows="1"
+                disabled={!inputReady}
                 maxlength="131072"
                 use:measureComposer={{
                     value: draft,
@@ -145,15 +153,17 @@
                 >
             </div>
             <div class="ui-compose-send">
-                {#if busy}<IconButton label={$tr('uiPreview.stopReply')} onclick={() => onstop?.()}
-                        ><Square /></IconButton
+                {#if stoppable}<IconButton
+                        label={$tr('uiPreview.stopReply')}
+                        onclick={() => onstop?.()}><Square /></IconButton
                     >
                 {:else}<IconButton
                         label={$tr('uiPreview.send')}
-                        disabled={!draft.trim() || composing}
+                        disabled={busy || !inputReady || !draft.trim() || composing}
                         onclick={send}><ArrowUp /></IconButton
                     >{/if}
             </div>
         </div>
     </div>
+    {#if submitting && !stoppable}<p role="status">{$tr('ux.sending')}</p>{/if}
 </form>

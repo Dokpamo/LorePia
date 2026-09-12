@@ -100,7 +100,7 @@ impl Storage {
     pub fn list_conversations(&self) -> CoreResult<Vec<Conversation>> {
         let connection = self.connection()?;
         let mut statement = connection
-            .prepare(
+            .prepare_cached(
                 "SELECT id, character_id, title, created_at, updated_at
                  FROM conversations ORDER BY updated_at DESC, id",
             )
@@ -157,7 +157,7 @@ impl Storage {
     ) -> CoreResult<Vec<Conversation>> {
         let connection = self.connection()?;
         let mut statement = connection
-            .prepare(
+            .prepare_cached(
                 "SELECT id, character_id, title, created_at, updated_at
                  FROM conversations
                  WHERE character_id = ?1

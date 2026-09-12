@@ -2,30 +2,56 @@
 //! This checks container integrity, not decompressed pixels or image semantics.
 
 const SIGNATURE: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
-const CRC_TABLE: [u32; 256] = crc_table();
+const CRC_TABLE: [[u32; 256]; 8] = crc_table();
 
-const fn crc_table() -> [u32; 256] {
-    let mut table = [0; 256];
+const fn crc_table() -> [[u32; 256]; 8] {
+    let mut table = [[0; 256]; 8];
     let mut index = 0;
     let mut seed = 0_u32;
-    while index < table.len() {
+    while index < 256 {
         let mut value = seed;
         let mut bit = 0;
         while bit < 8 {
             value = (value >> 1) ^ if value & 1 == 1 { 0xedb8_8320 } else { 0 };
             bit += 1;
         }
-        table[index] = value;
+        table[0][index] = value;
         index += 1;
         seed += 1;
+    }
+    index = 0;
+    while index < 256 {
+        let mut value = table[0][index];
+        let mut slice = 1;
+        while slice < 8 {
+            value = (value >> 8) ^ table[0][(value & 0xff) as usize];
+            table[slice][index] = value;
+            slice += 1;
+        }
+        index += 1;
     }
     table
 }
 
 fn crc32(bytes: &[u8]) -> u32 {
     let mut crc = u32::MAX;
-    for byte in bytes {
-        crc = (crc >> 8) ^ CRC_TABLE[usize::from(crc.to_le_bytes()[0] ^ byte)];
+    let mut blocks = bytes.chunks_exact(8);
+    // Each table advances one byte by its remaining zero bytes. Explicit
+    // little-endian words avoid alignment and host-endianness assumptions.
+    for block in &mut blocks {
+        let word = crc ^ u32::from_le_bytes(block[..4].try_into().expect("four CRC bytes"));
+        let word = word.to_le_bytes();
+        crc = CRC_TABLE[7][usize::from(word[0])]
+            ^ CRC_TABLE[6][usize::from(word[1])]
+            ^ CRC_TABLE[5][usize::from(word[2])]
+            ^ CRC_TABLE[4][usize::from(word[3])]
+            ^ CRC_TABLE[3][usize::from(block[4])]
+            ^ CRC_TABLE[2][usize::from(block[5])]
+            ^ CRC_TABLE[1][usize::from(block[6])]
+            ^ CRC_TABLE[0][usize::from(block[7])];
+    }
+    for byte in blocks.remainder() {
+        crc = (crc >> 8) ^ CRC_TABLE[0][usize::from(crc.to_le_bytes()[0] ^ byte)];
     }
     !crc
 }

@@ -22,6 +22,9 @@ export interface SampleConversation {
     date: string;
     messages: SampleMessage[];
     mode?: ChatDisplayMode;
+    scrollMessages?: MessageDto[];
+    messageOffset?: number;
+    totalMessages?: number;
     branches?: SampleBranch[];
     activeBranchId?: string;
     responsePreview?: 'complete' | 'failed' | 'slow';

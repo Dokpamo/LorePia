@@ -35,6 +35,7 @@
         mode,
         onclose,
         root = false,
+        active = true,
         initialSection,
         ondetail,
     }: {
@@ -44,6 +45,7 @@
         mode: 'app-settings' | 'providers' | 'studio';
         onclose: () => void;
         root?: boolean;
+        active?: boolean;
         initialSection?: Section;
         ondetail?: (active: boolean) => void;
     } = $props();
@@ -87,13 +89,17 @@
         contentPackageController: packages,
     });
     $effect(() => {
-        if (ready) {
+        if (ready && active && section === 'persona') {
             const id = conversationId;
             untrack(() => void personas.loadContext(id));
         }
     });
     $effect(() => {
-        if (ready) {
+        if (
+            ready &&
+            active &&
+            (section === 'prompt' || section === 'memory' || section === 'plugins')
+        ) {
             const conversation = conversationId;
             const branch = branchId;
             untrack(() => void orchestration.loadContext(conversation, branch));

@@ -65,7 +65,13 @@ export interface LorepiaAppState {
     } | null;
     conversation_state: ConversationStateDto | null;
     branches: ConversationBranchDto[];
-    messages: SectionState & { items: MessageDto[] };
+    messages: SectionState & {
+        items: MessageDto[];
+        start_index?: number;
+        total_messages?: number;
+        head_message_id?: string | null;
+        last_assistant_message?: MessageDto | null;
+    };
     memory_query_retries: MemoryQueryRetryState;
     chat: ChatState;
     providers: SectionState & { workspace: ProviderWorkspaceDto };
