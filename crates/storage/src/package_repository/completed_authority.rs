@@ -478,7 +478,11 @@ mod tests {
                     match fs::rename(&replacement, &path) {
                         Ok(()) => {}
                         #[cfg(windows)]
-                        Err(error) if error.raw_os_error() == Some(32) => blocked.set(true),
+                        Err(error) if matches!(error.raw_os_error(), Some(5 | 32)) => {
+                            // Windows may report access denied for replacement
+                            // of a destination opened without delete sharing.
+                            blocked.set(true);
+                        }
                         Err(error) => panic!("replace verified source: {error}"),
                     }
                 }
