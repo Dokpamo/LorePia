@@ -88,3 +88,18 @@ and runtime-shutdown reconnection checks. Strict transport construction/key reus
 remains covered by pool unit tests. No sleeps, production transport changes,
 dependency changes or weakened credential/network policy. Rerun the focused
 transport binary and complete the workspace gate.
+
+### Verification-tool installation repair
+
+Security run 34701904888 failed before auditing the application: the existing
+audit action runs unlocked `cargo install cargo-audit`, whose 0.22.2 resolution
+selected a broken jiff 0.2.36 package missing four include_str documentation files.
+The installed action has no version/locked input but reuses an existing PATH tool.
+The cargo-audit 0.22.2 distribution lockfile selects intact jiff 0.2.28.
+Before editing security.yml, inventory the workflow/checker and exact pinned
+action implementation; the 102 Python baseline tests already cover the workflow
+checker. Add one explicit same-version `--locked --force` installation step,
+preserve the action, its audit policy, permissions and all checks. This belongs
+to completing the authorized verification gate; no app dependency/lockfile or
+security exception changes. Expected delta: two YAML lines and this evidence.
+Rerun workflow checker tests and confirm actual RustSec CI installation/audit.

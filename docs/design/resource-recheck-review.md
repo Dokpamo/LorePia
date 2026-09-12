@@ -37,17 +37,28 @@ Storage는 본문과 표시 sidecar·진단을 같은 읽기 transaction에서 �
 
 ## 검증 기록
 
-프런트 전체 162개 파일/880개 테스트, Lua/regex sandbox 후속 검사,
-format·lint·TypeScript·Svelte 검사를 통과했다. 수정한 계보/hook/페이지 표적은
-각각 5/2/10개, Shell의 페이지/snapshot 표적 9개를 통과했다. 통합 Rust/Python
-검사의 최종 결과는 PR #54 본문의 validation과 checks에 기록한다. Windows
-공유 동작은 실제 Windows CI 결과로 판단하며 checks가 원본 기록이다.
+macOS ARM64, Rust 1.96.0, Node 24.18.1에서 전체 Rust 1,981개 테스트를
+통과했다(기존 ignored 14개, 실패 0개). 프런트 전체 162개 파일/880개 테스트,
+Lua/regex sandbox·GC 메모리 회귀 검사, production build와
+format·lint·TypeScript·Svelte 검사도 통과했다. 전체 workspace Clippy의
+경고 금지 검사와 rustfmt, Python 102개 테스트 및 IPC·architecture·context·
+i18n·archive·workflow 검사를 통과했다. 수정한 계보/hook/페이지 표적은
+각각 5/2/10개, Shell의 페이지/snapshot 표적 9개를 통과했다. 플랫폼 CI의
+최종 결과는 PR #54 본문의 validation과 checks에 기록한다. Windows 공유
+동작은 실제 Windows CI 결과로 판단하며 checks가 원본 기록이다.
 
 전체 Rust 실행 중 direct-reqwest 대조군의 정확히 1개 TCP 가정도 교정했다.
 Hyper의 idle 반영과 다음 연결 시작은 경쟁할 수 있어, 완료된 body만으로
 정확한 TCP 개수를 보장할 수 없다. 통합 검사는 20회 요청에서 실제 연결
 재사용과 요청 수·credential 분리를 확인하며, 정확한 transport 생성/정책 key는
 기존 pool 단위 검사가 확인한다. 제품 전송 정책이나 코드는 변경하지 않았다.
+
+RustSec CI에는 검사 도구 설치 문제도 있었다. 고정 action의 기본 설치가
+버전/lockfile을 고정하지 않아 문서 파일이 빠진 jiff 0.2.36을 선택했다.
+같은 cargo-audit 0.22.2를 배포 lockfile로 미리 설치하도록 고쳤다. 앱의
+Cargo.lock이나 감사 제외 목록은 변경하지 않았다. 기존 action이 PATH의
+도구를 재사용하는 동작은 [고정 action 코드](https://github.com/rustsec/audit-check/blob/69366f33c96575abad1ee0dba8212993eecbe998/src/main.ts)와
+실행 번들에서 확인했다. `--locked`의 의미는 [Cargo 설치 문서](https://doc.rust-lang.org/cargo/commands/cargo-install.html)를 따른다.
 
 ## 보장 범위
 
