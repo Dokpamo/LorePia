@@ -25,11 +25,12 @@ base64 = { version = "0.23.1", default-features = false, features = ["std"] }
 chrono = { version = "0.4", features = ["serde"] }
 futures-util = "0.3"
 hex = "0.4"
+imagesize = { version = "=0.15.0", default-features = false, features = ["png", "jpeg", "gif", "webp", "heif"] }
 psl = "2.1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 regex = "1.11"
 ring = "0.17"
-rusqlite = { version = "0.40.2", default-features = false, features = ["backup", "bundled", "cache", "fallible_uint", "functions"] }
+rusqlite = { version = "0.40.2", default-features = false, features = ["backup", "bundled", "cache", "fallible_uint", "functions", "hooks"] }
 rustix = { version = "1.1", features = ["fs"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

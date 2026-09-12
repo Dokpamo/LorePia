@@ -159,7 +159,10 @@ impl Core {
         credential_broker: &dyn TaskCredentialBroker,
         cancelled: tokio::sync::watch::Receiver<bool>,
     ) -> CoreResult<Option<MemoryJobExecutionResult>> {
-        let Some(entry) = self.storage().claim_next_memory_job(Utc::now())? else {
+        let Some(entry) = self
+            .run_blocking(|core| core.storage().claim_next_memory_job(Utc::now()))
+            .await?
+        else {
             return Ok(None);
         };
         let expected_running_revision = entry.revision;
@@ -201,7 +204,13 @@ impl Core {
                 Utc::now(),
             );
         }
-        let Ok(prepared) = self.prepare_claimed_memory_summary(&entry) else {
+        let (entry, prepared) = self
+            .run_blocking(move |core| {
+                let prepared = core.prepare_claimed_memory_summary(&entry);
+                Ok((entry, prepared))
+            })
+            .await?;
+        let Ok(prepared) = prepared else {
             return self.finish_memory_job_execution(
                 &entry,
                 expected_running_revision,

@@ -350,7 +350,24 @@ export class ConversationController {
                 conversation.id,
                 branchId,
             );
-            const messages = await loadRecentBranchMessages(this.context.client, branchId);
+            if (!this.epoch.isCurrent(epoch)) return;
+            const messages = await loadRecentBranchMessages(
+                this.context.client,
+                branchId,
+                (initial) => {
+                    if (!this.epoch.isCurrent(epoch)) return false;
+                    this.context.update((state) => ({
+                        ...state,
+                        conversation_state: conversationState,
+                        messages: {
+                            phase: 'loading',
+                            error: null,
+                            items: initial,
+                            ...messageWindowMetadata(initial),
+                        },
+                    }));
+                },
+            );
             if (!this.epoch.isCurrent(epoch)) return;
             this.context.update((state) => ({
                 ...state,

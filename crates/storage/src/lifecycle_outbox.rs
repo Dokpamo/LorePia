@@ -1,3 +1,5 @@
+mod claim;
+
 use chrono::{DateTime, Utc};
 use lorepia_domain::{
     ConversationBranchId, ConversationId, CoreError, CoreErrorCode, CoreResult, GenerationId,
@@ -93,49 +95,7 @@ impl Storage {
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage_db_error)?;
         let occurrence_ids = {
-            let mut statement = transaction
-                .prepare(
-                    "SELECT occurrence_id
-                     FROM core_lifecycle_outbox
-                     WHERE (
-                         (status = 'pending' AND available_at <= ?1)
-                         OR (status = 'claimed' AND lease_until <= ?1)
-                     )
-                     AND NOT EXISTS (
-                         SELECT 1
-                         FROM core_lifecycle_outbox AS predecessor
-                         WHERE predecessor.conversation_id =
-                                   core_lifecycle_outbox.conversation_id
-                           AND predecessor.branch_id =
-                                   core_lifecycle_outbox.branch_id
-                           AND predecessor.status != 'acknowledged'
-                           AND (
-                               predecessor.occurred_at <
-                                   core_lifecycle_outbox.occurred_at
-                               OR (
-                                   predecessor.occurred_at =
-                                       core_lifecycle_outbox.occurred_at
-                                   AND predecessor.occurrence_id <
-                                       core_lifecycle_outbox.occurrence_id
-                               )
-                           )
-                     )
-                     AND NOT (
-                         event_kind = 'message_committed'
-                         AND generation_id IS NOT NULL
-                         AND EXISTS (
-                             SELECT 1
-                             FROM core_lifecycle_outbox AS predecessor
-                             WHERE predecessor.generation_id =
-                                       core_lifecycle_outbox.generation_id
-                               AND predecessor.event_kind = 'after_generation'
-                               AND predecessor.status != 'acknowledged'
-                         )
-                     )
-                     ORDER BY occurred_at, occurrence_id
-                     LIMIT ?2",
-                )
-                .map_err(storage_db_error)?;
+            let mut statement = transaction.prepare(claim::SQL).map_err(storage_db_error)?;
             statement
                 .query_map(
                     params![

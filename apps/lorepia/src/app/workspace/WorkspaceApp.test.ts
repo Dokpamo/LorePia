@@ -26,6 +26,7 @@ describe('connected workspace', () => {
         const character = required((await client.listCharacters())[0]);
         const conversation = required((await client.listConversations(character.id))[0]);
         const readProfile = vi.spyOn(client, 'getCharacterRenderProfile');
+        const storageReads = vi.spyOn(Storage.prototype, 'getItem');
         const sendMessage = vi.spyOn(client, 'sendMessage');
         render(WorkspaceApp, { client });
         await fireEvent.click(screen.getByRole('button', { name: t('navigation.chats') }));
@@ -46,11 +47,18 @@ describe('connected workspace', () => {
             ).toBe(true),
         );
         const calls = readProfile.mock.calls.length;
+        const modeReads = () =>
+            storageReads.mock.calls.filter(
+                ([key]) => key === `lorepia.chatDisplay.${conversation.id}`,
+            ).length;
+        const initialModeReads = modeReads();
         await fireEvent.input(input, { target: { value: 'A new message' } });
         await fireEvent.submit(required(input.closest('form') ?? undefined));
         await waitFor(() => expect(sendMessage).toHaveBeenCalled());
         await waitFor(() => expect(input).toHaveValue(''));
         expect(readProfile.mock.calls.length).toBe(calls);
+        expect(modeReads()).toBe(initialModeReads);
+        storageReads.mockRestore();
     });
     it('keeps the empty-library CTA out of bootstrap and a pending character list', async () => {
         const client = createPreviewClient();

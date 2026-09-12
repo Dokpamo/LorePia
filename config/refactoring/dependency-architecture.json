@@ -293,7 +293,8 @@
         "bundled",
         "cache",
         "fallible_uint",
-        "functions"
+        "functions",
+        "hooks"
       ],
       "from": "lorepia-core",
       "kind": "dev",
@@ -845,7 +846,8 @@
         "bundled",
         "cache",
         "fallible_uint",
-        "functions"
+        "functions",
+        "hooks"
       ],
       "from": "lorepia-shell-api",
       "kind": "dev",
@@ -863,7 +865,8 @@
         "bundled",
         "cache",
         "fallible_uint",
-        "functions"
+        "functions",
+        "hooks"
       ],
       "from": "lorepia-shell-api",
       "kind": "normal",
@@ -1008,11 +1011,30 @@
     {
       "default_features": false,
       "features": [
+        "gif",
+        "heif",
+        "jpeg",
+        "png",
+        "webp"
+      ],
+      "from": "lorepia-storage",
+      "kind": "normal",
+      "optional": false,
+      "package": "imagesize",
+      "rename": null,
+      "requirement": "=0.15.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": false,
+      "features": [
         "backup",
         "bundled",
         "cache",
         "fallible_uint",
-        "functions"
+        "functions",
+        "hooks"
       ],
       "from": "lorepia-storage",
       "kind": "normal",

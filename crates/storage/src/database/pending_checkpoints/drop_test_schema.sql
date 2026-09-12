@@ -1,0 +1,5 @@
+DROP VIEW messages_with_checkpoints;
+DROP TRIGGER pending_assistant_checkpoint_content_replaced;
+DROP TRIGGER pending_assistant_checkpoint_owner_closed;
+DROP TABLE pending_assistant_checkpoint_chunks;
+DROP TABLE pending_assistant_checkpoints;

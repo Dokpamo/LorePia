@@ -11,6 +11,7 @@ use sha2::{Digest, Sha256};
 
 use crate::database::{Storage, storage_db_error};
 
+pub(crate) use loading::{read_page_projections, verify_batch};
 pub(crate) use persistence::persist_terminal_message_display_projection;
 
 /// Display transforms share the pure engine's 256 Ki-character ceiling. UTF-8

@@ -7,7 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use chrono::{Duration as ChronoDuration, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use lorepia_core::{
     ContentModuleActivationRequest, ContentModuleBindingDraft, ContentModuleRuntimeTarget, Core,
     CoreConfig, CoreErrorCode, CoreLifecycleDeliveryStatus, ModuleActivationApproval,
@@ -583,24 +583,35 @@ fn future_branch_head_drives_deadline_and_wakes_its_immediate_successor() {
     assert!(
         storage
             .claim_interaction_derived_events(
-                Utc::now(),
-                Utc::now() + ChronoDuration::seconds(30),
+                retry_at - ChronoDuration::milliseconds(1),
+                retry_at + ChronoDuration::seconds(30),
                 1,
             )
             .expect("attempt claim behind future predecessor")
             .is_empty(),
         "an immediate same-branch successor must remain behind its future predecessor"
     );
-    drop(storage);
-
-    let core = reopen_core(&root);
+    let mut due = storage
+        .claim_interaction_derived_events(retry_at, retry_at + ChronoDuration::seconds(30), 2)
+        .expect("claim at the exact predecessor deadline");
+    assert_eq!(due.len(), 1);
+    let due_head = due.pop().expect("only the predecessor is eligible");
+    assert_eq!(due_head.occurrence_id, occurrence.occurrence_id);
     assert!(
-        core.health_check()
-            .expect("read queued recovery health")
-            .recovery_pending
+        storage
+            .claim_interaction_derived_events(retry_at, retry_at + ChronoDuration::seconds(30), 2)
+            .expect("attempt claim behind claimed predecessor")
+            .is_empty()
     );
+    storage
+        .retry_interaction_derived_event_after(
+            &due_head.occurrence_id,
+            due_head.delivery_attempts,
+            retry_at,
+        )
+        .expect("restore the real-time predecessor deadline");
     let before = Connection::open(active_database_path(root.path()))
-        .expect("inspect pre-deadline materialization");
+        .expect("inspect materialization before Core owns the backlog");
     assert_eq!(
         scalar_count(
             &before,
@@ -609,6 +620,11 @@ fn future_branch_head_drives_deadline_and_wakes_its_immediate_successor() {
         0
     );
     drop(before);
+    drop(storage);
+
+    // Reopening may itself cross the deadline and legitimately drain both items.
+    // Persisted claim/ack times prove ordering without assuming fast startup.
+    let core = reopen_core(&root);
     wait_for_recovery_idle(&core, Duration::from_secs(5));
     assert!(
         !core
@@ -617,7 +633,46 @@ fn future_branch_head_drives_deadline_and_wakes_its_immediate_successor() {
             .recovery_pending
     );
     assert_materialization_counts(&root, 2);
+    assert_causal_deadline(&root, retry_at);
     assert_bounded_drop(core);
+}
+
+fn assert_causal_deadline(root: &TempDir, retry_at: DateTime<Utc>) {
+    let times = {
+        let connection = Connection::open(active_database_path(root.path()))
+            .expect("inspect actual supervisor claim and acknowledgement times");
+        let mut statement = connection
+            .prepare(
+                "SELECT available_at, acknowledged_at FROM interaction_derived_event_outbox
+                 ORDER BY chain_ordinal",
+            )
+            .expect("prepare causal timing query");
+        statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .expect("read causal timings")
+            .map(|row| {
+                let (claimed, acknowledged) = row.expect("read acknowledged occurrence");
+                (
+                    DateTime::parse_from_rfc3339(&claimed).expect("parse actual claim time"),
+                    DateTime::parse_from_rfc3339(&acknowledged)
+                        .expect("parse acknowledgement time"),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(times.len(), 2);
+    assert!(
+        times[0].0 >= retry_at,
+        "predecessor was claimed before its deadline"
+    );
+    assert!(times[0].1 >= times[0].0);
+    assert!(
+        times[1].0 >= times[0].1,
+        "successor overtook its predecessor"
+    );
+    assert!(times[1].1 >= times[1].0);
 }
 
 #[test]
@@ -640,6 +695,7 @@ fn independent_immediate_branch_is_not_hidden_by_a_future_branch_head() {
         )
         .expect("defer one independent branch");
 
+    let before_deadline = retry_at - ChronoDuration::milliseconds(1);
     let status = fixture
         .storage
         .interaction_derived_event_supervisor_status()
@@ -648,12 +704,16 @@ fn independent_immediate_branch_is_not_hidden_by_a_future_branch_head() {
     assert!(
         status
             .next_available_at
-            .is_some_and(|available_at| available_at <= Utc::now()),
+            .is_some_and(|available_at| available_at <= before_deadline),
         "an independent immediate branch must set the runnable deadline"
     );
     let immediate = fixture
         .storage
-        .claim_interaction_derived_events(Utc::now(), Utc::now() + ChronoDuration::seconds(30), 1)
+        .claim_interaction_derived_events(
+            before_deadline,
+            before_deadline + ChronoDuration::seconds(30),
+            1,
+        )
         .expect("claim independent immediate branch")
         .pop()
         .expect("independent immediate occurrence");

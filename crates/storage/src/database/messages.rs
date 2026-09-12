@@ -116,7 +116,7 @@ impl Storage {
             .prepare_cached(
                 "SELECT id, conversation_id, parent_id, role, content, status,
                         generation_id, created_at
-                 FROM messages WHERE conversation_id = ?1
+                 FROM messages_with_checkpoints WHERE conversation_id = ?1
                  ORDER BY created_at, id",
             )
             .map_err(storage_db_error)?;
@@ -142,7 +142,7 @@ impl Storage {
                           messages.role, messages.content, messages.status,
                           messages.generation_id, messages.created_at, 0
                    FROM conversation_branches
-                   JOIN messages
+                   JOIN messages_with_checkpoints AS messages
                      ON messages.conversation_id = conversation_branches.conversation_id
                     AND messages.id = conversation_branches.head_message_id
                    WHERE conversation_branches.id = ?1
@@ -150,7 +150,7 @@ impl Storage {
                    SELECT parent.id, parent.conversation_id, parent.parent_id,
                           parent.role, parent.content, parent.status,
                           parent.generation_id, parent.created_at, lineage.depth + 1
-                   FROM messages AS parent
+                   FROM messages_with_checkpoints AS parent
                    JOIN lineage
                      ON parent.conversation_id = lineage.conversation_id
                     AND parent.id = lineage.parent_id
@@ -376,7 +376,7 @@ impl Storage {
                  FROM (
                    SELECT id, conversation_id, parent_id, role, content, status,
                           generation_id, created_at
-                   FROM messages
+                   FROM messages_with_checkpoints
                    WHERE conversation_id = ?1
                      AND role != 'system'
                      AND length(CAST(content AS BLOB)) <= ?3

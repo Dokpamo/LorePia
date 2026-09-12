@@ -23,6 +23,7 @@ use crate::app::{
 
 pub(in crate::app) struct GenerationTask {
     pub(in crate::app) storage: Arc<Storage>,
+    pub(in crate::app) blocking: crate::app::runtime_control::BlockingWork,
     pub(in crate::app) active_generations: Arc<GenerationRegistry>,
     pub(in crate::app) event_bus: broadcast::Sender<ChatEvent>,
     pub(in crate::app) branch_id: ConversationBranchId,
@@ -77,6 +78,7 @@ pub(in crate::app) struct GenerationEventForwardingContext {
     pub(in crate::app) active_generations: Arc<GenerationRegistry>,
     pub(in crate::app) event_bus: broadcast::Sender<ChatEvent>,
     pub(in crate::app) storage: Arc<Storage>,
+    pub(in crate::app) blocking: crate::app::runtime_control::BlockingWork,
     pub(in crate::app) checkpoint: Message,
     pub(in crate::app) branch_id: ConversationBranchId,
     pub(in crate::app) assistant_message_id: MessageId,
@@ -173,6 +175,7 @@ impl Core {
         let generation_id = request.generation_id.clone();
         let task = launch.into_task(
             Arc::clone(&self.inner.storage),
+            self.inner.runtime.blocking(),
             self.inner.event_bus.clone(),
             branch_id,
             request,

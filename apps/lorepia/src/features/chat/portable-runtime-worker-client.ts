@@ -130,14 +130,6 @@ export class PortableRuntimeWorkerClient {
             requestId,
             operation,
         };
-        if (!portableRuntimeMessageWithinLimit(message)) {
-            return Promise.reject(
-                new PortableRuntimeWorkerError(
-                    'protocol-error',
-                    'portable runtime worker request exceeds the message limit',
-                ),
-            );
-        }
         const outbound = clonePortableRuntimeMessageValue(message);
         if (!outbound.ok || !isPortableRuntimeMainMessage(outbound.value)) {
             return Promise.reject(

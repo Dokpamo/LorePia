@@ -60,12 +60,18 @@ impl Storage {
         crate::model_sync::recover_interrupted_model_sync_jobs(&mut connection)?;
         remove_abandoned_staging_files(&root.join("staging"))?;
 
+        let change_tracking = super::change_tracking::ChangeTracking::install(&connection)?;
         let storage = Self {
+            change_tracking,
             root,
             cas_mutation: Mutex::new(()),
             connection_metrics: DatabaseConnectionMetricState::default(),
             connection: Mutex::new(connection),
             verified_asset_cache: Mutex::new(VerifiedAssetCache::default()),
+            lineage_cache: Mutex::new(super::lineage_cache::LineageCache::default()),
+            checkpoint_proofs: Mutex::new(
+                super::pending_checkpoints::CheckpointProofCache::default(),
+            ),
             #[cfg(test)]
             approved_asset_hash_verifications: AtomicUsize::new(0),
             _owner_lock: owner_lock,

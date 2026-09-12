@@ -6,6 +6,7 @@
 //! bytes.
 
 mod admission;
+#[cfg(test)]
 mod png;
 
 pub(crate) use admission::AssetProtocolAdmission;
@@ -136,16 +137,8 @@ fn handle_with_backend(
     if request.method() == Method::HEAD {
         return finish(builder, Vec::new());
     }
-    // A partial PNG response must not bypass validation of the complete image.
-    let is_png = descriptor.media_type == "image/png";
-    let read_range = if is_png {
-        ByteRange {
-            start: 0,
-            length: descriptor.size_bytes,
-        }
-    } else {
-        response_range
-    };
+    // Storage validates the complete image on its identity-checked cold lease.
+    let read_range = response_range;
     if !permit.reserve_bytes(read_range.length) {
         return overloaded_response();
     }
@@ -156,22 +149,17 @@ fn handle_with_backend(
     if verified.descriptor != descriptor || verified.start != read_range.start {
         return empty(StatusCode::INTERNAL_SERVER_ERROR);
     }
-    let mut body = verified.bytes;
+    if descriptor.media_type.starts_with("image/")
+        && verified.image_validation_policy != AssetProtocolRange::IMAGE_VALIDATION_POLICY
+    {
+        return empty(StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    }
+    let body = verified.bytes;
     let Ok(actual_length) = u64::try_from(body.len()) else {
         return empty(StatusCode::INTERNAL_SERVER_ERROR);
     };
     if actual_length != read_range.length {
         return empty(StatusCode::INTERNAL_SERVER_ERROR);
-    }
-    if is_png {
-        if !png::has_valid_chunk_checksums(&body) {
-            return empty(StatusCode::UNSUPPORTED_MEDIA_TYPE);
-        }
-        // Keep the full buffer reservation; avoid allocating another range buffer.
-        let start = usize::try_from(response_range.start).expect("bounded image offset");
-        let length = usize::try_from(response_range.length).expect("bounded image length");
-        body.copy_within(start..start + length, 0);
-        body.truncate(length);
     }
     finish(builder, body)
 }
@@ -359,6 +347,7 @@ mod tests {
     mod png_rendering;
 
     struct CountingBackend {
+        policy: u32,
         descriptor: AssetDeliveryDto,
         bytes: Vec<u8>,
         resolve_calls: Cell<usize>,
@@ -371,6 +360,7 @@ mod tests {
         fn new() -> Self {
             let sha256 = "ab".repeat(32);
             Self {
+                policy: AssetProtocolRange::IMAGE_VALIDATION_POLICY,
                 descriptor: AssetDeliveryDto {
                     asset_id: "asset".to_owned(),
                     sha256: sha256.clone(),
@@ -410,10 +400,17 @@ mod tests {
             let length = usize::try_from(requested_bytes).map_err(|_| ShellErrorCode::Internal)?;
             let end = start.checked_add(length).ok_or(ShellErrorCode::Internal)?;
             let bytes = self.bytes.get(start..end).ok_or(ShellErrorCode::Internal)?;
+            // This trusted backend mock models Storage's full-container policy.
+            if self.descriptor.media_type == "image/png"
+                && !png::has_valid_chunk_checksums(&self.bytes)
+            {
+                return Err(ShellErrorCode::UnsupportedContent);
+            }
             Ok(lorepia_shell_api::AssetProtocolRange {
                 descriptor: self.descriptor.clone(),
                 start: u64::try_from(start).map_err(|_| ShellErrorCode::Internal)?,
                 bytes: bytes.to_vec(),
+                image_validation_policy: self.policy,
             })
         }
     }

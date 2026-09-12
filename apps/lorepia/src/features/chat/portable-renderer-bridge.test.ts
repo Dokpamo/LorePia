@@ -3,7 +3,7 @@ import bridgeSource from './portable-renderer-bridge.js?raw';
 
 function mountBridge(surface: 'room' | 'message') {
     const frames: (() => void)[] = [];
-    const listeners = new Map<string, () => void>();
+    const listeners = new Map<string, (event?: MessageEvent) => void>();
     const publish = vi.fn();
     const style = vi.fn((element: Element) => getComputedStyle(element));
     const script = document.createElement('script');
@@ -31,7 +31,8 @@ function mountBridge(surface: 'room' | 'message') {
         innerWidth: 800,
         innerHeight: 600,
         requestAnimationFrame: (callback: () => void) => frames.push(callback),
-        addEventListener: (type: string, callback: () => void) => listeners.set(type, callback),
+        addEventListener: (type: string, callback: (event?: MessageEvent) => void) =>
+            listeners.set(type, callback),
         ResizeObserver: undefined,
         MutationObserver: class {
             observe() {
@@ -51,7 +52,23 @@ function mountBridge(surface: 'room' | 'message') {
         if (!frame) throw new Error('resize layout was not scheduled');
         frame();
     };
-    return { report, publish, style, frames };
+    return {
+        report,
+        publish,
+        style,
+        frames,
+        load: () => listeners.get('load')?.(),
+        visibility: (visible: unknown, validSource = true, id = script.dataset.runtimeId) =>
+            listeners.get('message')?.({
+                source: validSource ? context.parent : {},
+                data: {
+                    channel: 'lorepia-portable-renderer-v1',
+                    type: 'portable_visibility',
+                    runtimeId: id,
+                    visible,
+                },
+            } as MessageEvent),
+    };
 }
 
 afterEach(() => {
@@ -218,4 +235,73 @@ it('bounds text line scanning even when every measured line is offscreen', () =>
     ]);
     const { publish } = mountBridge('room');
     expect(publish.mock.calls[0]?.[0]).toMatchObject({ type: 'portable_regions', regions: [] });
+});
+
+it('gates historical autoplay and resumes only media paused for visibility, rejecting stale or foreign messages', async () => {
+    document.body.innerHTML =
+        '<div class="portable-message"><audio data-portable-autoplay="true"></audio></div>';
+    let paused = true;
+    vi.spyOn(HTMLMediaElement.prototype, 'paused', 'get').mockImplementation(() => paused);
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(() => {
+        paused = false;
+        return Promise.resolve();
+    });
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {
+        paused = true;
+    });
+    const bridge = mountBridge('message');
+    bridge.load();
+    expect(play).not.toHaveBeenCalled();
+    bridge.visibility(true, false);
+    bridge.visibility(true, true, 'other-runtime');
+    bridge.visibility('true');
+    expect(play).not.toHaveBeenCalled();
+    bridge.visibility(true);
+    await Promise.resolve();
+    expect(play).toHaveBeenCalledOnce();
+    bridge.visibility(false);
+    expect(pause).toHaveBeenCalledOnce();
+    bridge.visibility(true);
+    await Promise.resolve();
+    expect(play).toHaveBeenCalledTimes(2);
+    paused = true; // User paused the visible audio.
+    bridge.visibility(false);
+    bridge.visibility(true);
+    await Promise.resolve();
+    expect(play).toHaveBeenCalledTimes(2);
+});
+it('keeps intentional room BGM playback independent of transcript visibility', () => {
+    document.body.innerHTML = '<div class="portable-message"><audio autoplay></audio></div>';
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
+    const bridge = mountBridge('room');
+    bridge.load();
+    bridge.visibility(false);
+    expect(play).toHaveBeenCalledOnce();
+    expect(pause).not.toHaveBeenCalled();
+});
+
+it('pauses a delayed autoplay completion after its frame becomes hidden', async () => {
+    document.body.innerHTML =
+        '<div class="portable-message"><audio data-portable-autoplay="true"></audio></div>';
+    let finish!: () => void;
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(
+        () =>
+            new Promise<void>((resolve) => {
+                finish = resolve;
+            }),
+    );
+    vi.spyOn(HTMLMediaElement.prototype, 'paused', 'get').mockReturnValue(true);
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
+    const bridge = mountBridge('message');
+    bridge.visibility(true);
+    bridge.visibility(false);
+    bridge.visibility(true);
+    expect(play).toHaveBeenCalledOnce();
+    bridge.visibility(false);
+    finish();
+    await Promise.resolve();
+    expect(pause).toHaveBeenCalledOnce();
+    bridge.visibility(true);
+    expect(play).toHaveBeenCalledTimes(2);
 });

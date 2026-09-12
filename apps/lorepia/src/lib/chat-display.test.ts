@@ -2,6 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
 import {
     chatDisplayPreferences,
+    createConversationDisplayModeResolver,
     conversationDisplayMode,
     setConversationDisplayMode,
 } from './chat-display';
@@ -38,4 +39,17 @@ it('keeps switching usable if device preference storage is unavailable', () => {
     setConversationDisplayMode('room-a', 'default');
     expect(conversationDisplayMode('room-a', 'chat', get(chatDisplayPreferences))).toBe('default');
     expect(conversationDisplayMode('room-b', 'chat', get(chatDisplayPreferences))).toBe('chat');
+});
+
+it('retains only the last workspace preference resolution and invalidates room, native mode and preference changes', () => {
+    const resolve = createConversationDisplayModeResolver();
+    const preferences = {};
+    const read = vi.spyOn(Storage.prototype, 'getItem');
+    for (let index = 0; index < 1000; index++)
+        expect(resolve('room-a', 'chat', preferences)).toBe('chat');
+    expect(read).toHaveBeenCalledOnce();
+    expect(resolve('room-b', 'chat', preferences)).toBe('chat');
+    expect(resolve('room-a', 'story', preferences)).toBe('story');
+    expect(resolve('room-a', 'chat', { 'room-a': 'default' })).toBe('default');
+    expect(read).toHaveBeenCalledTimes(3);
 });

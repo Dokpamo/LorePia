@@ -246,13 +246,11 @@
     }
 
     fn synthetic_media_package(path: &Path) -> Vec<String> {
+        // Successful display delivery needs actual dimensions and PNG chunk CRCs.
+        let image = hex::decode("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415408d763f8cfc0f01f00050001ff729c52670000000049454e44ae426082")
+            .expect("valid one-pixel PNG fixture");
         let media = [
-            (
-                "image",
-                b"\x89PNG\r\n\x1a\nsynthetic".as_slice(),
-                "image/png",
-                "png",
-            ),
+            ("image", image.as_slice(), "image/png", "png"),
             ("audio", b"ID3synthetic".as_slice(), "audio/mpeg", "mp3"),
             (
                 "video",

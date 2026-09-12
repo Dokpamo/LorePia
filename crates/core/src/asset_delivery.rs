@@ -41,6 +41,12 @@ pub struct AssetDeliveryRange {
     pub descriptor: AssetDeliveryDescriptor,
     pub start: u64,
     pub bytes: Vec<u8>,
+    pub image_validation_policy: u32,
+}
+
+impl AssetDeliveryRange {
+    pub const IMAGE_VALIDATION_POLICY: u32 =
+        lorepia_storage::ApprovedAssetRange::IMAGE_VALIDATION_POLICY;
 }
 
 impl TryFrom<AssetDescriptor> for AssetDeliveryDescriptor {
@@ -93,6 +99,7 @@ impl Core {
             descriptor: range.descriptor.try_into()?,
             start: range.start,
             bytes: range.bytes,
+            image_validation_policy: range.image_validation_policy,
         })
     }
 }

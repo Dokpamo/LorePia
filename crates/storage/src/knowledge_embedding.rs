@@ -1,7 +1,9 @@
 //! Exact, immutable semantic vectors for revisioned knowledge entries.
 //!
 //! Core's durable provider intent supplies the query. Storage admits only the same
-//! immutable task revision and vector space, then scores borrowed f32le bytes in Rust.
+//! immutable task revision and vector space, then scores a bounded snapshot in Rust.
+
+mod snapshot;
 
 use std::collections::BTreeSet;
 
@@ -11,7 +13,7 @@ use lorepia_domain::{
     TaskProfile, ValidateOrchestration,
 };
 use lorepia_orchestration::MAX_GENERATION_KNOWLEDGE_WORK_BYTES;
-use rusqlite::{Error::InvalidColumnType, OptionalExtension, params};
+use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -303,13 +305,9 @@ impl Storage {
             &query.model_route_id,
             query.dimensions,
         )?;
-        let mut matches = score_knowledge_embedding_rows(
-            &connection,
-            query,
-            query_norm,
-            required_entry_ids,
-            &mut work,
-        )?;
+        let candidates = snapshot::load(&connection, query, required_entry_ids, &mut work)?;
+        drop(connection);
+        let mut matches = snapshot::score(candidates, query, query_norm)?;
         charge_embedding_sort(&matches, &mut work)?;
         matches.sort_unstable_by(|left, right| {
             right
@@ -444,88 +442,6 @@ fn load_existing_knowledge_embedding(
         )
         .optional()
         .map_err(storage_db_error)
-}
-
-fn score_knowledge_embedding_rows(
-    connection: &rusqlite::Connection,
-    query: &KnowledgeEmbeddingQuery,
-    query_norm: f64,
-    required_entry_ids: &[KnowledgeEntryId],
-    work: &mut KnowledgeEmbeddingWorkMeter,
-) -> CoreResult<Vec<KnowledgeEmbeddingMatch>> {
-    let entry_filter = required_entry_filter(required_entry_ids.len(), work)?;
-    let sql = format!(
-        "SELECT length(embedding.id), length(embedding.entry_id),
-                length(embedding.vector_sha256), length(embedding.vector_blob),
-                embedding.id, embedding.entry_id,
-                embedding.vector_sha256, embedding.vector_blob
-         FROM knowledge_embeddings AS embedding
-         JOIN knowledge_entries AS entry
-           ON entry.book_revision_id = embedding.book_revision_id
-          AND entry.entry_id = embedding.entry_id
-         WHERE embedding.book_revision_id = ?1
-           AND embedding.task_profile_revision_id = ?2
-           AND embedding.model_route_id = ?3
-           AND embedding.dimensions = ?4
-           AND embedding.vector_space_sha256 = ?5
-           AND embedding.encoding = 'f32le'
-           {entry_filter}
-         ORDER BY embedding.entry_id, embedding.id
-         LIMIT {MAX_KNOWLEDGE_EMBEDDING_QUERY_ROWS}"
-    );
-    let mut statement = connection.prepare(&sql).map_err(storage_db_error)?;
-    bind_exact_space_query(&mut statement, query)?;
-    bind_required_entries(&mut statement, required_entry_ids)?;
-    let mut rows = statement.raw_query();
-    let mut matches = Vec::new();
-    let mut previous_entry_id: Option<String> = None;
-    while let Some(row) = rows.next().map_err(storage_db_error)? {
-        if matches.len() >= MAX_KNOWLEDGE_EMBEDDINGS_PER_BOOK {
-            return Err(corrupted(
-                "stored knowledge embeddings exceed the per-book safety limit",
-            ));
-        }
-        let embedding_id_len = stored_length(row, 0, "knowledge embedding id")?;
-        let entry_id_len = stored_length(row, 1, "knowledge entry id")?;
-        let vector_sha256_len = stored_length(row, 2, "knowledge embedding digest")?;
-        let vector_blob_len = stored_length(row, 3, "knowledge embedding vector")?;
-        validate_stored_row_lengths(
-            query.dimensions,
-            embedding_id_len,
-            entry_id_len,
-            vector_sha256_len,
-            vector_blob_len,
-        )?;
-        charge_stored_embedding_row(
-            embedding_id_len,
-            entry_id_len,
-            vector_sha256_len,
-            vector_blob_len,
-            work,
-        )?;
-        let embedding_id = row.get::<_, String>(4).map_err(storage_db_error)?;
-        let entry_id = row.get::<_, String>(5).map_err(storage_db_error)?;
-        let vector_sha256 = row.get::<_, String>(6).map_err(storage_db_error)?;
-        let vector = row.get_ref(7).map_err(storage_db_error)?;
-        let type_error = || InvalidColumnType(7, "vector_blob".into(), vector.data_type());
-        let bytes = vector
-            .as_blob()
-            .map_err(|_| storage_db_error(type_error()))?;
-        if previous_entry_id.as_deref() == Some(entry_id.as_str()) {
-            return Err(corrupted(
-                "knowledge entry has ambiguous embeddings in one exact vector space",
-            ));
-        }
-        previous_entry_id = Some(entry_id.clone());
-        let similarity = score_encoded_vector(query, query_norm, bytes, &vector_sha256)?;
-        matches.push(KnowledgeEmbeddingMatch {
-            embedding_id,
-            entry_id: KnowledgeEntryId::from(entry_id),
-            vector_sha256,
-            similarity_millionths: similarity_millionths(similarity),
-        });
-    }
-    Ok(matches)
 }
 
 fn score_encoded_vector(

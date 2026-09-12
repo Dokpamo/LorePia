@@ -99,6 +99,7 @@ fn two_thousand_messages_page_in_both_directions_with_absolute_offsets() {
     assert!(after_last.messages.is_empty());
     assert_eq!(after_last.start_index, 2000);
     assert_eq!(fixture.page(None, None, 128).messages.len(), 128);
+    assert_eq!(fixture.storage.lineage_cache.lock().unwrap().validations, 1);
 }
 
 #[test]

@@ -1207,8 +1207,8 @@ impl From<UrlPolicyError> for NetworkResolutionError {
 /// Safe request order:
 ///
 /// 1. [`Self::resolve`] the canonical URL.
-/// 2. Apply [`Self::pin_reqwest_builder`] to a fresh client with proxies and
-///    automatic redirects disabled.
+/// 2. Pin using [`Self::pin_reqwest_builder`]; reuse only exact pins.
+///    No proxies or automatic redirects.
 /// 3. Call [`Self::revalidate_dns`] immediately before sending.
 /// 4. After headers arrive, call [`Self::validate_peer`] with
 ///    `Response::remote_addr`.

@@ -313,8 +313,7 @@ impl Core {
                     break;
                 };
                 let core = Core { inner };
-                let _ = core.drain_interaction_derived_events();
-                delay = interaction_derived_supervisor_delay(core.storage(), Utc::now());
+                delay = core.drain_interaction_derived_events_blocking().await;
             }
         });
     }

@@ -1,3 +1,5 @@
+#[path = "chat_vertical_slice/checkpoint_journal.rs"]
+mod checkpoint_journal;
 mod support;
 
 use std::{
