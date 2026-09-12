@@ -1,4 +1,4 @@
-import { render, cleanup } from '@testing-library/svelte';
+import { render, cleanup, fireEvent, screen } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import { afterEach, expect, it, vi } from 'vitest';
 import ChatTranscript from './ChatTranscript.svelte';
@@ -10,13 +10,15 @@ afterEach(() => {
 });
 it('checks older history after rendering 30 short messages that cannot scroll', async () => {
     vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(900);
-    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(600);
+    const height = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(600);
     const onhistoryedge = vi.fn();
+    const handleScroll = vi.fn();
     const scroll = {
         scroller: null,
         virtualWindow: () => ({ start: 0, end: 30, topSpacer: 0, bottomSpacer: 0 }),
         measureMessage: () => ({}),
         measurementEpoch: 0,
+        handleScroll,
     } as unknown as ChatScrollLifecycle;
     render(ChatTranscript, {
         character: {
@@ -61,4 +63,12 @@ it('checks older history after rendering 30 short messages that cannot scroll', 
     await tick();
     await tick();
     expect(onhistoryedge).toHaveBeenCalledOnce();
+    const log = screen.getByRole('log');
+    await fireEvent.scroll(log);
+    expect(onhistoryedge).toHaveBeenCalledOnce();
+    expect(handleScroll).toHaveBeenCalledOnce();
+    height.mockReturnValue(1000);
+    await fireEvent.scroll(log);
+    expect(onhistoryedge).toHaveBeenCalledTimes(2);
+    expect(handleScroll).toHaveBeenCalledTimes(2);
 });

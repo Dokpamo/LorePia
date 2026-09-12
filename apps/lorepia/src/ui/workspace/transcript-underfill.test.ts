@@ -63,7 +63,7 @@ it('loads only growing pages until scrollable and resumes when resizing exposes 
     await tick();
     expect(f.check).toHaveBeenCalledOnce();
     f.height(1200);
-    f.action.update({ ...f.options, start: 1940, first: 'm-1940', count: 60 });
+    f.action.update({ ...f.options, start: 1940, first: 'm-1940', count: 45 });
     await tick();
     expect(f.check).toHaveBeenCalledOnce();
     f.viewport(1500);
@@ -89,10 +89,10 @@ it('does not retry unchanged failures or chase capped pages without layout progr
     await tick();
     expect(f.check).toHaveBeenCalledOnce();
     f.height(700);
-    f.action.update({ ...f.options, start: 1910, first: 'm-1910', count: 90 });
+    f.action.update({ ...f.options, start: 1910, first: 'm-1910', count: 45 });
     await tick();
     expect(f.check).toHaveBeenCalledTimes(2);
-    f.action.update({ ...f.options, start: 1880, first: 'm-1880', last: 'm-1969', count: 90 });
+    f.action.update({ ...f.options, start: 1880, first: 'm-1880', last: 'm-1969', count: 45 });
     f.resize();
     await tick();
     expect(f.check).toHaveBeenCalledTimes(2);
@@ -139,4 +139,28 @@ it('rechecks an initially oversized virtual estimate when only the inner list sh
     f.resize(f.content);
     await tick();
     expect(f.check).toHaveBeenCalledOnce();
+});
+
+it('stops before another page would exceed the DOM or retained cap, even while measured height increases', async () => {
+    const f = fixture();
+    f.viewport(6000);
+    await tick();
+    f.height(1200);
+    f.action.update({ ...f.options, start: 1940, first: 'm-1940', count: 60 });
+    await tick();
+    expect(f.check).toHaveBeenCalledOnce();
+    f.height(1800);
+    const capped = { ...f.options, start: 1910, first: 'm-1910', count: 90 };
+    f.action.update(capped);
+    await tick();
+    for (const height of [2000, 2400, 3000]) {
+        f.height(height);
+        f.resize(f.content);
+        await tick();
+    }
+    expect(f.check).toHaveBeenCalledOnce();
+    f.action.update({ ...capped, start: 1880, first: 'm-1880', last: 'm-1969' });
+    await tick();
+    expect(f.check).toHaveBeenCalledOnce();
+    f.action.destroy();
 });

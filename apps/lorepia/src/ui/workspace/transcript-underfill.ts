@@ -1,4 +1,7 @@
 import { tick } from 'svelte';
+import { MAX_HISTORY_MESSAGES } from '../../app/controllers/message-history-controller';
+import { INITIAL_HISTORY_MESSAGES } from '../../app/controllers/recent-branch-messages';
+import { VIRTUAL_MESSAGE_DOM_LIMIT } from '../../features/chat/virtual-window';
 
 interface UnderfillOptions {
     scope: string;
@@ -38,7 +41,15 @@ export function observeTranscriptUnderfill(node: HTMLElement, initial: Underfill
                 reported = underfilled;
                 options.onunderfill?.(underfilled);
             }
-            if (!underfilled || options.busy || !options.check || options.start <= 0) return;
+            if (
+                !underfilled ||
+                options.busy ||
+                !options.check ||
+                options.start <= 0 ||
+                options.count + INITIAL_HISTORY_MESSAGES >
+                    Math.min(MAX_HISTORY_MESSAGES, VIRTUAL_MESSAGE_DOM_LIMIT)
+            )
+                return;
             if (attempted?.scope === options.scope) {
                 if (
                     attempted.start === options.start &&

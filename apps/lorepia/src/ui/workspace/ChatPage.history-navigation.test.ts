@@ -93,7 +93,7 @@ it('offers manual older navigation only for visible underfilled history, outside
     const button = screen.getByRole('button', { name: t('pagination.older_messages') });
     const log = screen.getByRole('log');
     expect(log.contains(button)).toBe(false);
-    expect(loadHistory).toHaveBeenCalledOnce();
+    expect(loadHistory).not.toHaveBeenCalled();
     loadHistory.mockClear();
     await fireEvent.click(button);
     expect(loadHistory).toHaveBeenCalledExactlyOnceWith('older');

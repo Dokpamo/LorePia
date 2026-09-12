@@ -89,3 +89,29 @@ changed from an empty text-only clip to two visible line regions. The isolated
 frame harness used a nonce-authorized data URL for the exact trusted script to
 avoid Chrome's null-origin loopback restriction; production loading is unchanged.
 Evidence and browser screenshots remain in the task's temporary backup folder.
+
+### Automatic window ceiling follow-up
+
+The same task continues from clean `34fe8dd1ca733c6edf687a7e919fd88d65292db7`.
+An additional end-to-end boundary check reached the oldest and newest records,
+but checking the settled newest record exposed automatic requests moving the
+window past its capacity at 6,000px height (last rendered index 1,870 rather
+than 2,000). Before publishing another commit, constrain an automatic next page
+to both the existing UI and DOM capacities; larger moves require the manual
+action. Keep programmatic underfill scroll events on the same policy path.
+Targets are the underfill helper/tests, transcript scroll callback/tests and
+the existing controller's internal window-cap constant, shared without changing
+IPC or the controller's behavior. No changes to virtual-layout algorithms,
+security boundaries, schema or dependencies are planned. Regression evidence
+must check settled initial/latest positions, manual paging, page caps and
+observer cleanup. Expected growth is a small guard and focused tests; existing
+source-size limits remain unchanged.
+
+Final boundary QA passes: initial and settled return-to-latest both show record
+2,000; 65 explicit older-page clicks reach record 1; the DOM never exceeds 80
+messages and no page errors or automatic endpoint oscillation occur. Automatic
+underfill now stops at 60 messages before another complete 30-message page
+would exceed the 80-message renderer capacity; manual paging retains the
+existing 90-message UI window. A viewport can therefore keep the manual action
+even with unused vertical space. Frontend regression tests total 821 passing
+cases across 152 files, plus the Lua/regex sandbox checks.

@@ -83,7 +83,8 @@
     aria-busy={loading || historyLoading}
     onscroll={(event) => {
         scroll.handleScroll(event);
-        onhistoryedge?.();
+        const node = event.currentTarget;
+        if (node.clientHeight > 0 && node.scrollHeight > node.clientHeight + 1) onhistoryedge?.();
     }}
     onpointerdown={(event) => {
         if (!(event.target instanceof Element) || !event.target.closest('[data-message-id]'))

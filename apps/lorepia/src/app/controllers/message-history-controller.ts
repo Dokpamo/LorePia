@@ -8,7 +8,7 @@ import {
     type MessageHistoryPage,
 } from './recent-branch-messages';
 
-const MAX_HISTORY_MESSAGES = INITIAL_HISTORY_MESSAGES * 3;
+export const MAX_HISTORY_MESSAGES = INITIAL_HISTORY_MESSAGES * 3;
 export interface MessageHistoryState {
     scope: string;
     items: MessageDto[];
