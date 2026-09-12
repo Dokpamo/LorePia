@@ -1,6 +1,6 @@
 import type { PortableSurface } from './portable-renderer-policy';
 
-/** Move viewport overlays to the host's isolated card screen, never the chat chrome. */
+/** Keep message prose in the transcript and viewport controls in the isolated room. */
 export function selectPortableRoomMarkup(
     root: HTMLElement,
     background: string,
@@ -8,25 +8,11 @@ export function selectPortableRoomMarkup(
 ): void {
     const template = document.createElement('template');
     template.innerHTML = background;
-    const appendBackground = () => {
-        if (surface === 'room') root.append(template.content);
-    };
     const styles = [
         ...template.content.querySelectorAll('style'),
         ...root.querySelectorAll('style'),
     ];
     const css = styles.map((style) => style.textContent).join('\n');
-    if (css.length > 262_144 || typeof CSSStyleSheet.prototype.replaceSync !== 'function') {
-        appendBackground();
-        return;
-    }
-    const sheet = new CSSStyleSheet();
-    try {
-        sheet.replaceSync(css);
-    } catch {
-        appendBackground();
-        return;
-    }
     const selectors: string[] = [];
     let count = 0;
     const visit = (rules: CSSRuleList): void => {
@@ -39,8 +25,20 @@ export function selectPortableRoomMarkup(
             } else if ('cssRules' in rule) visit(rule.cssRules as CSSRuleList);
         }
     };
-    visit(sheet.cssRules);
-    const overlays = new Set<Element>();
+    if (css.length <= 262_144 && typeof CSSStyleSheet.prototype.replaceSync === 'function') {
+        try {
+            const sheet = new CSSStyleSheet();
+            sheet.replaceSync(css);
+            visit(sheet.cssRules);
+        } catch {
+            // Unsupported CSS does not turn ordinary message prose into a room overlay.
+        }
+    }
+    const overlays = new Set<Element>(
+        [...root.querySelectorAll<HTMLElement>('[style]')].filter(
+            (element) => element.style.position === 'fixed',
+        ),
+    );
     for (const selector of selectors) {
         try {
             for (const element of root.querySelectorAll(selector)) overlays.add(element);
@@ -51,13 +49,13 @@ export function selectPortableRoomMarkup(
     const top = [...overlays].filter(
         (element) => ![...overlays].some((other) => other !== element && other.contains(element)),
     );
-    if (surface === 'room' && top.length > 0) {
+    if (surface === 'room') {
         const inlineStyles = [...root.querySelectorAll('style')].map((style) =>
             style.cloneNode(true),
         );
         root.replaceChildren(...inlineStyles, ...top);
-    } else if (surface === 'message') {
+    } else {
         for (const element of top) element.remove();
     }
-    appendBackground();
+    if (surface === 'room') root.append(template.content);
 }

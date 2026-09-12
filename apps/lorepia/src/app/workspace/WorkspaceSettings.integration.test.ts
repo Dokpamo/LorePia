@@ -111,7 +111,7 @@ describe('live workspace settings entry', () => {
         await fireEvent.click(
             await screen.findByRole('button', { name: t('uiPreview.roomSettings') }),
         );
-        await fireEvent.click(screen.getByRole('button', { name: t('uiPreview.back') }));
+        await fireEvent.click(screen.getByRole('button', { name: t('uiPreview.closeChoices') }));
         await fireEvent.click(screen.getByRole('button', { name: t('uiPreview.openManagement') }));
         await fireEvent.click(screen.getByRole('button', { name: t('navigation.settings') }));
         await fireEvent.click(

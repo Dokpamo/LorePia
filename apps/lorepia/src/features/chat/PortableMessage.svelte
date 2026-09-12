@@ -20,15 +20,13 @@
         renderPortableMacros,
     } from './portable-display';
     import { selectPortableRoomMarkup } from './portable-room-markup';
+    import { applyPortableFrameLayout } from './portable-frame-layout';
     import {
         type PortableSurface,
         sanitizePortableCss,
         sanitizePortableTree,
     } from './portable-renderer-policy';
-    import {
-        isPortableRendererMessage,
-        MIN_PORTABLE_RENDERER_HEIGHT,
-    } from './portable-renderer-protocol';
+    import { isPortableRendererMessage } from './portable-renderer-protocol';
 
     const MAX_PORTABLE_SOURCE_CHARS = 262_144;
     const MAX_PORTABLE_MARKUP_TAGS = 4_096;
@@ -47,6 +45,7 @@
         profile: CharacterRenderProfileDto | null;
         enabled?: boolean;
         surface?: PortableSurface;
+        floating?: boolean;
         expandMacros?: boolean;
         messageIndex?: number;
         lastMessageId?: number;
@@ -64,6 +63,7 @@
         profile,
         enabled = true,
         surface = 'message',
+        floating = false,
         expandMacros = enabled,
         messageIndex,
         lastMessageId,
@@ -174,6 +174,7 @@
         const activeLastMessageId = lastMessageId;
         const active = usesPortableMarkup;
         const activeSurface = surface;
+        const floatingRoom = floating;
         const screenWidth = frameWidth;
         void displayVariablesKey;
         const activeVariables = untrack(() => displayVariables);
@@ -198,7 +199,7 @@
                 onAction?.(event.data.action);
                 return;
             }
-            if (activeSurface === 'message') target.style.height = `${String(event.data.height)}px`;
+            applyPortableFrameLayout(target, event.data, activeSurface === 'room', floatingRoom);
         };
         globalThis.addEventListener('message', handleMessage);
         void buildPortableDocument(
@@ -233,8 +234,6 @@
                 activeSurface,
             );
             if (isCancelled()) return;
-            if (activeSurface === 'message')
-                target.style.height = `${String(MIN_PORTABLE_RENDERER_HEIGHT)}px`;
             target.srcdoc = portableFrameDocument(
                 rendered,
                 importedStyle,
@@ -537,6 +536,7 @@
     <div class="portable-boundary" class:portable-room={surface === 'room'}>
         <iframe
             class="portable-frame"
+            class:portable-floating={floating}
             bind:this={frame}
             title="카드 콘텐츠"
             sandbox="allow-scripts"
@@ -558,8 +558,7 @@
         contain: layout paint style;
         isolation: isolate;
         max-width: 100%;
-        max-height: min(70vh, 720px);
-        overflow: auto;
+        overflow: clip;
     }
 
     .portable-room {
@@ -579,6 +578,9 @@
         max-width: 100%;
         border: 0;
         overflow: hidden;
+    }
+    .portable-floating {
+        clip-path: path('M0,0Z');
     }
 
     .portable-regex-warning {

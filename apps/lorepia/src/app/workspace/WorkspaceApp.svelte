@@ -30,6 +30,8 @@
     import WorkspaceSettings from './WorkspaceSettings.svelte';
     import WorkspaceFeatures from './WorkspaceFeatures.svelte';
     import WorkspaceCreator from './WorkspaceCreator.svelte';
+    import CardRoomSurface from './runtime/CardRoomSurface.svelte';
+    import CardRuntimeSettings from './runtime/CardRuntimeSettings.svelte';
     import WorkspaceChatExtras from './WorkspaceChatExtras.svelte';
     import type { SampleMessage, Overlay, Page } from '../../ui/workspace/view-types';
     import { LiveChatSession } from './live-chat-session.svelte';
@@ -239,6 +241,7 @@
     appearance={$themePreference}
     textScale={$chatTextSize === 'large' ? 1.1 : 1}
     conversationMode={conversation?.mode ?? 'chat'}
+    rightPageAvailable={subpage && conversation !== null}
 >
     {#snippet home()}
         <CharacterLibrary
@@ -346,7 +349,11 @@
                 }}
                 onproviders={() => (featureOverlay = 'providers')}
                 onadvanced={() => (featureOverlay = 'studio')}
-            />
+            >
+                {#snippet cardSettings()}{#if subpage}<CardRuntimeSettings
+                            {runtime}
+                        />{/if}{/snippet}
+            </WorkspaceSettings>
         {/if}
         {#if featureOverlay}
             <WorkspaceFeatures
@@ -410,6 +417,11 @@
                         {refreshEpoch}
                         onnotice={(value: string) => (notice = value)}
                     />{/snippet}
+                {#snippet cardSurface()}{#if page === 1}<CardRoomSurface
+                            {runtime}
+                            client={appClient}
+                            floating
+                        />{/if}{/snippet}
             </ChatPage>
             {#if error ?? (notice !== '' ? notice : appState.chat.reconcile_notice)}<div
                     class="ui-live-error"
@@ -450,7 +462,9 @@
     {#snippet creator(navigate: (page: Page) => void)}<WorkspaceCreator
             {runtime}
             client={appClient}
+            active={page === 2}
             onback={() => navigate(1)}
+            onsettings={(trigger: HTMLButtonElement) => open('room-settings', trigger)}
         />{/snippet}
 </ApplicationFrame>
 <div class="sr-only" role="status" aria-live="polite">{appState.announcement}</div>

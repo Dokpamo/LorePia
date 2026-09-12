@@ -52,7 +52,7 @@ export function portableFrameDocument(
         `<style>${BASE_STYLE}${importedStyle}${activeSurface === 'room' ? 'html,body{height:100%;max-height:100%;overflow:hidden}.portable-message{height:100%;white-space:normal}' : ''}</style>`,
         '</head><body>',
         content,
-        `<script nonce="${nonce}" src="${escapeHtml(scriptUrl)}" data-runtime-id="${escapeHtml(runtimeId)}">${scriptClose}`,
+        `<script nonce="${nonce}" src="${escapeHtml(scriptUrl)}" data-runtime-id="${escapeHtml(runtimeId)}" data-surface="${activeSurface}">${scriptClose}`,
         '</body></html>',
     ].join('');
 }

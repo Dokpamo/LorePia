@@ -15,6 +15,7 @@
     import './root-tab-swipe.css';
     import { scrollHeaders } from './scroll-headers';
     import './scroll-headers.css';
+    import { chatForwardSwipe } from './chat-forward-swipe';
 
     let {
         page = $bindable<Page>(0),
@@ -24,6 +25,7 @@
         appearance = 'system',
         textScale = 1,
         conversationMode = 'chat',
+        rightPageAvailable = false,
         home,
         chats,
         create,
@@ -39,6 +41,7 @@
         appearance?: Appearance;
         textScale?: number;
         conversationMode?: ChatDisplayMode;
+        rightPageAvailable?: boolean;
         home: Snippet;
         chats: Snippet;
         create: Snippet;
@@ -175,6 +178,11 @@
             bind:this={chatSurface}
             data-conversation-mode={conversationMode}
             use:persistentBack={{ enabled: page === 1 && !blocked, destination: 0 }}
+            use:chatForwardSwipe={{
+                enabled: page === 1 && !blocked && rightPageAvailable,
+                target: () => creatorSurface.parentElement ?? undefined,
+                onopen: () => (page = 2),
+            }}
         >
             {@render chat(navigate, false, false)}
         </div>

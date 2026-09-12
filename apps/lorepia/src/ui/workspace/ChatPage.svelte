@@ -25,6 +25,7 @@
         session,
         renderMessage,
         extras,
+        cardSurface,
         externalNotice = '',
         draft,
         managementVisible = false,
@@ -42,6 +43,7 @@
         session: ChatSession;
         renderMessage?: Snippet<[SampleMessage, number]>;
         extras?: Snippet;
+        cardSurface?: Snippet;
         externalNotice?: string;
         draft: string;
         managementVisible?: boolean;
@@ -158,6 +160,7 @@
             onclick={() => onnavigate(2)}><PanelRight /></IconButton
         >{/if}
 </header>
+{#if cardSurface}{@render cardSurface()}{/if}
 <div class="ui-chat-notices">
     {#if notice}{#key notice.id}<UiNotice {notice} ondismiss={() => (notice = null)} />{/key}{/if}
 </div>

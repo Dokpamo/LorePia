@@ -65,7 +65,9 @@ describe('workspace settings navigation', () => {
             await fireEvent.click(within(ai).getByRole('button', { name: t('uiPreview.back') }));
             await waitFor(() => expect(screen.getAllByRole('dialog')).toEqual([room]));
             expect(room).toHaveProperty('inert', false);
-            await fireEvent.click(within(room).getByRole('button', { name: t('uiPreview.back') }));
+            await fireEvent.click(
+                within(room).getByRole('button', { name: t('uiPreview.closeChoices') }),
+            );
             await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
             expect(screen.getByRole('textbox', { name: t('uiPreview.message') })).toBeVisible();
         },
