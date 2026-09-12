@@ -75,6 +75,7 @@
         onAction,
     }: Props = $props();
     let frame = $state<HTMLIFrameElement | null>(null);
+    let frameWidth = $state(393);
     let normalizedText = $state('');
     let regexWarning = $state<string | null>(null);
 
@@ -121,7 +122,10 @@
     const usesPortableMarkup = $derived(
         enabled &&
             profile !== null &&
-            (/<(?:style|details|article|div|section|header|pre|button)\b/i.test(normalizedText) ||
+            ((surface === 'room' && (backgroundMarkup ?? profile.background_markup) !== '') ||
+                /<(?:style|details|article|div|section|header|pre|button)\b/i.test(
+                    normalizedText,
+                ) ||
                 /<img\s*=/i.test(normalizedText) ||
                 /\{\{(?:raw|audio|bgm)::/i.test(normalizedText) ||
                 hasPortableDisplayTransform(normalizedText, profile.display_transforms)),
@@ -146,6 +150,23 @@
 
     $effect(() => {
         const target = frame;
+        if (target === null) return;
+        const measure = () => {
+            const width = Math.round(target.clientWidth);
+            if (width > 0) frameWidth = width;
+        };
+        measure();
+        if (typeof ResizeObserver === 'function') {
+            const observer = new ResizeObserver(measure);
+            observer.observe(target);
+            return () => observer.disconnect();
+        }
+        globalThis.addEventListener('resize', measure);
+        return () => globalThis.removeEventListener('resize', measure);
+    });
+
+    $effect(() => {
+        const target = frame;
         const activeProfile = profile;
         const activeClient = client;
         const source = normalizedText;
@@ -153,7 +174,7 @@
         const activeLastMessageId = lastMessageId;
         const active = usesPortableMarkup;
         const activeSurface = surface;
-        const screenWidth = target?.clientWidth ?? 393;
+        const screenWidth = frameWidth;
         void displayVariablesKey;
         const activeVariables = untrack(() => displayVariables);
         const activeBackgroundMarkup = backgroundMarkup ?? activeProfile?.background_markup ?? '';
@@ -241,7 +262,11 @@
         activeBackgroundMarkup: string,
         isCancelled: () => boolean,
     ): Promise<string> {
-        if (source.length > MAX_PORTABLE_SOURCE_CHARS) return portableLimitMarkup();
+        if (
+            source.length > MAX_PORTABLE_SOURCE_CHARS ||
+            activeBackgroundMarkup.length > MAX_PORTABLE_SOURCE_CHARS
+        )
+            return portableLimitMarkup();
         const displaySource = await renderPortableDisplay(
             source,
             activeProfile.display_transforms,
@@ -261,13 +286,30 @@
             },
         );
         if (isCancelled()) return '';
+        const background = renderPortableMacros(
+            activeBackgroundMarkup,
+            {
+                variables: activeVariables,
+                chatIndex: activeMessageIndex,
+                lastMessageId: activeLastMessageId,
+                lastCharacterMessage,
+                characterName,
+                userName,
+                screenWidth,
+            },
+            source,
+        );
+        const assetSource =
+            activeSurface === 'room' ? `${displaySource}\n${background}` : displaySource;
         if (
-            displaySource.length > MAX_PORTABLE_SOURCE_CHARS ||
-            markupTagCount(displaySource) > MAX_PORTABLE_MARKUP_TAGS
+            assetSource.length > MAX_PORTABLE_SOURCE_CHARS ||
+            background.length > MAX_PORTABLE_SOURCE_CHARS ||
+            markupTagCount(assetSource) > MAX_PORTABLE_MARKUP_TAGS ||
+            markupTagCount(background) > MAX_PORTABLE_MARKUP_TAGS
         ) {
             return portableLimitMarkup();
         }
-        const references = collectAssetReferences(displaySource);
+        const references = collectAssetReferences(assetSource);
         if (references === null) return portableLimitMarkup();
         const resolved = new SvelteMap<string, string | null>();
         const aliases = indexAssetAliases(activeProfile.assets);
@@ -298,7 +340,36 @@
             );
         }
 
-        let html = displaySource.replace(
+        const template = document.createElement('template');
+        template.innerHTML = `<div class="portable-message">${resolveMarkupAssets(displaySource, resolved)}</div>`;
+        const root = template.content.firstElementChild;
+        if (!(root instanceof HTMLElement)) {
+            const fallback = document.createElement('div');
+            fallback.className = 'portable-message';
+            fallback.textContent = displaySource;
+            return fallback.outerHTML;
+        }
+        selectPortableRoomMarkup(
+            root,
+            activeSurface === 'room' ? resolveMarkupAssets(background, resolved) : background,
+            activeSurface,
+        );
+        if (root.querySelectorAll('*').length > MAX_PORTABLE_MARKUP_TAGS) {
+            return portableLimitMarkup();
+        }
+        sanitizePortableTree(
+            root,
+            new SvelteSet([...resolved.values()].filter(isString)),
+            activeSurface,
+        );
+        return root.outerHTML;
+    }
+
+    function resolveMarkupAssets(
+        source: string,
+        resolved: ReadonlyMap<string, string | null>,
+    ): string {
+        let html = source.replace(
             /<img\s*=\s*(?:"([^"]+)"|'([^']+)'|([^>\s]+))\s*\/?\s*>/gi,
             (
                 _match,
@@ -328,35 +399,7 @@
             },
         );
 
-        const template = document.createElement('template');
-        template.innerHTML = `<div class="portable-message">${html}</div>`;
-        const root = template.content.firstElementChild;
-        if (!(root instanceof HTMLElement)) {
-            const fallback = document.createElement('div');
-            fallback.className = 'portable-message';
-            fallback.textContent = displaySource;
-            return fallback.outerHTML;
-        }
-        if (root.querySelectorAll('*').length > MAX_PORTABLE_MARKUP_TAGS) {
-            return portableLimitMarkup();
-        }
-        const background = renderPortableMacros(
-            activeBackgroundMarkup,
-            {
-                variables: activeVariables,
-                chatIndex: activeMessageIndex,
-                lastMessageId: activeLastMessageId,
-                screenWidth,
-            },
-            source,
-        );
-        selectPortableRoomMarkup(root, background, activeSurface);
-        sanitizePortableTree(
-            root,
-            new SvelteSet([...resolved.values()].filter(isString)),
-            activeSurface,
-        );
-        return root.outerHTML;
+        return html;
     }
 
     function collectAssetReferences(source: string): string[] | null {

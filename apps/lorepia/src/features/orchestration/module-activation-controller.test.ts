@@ -129,6 +129,58 @@ function fixture() {
 }
 
 describe('paged module activation authority', () => {
+    it('preserves choices, the resolved plan and approval when paging back to the first page', async () => {
+        const f = fixture();
+        const conflict = {
+            component: { kind: 'asset' as const, id: 'shared' },
+            reason: 'different_hash',
+            candidates: [
+                { module_id: 'module', revision_id: 'revision', component_hash: hash('4') },
+            ],
+        };
+        f.page.conflicts = [conflict];
+        Object.assign(f.plan, {
+            component_count: 127,
+            omitted_component_count: 1,
+            runtime_enabled_count: 127,
+        });
+        await f.controller.review();
+        f.controller.choose(conflict, 'omit');
+        expect(await f.controller.resolve()).toBe(true);
+        const before = get(f.controller.state);
+        f.client.reviewContentModuleActivationPage.mockResolvedValueOnce({
+            ...f.page,
+            offset: 64,
+            next_offset: null,
+        });
+        expect(await f.controller.review(64)).toBe(true);
+        expect(await f.controller.review(0)).toBe(true);
+        expect(f.client.reviewContentModuleActivationPage.mock.lastCall?.[0]).toMatchObject({
+            offset: 0,
+            expected_review_sha256: f.page.review_sha256,
+        });
+        expect(get(f.controller.state)).toMatchObject({
+            choices: before.choices,
+            plan: before.plan,
+        });
+        expect(await f.controller.activate()).toBe(true);
+        await f.controller.review();
+        expect(get(f.controller.state)).toMatchObject({ choices: {}, plan: null, receipt: null });
+    });
+
+    it('rejects a changed first page during navigation instead of silently resetting choices', async () => {
+        const f = fixture();
+        await f.controller.review();
+        await f.controller.resolve();
+        f.client.reviewContentModuleActivationPage.mockResolvedValueOnce({
+            ...f.page,
+            review_sha256: hash('3'),
+        });
+        expect(await f.controller.review(0)).toBe(false);
+        expect(get(f.controller.state).plan).toEqual(f.plan);
+        expect(get(f.controller.state).page?.review_sha256).toBe(f.page.review_sha256);
+    });
+
     it('keeps the approval id on an uncertain result and accepts only the exact verified receipt', async () => {
         const f = fixture();
         expect(await f.controller.review()).toBe(true);

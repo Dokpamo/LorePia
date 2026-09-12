@@ -98,10 +98,11 @@ export class ImportedSetupController {
                 );
             if (selection.applyToRoom && !context)
                 throw new SetupError(t('settingsLive.chooseRoom'));
-            const presetId = importedSetupId(
+            const presetId = await importedSetupId(
                 source.value.id,
                 selection.kind === 'memory' ? 'summary-provider' : 'provider',
             );
+            if (!this.current(epoch)) return false;
             const generation = buildImportedGenerationPreset(
                 workspace,
                 hints,
@@ -252,8 +253,15 @@ function roomContext(services: SettingsServices): string | null {
     const branch = services.appState.conversation_state?.active_branch_id;
     return conversation && branch ? JSON.stringify([conversation, branch]) : null;
 }
-function importedSetupId(source: string, suffix: string): string {
-    return `${source.replaceAll(/[^A-Za-z0-9._-]+/g, '-').slice(0, 210)}-${suffix}`;
+async function importedSetupId(source: string, suffix: string): Promise<string> {
+    const digest = await globalThis.crypto.subtle.digest(
+        'SHA-256',
+        new TextEncoder().encode(source),
+    );
+    const hash = [...new Uint8Array(digest)]
+        .map((byte) => byte.toString(16).padStart(2, '0'))
+        .join('');
+    return `imported-${hash}-${suffix}`;
 }
 
 class SetupError extends Error {}

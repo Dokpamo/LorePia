@@ -91,13 +91,16 @@ export class ModuleActivationController {
         });
     }
 
-    review(offset = 0) {
+    review(pageOffset?: number) {
         return this.run(async (current) => {
             const previous = get(this.mutable).page;
+            const fresh = pageOffset === undefined;
+            const offset = pageOffset ?? 0;
+            if (offset !== 0 && previous === null) this.invalid();
             const page = await this.client.reviewContentModuleActivationPage({
                 activation: this.draft.request,
                 offset,
-                expected_review_sha256: offset === 0 ? null : (previous?.review_sha256 ?? null),
+                expected_review_sha256: fresh ? null : (previous?.review_sha256 ?? null),
             });
             if (!current()) return;
             const { candidate, request } = this.draft;
@@ -120,7 +123,7 @@ export class ModuleActivationController {
                         page.next_offset >= page.component_count)) ||
                 (page.next_offset === null &&
                     offset + page.components.length !== page.component_count) ||
-                (offset !== 0 && page.review_sha256 !== previous?.review_sha256)
+                (!fresh && previous !== null && page.review_sha256 !== previous.review_sha256)
             )
                 this.invalid();
             if (candidate.source_kind === 'imported_package') {
@@ -137,11 +140,12 @@ export class ModuleActivationController {
                 )
                     this.invalid();
             } else if (page.package_approval !== null) this.invalid();
-            if (offset === 0) this.approvalId = null;
+            const reset = fresh || previous === null;
+            if (reset) this.approvalId = null;
             this.mutable.update((s) => ({
                 ...s,
                 page,
-                ...(offset === 0 ? { plan: null, receipt: null, choices: {} } : {}),
+                ...(reset ? { plan: null, receipt: null, choices: {} } : {}),
             }));
         });
     }

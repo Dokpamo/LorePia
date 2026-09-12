@@ -66,6 +66,41 @@ async function fixture() {
 }
 
 describe('imported settings connection', () => {
+    it.each([
+        ['\ud55c\uae00', '\ub2e4\ub978'],
+        ['preset::one', 'preset/?one'],
+        ['a'.repeat(210) + 'first', 'a'.repeat(210) + 'second'],
+    ])('keeps distinct imported sources separate: %s', async (firstId, secondId) => {
+        const f = await fixture();
+        const savedIds: string[] = [];
+        for (const sourceId of [firstId, secondId]) {
+            await f.client.upsertPromptPreset({
+                value: { ...source('generation'), id: sourceId },
+                expected_revision: null,
+            });
+            expect(await f.controller.save({ ...f.selection, sourceId, applyToRoom: false })).toBe(
+                true,
+            );
+            const saved = await f.client.getEditablePromptPreset({ prompt_preset_id: sourceId });
+            const generationId = saved.value.default_generation_preset_id;
+            expect(generationId).toMatch(/^imported-[a-f0-9]{64}-provider$/);
+            if (!generationId) throw new Error('Expected generated preset id');
+            savedIds.push(generationId);
+        }
+        expect(new Set(savedIds).size).toBe(2);
+        expect(
+            await f.controller.save({ ...f.selection, sourceId: firstId, applyToRoom: false }),
+        ).toBe(true);
+        expect(
+            (await f.client.getEditablePromptPreset({ prompt_preset_id: firstId })).value
+                .default_generation_preset_id,
+        ).toBe(savedIds[0]);
+        expect(
+            (await f.client.getEditablePromptPreset({ prompt_preset_id: secondId })).value
+                .default_generation_preset_id,
+        ).toBe(savedIds[1]);
+    });
+
     it('loads imported documents and connects their generation preset using fresh revisions', async () => {
         const f = await fixture();
         await f.controller.load(await f.client.listPromptPresets());
@@ -76,10 +111,13 @@ describe('imported settings connection', () => {
         const saved = await f.client.getEditablePromptPreset({
             prompt_preset_id: f.selection.sourceId,
         });
-        expect(saved.value.default_generation_preset_id).toBe('imported-generation-provider');
+        expect(saved.value.default_generation_preset_id).toBe(
+            'imported-ad7fa24f8ece8f67ba15b4e4bf49f8b4153efb4bbf44fd1d080e7723c3b3622a-provider',
+        );
         expect(f.stageRoomConfig).toHaveBeenCalledWith({
             prompt_preset_id: saved.value.id,
-            generation_preset_id: 'imported-generation-provider',
+            generation_preset_id:
+                'imported-ad7fa24f8ece8f67ba15b4e4bf49f8b4153efb4bbf44fd1d080e7723c3b3622a-provider',
         });
         expect(f.saveRoomConfig).toHaveBeenCalledOnce();
         expect(await f.controller.save(f.selection)).toBe(true);
@@ -123,7 +161,8 @@ describe('imported settings connection', () => {
         ).toMatchObject({
             kind: 'memory_summary',
             route_id: 'route-1',
-            generation_preset_id: 'imported-memory-summary-provider',
+            generation_preset_id:
+                'imported-b5e97230126eb13d9a69ffd167e1c10c73e1928afbb3fa1583d32430f28391b6-summary-provider',
         });
         expect(
             (await f.client.getEditablePromptPreset({ prompt_preset_id: 'imported-generation' }))
@@ -162,7 +201,9 @@ describe('imported settings connection', () => {
         expect(
             (await f.client.getEditablePromptPreset({ prompt_preset_id: 'imported-generation' }))
                 .value.default_generation_preset_id,
-        ).toBe('imported-generation-provider');
+        ).toBe(
+            'imported-ad7fa24f8ece8f67ba15b4e4bf49f8b4153efb4bbf44fd1d080e7723c3b3622a-provider',
+        );
     });
 
     it('stops dependent writes after a failed task save and permits a safe retry', async () => {

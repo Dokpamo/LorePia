@@ -8,16 +8,23 @@ export function selectPortableRoomMarkup(
 ): void {
     const template = document.createElement('template');
     template.innerHTML = background;
+    const appendBackground = () => {
+        if (surface === 'room') root.append(template.content);
+    };
     const styles = [
         ...template.content.querySelectorAll('style'),
         ...root.querySelectorAll('style'),
     ];
     const css = styles.map((style) => style.textContent).join('\n');
-    if (css.length > 262_144 || typeof CSSStyleSheet.prototype.replaceSync !== 'function') return;
+    if (css.length > 262_144 || typeof CSSStyleSheet.prototype.replaceSync !== 'function') {
+        appendBackground();
+        return;
+    }
     const sheet = new CSSStyleSheet();
     try {
         sheet.replaceSync(css);
     } catch {
+        appendBackground();
         return;
     }
     const selectors: string[] = [];
@@ -52,4 +59,5 @@ export function selectPortableRoomMarkup(
     } else if (surface === 'message') {
         for (const element of top) element.remove();
     }
+    appendBackground();
 }
