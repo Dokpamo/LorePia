@@ -14,6 +14,8 @@ export interface ListBranchMessagesPageInput {
 /** Chronological messages and absolute positions in the returned head snapshot. */
 export interface BranchMessagesPageDto {
     messages: MessageDto[];
+    /** Opaque equality evidence covering canonical bodies and display sidecars. */
+    snapshot_token?: string;
     has_older: boolean;
     has_newer: boolean;
     head_message_id: string | null;

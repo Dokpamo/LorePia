@@ -1,4 +1,9 @@
-use std::collections::HashSet;
+use super::lineage_cache::LineageSnapshot;
+mod last_assistant;
+use crate::message_display_projection::{
+    StoredMessageDisplayProjection, read_page_projections, verify_batch,
+};
+use last_assistant::load_last_assistant;
 
 use super::{
     Connection, ConversationBranchId, CoreError, CoreResult, Message, MessageId, MessageRole,
@@ -10,6 +15,9 @@ use super::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BranchMessagePage {
     pub messages: Vec<Message>,
+    /// Equality-only evidence for bodies and projections from this read snapshot.
+    pub snapshot_token: String,
+    pub display_projections: Vec<StoredMessageDisplayProjection>,
     pub has_older: bool,
     pub has_newer: bool,
     pub head_message_id: Option<MessageId>,
@@ -55,18 +63,18 @@ impl Storage {
             .lineage_cache
             .lock()
             .map_err(|_| CoreError::internal("lineage cache lock was poisoned"))?
-            .load(&transaction, &conversation_id, head.as_deref())?;
+            .load(
+                &transaction,
+                &conversation_id,
+                head.as_deref(),
+                self.change_tracking.lineage_epoch(),
+            )?;
         let anchor = before
             .or(after)
             .map(|anchor| {
-                lineage
-                    .iter()
-                    .position(|id| *id == anchor.0)
-                    .ok_or_else(|| {
-                        CoreError::invalid(
-                            "message page anchor is not in the current branch lineage",
-                        )
-                    })
+                lineage.position(&anchor.0).ok_or_else(|| {
+                    CoreError::invalid("message page anchor is not in the current branch lineage")
+                })
             })
             .transpose()?;
         let limit = usize::try_from(limit)
@@ -80,17 +88,23 @@ impl Storage {
         let selected = lineage[start..end].iter().rev().collect::<Vec<_>>();
         let messages = load_selected_messages(&transaction, &conversation_id, &selected)?;
         let last_assistant_message = if include_last_assistant {
-            load_last_assistant(
-                &transaction,
-                &conversation_id,
-                &lineage,
-                &messages,
-                start == 0,
-            )?
+            load_last_assistant(&transaction, &conversation_id, &lineage, &messages, start)?
         } else {
             None
         };
-        let page = BranchMessagePage {
+        let projection_rows = read_page_projections(
+            &transaction,
+            messages.iter().chain(last_assistant_message.iter()),
+        )?;
+        let snapshot_token = self
+            .change_tracking
+            .history_snapshot_token(&transaction, &branch_id.0)?;
+        transaction.commit().map_err(storage_db_error)?;
+        drop(connection);
+        let display_projections = verify_batch(projection_rows)?;
+        Ok(BranchMessagePage {
+            snapshot_token,
+            display_projections,
             last_assistant_message,
             retained_message_ids: check_message_ids.map(|ids| retained_candidates(&lineage, ids)),
             messages,
@@ -101,9 +115,7 @@ impl Storage {
                 .map_err(|_| CoreError::internal("message count exceeds supported range"))?,
             start_index: u64::try_from(lineage.len() - end)
                 .map_err(|_| CoreError::internal("message offset exceeds supported range"))?,
-        };
-        transaction.commit().map_err(storage_db_error)?;
-        Ok(page)
+        })
     }
 }
 
@@ -141,56 +153,6 @@ fn load_selected_messages(
     Ok(messages)
 }
 
-fn load_last_assistant(
-    connection: &Connection,
-    conversation_id: &str,
-    lineage: &[String],
-    page_messages: &[Message],
-    includes_head: bool,
-) -> CoreResult<Option<Message>> {
-    if lineage.is_empty() {
-        return Ok(None);
-    }
-    if includes_head
-        && page_messages
-            .iter()
-            .any(|message| message.role == MessageRole::Assistant)
-    {
-        return Ok(None);
-    }
-    let ids = serde_json::to_string(lineage).map_err(|error| {
-        CoreError::internal(format!(
-            "cannot encode assistant lookup identities: {error}"
-        ))
-    })?;
-    let page_ids = serde_json::to_string(
-        &page_messages
-            .iter()
-            .map(|message| &message.id.0)
-            .collect::<Vec<_>>(),
-    )
-    .map_err(|error| {
-        CoreError::internal(format!("cannot encode assistant page identities: {error}"))
-    })?;
-    connection
-        .prepare_cached(
-            "WITH selected AS MATERIALIZED (
-           SELECT message.id FROM json_each(?1) AS lineage
-           JOIN messages AS message ON message.id = lineage.value
-           WHERE message.conversation_id = ?2 AND message.role = 'assistant'
-           ORDER BY CAST(lineage.key AS INTEGER) LIMIT 1
-         )
-         SELECT message.id, message.conversation_id, message.parent_id, message.role,
-                message.content, message.status, message.generation_id, message.created_at
-         FROM selected JOIN messages_with_checkpoints AS message ON message.id = selected.id
-         WHERE selected.id NOT IN (SELECT value FROM json_each(?3))",
-        )
-        .map_err(storage_db_error)?
-        .query_row(params![ids, conversation_id, page_ids], map_message)
-        .optional()
-        .map_err(storage_db_error)
-}
-
 fn validate_membership_candidates(ids: Option<&[MessageId]>) -> CoreResult<()> {
     if let Some(ids) = ids {
         if ids.len() > 256 {
@@ -213,18 +175,9 @@ fn validate_membership_candidates(ids: Option<&[MessageId]>) -> CoreResult<()> {
     Ok(())
 }
 
-fn retained_candidates(lineage: &[String], ids: &[MessageId]) -> Vec<MessageId> {
-    if ids.is_empty() {
-        return Vec::new();
-    }
-    let requested = ids.iter().map(|id| id.0.as_str()).collect::<HashSet<_>>();
-    let retained = lineage
-        .iter()
-        .map(String::as_str)
-        .filter(|id| requested.contains(id))
-        .collect::<HashSet<_>>();
+fn retained_candidates(lineage: &LineageSnapshot, ids: &[MessageId]) -> Vec<MessageId> {
     ids.iter()
-        .filter(|id| retained.contains(id.0.as_str()))
+        .filter(|id| lineage.position(&id.0).is_some())
         .cloned()
         .collect()
 }

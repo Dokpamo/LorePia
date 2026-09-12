@@ -1,5 +1,9 @@
 # 마지막 자원 효율 개선 검토
 
+이 문서는 최초 감사 수정 c999c43의 기록이다. 이후 Pro 재점검으로 확인한
+Markdown·계보 무효화·30+98 기록 재사용·정적 카드·Windows 테스트의 추가 수정은
+[후속 재점검 결과](resource-recheck-review.md)에 기록한다.
+
 브랜치: `codex/final-resource-efficiency-20260912`
 기준 커밋: `e32c13c5b04c3d5db1b60637be115c2b61fcfb78`
 

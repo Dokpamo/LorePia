@@ -4,6 +4,7 @@ mod bootstrap;
 mod branches;
 mod capability_observations;
 mod cas_filesystem;
+mod change_tracking;
 mod character_catalog;
 mod character_import;
 mod connection;
@@ -13,6 +14,7 @@ mod data_root;
 mod finalize;
 mod generation_append;
 mod generation_presets;
+mod generation_route;
 mod health;
 mod interrupted_generation_recovery;
 mod lineage_cache;
@@ -81,6 +83,7 @@ pub use asset_delivery::ApprovedAssetRange;
 pub(crate) use connection_metrics::DatabaseConnectionGuard;
 use connection_metrics::DatabaseConnectionMetricState;
 pub use connection_metrics::DatabaseConnectionMetrics;
+use generation_route::StoredGenerationRoute;
 pub use memory_source::MemorySourceMessageIdentity;
 pub use message_pages::BranchMessagePage;
 pub use messages::{MessageGenerationAction, MessageGenerationActionContext};
@@ -210,18 +213,11 @@ pub struct Storage {
     pub(crate) connection: Mutex<Connection>,
     verified_asset_cache: Mutex<VerifiedAssetCache>,
     lineage_cache: Mutex<lineage_cache::LineageCache>,
+    change_tracking: change_tracking::ChangeTracking,
     checkpoint_proofs: Mutex<pending_checkpoints::CheckpointProofCache>,
     #[cfg(test)]
     approved_asset_hash_verifications: AtomicUsize,
     _owner_lock: File,
-}
-
-struct StoredGenerationRoute {
-    conversation: String,
-    branch: String,
-    user_message: String,
-    assistant_message: Option<String>,
-    provider_family: Option<ApiFamily>,
 }
 
 impl Storage {

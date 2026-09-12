@@ -43,10 +43,33 @@ impl Storage {
     }
 }
 
-struct LoadedProjection<'a> {
+pub(crate) struct LoadedProjection<'a> {
     message: &'a Message,
     row: ProjectionRow,
     diagnostics: Vec<StoredRuleDiagnosticRow>,
+}
+
+/// Reads page sidecars from the caller's established canonical-message snapshot.
+/// Verification consumes these borrowed rows only after the caller releases `SQLite`.
+pub(crate) fn read_page_projections<'a>(
+    connection: &rusqlite::Connection,
+    messages: impl Iterator<Item = &'a Message>,
+) -> CoreResult<Vec<LoadedProjection<'a>>> {
+    let eligible = messages
+        .filter(|message| {
+            message.role == lorepia_domain::MessageRole::Assistant
+                && message.status != lorepia_domain::MessageStatus::Pending
+                && message
+                    .generation_id
+                    .as_ref()
+                    .is_some_and(|id| !id.is_character_greeting())
+        })
+        .collect::<Vec<_>>();
+    let mut rows = Vec::new();
+    for batch in eligible.chunks(MESSAGE_BATCH_SIZE) {
+        rows.extend(read_batch(connection, batch)?);
+    }
+    Ok(rows)
 }
 
 fn read_batch<'a>(
@@ -143,7 +166,7 @@ fn read_batch<'a>(
         .collect())
 }
 
-fn verify_batch(
+pub(crate) fn verify_batch(
     rows: Vec<LoadedProjection<'_>>,
 ) -> CoreResult<Vec<StoredMessageDisplayProjection>> {
     rows.into_iter()

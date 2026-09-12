@@ -87,9 +87,14 @@ impl Storage {
             .lineage_cache
             .lock()
             .map_err(|_| CoreError::internal("lineage cache lock was poisoned"))?
-            .load(&transaction, &owner, head.as_deref())?;
+            .load(
+                &transaction,
+                &owner,
+                head.as_deref(),
+                self.change_tracking.lineage_epoch(),
+            )?;
         let (from, to) = range_indices(&lineage, range)?;
-        let ids = serde_json::to_string(lineage.as_ref()).map_err(|error| {
+        let ids = serde_json::to_string(lineage.as_slice()).map_err(|error| {
             CoreError::internal(format!("cannot encode memory identities: {error}"))
         })?;
         if range.is_some() {

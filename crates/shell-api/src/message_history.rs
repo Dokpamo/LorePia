@@ -21,6 +21,8 @@ pub struct ListBranchMessagesPageInput {
 #[serde(deny_unknown_fields)]
 pub struct BranchMessagesPageDto {
     pub messages: Vec<MessageDto>,
+    /// Opaque equality evidence; it is not durable authority or a cursor.
+    pub snapshot_token: String,
     pub has_older: bool,
     pub has_newer: bool,
     pub head_message_id: Option<String>,
@@ -37,6 +39,7 @@ impl From<MessagePresentationPage> for BranchMessagesPageDto {
     fn from(value: MessagePresentationPage) -> Self {
         Self {
             messages: value.messages.into_iter().map(Into::into).collect(),
+            snapshot_token: value.snapshot_token,
             last_assistant_message: value.last_assistant_message.map(Into::into),
             has_older: value.has_older,
             has_newer: value.has_newer,

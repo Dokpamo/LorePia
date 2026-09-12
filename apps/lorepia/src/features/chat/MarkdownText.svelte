@@ -1,13 +1,14 @@
 <script lang="ts">
     import MarkdownInline from './MarkdownInline.svelte';
-    import { parseMarkdown } from './markdown';
+    import { createIncrementalMarkdownParser } from './markdown-incremental';
 
     interface Props {
         text: string;
     }
 
     let { text }: Props = $props();
-    const blocks = $derived(parseMarkdown(text));
+    const parse = createIncrementalMarkdownParser();
+    const blocks = $derived(parse(text));
 </script>
 
 <div class="markdown">

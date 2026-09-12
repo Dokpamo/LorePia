@@ -9,6 +9,8 @@ const NOW: &str = "2026-09-12T00:00:00Z";
 const CANONICAL: &str = "canonical terminal response";
 const DISPLAY: &str = "display-only terminal response";
 
+mod snapshots;
+
 struct Fixture {
     root: TempDir,
     shell: ShellApi,
@@ -139,6 +141,7 @@ fn shell_pages_preserve_absolute_indexes_display_projection_and_legacy_results()
             "has_older",
             "head_message_id",
             "messages",
+            "snapshot_token",
             "start_index",
             "total_messages"
         ]

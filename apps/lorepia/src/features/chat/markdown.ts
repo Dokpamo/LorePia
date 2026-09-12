@@ -5,13 +5,12 @@
  * `MarkdownText.svelte` renders through ordinary Svelte elements, so message
  * text can never introduce markup, script, or navigation. Every function here
  * is total: malformed or partial input degrades to literal text instead of
- * throwing, because the streaming view re-parses a growing prefix on every
- * delta and must stay stable while a marker is still unterminated.
+ * throwing, because the streaming view must stay stable while a marker is still unterminated.
  */
 
 /** Matches the backend generation ceiling; larger input renders as plain text. */
 export const MAX_MARKDOWN_INPUT_BYTES = 256 * 1024;
-/** Total inline nodes admitted before the remainder is emitted as literal text. */
+/** Whole render-tree budget, including two reserved literal fallback units. */
 export const MAX_MARKDOWN_NODES = 4096;
 /** Maximum list items or block-quote lines grouped into one block. */
 export const MAX_MARKDOWN_BLOCK_LINES = 512;
@@ -43,7 +42,7 @@ const LINK = /^\[([^\]\n]{0,512})\]\(([^\s)]{1,2048})\)/;
 /** Only these schemes are recognized; anything else stays literal text. */
 const ALLOWED_LINK_SCHEMES = ['https://', 'http://'];
 
-function byteLength(value: string): number {
+export function markdownByteLength(value: string): number {
     // Avoids allocating a TextEncoder for every streaming delta.
     let bytes = 0;
     for (const character of value) {
@@ -56,27 +55,24 @@ function byteLength(value: string): number {
     return bytes;
 }
 
+const BUDGET_EXHAUSTED = new Error('markdown render budget exhausted');
+
 class NodeBudget {
-    private remaining = MAX_MARKDOWN_NODES;
-
-    take(): boolean {
-        if (this.remaining <= 0) return false;
-        this.remaining -= 1;
-        return true;
-    }
-
-    get exhausted(): boolean {
-        return this.remaining <= 0;
+    constructor(public remaining = MAX_MARKDOWN_NODES - 2) {}
+    take(count = 1): void {
+        if (this.remaining < count) throw BUDGET_EXHAUSTED;
+        this.remaining -= count;
     }
 }
 
-function pushText(nodes: MarkdownInline[], value: string): void {
+function pushText(nodes: MarkdownInline[], value: string, budget: NodeBudget): void {
     if (value === '') return;
     const last = nodes.at(-1);
     if (last?.kind === 'text') {
         last.value += value;
         return;
     }
+    budget.take();
     nodes.push({ kind: 'text', value });
 }
 
@@ -98,18 +94,18 @@ function parseInline(source: string, budget: NodeBudget, depth = 0): MarkdownInl
     let literalStart = 0;
 
     const flushLiteral = (end: number): void => {
-        pushText(nodes, source.slice(literalStart, end));
+        pushText(nodes, source.slice(literalStart, end), budget);
         literalStart = end;
     };
 
     while (index < source.length) {
-        if (budget.exhausted) break;
         const character = source[index];
         if (character === undefined) break;
 
         if (character === '`') {
             const close = source.indexOf('`', index + 1);
-            if (close > index && budget.take()) {
+            if (close > index) {
+                budget.take(2);
                 flushLiteral(index);
                 nodes.push({ kind: 'code', value: source.slice(index + 1, close) });
                 index = close + 1;
@@ -127,9 +123,10 @@ function parseInline(source: string, budget: NodeBudget, depth = 0): MarkdownInl
                 consumed !== undefined &&
                 label !== undefined &&
                 href !== undefined &&
-                isAllowedHref(href) &&
-                budget.take()
+                isAllowedHref(href)
             ) {
+                budget.take();
+                if (depth >= 4) budget.take();
                 flushLiteral(index);
                 nodes.push({
                     kind: 'link',
@@ -152,7 +149,8 @@ function parseInline(source: string, budget: NodeBudget, depth = 0): MarkdownInl
             const inner = close > index ? source.slice(index + marker.length, close) : '';
             // An empty span is not emphasis; leaving it literal keeps `**` and
             // stray asterisks readable, which matters while text is streaming.
-            if (close > index && inner.trim() !== '' && depth < 4 && budget.take()) {
+            if (close > index && inner.trim() !== '' && depth < 4) {
+                budget.take();
                 flushLiteral(index);
                 nodes.push({
                     kind: strong ? 'strong' : 'emphasis',
@@ -171,98 +169,138 @@ function parseInline(source: string, budget: NodeBudget, depth = 0): MarkdownInl
     return nodes;
 }
 
-/** Reads a markdown message into a render tree. Never throws. */
+/** Internal stable-prefix checkpoint for one mounted streaming message. */
+export interface MarkdownCheckpoint {
+    offset: number;
+    count: number;
+    remaining: number;
+}
+export interface MarkdownParseResult {
+    blocks: MarkdownBlock[];
+    settled: MarkdownCheckpoint | null;
+}
+export function markdownLiteral(source: string): MarkdownBlock[] {
+    return source === ''
+        ? []
+        : [{ kind: 'paragraph', children: [{ kind: 'text', value: source }] }];
+}
+
+/** Reads a markdown message into a render tree. */
 export function parseMarkdown(source: string): MarkdownBlock[] {
-    if (source === '') return [];
-    if (byteLength(source) > MAX_MARKDOWN_INPUT_BYTES) {
-        return [{ kind: 'paragraph', children: [{ kind: 'text', value: source }] }];
-    }
+    if (markdownByteLength(source) > MAX_MARKDOWN_INPUT_BYTES) return markdownLiteral(source);
+    return parseMarkdownSegment(source).blocks;
+}
 
-    const budget = new NodeBudget();
-    const lines = source.split('\n');
+/** Internal suffix parser; its caller owns the whole-input byte ceiling. */
+export function parseMarkdownSegment(
+    source: string,
+    remaining = MAX_MARKDOWN_NODES - 2,
+): MarkdownParseResult {
+    const budget = new NodeBudget(remaining);
     const blocks: MarkdownBlock[] = [];
+    let settled: MarkdownCheckpoint | null = null;
+    if (source === '') return { blocks, settled };
+    if (remaining === 0) return { blocks: markdownLiteral(source), settled };
+    const lines = source.split('\n');
     let index = 0;
-
+    let offset = 0;
+    const advance = () => {
+        offset = Math.min(source.length, offset + (lines[index]?.length ?? 0) + 1);
+        index += 1;
+    };
     while (index < lines.length) {
         const line = lines[index] ?? '';
-
+        // A complete blank line outside a fence cannot be reinterpreted by append.
+        if (line.trim() === '' && index < lines.length - 1) {
+            settled = { offset, count: blocks.length, remaining: budget.remaining };
+        }
+        if (budget.remaining === 0) {
+            blocks.push(...markdownLiteral(source.slice(offset)));
+            break;
+        }
         if (line.trim() === '') {
-            index += 1;
+            advance();
+            if (index < lines.length)
+                settled = { offset, count: blocks.length, remaining: budget.remaining };
             continue;
         }
-
-        const fence = FENCE_LINE.exec(line);
-        if (fence !== null) {
-            const marker = line.trimStart().slice(0, 3);
-            const body: string[] = [];
-            index += 1;
-            while (index < lines.length && !(lines[index] ?? '').trimStart().startsWith(marker)) {
-                if (body.length >= MAX_MARKDOWN_BLOCK_LINES) break;
-                body.push(lines[index] ?? '');
-                index += 1;
+        const blockStart = offset;
+        try {
+            const fence = FENCE_LINE.exec(line);
+            if (fence !== null) {
+                budget.take(3); // pre, code, text
+                const marker = line.trimStart().slice(0, 3);
+                const body: string[] = [];
+                advance();
+                while (
+                    index < lines.length &&
+                    !(lines[index] ?? '').trimStart().startsWith(marker)
+                ) {
+                    body.push(lines[index] ?? '');
+                    advance();
+                }
+                if (index < lines.length) advance(); // An actual closing fence only.
+                blocks.push({
+                    kind: 'code',
+                    language: fence[1] === undefined || fence[1] === '' ? null : fence[1],
+                    value: body.join('\n'),
+                });
+                continue;
             }
-            // A fence still being streamed has no closing marker yet; render
-            // what has arrived rather than falling back to literal text.
-            if (index < lines.length) index += 1;
-            blocks.push({
-                kind: 'code',
-                language: fence[1] === undefined || fence[1] === '' ? null : fence[1],
-                value: body.join('\n'),
-            });
-            continue;
-        }
-
-        if (RULE_LINE.test(line)) {
-            blocks.push({ kind: 'rule' });
-            index += 1;
-            continue;
-        }
-
-        const quote = QUOTE_LINE.exec(line);
-        if (quote !== null) {
-            const quoted: MarkdownInline[][] = [];
-            while (index < lines.length && quoted.length < MAX_MARKDOWN_BLOCK_LINES) {
-                const quoted_line = QUOTE_LINE.exec(lines[index] ?? '')?.[1];
-                if (quoted_line === undefined) break;
-                quoted.push(parseInline(quoted_line, budget));
-                index += 1;
+            budget.take(); // Block element, including paragraph/list/quote/rule.
+            if (RULE_LINE.test(line)) {
+                blocks.push({ kind: 'rule' });
+                advance();
+                continue;
             }
-            blocks.push({ kind: 'quote', lines: quoted });
-            continue;
-        }
-
-        const ordered = ORDERED_ITEM.test(line);
-        if (ordered || UNORDERED_ITEM.test(line)) {
-            const pattern = ordered ? ORDERED_ITEM : UNORDERED_ITEM;
-            const items: MarkdownInline[][] = [];
-            while (index < lines.length && items.length < MAX_MARKDOWN_BLOCK_LINES) {
-                const item = pattern.exec(lines[index] ?? '')?.[1];
-                if (item === undefined) break;
-                items.push(parseInline(item, budget));
-                index += 1;
+            if (QUOTE_LINE.test(line)) {
+                const quoted: MarkdownInline[][] = [];
+                while (index < lines.length && quoted.length < MAX_MARKDOWN_BLOCK_LINES) {
+                    const value = QUOTE_LINE.exec(lines[index] ?? '')?.[1];
+                    if (value === undefined) break;
+                    budget.take(); // Quote line paragraph.
+                    quoted.push(parseInline(value, budget));
+                    advance();
+                }
+                blocks.push({ kind: 'quote', lines: quoted });
+                continue;
             }
-            blocks.push({ kind: 'list', ordered, items });
-            continue;
-        }
-
-        const paragraph: string[] = [];
-        while (index < lines.length && paragraph.length < MAX_MARKDOWN_BLOCK_LINES) {
-            const current = lines[index] ?? '';
-            if (
-                current.trim() === '' ||
-                FENCE_LINE.test(current) ||
-                RULE_LINE.test(current) ||
-                QUOTE_LINE.test(current) ||
-                ORDERED_ITEM.test(current) ||
-                UNORDERED_ITEM.test(current)
-            ) {
-                break;
+            const ordered = ORDERED_ITEM.test(line);
+            if (ordered || UNORDERED_ITEM.test(line)) {
+                const pattern = ordered ? ORDERED_ITEM : UNORDERED_ITEM;
+                const items: MarkdownInline[][] = [];
+                while (index < lines.length && items.length < MAX_MARKDOWN_BLOCK_LINES) {
+                    const item = pattern.exec(lines[index] ?? '')?.[1];
+                    if (item === undefined) break;
+                    budget.take(); // List item element.
+                    items.push(parseInline(item, budget));
+                    advance();
+                }
+                blocks.push({ kind: 'list', ordered, items });
+                continue;
             }
-            paragraph.push(current);
-            index += 1;
+            const paragraph: string[] = [];
+            while (index < lines.length && paragraph.length < MAX_MARKDOWN_BLOCK_LINES) {
+                const current = lines[index] ?? '';
+                if (
+                    current.trim() === '' ||
+                    FENCE_LINE.test(current) ||
+                    RULE_LINE.test(current) ||
+                    QUOTE_LINE.test(current) ||
+                    ORDERED_ITEM.test(current) ||
+                    UNORDERED_ITEM.test(current)
+                )
+                    break;
+                paragraph.push(current);
+                advance();
+            }
+            blocks.push({ kind: 'paragraph', children: parseInline(paragraph.join('\n'), budget) });
+        } catch (error) {
+            if (error !== BUDGET_EXHAUSTED) throw error;
+            // Discard the incomplete block, preserving its exact source plus the suffix.
+            blocks.push(...markdownLiteral(source.slice(blockStart)));
+            break;
         }
-        blocks.push({ kind: 'paragraph', children: parseInline(paragraph.join('\n'), budget) });
     }
-
-    return blocks;
+    return { blocks, settled };
 }

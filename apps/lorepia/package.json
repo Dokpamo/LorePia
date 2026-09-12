@@ -22,7 +22,7 @@
     "typecheck:svelte": "svelte-check --tsconfig ./tsconfig.json",
     "check": "npm run format:check && npm run i18n:check && npm run lint && npm run typecheck",
     "test": "vitest run",
-    "posttest": "node ../../scripts/test_portable_lua_sandbox.mjs && node ../../scripts/test_portable_regex_worker.mjs",
+    "posttest": "node ../../scripts/test_portable_lua_sandbox.mjs && node ../../scripts/test_portable_regex_worker.mjs && node ../../scripts/test_markdown_retention.mjs",
     "test:component": "vitest run src/features",
     "test:watch": "vitest"
   },

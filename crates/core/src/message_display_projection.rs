@@ -2,7 +2,7 @@ use lorepia_domain::{
     ConversationBranchId, ConversationId, CoreResult, GenerationId, Message, MessageId,
     MessageRole, MessageStatus, Sha256Digest,
 };
-use lorepia_storage::MessageTransformDiagnostic;
+use lorepia_storage::{MessageTransformDiagnostic, StoredMessageDisplayProjection};
 use sha2::{Digest, Sha256};
 
 use crate::Core;
@@ -25,6 +25,7 @@ pub struct MessagePresentation {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MessagePresentationPage {
     pub messages: Vec<MessagePresentation>,
+    pub snapshot_token: String,
     pub has_older: bool,
     pub has_newer: bool,
     pub head_message_id: Option<MessageId>,
@@ -63,19 +64,25 @@ impl Core {
             check_message_ids,
             include_last_assistant,
         )?;
-        let messages = self.present_messages(page.messages)?;
+        let mut projections = page
+            .display_projections
+            .into_iter()
+            .map(|projection| (projection.message_id.clone(), projection))
+            .collect();
+        let messages = present_with_projections(page.messages, &mut projections)?;
         let last_assistant_message = match page.last_assistant_message {
             Some(message) => {
                 if let Some(existing) = messages.iter().find(|item| item.message.id == message.id) {
                     Some(existing.clone())
                 } else {
-                    self.present_messages(vec![message])?.pop()
+                    present_with_projections(vec![message], &mut projections)?.pop()
                 }
             }
             None => None,
         };
         Ok(MessagePresentationPage {
             messages,
+            snapshot_token: page.snapshot_token,
             last_assistant_message,
             has_older: page.has_older,
             has_newer: page.has_newer,
@@ -137,32 +144,39 @@ impl Core {
             .into_iter()
             .map(|projection| (projection.message_id.clone(), projection))
             .collect::<std::collections::HashMap<_, _>>();
-        messages
-            .into_iter()
-            .map(|message| {
-                let projection = projections.remove(&message.id);
-                if let Some(projection) = projection {
-                    return Ok(MessagePresentation {
-                        message,
-                        display_content: projection.display_content,
-                        canonical_content_sha256: projection.canonical_content_sha256,
-                        display_content_sha256: projection.display_content_sha256,
-                        projection_diagnostics_sha256: Some(projection.diagnostics_sha256),
-                        transform_diagnostics: projection.diagnostics,
-                    });
-                }
-                let display_content_sha256 = sha256_digest(message.content.as_bytes())?;
-                Ok(MessagePresentation {
-                    display_content: message.content.clone(),
-                    message,
-                    canonical_content_sha256: display_content_sha256.clone(),
-                    display_content_sha256,
-                    projection_diagnostics_sha256: None,
-                    transform_diagnostics: Vec::new(),
-                })
-            })
-            .collect()
+        present_with_projections(messages, &mut projections)
     }
+}
+
+fn present_with_projections(
+    messages: Vec<Message>,
+    projections: &mut std::collections::HashMap<MessageId, StoredMessageDisplayProjection>,
+) -> CoreResult<Vec<MessagePresentation>> {
+    messages
+        .into_iter()
+        .map(|message| {
+            let projection = projections.remove(&message.id);
+            if let Some(projection) = projection {
+                return Ok(MessagePresentation {
+                    message,
+                    display_content: projection.display_content,
+                    canonical_content_sha256: projection.canonical_content_sha256,
+                    display_content_sha256: projection.display_content_sha256,
+                    projection_diagnostics_sha256: Some(projection.diagnostics_sha256),
+                    transform_diagnostics: projection.diagnostics,
+                });
+            }
+            let display_content_sha256 = sha256_digest(message.content.as_bytes())?;
+            Ok(MessagePresentation {
+                display_content: message.content.clone(),
+                message,
+                canonical_content_sha256: display_content_sha256.clone(),
+                display_content_sha256,
+                projection_diagnostics_sha256: None,
+                transform_diagnostics: Vec::new(),
+            })
+        })
+        .collect()
 }
 
 fn sha256_digest(bytes: &[u8]) -> CoreResult<Sha256Digest> {

@@ -17,6 +17,10 @@
     } from './portable-display';
     import { selectPortableRoomMarkup } from './portable-room-markup';
     import { observePortableMediaVisibility } from './portable-media-visibility';
+    import {
+        createPortableInputGate,
+        portableBuildUsesContext,
+    } from './portable-build-dependencies';
     import { PortableDocumentQueue } from './portable-document-queue';
     import { resolvePortableAssets } from './portable-asset-resolution';
     import { createPortableAssetSelector } from './portable-asset-selection';
@@ -82,10 +86,12 @@
                   : t('chat.portable.regex.unavailable', { rule });
     }
 
+    const selectNormalizationInputs = createPortableInputGate();
+    const normalizationInputs = $derived(
+        selectNormalizationInputs([text, profile, enabled] as const),
+    );
     $effect(() => {
-        const source = text;
-        const activeProfile = profile;
-        const active = enabled;
+        const [source, activeProfile, active] = normalizationInputs;
         let cancelled = false;
         const exceedsLimit =
             active && activeProfile !== null && source.length > MAX_PORTABLE_SOURCE_CHARS;
@@ -195,21 +201,53 @@
             return observePortableMediaVisibility(target, () => documents.activeRuntimeId);
         }
     });
+    const selectBuildInputs = createPortableInputGate();
+    const buildInputs = $derived.by(() => {
+        const background = backgroundMarkup ?? profile?.background_markup ?? '';
+        const dynamic = portableBuildUsesContext(normalizedText, background, profile);
+        return selectBuildInputs([
+            frame,
+            profile,
+            client,
+            normalizedText,
+            messageIndex,
+            dynamic ? lastMessageId : undefined,
+            surface,
+            floating,
+            frameWidth,
+            dynamic ? displayVariablesKey : '',
+            dynamic ? lastCharacterMessage : '',
+            characterName,
+            userName,
+            background,
+            usesPortableMarkup,
+        ] as const);
+    });
     $effect(() => {
-        const target = frame;
-        const activeProfile = profile;
-        const activeClient = client;
-        const source = normalizedText;
-        const activeMessageIndex = messageIndex;
-        const activeLastMessageId = lastMessageId;
-        const activeSurface = surface;
-        const floatingRoom = floating;
-        const screenWidth = frameWidth;
-        void displayVariablesKey;
+        const [
+            target,
+            activeProfile,
+            activeClient,
+            source,
+            activeMessageIndex,
+            activeLastMessageId,
+            activeSurface,
+            floatingRoom,
+            screenWidth,
+            ,
+            activeLastCharacterMessage,
+            activeCharacterName,
+            activeUserName,
+            activeBackgroundMarkup,
+            portable,
+        ] = buildInputs;
         const activeVariables = untrack(() => displayVariables);
-        const names = { lastCharacterMessage, characterName, userName };
-        const activeBackgroundMarkup = backgroundMarkup ?? activeProfile?.background_markup ?? '';
-        if (!usesPortableMarkup || !target || !activeProfile || !activeClient) return;
+        const names = {
+            lastCharacterMessage: activeLastCharacterMessage,
+            characterName: activeCharacterName,
+            userName: activeUserName,
+        };
+        if (!portable || !target || !activeProfile || !activeClient) return;
         return documents.submit(
             [
                 target,
@@ -219,8 +257,8 @@
                 floatingRoom,
                 screenWidth,
                 activeMessageIndex,
-                characterName,
-                userName,
+                activeCharacterName,
+                activeUserName,
             ],
             async (signal) => {
                 const rendered = await buildPortableDocument(

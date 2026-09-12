@@ -60,7 +60,9 @@ impl Storage {
         crate::model_sync::recover_interrupted_model_sync_jobs(&mut connection)?;
         remove_abandoned_staging_files(&root.join("staging"))?;
 
+        let change_tracking = super::change_tracking::ChangeTracking::install(&connection)?;
         let storage = Self {
+            change_tracking,
             root,
             cas_mutation: Mutex::new(()),
             connection_metrics: DatabaseConnectionMetricState::default(),

@@ -293,7 +293,8 @@
         "bundled",
         "cache",
         "fallible_uint",
-        "functions"
+        "functions",
+        "hooks"
       ],
       "from": "lorepia-core",
       "kind": "dev",
@@ -845,7 +846,8 @@
         "bundled",
         "cache",
         "fallible_uint",
-        "functions"
+        "functions",
+        "hooks"
       ],
       "from": "lorepia-shell-api",
       "kind": "dev",
@@ -863,7 +865,8 @@
         "bundled",
         "cache",
         "fallible_uint",
-        "functions"
+        "functions",
+        "hooks"
       ],
       "from": "lorepia-shell-api",
       "kind": "normal",
@@ -1030,7 +1033,8 @@
         "bundled",
         "cache",
         "fallible_uint",
-        "functions"
+        "functions",
+        "hooks"
       ],
       "from": "lorepia-storage",
       "kind": "normal",

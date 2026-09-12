@@ -328,8 +328,8 @@
       "lines": 2110
     },
     "crates/storage/src/database.rs": {
-      "bytes": 33127,
-      "lines": 871
+      "bytes": 33084,
+      "lines": 867
     },
     "crates/storage/src/generation_attempt.rs": {
       "bytes": 159784,

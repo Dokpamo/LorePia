@@ -81,6 +81,24 @@ fn concurrent_cold_png_ranges_share_hash_and_policy_then_detect_warm_mutation() 
         .join(content_relative_path(digest.as_str()).unwrap());
     let mut changed = bytes;
     changed[54] ^= 1;
+    #[cfg(windows)]
+    let storage = {
+        // A live verified lease intentionally denies write/delete sharing.
+        // Test that protection first, then validate a fresh open after tampering.
+        let error = std::fs::write(&path, &changed).unwrap_err();
+        assert_eq!(error.raw_os_error(), Some(32)); // ERROR_SHARING_VIOLATION
+        assert_eq!(
+            storage
+                .read_approved_asset_range(&digest, 0, 8)
+                .unwrap()
+                .bytes,
+            png()[..8]
+        );
+        drop(storage);
+        std::fs::write(&path, &changed).unwrap();
+        Storage::open(root.path()).unwrap()
+    };
+    #[cfg(not(windows))]
     std::fs::write(path, changed).unwrap();
     assert_eq!(
         storage
