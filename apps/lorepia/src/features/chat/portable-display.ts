@@ -121,17 +121,14 @@ function isAssetTransform(transform: CharacterDisplayTransformDto): boolean {
 }
 
 function safeFlags(flags: string, retainGlobal: boolean): string {
-    const result = [
-        ...new Set(
-            flags
-                .replace(/<[^>]*>/g, '')
-                .split('')
-                .filter((flag) => 'dgimsuvy'.includes(flag)),
-        ),
-    ]
-        .filter((flag) => retainGlobal || (flag !== 'g' && flag !== 'y'))
-        .join('');
-    return result;
+    const parsed = new Set<string>();
+    let modifierDepth = 0;
+    for (const flag of flags) {
+        if (flag === '<') modifierDepth += 1;
+        else if (flag === '>') modifierDepth = Math.max(0, modifierDepth - 1);
+        else if (modifierDepth === 0 && 'dgimsuvy'.includes(flag)) parsed.add(flag);
+    }
+    return [...parsed].filter((flag) => retainGlobal || (flag !== 'g' && flag !== 'y')).join('');
 }
 
 export function renderPortableMacros(

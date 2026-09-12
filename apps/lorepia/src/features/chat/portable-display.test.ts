@@ -76,15 +76,18 @@ describe('portable display transforms', () => {
         ).resolves.toBe('y');
     });
 
-    it('does not accidentally enable dotAll from the CBS modifier', async () => {
-        await expect(
-            renderPortableDisplay(
-                'a\nb',
-                [{ pattern: 'a.b', replacement: 'bad', flags: 'g<cbs>' }],
-                context,
-            ),
-        ).resolves.toBe('a\nb');
-    });
+    it.each(['g<cbs>', 'g<<cbs>>', 'g<cbs', '<sc<script>ript>g'])(
+        'does not enable dotAll from modifier text in %s',
+        async (flags) => {
+            await expect(
+                renderPortableDisplay(
+                    'a\nb',
+                    [{ pattern: 'a.b', replacement: 'bad', flags }],
+                    context,
+                ),
+            ).resolves.toBe('a\nb');
+        },
+    );
 
     it('renders tagged blocks and evaluates nested portable conditions', async () => {
         const transforms = [

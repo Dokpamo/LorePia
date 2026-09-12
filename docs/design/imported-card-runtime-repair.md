@@ -47,3 +47,5 @@ A new Core vertical test first reproduced the invalid synthetic revision, then v
 - Final `npm run check`: formatting, lint, native TypeScript and Svelte checks passed (zero Svelte errors/warnings). Final `npm run test`: 725 tests passed, followed by the real Lua timeout and regex worker sandbox regressions.
 - Actual-card display and Lua fixtures passed against the supplied 5,624-asset merged profile. IPC generation, source architecture, and the 102 Python tooling tests passed. Temporary card-specific fixtures remain outside the repository.
 - Native verification did not send an external model request. Model-backed generation is not claimed as a live end-to-end test.
+
+PR #52's CodeQL check identified two single-pass modifier-removal expressions in regex-flag parsing. Their output already passed a flag-character allowlist and never entered an HTML sink. Replace both with direct, depth-aware flag collection so nested or unfinished modifiers cannot accidentally contribute flags such as `s`. Display tests and the real worker test cover ordinary CBS, nested, unfinished and split-tag input. The HTML sanitizer, CSP and worker bounds remain unchanged.
