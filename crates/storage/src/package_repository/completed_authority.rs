@@ -456,7 +456,7 @@ mod tests {
     }
 
     #[test]
-    fn replacing_verified_bytes_with_an_identical_file_invalidates_authority() {
+    fn replacing_verified_bytes_is_blocked_or_invalidates_authority() {
         let root = tempdir().expect("data root");
         let storage = Storage::open(root.path()).expect("storage");
         let bytes = b"immutable package source";
@@ -467,22 +467,32 @@ mod tests {
         fs::create_dir_all(path.parent().expect("prefix")).expect("prefix directory");
         fs::write(&path, bytes).expect("source");
         let calls = Cell::new(0);
-        let error = storage
-            .verify_completed_package_authority_with(
-                "replacement",
-                |_, _| {
-                    calls.set(calls.get() + 1);
-                    if calls.get() == 2 {
-                        let replacement = path.with_extension("replacement");
-                        fs::write(&replacement, bytes).expect("replacement");
-                        fs::rename(&replacement, &path).expect("replace verified source");
+        let blocked = Cell::new(false);
+        let result = storage.verify_completed_package_authority_with(
+            "replacement",
+            |_, _| {
+                calls.set(calls.get() + 1);
+                if calls.get() == 2 {
+                    let replacement = path.with_extension("replacement");
+                    fs::write(&replacement, bytes).expect("replacement");
+                    match fs::rename(&replacement, &path) {
+                        Ok(()) => {}
+                        #[cfg(windows)]
+                        Err(error) if error.raw_os_error() == Some(32) => blocked.set(true),
+                        Err(error) => panic!("replace verified source: {error}"),
                     }
-                    Ok(snapshot.clone())
-                },
-                || {},
-            )
-            .expect_err("identical bytes on another identity must be re-reviewed");
-        assert_eq!(error.code, CoreErrorCode::StorageCorrupted);
+                }
+                Ok(snapshot.clone())
+            },
+            || {},
+        );
+        if blocked.get() {
+            result.expect("the original protected source remains authorized");
+            assert_eq!(fs::read(&path).expect("protected source"), bytes);
+        } else {
+            let error = result.expect_err("a replaced identity must be re-reviewed");
+            assert_eq!(error.code, CoreErrorCode::StorageCorrupted);
+        }
     }
 
     #[test]
@@ -502,11 +512,46 @@ mod tests {
         }
         let mut changed = bytes.to_vec();
         changed[0] ^= 1;
-        fs::write(&path, changed).expect("same-size mutation");
+        match fs::write(&path, &changed) {
+            Ok(()) => {}
+            #[cfg(windows)]
+            Err(error) if error.raw_os_error() == Some(32) => {
+                assert_eq!(fs::read(&path).expect("protected source"), bytes);
+                super::super::invalidate_verified_source_lease(&digest).expect("release lease");
+                fs::write(&path, &changed).expect("same-size mutation after lease release");
+            }
+            Err(error) => panic!("same-size mutation: {error}"),
+        }
         let error = storage
             .verify_completed_package_authority_with("warm", |_, _| Ok(snapshot.clone()), || {})
             .expect_err("a retained lease cannot authorize changed bytes");
         assert_eq!(error.code, CoreErrorCode::StorageCorrupted);
+    }
+
+    #[test]
+    fn cached_source_allows_duplicate_durable_publication() {
+        let root = tempdir().expect("data root");
+        let storage = Storage::open(root.path()).expect("storage");
+        let bytes = b"source lease duplicate publication fixture";
+        let digest = super::super::sha256_hex(bytes);
+        let size = bytes.len() as u64;
+        let staged = storage.staging_dir().join("duplicate-source");
+        fs::write(&staged, bytes).expect("staged source");
+        let path = storage
+            .promote_package_source("first", &staged, &digest, size)
+            .expect("first durable publication");
+        let relative = format!("sources/sha256/{}/{}", &digest[..2], &digest[2..]);
+        drop(
+            verify_owned_cas_file(&storage, "sources", &digest, size, &relative)
+                .expect("warm verified source lease"),
+        );
+        assert_eq!(
+            storage
+                .promote_package_source("second", &staged, &digest, size)
+                .expect("duplicate publication flushes while a source lease was cached"),
+            path,
+        );
+        assert_eq!(fs::read(path).expect("published source"), bytes);
     }
 
     #[cfg(any(target_os = "linux", target_vendor = "apple"))]

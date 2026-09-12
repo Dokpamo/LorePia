@@ -85,6 +85,7 @@ use selection::{
     ReviewedComponentRow, assert_inspection_expectation, decode_selection,
     load_reviewed_components, reviewed_component_rows_sha256,
 };
+pub(crate) use source_verification_cache::invalidate as invalidate_verified_source_lease;
 use target_review::{
     canonical_update_target_confirmations, insert_document_target_reviews,
     load_document_target_reviews, load_package_import_target_review, reviewed_document_target,

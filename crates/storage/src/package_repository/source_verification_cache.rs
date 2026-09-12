@@ -17,6 +17,18 @@ struct Entry {
 
 static CACHE: OnceLock<Mutex<VecDeque<Entry>>> = OnceLock::new();
 
+/// Publication holds the CAS mutation lock before releasing a retained reader.
+/// Windows needs a write-capable handle even to flush identical existing bytes.
+pub(crate) fn invalidate(sha256: &str) -> CoreResult<()> {
+    if let Some(cache) = CACHE.get() {
+        cache
+            .lock()
+            .map_err(|_| storage_corrupted("source verification cache is poisoned"))?
+            .retain(|entry| entry.sha256 != sha256);
+    }
+    Ok(())
+}
+
 // Every lookup receives a newly no-follow-opened, path/size/link-checked handle.
 // Only a still-open verified handle with exactly that identity can satisfy it.
 pub(super) fn lookup(
