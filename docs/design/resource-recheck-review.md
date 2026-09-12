@@ -60,6 +60,15 @@ Cargo.lock이나 감사 제외 목록은 변경하지 않았다. 기존 action�
 도구를 재사용하는 동작은 [고정 action 코드](https://github.com/rustsec/audit-check/blob/69366f33c96575abad1ee0dba8212993eecbe998/src/main.ts)와
 실행 번들에서 확인했다. `--locked`의 의미는 [Cargo 설치 문서](https://doc.rust-lang.org/cargo/commands/cargo-install.html)를 따른다.
 
+Windows의 전체 실행은 기존 supervisor 테스트의 별도 시간 경합도 찾았다.
+2초 기한이 Core 재개방 도중 지나면 정상 startup drain으로 이미 완료될 수
+있는데, 테스트는 재개방 직후 반드시 대기 중이라고 가정했다. 기한 직전과
+정확한 기한을 Storage claim API에 주입해 선행·후속 순서를 검증하고, 실제
+처리 후 기록된 claim/ack 시각으로 조기 실행과 순서 역전을 항상 검사하도록
+고쳤다. Core 실행 정책·대기 상한은 그대로이며 테스트 제외도 추가하지 않았다.
+이후 전체 supervisor 통합 4개와 Core Clippy·rustfmt·architecture 검사를
+다시 통과했다. 최종 CI 결과는 PR의 해당 커밋 checks에 남긴다.
+
 ## 보장 범위
 
 - 계보의 첫 검증은 전체 ID를 읽고 정렬한다. 8 MiB는 유지되는 캐시의 상한으로,

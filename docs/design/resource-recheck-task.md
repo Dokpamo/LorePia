@@ -103,3 +103,31 @@ preserve the action, its audit policy, permissions and all checks. This belongs
 to completing the authorized verification gate; no app dependency/lockfile or
 security exception changes. Expected delta: two YAML lines and this evidence.
 Rerun workflow checker tests and confirm actual RustSec CI installation/audit.
+
+### Supervisor deadline test correction
+
+Windows job 103577516023 (7376151, clean working tree) failed the unchanged
+`future_branch_head_drives_deadline_and_wakes_its_immediate_successor` test at
+interaction_derived_supervisor.rs:597. Its two-second deadline was set before
+Core::open, which legitimately drains already-due occurrences before returning.
+The queued-health assertion therefore assumed startup completed within two
+seconds. Inventory the fixture, Core open/supervisor/drain and Storage claim,
+retry and acknowledgement timestamp paths before editing this test file.
+Keep Task RESOURCE-RECHECK-20260912; no production or public entry changes.
+Inject explicit pre-deadline and exact-deadline times into existing Storage APIs,
+verify head-only claiming and blocked successors, and requeue through the normal
+retry API. Replace the startup-speed assumption with persisted acknowledgement
+timestamps proving no early completion and causal order, preserving exact-two
+materialization, queue-idle and bounded-drop assertions. The adjacent independent
+branch test should also inject its pre-deadline claim time. Expected delta: about
+50 test lines and this evidence, no new dependencies, clocks, schema or baselines.
+Semantic risk is weakened deadline evidence: independently review timestamp
+provenance and preserve both timely-supervisor and already-due startup outcomes.
+Run the full four-test integration binary, Core Clippy, rustfmt and architecture
+checks, then rerun the cross-platform gates. The failed Windows execution and
+existing full local pass provide the baseline; also record a focused local run.
+The four-test run passed; Clippy then measured the expanded test at 112/100
+lines. Extract only its new timing-query/assertion block into a private fixture
+helper in the same test file, preserving assertion and call order. No lint
+allowance or source-size increase is authorized. The final delta is about 70
+test lines including the helper.
