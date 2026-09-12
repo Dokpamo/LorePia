@@ -41,3 +41,51 @@ PR with both branch tips represented, wait for the required checks, then verify
 the merged tree before deleting local/remote topic refs. Preserve any changed
 head or unmerged work. Run the repository's full local pre-merge gate against
 the combined tree; local results do not replace the protected GitHub checks.
+
+## PR #53 review follow-up
+
+Continue task `INTEGRATE-BRANCHES-20260912` from clean integration commit
+`b1ff944a4d6d3e9fa39775206152ae12d8ac00ed`, with merge-base/main still
+`aac3b16e0697c710b1209f498caba71821746140`. The full local gate and all ten
+required GitHub checks passed, but two unresolved review threads require
+checking text-only floating card surfaces and short, unscrollable history
+pages before merging.
+
+Targets are `portable-renderer-bridge.js` and its tests, plus
+`ChatTranscript.svelte` and focused view-local history tests/helpers if needed.
+Public entries, IPC contracts, dependencies and schema remain unchanged; no
+symbols move. Preserve iframe clipping/sanitization, bounded hit regions,
+per-report style caching, scroll anchoring, page/memory limits, request
+deduplication, branch epochs and observer teardown. Expected growth is a small
+local rendering fix and regression coverage within existing size caps. The
+semantic risks are exposing oversized hit regions, redundant page requests,
+and repeated loading after disposal or errors. Root/frontend AGENTS and the
+existing ADR boundaries govern these fixes. Reproduce each report, run focused
+tests, then frontend/architecture gates and required GitHub checks on the final
+commit. The unchanged Rust tree retains the completed local workspace gate.
+
+Browser follow-up also checks viewports large enough to fit the bounded window:
+an explicit older-history action must remain available once automatic loading
+stops at the memory cap. This adds `ChatPage.svelte` wiring and one entry in the
+existing split pagination catalog to the same review task. It reuses the
+controller's existing load/notice path and introduces no backend/API change.
+Observe both the viewport and inner list with the same observer, so virtual
+spacer corrections that reduce content height also trigger an underfill check.
+
+Both review cases were reproduced before the fix. Direct text now contributes
+line-sized Range bounds to the same clipped, capped region list. Underfilled
+transcripts check after rendering and viewport/content resizing, suppress
+repeated or non-growing automatic requests, and offer manual older navigation
+outside the measured list. The existing controller retains race/error authority.
+
+Follow-up validation: 152 frontend files / 820 tests passed, including Lua and
+regex sandbox checks; format, lint, TypeScript/Svelte, production build, source
+architecture and context budgets passed. Svelte reported zero errors/warnings.
+Chrome QA used 2,000 synthetic messages: a 4,000px viewport filled without user
+scroll; a 6,000px viewport retained at most 80 DOM messages and allowed another
+older page through the manual action, then stopped requesting pages. Resizing
+back to 900px hid that action. The actual frame document/bridge/layout path also
+changed from an empty text-only clip to two visible line regions. The isolated
+frame harness used a nonce-authorized data URL for the exact trusted script to
+avoid Chrome's null-origin loopback restriction; production loading is unchanged.
+Evidence and browser screenshots remain in the task's temporary backup folder.

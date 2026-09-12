@@ -54,6 +54,15 @@
             }
             return style;
         };
+        /** @param {DOMRect} bounds */
+        const addRegion = (bounds) => {
+            const x = Math.max(0, Math.min(width, bounds.left));
+            const y = Math.max(0, Math.min(height, bounds.top));
+            const right = Math.max(0, Math.min(width, bounds.right));
+            const bottom = Math.max(0, Math.min(height, bounds.bottom));
+            if (right > x && bottom > y)
+                regions.push({ x, y, width: right - x, height: bottom - y });
+        };
         for (const element of elements) {
             if (!(element instanceof HTMLElement) || element.tagName === 'STYLE') continue;
             const style = roomStyle(element);
@@ -67,14 +76,30 @@
                 parent = parent.parentElement;
             }
             if (hidden) continue;
-            const bounds = element.getBoundingClientRect();
-            const x = Math.max(0, Math.min(width, bounds.left));
-            const y = Math.max(0, Math.min(height, bounds.top));
-            const right = Math.max(0, Math.min(width, bounds.right));
-            const bottom = Math.max(0, Math.min(height, bounds.bottom));
-            if (right > x && bottom > y)
-                regions.push({ x, y, width: right - x, height: bottom - y });
+            addRegion(element.getBoundingClientRect());
             if (regions.length === 128) break;
+        }
+        // Root text has no descendant element box; measure its rendered lines.
+        let textNodes = 0;
+        let textRects = 0;
+        for (const node of root.childNodes) {
+            if (textNodes++ === 4096 || textRects === 4096 || regions.length === 128) break;
+            if (node.nodeType !== Node.TEXT_NODE || !node.textContent?.trim()) continue;
+            const style = roomStyle(root);
+            if (
+                style.visibility === 'hidden' ||
+                style.visibility === 'collapse' ||
+                style.display === 'none' ||
+                Number(style.opacity) === 0
+            )
+                break;
+            const range = document.createRange();
+            range.selectNodeContents(node);
+            for (const bounds of range.getClientRects()) {
+                if (textRects === 4096 || regions.length === 128) break;
+                textRects += 1;
+                addRegion(bounds);
+            }
         }
         const layout = JSON.stringify(regions);
         if (lastLayout !== layout) publish({ type: 'portable_regions', regions });

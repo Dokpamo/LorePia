@@ -12,6 +12,7 @@
     import type { ChatSession } from './chat-session';
     import type { LorepiaClient } from '../../lib/ipc/contracts';
     import LoadingState from './LoadingState.svelte';
+    import { observeTranscriptUnderfill } from './transcript-underfill';
     let {
         character,
         client,
@@ -30,6 +31,7 @@
         loadError = null,
         onretry,
         onhistoryedge,
+        onunderfill,
         historyLoading = false,
     }: {
         character: SampleCharacter;
@@ -49,6 +51,7 @@
         loadError?: string | null;
         onretry?: () => void;
         onhistoryedge?: () => void;
+        onunderfill?: (value: boolean) => void;
         historyLoading?: boolean;
     } = $props();
     const viewport = $derived(scroll.virtualWindow());
@@ -64,6 +67,16 @@
 <div
     class="ui-messages"
     bind:this={scroll.scroller}
+    use:observeTranscriptUnderfill={{
+        scope: `${conversation.id}:${conversation.activeBranchId ?? ''}`,
+        start: conversation.messageOffset ?? 0,
+        count: conversation.messages.length,
+        first: conversation.messages[0]?.id,
+        last: conversation.messages.at(-1)?.id,
+        busy: loading || historyLoading || loadError !== null,
+        check: onhistoryedge,
+        onunderfill,
+    }}
     role="log"
     tabindex="-1"
     aria-label={$tr('uiPreview.messages')}

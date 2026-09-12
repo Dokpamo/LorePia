@@ -14,12 +14,14 @@ function mountBridge(surface: 'room' | 'message') {
     const context = {
         document: {
             currentScript: script,
+            createRange: () => document.createRange(),
             body: document.body,
             querySelector: (selector: string) => document.querySelector(selector),
             querySelectorAll: (selector: string) => document.querySelectorAll(selector),
             addEventListener: vi.fn(),
         },
         parent: { postMessage: publish },
+        Node,
         HTMLElement,
         Element,
         HTMLMediaElement,
@@ -134,4 +136,86 @@ describe('portable renderer bridge layout', () => {
         expect(section.style.maxHeight).toBe('none');
         expect(section.style.overflowY).toBe('visible');
     });
+});
+
+function textRange(rectangles: DOMRect[]) {
+    const selectNodeContents = vi.fn();
+    const create = vi.spyOn(document, 'createRange').mockReturnValue({
+        selectNodeContents,
+        getClientRects: () => rectangles,
+    } as unknown as Range);
+    return { create, selectNodeContents };
+}
+
+it('reports direct card text line bounds synchronously and refreshes root visibility', () => {
+    document.body.innerHTML = '<div class="portable-message">Plain card text</div>';
+    const root = document.querySelector<HTMLElement>('.portable-message');
+    if (!root) throw new Error('Missing text card');
+    const { selectNodeContents } = textRange([
+        new DOMRect(12, 20, 85, 18),
+        new DOMRect(12, 38, 40, 18),
+    ]);
+    const { publish, frames, style, report } = mountBridge('room');
+    expect(frames).toHaveLength(0);
+    expect(selectNodeContents).toHaveBeenCalledWith(root.firstChild);
+    expect(publish.mock.calls[0]?.[0]).toMatchObject({
+        type: 'portable_regions',
+        regions: [
+            { x: 12, y: 20, width: 85, height: 18 },
+            { x: 12, y: 38, width: 40, height: 18 },
+        ],
+    });
+    expect(style).toHaveBeenCalledOnce();
+    root.style.visibility = 'hidden';
+    report();
+    expect(publish.mock.calls[1]?.[0]).toMatchObject({ type: 'portable_regions', regions: [] });
+    expect(style).toHaveBeenCalledTimes(2);
+});
+
+it.each(['display:none', 'visibility:hidden', 'visibility:collapse', 'opacity:0'])(
+    'ignores hidden direct text with %s',
+    (hidden) => {
+        document.body.innerHTML = `<div class="portable-message" style="${hidden}">Hidden</div>`;
+        const { create } = textRange([new DOMRect(0, 0, 100, 20)]);
+        const { publish } = mountBridge('room');
+        expect(create).not.toHaveBeenCalled();
+        expect(publish.mock.calls[0]?.[0]).toMatchObject({ type: 'portable_regions', regions: [] });
+    },
+);
+
+it('does not create text hit regions for whitespace-only root children', () => {
+    document.body.innerHTML = '<div class="portable-message"> \n\t </div>';
+    const { create } = textRange([new DOMRect(0, 0, 800, 600)]);
+    const { publish } = mountBridge('room');
+    expect(create).not.toHaveBeenCalled();
+    expect(publish.mock.calls[0]?.[0]).toMatchObject({ type: 'portable_regions', regions: [] });
+});
+
+it('clips oversized text bounds and keeps the shared 128-region cap', () => {
+    document.body.innerHTML =
+        '<div class="portable-message"><button>Control</button>Many lines</div>';
+    const button = document.querySelector('button');
+    if (!button) throw new Error('Missing card control');
+    button.getBoundingClientRect = () => new DOMRect(10, 10, 20, 20);
+    textRange([
+        new DOMRect(-20, -30, 1000, 900),
+        new DOMRect(-20, -20, 1, 1),
+        ...Array.from({ length: 200 }, () => new DOMRect(2, 3, 4, 5)),
+    ]);
+    const { publish } = mountBridge('room');
+    const report = publish.mock.calls[0]?.[0] as { regions: unknown[] };
+    expect(report.regions).toHaveLength(128);
+    expect(report.regions[0]).toEqual({ x: 10, y: 10, width: 20, height: 20 });
+    expect(report.regions[1]).toEqual({ x: 0, y: 0, width: 800, height: 600 });
+    expect(report.regions[127]).toEqual({ x: 2, y: 3, width: 4, height: 5 });
+});
+
+it('bounds text line scanning even when every measured line is offscreen', () => {
+    document.body.innerHTML = '<div class="portable-message">Offscreen lines</div>';
+    textRange([
+        ...Array.from({ length: 4096 }, () => new DOMRect(-10, -10, 1, 1)),
+        new DOMRect(0, 0, 10, 10),
+    ]);
+    const { publish } = mountBridge('room');
+    expect(publish.mock.calls[0]?.[0]).toMatchObject({ type: 'portable_regions', regions: [] });
 });

@@ -64,6 +64,7 @@
         onretry?: () => void;
     } = $props();
     let active = $state<string | null>(null);
+    let underfilled = $state(false);
     let notice = $state<UiNoticeValue | null>(null);
     let noticeId = 0;
     let previousNotice = untrack(() => externalNotice);
@@ -212,6 +213,9 @@
     {onretry}
     historyLoading={history?.loading ?? false}
     onhistoryedge={prefetchHistory}
+    onunderfill={(value: boolean) => {
+        underfilled = value;
+    }}
     onactive={activate}
     onnotice={showNotice}
     onwrite={() =>
@@ -221,6 +225,15 @@
             ?.focus()}
 />
 <div class="ui-chat-floaters">
+    {#if underfilled && history?.has_older && !history.loading && !loading && !loadError && typeof session.loadHistory === 'function'}
+        <button
+            class="ui-result-action ui-pressable"
+            style:pointer-events="auto"
+            style:align-self="center"
+            onclick={() => void session.loadHistory?.('older')}
+            ><span class="ui-press-visual">{$tr('pagination.older_messages')}</span></button
+        >
+    {/if}
     <div
         class="ui-jump-latest"
         data-visible={!scroll.nearBottom || history?.has_newer}
