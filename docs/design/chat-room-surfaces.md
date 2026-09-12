@@ -30,3 +30,23 @@ Regression coverage: notice position during header scroll, swipe direction/cance
 and input exclusion, sheet dismissal/expansion/draft preservation, approved card
 placement and grant management, tall message layout, frame identity and malformed
 layout messages. Visual validation at the mobile app's dimensions is required.
+
+Browser verification at 384 × 832 CSS px:
+- The notice stayed at y=8 while the navigation header moved from y=0 to y=-59.
+- A supplied 160px scroll box expanded to a 3436px message. Scrolling over that
+  message moved the transcript, with no scroll viewport inside the bubble.
+- A fixture's approved Lua button opened and closed its card panel over chat;
+  transparent areas passed input to the transcript. No native data or model calls
+  were used for this fixture.
+- A leftward pointer drag opened the right page; only that page then retained a
+  room iframe. The settings sheet expanded and retained its title/close header.
+
+Two browser-specific regressions are covered: an initially clipped cross-origin
+iframe must publish its first hit regions without waiting for rAF, and a delayed
+pointer-capture release from the back recognizer must not cancel a forward pan.
+
+Final checks: 747 frontend tests across 136 files passed, along with the Lua and
+regex sandbox regressions, frontend format/i18n/lint/type checks, IPC generation,
+source architecture and archived refactoring/context checks. The optimized macOS
+UI bundle built successfully. Native UI interaction remains unverified while the
+host Mac is locked; the browser checks above use the current renderer.

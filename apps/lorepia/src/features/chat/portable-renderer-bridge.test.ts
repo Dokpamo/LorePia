@@ -3,6 +3,7 @@ import bridgeSource from './portable-renderer-bridge.js?raw';
 
 function mountBridge(surface: 'room' | 'message') {
     const frames: (() => void)[] = [];
+    const listeners = new Map<string, () => void>();
     const publish = vi.fn();
     const style = vi.fn((element: Element) => getComputedStyle(element));
     const script = document.createElement('script');
@@ -28,7 +29,7 @@ function mountBridge(surface: 'room' | 'message') {
         innerWidth: 800,
         innerHeight: 600,
         requestAnimationFrame: (callback: () => void) => frames.push(callback),
-        addEventListener: vi.fn(),
+        addEventListener: (type: string, callback: () => void) => listeners.set(type, callback),
         ResizeObserver: undefined,
         MutationObserver: class {
             observe() {
@@ -42,9 +43,13 @@ function mountBridge(surface: 'room' | 'message') {
         ...values: unknown[]
     ) => void;
     execute(...Object.values(context), context);
-    const report = frames[0];
-    if (!report) throw new Error('initial layout was not scheduled');
-    return { report, publish, style };
+    const report = () => {
+        listeners.get('resize')?.();
+        const frame = frames.shift();
+        if (!frame) throw new Error('resize layout was not scheduled');
+        frame();
+    };
+    return { report, publish, style, frames };
 }
 
 afterEach(() => {
@@ -68,7 +73,6 @@ describe('portable renderer bridge layout', () => {
             toJSON: () => ({}),
         });
         const { report, publish, style } = mountBridge('room');
-        report();
         expect(style).toHaveBeenCalledTimes(4);
         expect(publish.mock.calls[0]?.[0]).toMatchObject({
             type: 'portable_regions',
@@ -88,12 +92,46 @@ describe('portable renderer bridge layout', () => {
         document.body.innerHTML =
             '<div class="portable-message"><section style="overflow-y:scroll;height:100px">message</section></div>';
         const { report, publish } = mountBridge('message');
-        report();
         const section = document.querySelector('section');
         expect(section?.style.height).toBe('auto');
         expect(section?.style.overflowY).toBe('visible');
         expect(publish.mock.calls[0]?.[0]).toMatchObject({ type: 'portable_resize', height: 32 });
         report();
         expect(publish).toHaveBeenCalledOnce();
+    });
+
+    it('reports card hit regions before a clipped frame receives animation frames', () => {
+        document.body.innerHTML =
+            '<div class="portable-message"><button style="position:fixed">Card</button></div>';
+        const button = document.querySelector('button');
+        if (!button) throw new Error('Missing card control');
+        button.getBoundingClientRect = () => new DOMRect(320, 12, 48, 48);
+        const { publish, frames } = mountBridge('room');
+        expect(frames).toHaveLength(0);
+        expect(publish).toHaveBeenCalledWith(
+            expect.objectContaining({
+                type: 'portable_regions',
+                regions: [{ x: 320, y: 12, width: 48, height: 48 }],
+            }),
+            '*',
+        );
+    });
+
+    it('expands an imported scroll box before reporting its full initial height', () => {
+        document.body.innerHTML =
+            '<div class="portable-message"><section style="height:160px;max-height:160px;overflow-y:auto">Long message</section></div>';
+        const root = document.querySelector<HTMLElement>('.portable-message');
+        const section = document.querySelector('section');
+        if (!root || !section) throw new Error('Missing message');
+        root.getBoundingClientRect = () => new DOMRect(0, 0, 300, 3436);
+        const { publish, frames } = mountBridge('message');
+        expect(frames).toHaveLength(0);
+        expect(publish).toHaveBeenCalledWith(
+            expect.objectContaining({ type: 'portable_resize', height: 3436 }),
+            '*',
+        );
+        expect(section.style.height).toBe('auto');
+        expect(section.style.maxHeight).toBe('none');
+        expect(section.style.overflowY).toBe('visible');
     });
 });

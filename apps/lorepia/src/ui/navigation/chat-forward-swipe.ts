@@ -13,6 +13,7 @@ interface Pointer {
     width: number;
     scale: number;
     dragging: boolean;
+    capturePending: boolean;
     lastX: number;
     time: number;
     velocity: number;
@@ -118,6 +119,7 @@ export function chatForwardSwipe(node: HTMLElement, initial: Options) {
             width: node.clientWidth || bounds.width,
             scale: bounds.width / (node.clientWidth || bounds.width),
             dragging: false,
+            capturePending: false,
             lastX: event.clientX,
             time: event.timeStamp,
             velocity: 0,
@@ -136,6 +138,7 @@ export function chatForwardSwipe(node: HTMLElement, initial: Options) {
             }
             p.dragging = true;
             suppressClick = true;
+            p.capturePending = true;
             node.setPointerCapture(p.id);
             window.getSelection()?.removeAllRanges();
         }
@@ -163,7 +166,16 @@ export function chatForwardSwipe(node: HTMLElement, initial: Options) {
         if (event.pointerId === pointer?.id) cancel();
     }
     function lostCapture(event: PointerEvent) {
-        if (pointer?.dragging) interrupted(event);
+        if (!pointer?.dragging || event.pointerId !== pointer.id) return;
+        if (pointer.capturePending) {
+            // The back recognizer can release its initial capture after this pan
+            // has claimed it. Complete that handoff before treating loss as cancel.
+            pointer.capturePending = false;
+            node.setPointerCapture(pointer.id);
+        } else if (!node.hasPointerCapture(pointer.id)) interrupted(event);
+    }
+    function gotCapture(event: PointerEvent) {
+        if (pointer?.id === event.pointerId) pointer.capturePending = false;
     }
     function anotherTouch(event: PointerEvent) {
         if (pointer && event.pointerType === 'touch' && event.pointerId !== pointer.id) cancel();
@@ -182,6 +194,7 @@ export function chatForwardSwipe(node: HTMLElement, initial: Options) {
         cancel,
     });
     node.addEventListener('pointerdown', down);
+    node.addEventListener('gotpointercapture', gotCapture);
     node.addEventListener('lostpointercapture', lostCapture);
     node.addEventListener('click', click, true);
     window.addEventListener('pointerdown', anotherTouch);
@@ -199,6 +212,7 @@ export function chatForwardSwipe(node: HTMLElement, initial: Options) {
             wheel.destroy();
             cancel();
             node.removeEventListener('pointerdown', down);
+            node.removeEventListener('gotpointercapture', gotCapture);
             node.removeEventListener('lostpointercapture', lostCapture);
             node.removeEventListener('click', click, true);
             window.removeEventListener('pointerdown', anotherTouch);

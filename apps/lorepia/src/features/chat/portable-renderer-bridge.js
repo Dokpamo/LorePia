@@ -118,9 +118,11 @@
         'load',
         () => {
             playMedia();
-            scheduleLayout();
+            reportLayout();
         },
         { once: true },
     );
-    scheduleLayout();
+    // A clipped cross-origin frame can have animation frames suspended. Its first
+    // hit regions must be reported synchronously so the host can reveal it.
+    reportLayout();
 })();

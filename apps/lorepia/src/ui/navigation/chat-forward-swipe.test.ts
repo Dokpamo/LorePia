@@ -27,7 +27,7 @@ function setup() {
     document.body.append(host);
     const node = host.querySelector<HTMLElement>('.chat');
     const target = host.querySelector<HTMLElement>('.right');
-    if (!node || !target) throw new Error('Missing gesture fixture');
+    if (!node || !target) throw new Error('Missing page fixture');
     Object.defineProperty(node, 'clientWidth', { value: 393 });
     node.getBoundingClientRect = () => new DOMRect(0, 0, 393, 800);
     const captures = new Set<number>();
@@ -71,6 +71,21 @@ describe('chat right page gesture', () => {
         }
         expect(open).not.toHaveBeenCalled();
         expect(target.dataset.forwardPreview).toBeUndefined();
+    });
+    it('retains a pan when the back recognizer releases its capture after the first move', async () => {
+        const { node, target, open } = setup();
+        pointer(node, 'pointerdown', 370);
+        pointer(window, 'pointermove', 345);
+        // Browser capture changes are delivered after pointermove, unlike a
+        // synchronous capture shim. The forward owner must complete the handoff.
+        node.releasePointerCapture(1);
+        expect(node.hasPointerCapture(1)).toBe(true);
+        pointer(node, 'gotpointercapture', 345);
+        pointer(window, 'pointermove', 180);
+        expect(target.dataset.forwardPreview).toBe('true');
+        pointer(window, 'pointerup', 180);
+        await Promise.resolve();
+        expect(open).toHaveBeenCalledOnce();
     });
     it('hands trackpad leftward travel to the right page and cleans up cancelled gestures', async () => {
         vi.useFakeTimers();

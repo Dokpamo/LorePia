@@ -32,6 +32,16 @@
     aria-label={$tr('chat.runtime.controls.label')}
 >
     <h2 class="ui-settings-heading">{$tr('workspaceRuntime.title')}</h2>
+    {#if !runtime.displayApproved || !runtime.canReadChat}
+        <p class="ui-runtime-hint">{$tr('chat.runtime.enableDisplayHint')}</p>
+        <button
+            class="ui-submit ui-pressable"
+            disabled={runtime.phase === 'loading'}
+            onclick={() => void runtime.approveDisplay()}
+        >
+            <span class="ui-press-visual">{$tr('chat.runtime.enableDisplay')}</span>
+        </button>
+    {/if}
     <p class="ui-runtime-hint" role="status">
         {$tr(
             runtime.phase === 'loading'

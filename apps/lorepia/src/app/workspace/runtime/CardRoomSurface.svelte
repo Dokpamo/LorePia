@@ -40,7 +40,7 @@
         inset: var(--ui-header) 0
             calc(var(--ui-composer-height, 64px) + var(--ui-composer-bottom, 12px));
         height: auto;
-        z-index: 10;
+        z-index: 14;
         pointer-events: none;
     }
     .ui-card-floating :global(iframe) {
