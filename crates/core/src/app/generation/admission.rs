@@ -34,6 +34,7 @@ impl GenerationLaunchPermit {
     pub(in crate::app) fn into_task(
         mut self,
         storage: Arc<Storage>,
+        blocking: crate::app::runtime_control::BlockingWork,
         event_bus: broadcast::Sender<ChatEvent>,
         branch_id: lorepia_domain::ConversationBranchId,
         request: GenerationRequest,
@@ -49,6 +50,7 @@ impl GenerationLaunchPermit {
             .expect("generation launch permit can be consumed only once");
         Ok(GenerationTask {
             storage,
+            blocking,
             active_generations: Arc::clone(&self.active_generations),
             event_bus,
             branch_id,

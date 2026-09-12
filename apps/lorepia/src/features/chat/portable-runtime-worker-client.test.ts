@@ -76,7 +76,8 @@ describe('portable runtime worker client', () => {
         });
         const proxiedPersisted = new Proxy(persisted, {});
 
-        const response = await client.request({
+        const encode = vi.spyOn(TextEncoder.prototype, 'encode');
+        const pendingResponse = client.request({
             type: 'refresh-display',
             context: {
                 persisted: proxiedPersisted,
@@ -87,6 +88,9 @@ describe('portable runtime worker client', () => {
             },
         });
 
+        expect(encode).toHaveBeenCalledTimes(1);
+        encode.mockRestore();
+        const response = await pendingResponse;
         expect(response.result).toEqual({ type: 'display', entries: [] });
         client.close();
     });

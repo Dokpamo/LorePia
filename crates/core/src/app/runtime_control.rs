@@ -4,10 +4,14 @@ use std::time::Duration;
 use lorepia_domain::{CoreError, CoreResult};
 use tokio::runtime::{Builder, Handle};
 
+mod blocking;
+pub(super) use blocking::BlockingWork;
+
 const RUNTIME_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(1);
 
 pub(super) struct RuntimeControl {
     handle: Handle,
+    blocking: BlockingWork,
     shutdown_sender: Option<tokio::sync::oneshot::Sender<()>>,
     owner_thread: Option<std::thread::JoinHandle<()>>,
 }
@@ -47,6 +51,7 @@ impl RuntimeControl {
         match ready_receiver.recv() {
             Ok(Ok(handle)) => Ok(Self {
                 handle,
+                blocking: BlockingWork::default(),
                 shutdown_sender: Some(shutdown_sender),
                 owner_thread: Some(owner_thread),
             }),
@@ -69,6 +74,10 @@ impl RuntimeControl {
 
     pub(super) fn handle(&self) -> &Handle {
         &self.handle
+    }
+
+    pub(super) fn blocking(&self) -> BlockingWork {
+        self.blocking.clone()
     }
 
     pub(super) fn shutdown(&mut self) {

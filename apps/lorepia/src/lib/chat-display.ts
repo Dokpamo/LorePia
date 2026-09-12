@@ -45,3 +45,27 @@ export function setConversationDisplayMode(id: string, mode: ChatDisplayMode): v
     }
     chatDisplayPreferences.update((current) => ({ ...current, [id]: mode }));
 }
+
+/** One mounted workspace retains at most one resolved preference, including absence. */
+export function createConversationDisplayModeResolver(): typeof conversationDisplayMode {
+    let previous:
+        | {
+              id: string | undefined;
+              nativeMode: ConversationMode;
+              preferences: Preferences;
+              mode: ChatDisplayMode;
+          }
+        | undefined;
+    return (id, nativeMode, preferences) => {
+        if (
+            previous &&
+            previous.id === id &&
+            previous.nativeMode === nativeMode &&
+            previous.preferences === preferences
+        )
+            return previous.mode;
+        const mode = conversationDisplayMode(id, nativeMode, preferences);
+        previous = { id, nativeMode, preferences, mode };
+        return mode;
+    };
+}

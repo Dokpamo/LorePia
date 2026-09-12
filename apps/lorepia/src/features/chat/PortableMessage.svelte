@@ -1,7 +1,7 @@
 <script lang="ts">
     import { untrack } from 'svelte';
     import { convertFileSrc } from '@tauri-apps/api/core';
-    import { SvelteMap, SvelteSet, SvelteURL } from 'svelte/reactivity';
+    import { SvelteSet, SvelteURL } from 'svelte/reactivity';
 
     import type { CharacterRenderProfileDto, LorepiaClient } from '../../lib/ipc/contracts';
     import { t } from '../../lib/i18n';
@@ -16,6 +16,9 @@
         renderPortableMacros,
     } from './portable-display';
     import { selectPortableRoomMarkup } from './portable-room-markup';
+    import { observePortableMediaVisibility } from './portable-media-visibility';
+    import { PortableDocumentQueue } from './portable-document-queue';
+    import { resolvePortableAssets } from './portable-asset-resolution';
     import { createPortableAssetSelector } from './portable-asset-selection';
     import { applyPortableFrameLayout } from './portable-frame-layout';
     import {
@@ -28,7 +31,6 @@
     const MAX_PORTABLE_SOURCE_CHARS = 262_144;
     const MAX_PORTABLE_MARKUP_TAGS = 4_096;
     const MAX_PORTABLE_ASSET_REFERENCES = 128;
-    const MAX_PORTABLE_ASSET_CONCURRENCY = 8;
 
     interface Props {
         text: string;
@@ -156,6 +158,43 @@
         return () => globalThis.removeEventListener('resize', measure);
     });
 
+    const documents = new PortableDocumentQueue();
+    let publishedSurface: PortableSurface = 'message';
+    let publishedFloating = false;
+    $effect(() => {
+        const target = frame;
+        if (!target) return;
+        const handleMessage = (event: MessageEvent<unknown>) => {
+            const runtimeId = documents.activeRuntimeId;
+            if (
+                !documents.accepts(runtimeId) ||
+                event.origin !== 'null' ||
+                target.contentWindow === null ||
+                event.source !== target.contentWindow ||
+                !isPortableRendererMessage(event.data, runtimeId)
+            )
+                return;
+            if (event.data.type === 'portable_action') onAction?.(event.data.action);
+            else
+                applyPortableFrameLayout(
+                    target,
+                    event.data,
+                    publishedSurface === 'room',
+                    publishedFloating,
+                );
+        };
+        globalThis.addEventListener('message', handleMessage);
+        return () => {
+            documents.clear();
+            globalThis.removeEventListener('message', handleMessage);
+        };
+    });
+    $effect(() => {
+        const target = frame;
+        if (target && surface === 'message') {
+            return observePortableMediaVisibility(target, () => documents.activeRuntimeId);
+        }
+    });
     $effect(() => {
         const target = frame;
         const activeProfile = profile;
@@ -163,81 +202,72 @@
         const source = normalizedText;
         const activeMessageIndex = messageIndex;
         const activeLastMessageId = lastMessageId;
-        const active = usesPortableMarkup;
         const activeSurface = surface;
         const floatingRoom = floating;
         const screenWidth = frameWidth;
         void displayVariablesKey;
         const activeVariables = untrack(() => displayVariables);
+        const names = { lastCharacterMessage, characterName, userName };
         const activeBackgroundMarkup = backgroundMarkup ?? activeProfile?.background_markup ?? '';
-        if (!active || target === null || activeProfile === null || activeClient === undefined) {
-            return;
-        }
-        let cancelled = false;
-        const isCancelled = (): boolean => cancelled;
-        const runtimeId = globalThis.crypto.randomUUID();
-        const handleMessage = (event: MessageEvent<unknown>): void => {
-            if (
-                cancelled ||
-                event.origin !== 'null' ||
-                target.contentWindow === null ||
-                event.source !== target.contentWindow ||
-                !isPortableRendererMessage(event.data, runtimeId)
-            ) {
-                return;
-            }
-            if (event.data.type === 'portable_action') {
-                onAction?.(event.data.action);
-                return;
-            }
-            applyPortableFrameLayout(target, event.data, activeSurface === 'room', floatingRoom);
-        };
-        globalThis.addEventListener('message', handleMessage);
-        void buildPortableDocument(
-            source,
-            activeProfile,
-            activeClient,
-            activeMessageIndex,
-            activeLastMessageId,
-            activeVariables,
-            activeSurface,
-            screenWidth,
-            activeBackgroundMarkup,
-            isCancelled,
-        ).then(async (rendered) => {
-            if (isCancelled()) return;
-            const importedStyle = extractStyleText(
-                await renderPortableDisplay(
-                    activeBackgroundMarkup.length > MAX_PORTABLE_SOURCE_CHARS
-                        ? ''
-                        : activeBackgroundMarkup,
-                    [],
-                    {
-                        variables: activeVariables,
-                        chatIndex: activeMessageIndex,
-                        lastMessageId: activeLastMessageId,
-                        lastCharacterMessage,
-                        characterName,
-                        userName,
-                        screenWidth,
-                    },
-                ),
+        if (!usesPortableMarkup || !target || !activeProfile || !activeClient) return;
+        return documents.submit(
+            [
+                target,
+                activeProfile,
+                activeClient,
                 activeSurface,
-            );
-            if (isCancelled()) return;
-            target.srcdoc = portableFrameDocument(
-                rendered,
-                importedStyle,
-                runtimeId,
-                activeSurface,
-            );
-        });
-        return () => {
-            cancelled = true;
-            globalThis.removeEventListener('message', handleMessage);
-            // Keep the last complete frame visible while its replacement is built.
-            // Its old bridge loses its listener immediately; unmount unloads the frame.
-        };
+                floatingRoom,
+                screenWidth,
+                activeMessageIndex,
+                characterName,
+                userName,
+            ],
+            async (signal) => {
+                const rendered = await buildPortableDocument(
+                    source,
+                    activeProfile,
+                    activeClient,
+                    activeMessageIndex,
+                    activeLastMessageId,
+                    activeVariables,
+                    activeSurface,
+                    screenWidth,
+                    activeBackgroundMarkup,
+                    signal,
+                    names,
+                );
+                signal.throwIfAborted();
+                const importedStyle = extractStyleText(
+                    await renderPortableDisplay(
+                        activeBackgroundMarkup.length > MAX_PORTABLE_SOURCE_CHARS
+                            ? ''
+                            : activeBackgroundMarkup,
+                        [],
+                        {
+                            variables: activeVariables,
+                            chatIndex: activeMessageIndex,
+                            lastMessageId: activeLastMessageId,
+                            ...names,
+                            screenWidth,
+                        },
+                    ),
+                    activeSurface,
+                );
+                signal.throwIfAborted();
+                return { content: rendered, style: importedStyle };
+            },
+            (result, runtimeId, changed) => {
+                publishedSurface = activeSurface;
+                publishedFloating = floatingRoom;
+                if (changed)
+                    target.srcdoc = portableFrameDocument(
+                        result.content,
+                        result.style,
+                        runtimeId,
+                        activeSurface,
+                    );
+            },
+        );
     });
 
     async function buildPortableDocument(
@@ -250,8 +280,15 @@
         activeSurface: PortableSurface,
         screenWidth: number,
         activeBackgroundMarkup: string,
-        isCancelled: () => boolean,
+        signal: AbortSignal,
+        names: {
+            lastCharacterMessage: string | undefined;
+            characterName: string | undefined;
+            userName: string | undefined;
+        },
     ): Promise<string> {
+        const { lastCharacterMessage, characterName, userName } = names;
+        const isCancelled = () => signal.aborted;
         if (
             source.length > MAX_PORTABLE_SOURCE_CHARS ||
             activeBackgroundMarkup.length > MAX_PORTABLE_SOURCE_CHARS
@@ -301,34 +338,14 @@
         }
         const references = collectAssetReferences(assetSource);
         if (references === null) return portableLimitMarkup();
-        const resolved = new SvelteMap<string, string | null>();
         const selectAsset = createPortableAssetSelector(activeProfile.assets, displaySource);
-        for (let offset = 0; offset < references.length; offset += MAX_PORTABLE_ASSET_CONCURRENCY) {
-            if (isCancelled()) return '';
-            await Promise.all(
-                references
-                    .slice(offset, offset + MAX_PORTABLE_ASSET_CONCURRENCY)
-                    .map(async (reference) => {
-                        const asset = selectAsset(reference);
-                        if (asset === null) {
-                            resolved.set(reference, null);
-                            return;
-                        }
-                        try {
-                            const delivery = await activeClient.resolveAssetDelivery({
-                                selector: { kind: 'asset_id', asset_id: asset.asset_id },
-                            });
-                            if (delivery.asset_id !== asset.asset_id) {
-                                resolved.set(reference, null);
-                                return;
-                            }
-                            resolved.set(reference, rendererAssetUrl(delivery.sha256));
-                        } catch {
-                            resolved.set(reference, null);
-                        }
-                    }),
-            );
-        }
+        const resolved = await resolvePortableAssets(
+            references,
+            selectAsset,
+            activeClient,
+            signal,
+            rendererAssetUrl,
+        );
 
         const template = document.createElement('template');
         template.innerHTML = `<div class="portable-message">${resolveMarkupAssets(displaySource, resolved)}</div>`;

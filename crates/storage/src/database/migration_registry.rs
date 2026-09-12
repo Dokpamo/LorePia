@@ -86,3 +86,6 @@ pub(super) const MIGRATION_0041: &str =
     include_str!("../../migrations/0041_portable_runtime_package_capability.sql");
 pub(super) const MIGRATION_0042: &str =
     include_str!("../../migrations/0042_module_plan_documents.sql");
+
+pub(super) const MIGRATION_0043: &str =
+    include_str!("../../migrations/0043_pending_assistant_checkpoints.sql");

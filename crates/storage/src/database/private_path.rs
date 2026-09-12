@@ -24,6 +24,14 @@ pub(super) fn harden_private_path(_path: &Path, _directory: bool) -> CoreResult<
 
 #[cfg(unix)]
 pub(super) fn harden_owned_tree_permissions(root: &Path) -> CoreResult<()> {
+    harden_tree(root, &mut harden_private_path)
+}
+
+#[cfg(unix)]
+fn harden_tree(
+    root: &Path,
+    apply: &mut impl FnMut(&Path, bool) -> CoreResult<()>,
+) -> CoreResult<()> {
     const MAXIMUM_OWNED_PATHS: usize = 1_000_000;
 
     let mut pending = vec![root.to_path_buf()];
@@ -43,12 +51,16 @@ pub(super) fn harden_owned_tree_permissions(root: &Path) -> CoreResult<()> {
             )));
         }
         if metadata.file_type().is_dir() {
-            harden_private_path(&path, true)?;
+            if metadata.permissions().mode() & 0o7777 != 0o700 {
+                apply(&path, true)?;
+            }
             for entry in fs::read_dir(&path).map_err(storage_io_error)? {
                 pending.push(entry.map_err(storage_io_error)?.path());
             }
         } else if metadata.file_type().is_file() {
-            harden_private_path(&path, false)?;
+            if metadata.permissions().mode() & 0o7777 != 0o600 {
+                apply(&path, false)?;
+            }
         } else {
             return Err(storage_corrupted(format!(
                 "owned storage tree contains a special file: {}",
@@ -66,3 +78,7 @@ pub(super) fn harden_owned_tree_permissions(root: &Path) -> CoreResult<()> {
 pub(super) fn harden_owned_tree_permissions(_root: &Path) -> CoreResult<()> {
     Ok(())
 }
+
+#[cfg(test)]
+#[cfg(unix)]
+mod tests;

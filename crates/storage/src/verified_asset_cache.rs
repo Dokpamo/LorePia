@@ -3,15 +3,22 @@
 use std::{
     collections::VecDeque,
     fs::File,
-    io::{self, Read, Seek, SeekFrom},
+    io,
     path::Path,
-    time::{Duration, Instant, SystemTime},
+    sync::{Arc, atomic::AtomicUsize},
+    time::{Duration, SystemTime},
 };
 
+#[cfg(test)]
 use lorepia_domain::AssetDescriptor;
+#[cfg(test)]
+use std::time::Instant;
 
 mod budget;
+mod lease;
+mod table;
 use budget::VerificationBudget;
+pub(crate) use lease::{AssetLease, VerificationJob};
 
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
@@ -32,16 +39,11 @@ pub(crate) enum CacheLookup<T> {
 }
 
 pub(crate) struct VerifiedAssetCache {
-    entries: VecDeque<VerifiedAssetHandle>,
+    entries: VecDeque<Arc<AssetLease>>,
+    active_verifications: Arc<AtomicUsize>,
     verification_budget: VerificationBudget,
     max_handles: usize,
     lease_ttl: Duration,
-}
-
-struct VerifiedAssetHandle {
-    descriptor: AssetDescriptor,
-    file: AssetFileSnapshot,
-    verified_at: Instant,
 }
 
 /// Identity evidence without an open descriptor; never used to serve renderer bytes.
@@ -174,100 +176,6 @@ impl AssetFileSnapshot {
     }
 }
 
-impl VerifiedAssetCache {
-    pub(crate) fn new(max_handles: usize, lease_ttl: Duration) -> Self {
-        Self {
-            entries: VecDeque::new(),
-            verification_budget: VerificationBudget::new(Instant::now()),
-            max_handles: max_handles.max(1),
-            lease_ttl,
-        }
-    }
-
-    pub(crate) fn begin_verification(&mut self, size_bytes: u64) -> io::Result<()> {
-        self.verification_budget.admit(size_bytes, Instant::now())
-    }
-
-    pub(crate) fn contains_verified(
-        &mut self,
-        descriptor: &AssetDescriptor,
-    ) -> io::Result<CacheLookup<()>> {
-        self.with_entry(descriptor, |_| Ok(()))
-    }
-
-    pub(crate) fn read_range(
-        &mut self,
-        descriptor: &AssetDescriptor,
-        start: u64,
-        length: u64,
-    ) -> io::Result<CacheLookup<Vec<u8>>> {
-        self.with_entry(descriptor, |entry| {
-            let capacity = usize::try_from(length)
-                .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "range is too large"))?;
-            let mut bytes = vec![0_u8; capacity];
-            entry.seek(SeekFrom::Start(start))?;
-            entry.read_exact(&mut bytes)?;
-            Ok(bytes)
-        })
-    }
-
-    pub(crate) fn insert(
-        &mut self,
-        descriptor: AssetDescriptor,
-        file: AssetFileSnapshot,
-    ) -> io::Result<()> {
-        file.ensure_unchanged()?;
-        self.entries
-            .retain(|entry| entry.descriptor.sha256 != descriptor.sha256);
-        while self.entries.len() >= self.max_handles {
-            self.entries.pop_front();
-        }
-        self.entries.push_back(VerifiedAssetHandle {
-            descriptor,
-            file,
-            verified_at: Instant::now(),
-        });
-        Ok(())
-    }
-
-    fn with_entry<T>(
-        &mut self,
-        descriptor: &AssetDescriptor,
-        operation: impl FnOnce(&mut File) -> io::Result<T>,
-    ) -> io::Result<CacheLookup<T>> {
-        let now = Instant::now();
-        self.entries
-            .retain(|entry| now.duration_since(entry.verified_at) < self.lease_ttl);
-        let Some(index) = self
-            .entries
-            .iter()
-            .position(|entry| entry.descriptor.sha256 == descriptor.sha256)
-        else {
-            return Ok(CacheLookup::Miss);
-        };
-        let Some(mut entry) = self.entries.remove(index) else {
-            return Ok(CacheLookup::Miss);
-        };
-        if !same_file_contract(&entry.descriptor, descriptor)
-            || entry.file.ensure_unchanged().is_err()
-        {
-            return Ok(CacheLookup::Changed);
-        }
-        let value = operation(entry.file.file_mut())?;
-        if entry.file.ensure_unchanged().is_err() {
-            return Ok(CacheLookup::Changed);
-        }
-        self.entries.push_back(entry);
-        Ok(CacheLookup::Hit(value))
-    }
-}
-
-fn same_file_contract(left: &AssetDescriptor, right: &AssetDescriptor) -> bool {
-    left.sha256 == right.sha256
-        && left.size_bytes == right.size_bytes
-        && left.media_type == right.media_type
-}
-
 impl Default for VerifiedAssetCache {
     fn default() -> Self {
         Self::new(DEFAULT_MAX_HANDLES, DEFAULT_LEASE_TTL)
@@ -384,6 +292,9 @@ pub(crate) fn open_cas_file(root: &Path, namespace: &str, sha256: &str) -> io::R
 }
 
 #[cfg(test)]
+mod concurrency_tests;
+
+#[cfg(test)]
 mod tests {
     use std::{io::Write, thread};
 
@@ -392,7 +303,7 @@ mod tests {
 
     use super::*;
 
-    fn descriptor(sha256: &str, size_bytes: u64) -> AssetDescriptor {
+    pub(super) fn descriptor(sha256: &str, size_bytes: u64) -> AssetDescriptor {
         AssetDescriptor {
             id: AssetId::from("asset"),
             sha256: Sha256Digest::parse(sha256).expect("digest"),
@@ -490,7 +401,13 @@ mod tests {
         let expired = Instant::now()
             .checked_sub(DEFAULT_LEASE_TTL + Duration::from_secs(1))
             .expect("monotonic clock supports test offset");
-        cache.entries.front_mut().expect("entry").verified_at = expired;
+        cache
+            .entries
+            .front()
+            .expect("entry")
+            .lock()
+            .expect("lease")
+            .verified_at = expired;
         assert!(matches!(
             cache.contains_verified(&descriptor).expect("expired lease"),
             CacheLookup::Miss

@@ -12,7 +12,10 @@
     import { t, tr } from '../../lib/i18n';
     import { themePreference } from '../../lib/theme';
     import { chatTextSize } from '../../lib/display';
-    import { chatDisplayPreferences, conversationDisplayMode } from '../../lib/chat-display';
+    import {
+        chatDisplayPreferences,
+        createConversationDisplayModeResolver,
+    } from '../../lib/chat-display';
     import { PortableRuntimeLifecycle } from '../../features/chat/portable-runtime-lifecycle.svelte';
     import PortableMessage from '../../features/chat/PortableMessage.svelte';
     import ImportReviewDialog from './WorkspaceImportReview.svelte';
@@ -146,6 +149,12 @@
         })),
     );
     const projection = new ConversationProjection();
+    const resolveDisplayMode = createConversationDisplayModeResolver();
+    const displayConversationId = $derived(appState.selected_conversation?.id);
+    const displayNativeMode = $derived(appState.conversation_state?.selected_mode ?? 'chat');
+    const resolvedDisplayMode = $derived(
+        resolveDisplayMode(displayConversationId, displayNativeMode, $chatDisplayPreferences),
+    );
     const conversation = $derived(
         projection.project(
             {
@@ -160,11 +169,7 @@
                     ? { ...appState.chat, live_assistant_message_id: null }
                     : appState.chat,
             },
-            conversationDisplayMode(
-                appState.selected_conversation?.id,
-                appState.conversation_state?.selected_mode ?? 'chat',
-                $chatDisplayPreferences,
-            ),
+            resolvedDisplayMode,
         ),
     );
     const error = $derived(

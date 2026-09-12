@@ -13,7 +13,8 @@ use lorepia_orchestration::{
     TransformLimits, TransformPipeline, TransformResult, derive_memory_job_idempotency_key,
 };
 use lorepia_storage::{
-    MemoryJobEnqueue, StoredMemoryJobQueueEntry, StoredRevision, memory_job_input_fingerprint,
+    MemoryJobEnqueue, MemorySourceMessageIdentity, StoredMemoryJobQueueEntry, StoredRevision,
+    memory_job_input_fingerprint,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -321,43 +322,12 @@ impl Core {
         &self,
         entry: &StoredMemoryJobQueueEntry,
     ) -> CoreResult<Vec<Message>> {
-        let branch = self
-            .storage()
-            .get_conversation_branch(&entry.job.branch_id)?;
-        if branch.conversation_id != entry.job.conversation_id {
-            return Err(CoreError::invalid(
-                "memory job branch does not belong to its conversation",
-            ));
-        }
-        let visible = self
-            .storage()
-            .list_branch_messages(&entry.job.branch_id)?
-            .into_iter()
-            .filter(|message| {
-                message.conversation_id == entry.job.conversation_id
-                    && message.role != MessageRole::System
-                    && message.status == MessageStatus::Complete
-                    && !message.content.trim().is_empty()
-            })
-            .collect::<Vec<_>>();
-        let start = visible
-            .iter()
-            .position(|message| message.id == entry.job.source_start_message_id)
-            .ok_or_else(|| CoreError::invalid("memory source start is no longer in the branch"))?;
-        let end = visible
-            .iter()
-            .position(|message| message.id == entry.job.source_end_message_id)
-            .ok_or_else(|| CoreError::invalid("memory source end is no longer in the branch"))?;
-        if start > end {
-            return Err(CoreError::invalid("memory source range is reversed"));
-        }
-        let selected = visible[start..=end].to_vec();
-        if selected.len() > MAX_MEMORY_SOURCE_MESSAGES {
-            return Err(CoreError::invalid(
-                "memory source exceeds the message-count safety limit",
-            ));
-        }
-        Ok(selected)
+        self.storage().list_branch_memory_source(
+            &entry.job.conversation_id,
+            &entry.job.branch_id,
+            &entry.job.source_start_message_id,
+            &entry.job.source_end_message_id,
+        )
     }
 }
 
@@ -370,7 +340,31 @@ impl Core {
         task_profile_revision_id: &str,
         head_authority: MemorySummaryHeadAuthority,
     ) -> CoreResult<Option<Vec<Message>>> {
-        let visible = self.load_visible_memory_summary_messages(request, head_authority)?;
+        let historical = match head_authority {
+            MemorySummaryHeadAuthority::HistoricalCommittedHead => {
+                Some(self.load_historical_memory_summary_messages(request)?)
+            }
+            MemorySummaryHeadAuthority::CurrentBranchHead => None,
+        };
+        let visible = if let Some(messages) = &historical {
+            messages
+                .iter()
+                .map(|message| MemorySourceMessageIdentity {
+                    id: message.id.clone(),
+                    role: message.role,
+                })
+                .collect::<Vec<_>>()
+        } else {
+            self.validate_runtime_branch_head(
+                &request.conversation_id,
+                &request.branch_id,
+                request.expected_head.as_ref(),
+            )?;
+            self.storage().list_branch_memory_source_identities(
+                &request.conversation_id,
+                &request.branch_id,
+            )?
+        };
         if visible.is_empty() {
             return Ok(None);
         }
@@ -413,54 +407,46 @@ impl Core {
         else {
             return Ok(None);
         };
-        let selected = visible[turns[first_turn].0..=turns[last_turn].1].to_vec();
+        let selected = if let Some(messages) = historical {
+            messages[turns[first_turn].0..=turns[last_turn].1].to_vec()
+        } else {
+            self.storage().list_branch_memory_source(
+                &request.conversation_id,
+                &request.branch_id,
+                &visible[turns[first_turn].0].id,
+                &visible[turns[last_turn].1].id,
+            )?
+        };
         validate_memory_summary_source_limits(&selected)?;
         Ok(Some(selected))
     }
 
-    fn load_visible_memory_summary_messages(
+    fn load_historical_memory_summary_messages(
         &self,
         request: &EnqueueMemorySummaryRequest,
-        head_authority: MemorySummaryHeadAuthority,
     ) -> CoreResult<Vec<Message>> {
-        let messages = match head_authority {
-            MemorySummaryHeadAuthority::CurrentBranchHead => {
-                self.validate_runtime_branch_head(
-                    &request.conversation_id,
-                    &request.branch_id,
-                    request.expected_head.as_ref(),
-                )?;
-                self.storage().list_branch_messages(&request.branch_id)?
-            }
-            MemorySummaryHeadAuthority::HistoricalCommittedHead => {
-                self.validate_runtime_branch_identity(
-                    &request.conversation_id,
-                    &request.branch_id,
-                )?;
-                let exact_head = request.expected_head.as_ref().ok_or_else(|| {
-                    CoreError::new(
-                        CoreErrorCode::StorageCorrupted,
-                        "committed lifecycle memory source is missing its exact owner message",
-                        false,
-                    )
-                })?;
-                let messages = self.storage().list_recent_message_lineage_for_prompt(
-                    &request.conversation_id,
-                    Some(exact_head),
-                    MAX_MEMORY_SOURCE_MESSAGES,
-                    MAX_MEMORY_SOURCE_BYTES,
-                    MAX_MEMORY_SOURCE_CHARS,
-                )?;
-                if messages.last().map(|message| &message.id) != Some(exact_head) {
-                    return Err(CoreError::new(
-                        CoreErrorCode::StorageCorrupted,
-                        "committed lifecycle memory source head is not in its conversation lineage",
-                        false,
-                    ));
-                }
-                messages
-            }
-        };
+        self.validate_runtime_branch_identity(&request.conversation_id, &request.branch_id)?;
+        let exact_head = request.expected_head.as_ref().ok_or_else(|| {
+            CoreError::new(
+                CoreErrorCode::StorageCorrupted,
+                "committed lifecycle memory source is missing its exact owner message",
+                false,
+            )
+        })?;
+        let messages = self.storage().list_recent_message_lineage_for_prompt(
+            &request.conversation_id,
+            Some(exact_head),
+            MAX_MEMORY_SOURCE_MESSAGES,
+            MAX_MEMORY_SOURCE_BYTES,
+            MAX_MEMORY_SOURCE_CHARS,
+        )?;
+        if messages.last().map(|message| &message.id) != Some(exact_head) {
+            return Err(CoreError::new(
+                CoreErrorCode::StorageCorrupted,
+                "committed lifecycle memory source head is not in its conversation lineage",
+                false,
+            ));
+        }
         Ok(messages
             .into_iter()
             .filter(|message| {
@@ -475,7 +461,7 @@ impl Core {
     fn covered_memory_summary_turn_ranges(
         &self,
         request: &EnqueueMemorySummaryRequest,
-        visible: &[Message],
+        visible: &[MemorySourceMessageIdentity],
         turns: &[(usize, usize)],
         memory_profile_revision_id: &str,
         task_profile_revision_id: &str,

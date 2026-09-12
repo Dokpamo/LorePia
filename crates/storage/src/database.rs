@@ -15,6 +15,8 @@ mod generation_append;
 mod generation_presets;
 mod health;
 mod interrupted_generation_recovery;
+mod lineage_cache;
+mod memory_source;
 mod message_pages;
 mod messages;
 mod migration_provider_v4;
@@ -24,6 +26,7 @@ mod migration_special;
 mod migration_verification;
 mod model_routes;
 mod package_cas;
+mod pending_checkpoints;
 mod pragmas;
 mod private_path;
 mod provider_catalog;
@@ -32,6 +35,7 @@ mod provider_validation;
 mod schema;
 mod settings;
 mod stats;
+mod stored_value;
 
 use std::{
     collections::BTreeSet,
@@ -77,9 +81,11 @@ pub use asset_delivery::ApprovedAssetRange;
 pub(crate) use connection_metrics::DatabaseConnectionGuard;
 use connection_metrics::DatabaseConnectionMetricState;
 pub use connection_metrics::DatabaseConnectionMetrics;
+pub use memory_source::MemorySourceMessageIdentity;
 pub use message_pages::BranchMessagePage;
 pub use messages::{MessageGenerationAction, MessageGenerationActionContext};
 pub use stats::DatabaseStats;
+use stored_value::{optional_i64_to_u64_sql, parse_datetime_sql};
 
 pub(crate) use interrupted_generation_recovery::{
     InterruptedGenerationClosure, close_interrupted_generations_in_transaction,
@@ -203,6 +209,8 @@ pub struct Storage {
     connection_metrics: DatabaseConnectionMetricState,
     pub(crate) connection: Mutex<Connection>,
     verified_asset_cache: Mutex<VerifiedAssetCache>,
+    lineage_cache: Mutex<lineage_cache::LineageCache>,
+    checkpoint_proofs: Mutex<pending_checkpoints::CheckpointProofCache>,
     #[cfg(test)]
     approved_asset_hash_verifications: AtomicUsize,
     _owner_lock: File,
@@ -718,20 +726,6 @@ fn deserialize_opaque_reasoning_state(
     Ok(states)
 }
 
-fn optional_i64_to_u64_sql(value: Option<i64>, column: usize) -> rusqlite::Result<Option<u64>> {
-    value
-        .map(|value| {
-            u64::try_from(value).map_err(|error| {
-                rusqlite::Error::FromSqlConversionFailure(
-                    column,
-                    rusqlite::types::Type::Integer,
-                    Box::new(error),
-                )
-            })
-        })
-        .transpose()
-}
-
 fn str_to_api_family_sql(value: &str, column: usize) -> rusqlite::Result<ApiFamily> {
     match value {
         "openai_responses" => Ok(ApiFamily::OpenAiResponses),
@@ -741,18 +735,6 @@ fn str_to_api_family_sql(value: &str, column: usize) -> rusqlite::Result<ApiFami
         "ollama_native" => Ok(ApiFamily::OllamaNative),
         other => Err(invalid_enum(column, "provider API family", other)),
     }
-}
-
-fn parse_datetime_sql(value: String, column: usize) -> rusqlite::Result<DateTime<Utc>> {
-    DateTime::parse_from_rfc3339(&value)
-        .map(|value| value.with_timezone(&Utc))
-        .map_err(|error| {
-            rusqlite::Error::FromSqlConversionFailure(
-                column,
-                rusqlite::types::Type::Text,
-                Box::new(error),
-            )
-        })
 }
 
 const fn generation_status_to_str(status: GenerationStatus) -> &'static str {

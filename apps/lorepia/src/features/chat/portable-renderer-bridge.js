@@ -110,11 +110,70 @@
         scheduled = true;
         requestAnimationFrame(reportLayout);
     };
+    let mediaVisible = room;
+    /** @type {Set<HTMLMediaElement>} */
+    const resumedMedia = new Set();
+    const startedAutoplay = new WeakSet();
+    const pendingMedia = new WeakSet();
+    /** @param {HTMLMediaElement} media */
+    const playVisibleMedia = (media) => {
+        if (pendingMedia.has(media)) return;
+        pendingMedia.add(media);
+        void media
+            .play()
+            .then(() => {
+                pendingMedia.delete(media);
+                startedAutoplay.add(media);
+                if (!mediaVisible) {
+                    resumedMedia.add(media);
+                    media.pause();
+                }
+            })
+            .catch(() => pendingMedia.delete(media));
+    };
     const playMedia = () => {
-        for (const media of document.querySelectorAll('audio[autoplay]')) {
-            if (media instanceof HTMLMediaElement) void media.play().catch(() => undefined);
+        if (!mediaVisible) return;
+        const selector = room ? 'audio[autoplay]' : 'audio[data-portable-autoplay="true"]';
+        for (const media of document.querySelectorAll(selector)) {
+            if (!(media instanceof HTMLMediaElement) || (!room && startedAutoplay.has(media)))
+                continue;
+            playVisibleMedia(media);
         }
     };
+    if (!room)
+        globalThis.addEventListener('message', (event) => {
+            /** @type {unknown} */
+            const data = event.data;
+            if (
+                event.source !== parent ||
+                typeof data !== 'object' ||
+                data === null ||
+                !('channel' in data) ||
+                !('runtimeId' in data) ||
+                !('type' in data) ||
+                !('visible' in data) ||
+                data.channel !== channel ||
+                data.runtimeId !== runtimeId ||
+                data.type !== 'portable_visibility' ||
+                typeof data.visible !== 'boolean' ||
+                data.visible === mediaVisible
+            )
+                return;
+            mediaVisible = data.visible;
+            if (!mediaVisible) {
+                for (const media of document.querySelectorAll('audio,video')) {
+                    if (!(media instanceof HTMLMediaElement) || media.paused) continue;
+                    resumedMedia.add(media);
+                    media.pause();
+                }
+            } else {
+                for (const media of resumedMedia) {
+                    if (media.isConnected) playVisibleMedia(media);
+                }
+                resumedMedia.clear();
+                playMedia();
+            }
+        });
     document.addEventListener(
         'click',
         (event) => {

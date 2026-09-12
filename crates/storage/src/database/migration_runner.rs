@@ -528,6 +528,13 @@ pub(crate) fn apply_migrations(connection: &mut Connection) -> CoreResult<()> {
         sql::MIGRATION_0042,
         "chunked module authority documents",
     )?;
+    apply_checked_migration(
+        connection,
+        current_version,
+        43,
+        sql::MIGRATION_0043,
+        "pending assistant checkpoint chunks",
+    )?;
     read_current_schema_version(connection)?;
     Ok(())
 }

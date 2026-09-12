@@ -12,6 +12,7 @@ use super::{
 pub(super) async fn execute_generation_task(task: GenerationTask) {
     let GenerationTask {
         storage,
+        blocking,
         active_generations,
         event_bus,
         branch_id,
@@ -24,7 +25,7 @@ pub(super) async fn execute_generation_task(task: GenerationTask) {
         transforms,
     } = task;
     let generation_id = request.generation_id.clone();
-    let _active_generation = ActiveGenerationGuard {
+    let active_generation = ActiveGenerationGuard {
         generation_id: generation_id.clone(),
         active_generations: Arc::clone(&active_generations),
     };
@@ -38,6 +39,7 @@ pub(super) async fn execute_generation_task(task: GenerationTask) {
             active_generations: Arc::clone(&active_generations),
             event_bus: event_bus.clone(),
             storage: Arc::clone(&storage),
+            blocking: blocking.clone(),
             checkpoint: assistant.clone(),
             branch_id: branch_id.clone(),
             assistant_message_id: assistant_message_id.clone(),
@@ -64,21 +66,26 @@ pub(super) async fn execute_generation_task(task: GenerationTask) {
         })
         .and_then(std::convert::identity);
     let result = merge_generation_and_forwarding_results(generation_result, forwarding_result);
-    finish_generation_task(
-        GenerationCompletionContext {
-            storage,
-            active_generations,
-            event_bus,
-            branch_id,
-            conversation_id,
-            generation_id,
-            assistant_message_id,
-            preserve_partial,
-            transforms,
-        },
-        assistant,
-        result,
-    );
+    let _ = blocking
+        .run(move || {
+            let _active_generation = active_generation;
+            finish_generation_task(
+                GenerationCompletionContext {
+                    storage,
+                    active_generations,
+                    event_bus,
+                    branch_id,
+                    conversation_id,
+                    generation_id,
+                    assistant_message_id,
+                    preserve_partial,
+                    transforms,
+                },
+                assistant,
+                result,
+            );
+        })
+        .await;
 }
 
 fn finish_generation_task(
@@ -265,6 +272,7 @@ async fn forward_generation_events(
         event_bus,
         storage,
         mut checkpoint,
+        blocking,
         branch_id,
         assistant_message_id,
         preserve_partial,
@@ -273,7 +281,7 @@ async fn forward_generation_events(
     let start = time::Instant::now() + PARTIAL_CHECKPOINT_INTERVAL;
     let mut interval = time::interval_at(start, PARTIAL_CHECKPOINT_INTERVAL);
     interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
-    let mut last_checkpoint_bytes = 0;
+    let mut last_checkpoint_bytes = checkpoint.content.len();
     let mut dirty = false;
 
     loop {
@@ -281,7 +289,7 @@ async fn forward_generation_events(
             event = event_receiver.recv() => {
                 let Some(event) = event else {
                     if preserve_partial && dirty {
-                        storage.checkpoint_pending_assistant(&checkpoint)?;
+                        checkpoint_message(&blocking, &storage, checkpoint, last_checkpoint_bytes).await?;
                     }
                     return Ok(());
                 };
@@ -307,14 +315,14 @@ async fn forward_generation_events(
                     && dirty
                     && partial_checkpoint_due(checkpoint.content.len(), last_checkpoint_bytes)
                 {
-                    storage.checkpoint_pending_assistant(&checkpoint)?;
+                    checkpoint = checkpoint_message(&blocking, &storage, checkpoint, last_checkpoint_bytes).await?;
                     last_checkpoint_bytes = checkpoint.content.len();
                     dirty = false;
                 }
             }
             _ = interval.tick(), if preserve_partial => {
                 if dirty {
-                    storage.checkpoint_pending_assistant(&checkpoint)?;
+                    checkpoint = checkpoint_message(&blocking, &storage, checkpoint, last_checkpoint_bytes).await?;
                     last_checkpoint_bytes = checkpoint.content.len();
                     dirty = false;
                 }
@@ -325,6 +333,40 @@ async fn forward_generation_events(
 
 pub(super) fn partial_checkpoint_due(current_bytes: usize, last_checkpoint_bytes: usize) -> bool {
     current_bytes.saturating_sub(last_checkpoint_bytes) >= PARTIAL_CHECKPOINT_BYTES
+}
+
+async fn checkpoint_message(
+    blocking: &super::runtime_control::BlockingWork,
+    storage: &Arc<lorepia_storage::Storage>,
+    checkpoint: Message,
+    last_checkpoint_bytes: usize,
+) -> CoreResult<Message> {
+    let storage = Arc::clone(storage);
+    blocking
+        .run(move || {
+            let delta = checkpoint
+                .content
+                .get(last_checkpoint_bytes..)
+                .ok_or_else(|| {
+                    CoreError::internal("generation checkpoint offset is not a text boundary")
+                })?;
+            let generation_id = checkpoint.generation_id.as_ref().ok_or_else(|| {
+                CoreError::internal("generation checkpoint has no generation identity")
+            })?;
+            let expected = u64::try_from(last_checkpoint_bytes)
+                .map_err(|_| CoreError::internal("generation checkpoint offset is too large"))?;
+            let stored = storage.append_pending_assistant_checkpoint(
+                &checkpoint.id,
+                generation_id,
+                expected,
+                delta,
+            )?;
+            if u64::try_from(checkpoint.content.len()).ok() != Some(stored) {
+                return Err(CoreError::internal("generation checkpoint length diverged"));
+            }
+            Ok(checkpoint)
+        })
+        .await?
 }
 
 fn merge_generation_and_forwarding_results(

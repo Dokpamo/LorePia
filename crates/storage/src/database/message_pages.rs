@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use super::{
     Connection, ConversationBranchId, CoreError, CoreResult, Message, MessageId, MessageRole,
@@ -51,7 +51,11 @@ impl Storage {
             .optional()
             .map_err(storage_db_error)?
             .ok_or_else(|| not_found("conversation branch"))?;
-        let lineage = load_lineage_identities(&transaction, &conversation_id, head.as_deref())?;
+        let lineage = self
+            .lineage_cache
+            .lock()
+            .map_err(|_| CoreError::internal("lineage cache lock was poisoned"))?
+            .load(&transaction, &conversation_id, head.as_deref())?;
         let anchor = before
             .or(after)
             .map(|anchor| {
@@ -103,42 +107,6 @@ impl Storage {
     }
 }
 
-// No content enters the recursive CTE. UNION terminates even corrupt cycles;
-// reconstructing by parent identity makes ordering independent of SQLite order.
-fn load_lineage_identities(
-    connection: &Connection,
-    conversation_id: &str,
-    head: Option<&str>,
-) -> CoreResult<Vec<String>> {
-    let mut statement = connection
-        .prepare_cached(
-            "WITH RECURSIVE lineage(id, parent_id) AS (
-           SELECT id, parent_id FROM messages WHERE conversation_id = ?1 AND id = ?2
-           UNION
-           SELECT parent.id, parent.parent_id FROM messages AS parent
-           JOIN lineage ON parent.id = lineage.parent_id
-           WHERE parent.conversation_id = ?1
-         ) SELECT id, parent_id FROM lineage",
-        )
-        .map_err(storage_db_error)?;
-    let mut parents = statement
-        .query_map(params![conversation_id, head], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
-        })
-        .map_err(storage_db_error)?
-        .collect::<Result<HashMap<_, _>, _>>()
-        .map_err(storage_db_error)?;
-    let mut next = head.map(str::to_owned);
-    let mut lineage = Vec::with_capacity(parents.len());
-    while let Some(id) = next {
-        next = parents.remove(&id).ok_or_else(|| {
-            storage_corrupted("message page lineage contains a cycle or missing parent")
-        })?;
-        lineage.push(id);
-    }
-    Ok(lineage)
-}
-
 fn load_selected_messages(
     connection: &Connection,
     conversation_id: &str,
@@ -155,7 +123,7 @@ fn load_selected_messages(
             "SELECT message.id, message.conversation_id, message.parent_id, message.role,
                 message.content, message.status, message.generation_id, message.created_at
          FROM json_each(?1) AS selected
-         JOIN messages AS message ON message.id = selected.value
+         JOIN messages_with_checkpoints AS message ON message.id = selected.value
          WHERE message.conversation_id = ?2
          ORDER BY CAST(selected.key AS INTEGER)",
         )
@@ -214,7 +182,7 @@ fn load_last_assistant(
          )
          SELECT message.id, message.conversation_id, message.parent_id, message.role,
                 message.content, message.status, message.generation_id, message.created_at
-         FROM selected JOIN messages AS message ON message.id = selected.id
+         FROM selected JOIN messages_with_checkpoints AS message ON message.id = selected.id
          WHERE selected.id NOT IN (SELECT value FROM json_each(?3))",
         )
         .map_err(storage_db_error)?

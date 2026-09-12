@@ -40,7 +40,8 @@ export class LiveChatSession implements ChatSession {
         return this.drafts[this.scope] ?? '';
     }
     set draft(value: string) {
-        this.drafts[this.scope] = value;
+        if (value === '') Reflect.deleteProperty(this.drafts, this.scope);
+        else this.drafts[this.scope] = value;
     }
     loadHistory(direction: 'older' | 'newer' | 'latest') {
         return this.history?.load(direction) ?? Promise.resolve();
@@ -94,7 +95,8 @@ export class LiveChatSession implements ChatSession {
         try {
             const accepted = await this.run(() => dispatch(draft));
             // A late acknowledgement must not erase another room's draft or newer typing.
-            if (accepted && this.drafts[scope] === draft) this.drafts[scope] = '';
+            if (accepted && this.drafts[scope] === draft)
+                Reflect.deleteProperty(this.drafts, scope);
             return accepted === true;
         } finally {
             this.#submittingScope = null;

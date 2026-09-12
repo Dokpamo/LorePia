@@ -8,6 +8,7 @@ rust-version.workspace = true
 [dependencies]
 chrono.workspace = true
 hex.workspace = true
+imagesize.workspace = true
 lorepia-domain = { path = "../domain" }
 lorepia-orchestration = { path = "../orchestration" }
 rusqlite.workspace = true

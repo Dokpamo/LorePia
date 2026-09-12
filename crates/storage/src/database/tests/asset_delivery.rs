@@ -107,7 +107,8 @@ fn import_commit_observer_proves_cas_durability_precedes_sqlite_commit() {
 fn approved_asset_delivery_revalidates_descriptor_hash_signature_and_range() {
     let root = tempdir().expect("temp root");
     let source_bytes = b"synthetic character";
-    let image_bytes = b"\x89PNG\r\n\x1a\nsynthetic-image";
+    let image = hex::decode("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415408d763f8cfc0f01f00050001ff729c52670000000049454e44ae426082").expect("valid PNG");
+    let image_bytes = image.as_slice();
     let mut source = NamedTempFile::new_in(root.path()).expect("source staging");
     source.write_all(source_bytes).expect("source");
     let mut asset = NamedTempFile::new_in(root.path()).expect("asset staging");

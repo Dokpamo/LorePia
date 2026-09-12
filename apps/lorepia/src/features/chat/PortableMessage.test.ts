@@ -677,9 +677,132 @@ describe('PortableMessage', () => {
         expect(rendered.querySelector('audio')?.getAttribute('src')).toBe(
             `http://lorepia-asset.localhost/sha256/${SHA256}`,
         );
-        expect(rendered.querySelector('audio')?.hasAttribute('autoplay')).toBe(true);
+        expect(rendered.querySelector('audio')?.hasAttribute('autoplay')).toBe(false);
+        expect(rendered.querySelector('audio')?.getAttribute('data-portable-autoplay')).toBe(
+            'true',
+        );
         expect(rendered.querySelector('audio')?.hasAttribute('loop')).toBe(true);
         expect(rendered.body.textContent).toContain('GAME OVER');
         expect(frame.srcdoc).not.toContain('/Users/private/original.mp3');
     });
+});
+
+it('keeps identical sanitized srcdoc and accepts its existing bridge after a no-op rebuild', async () => {
+    const client = { resolveAssetDelivery: vi.fn() } as unknown as LorepiaClient;
+    const onAction = vi.fn();
+    const view = render(PortableMessage, {
+        text: '<div>{{button::Run::run}}<script>first()</script></div>',
+        client,
+        profile,
+        onAction,
+    });
+    const frame = await portableFrame(view.container);
+    const previous = frame.srcdoc;
+    const id = runtimeId(frame);
+    await view.rerender({
+        text: '<div>{{button::Run::run}}<script>second()</script></div>',
+        client,
+        profile,
+        onAction,
+    });
+    await tick();
+    await waitFor(() => {
+        globalThis.dispatchEvent(
+            new MessageEvent('message', {
+                origin: 'null',
+                source: frame.contentWindow,
+                data: {
+                    channel: PORTABLE_RENDERER_CHANNEL,
+                    type: 'portable_action',
+                    runtimeId: id,
+                    action: 'run',
+                },
+            }),
+        );
+        expect(onAction).toHaveBeenCalled();
+    });
+    expect(frame.srcdoc).toBe(previous);
+    expect(runtimeId(frame)).toBe(id);
+});
+
+it('defers historical audio loading/autoplay while preserving room BGM attributes', async () => {
+    const client = {
+        resolveAssetDelivery: vi.fn().mockResolvedValue({ asset_id: 'audio', sha256: SHA256 }),
+    } as unknown as LorepiaClient;
+    const audioProfile = { ...profile, assets: [{ asset_id: 'audio', aliases: ['track.mp3'] }] };
+    const message = render(PortableMessage, {
+        text: '{{bgm::track.mp3}}',
+        client,
+        profile: audioProfile,
+    });
+    const audio = frameDocument(await portableFrame(message.container)).querySelector('audio');
+    expect(audio?.hasAttribute('autoplay')).toBe(false);
+    expect(audio?.getAttribute('data-portable-autoplay')).toBe('true');
+    expect(audio?.getAttribute('preload')).toBe('none');
+    const room = render(PortableMessage, {
+        text: '{{bgm::track.mp3}}',
+        client,
+        profile: { ...audioProfile, background_markup: '<div>{{bgm::track.mp3}}</div>' },
+        surface: 'room',
+    });
+    expect(
+        frameDocument(await portableFrame(room.container))
+            .querySelector('audio')
+            ?.hasAttribute('autoplay'),
+    ).toBe(true);
+});
+
+it('retains an unchanged frame when only the render-only last-message index advances', async () => {
+    const client = { resolveAssetDelivery: vi.fn() } as unknown as LorepiaClient;
+    const onAction = vi.fn();
+    const props = {
+        text: '<div>static{{button::Run::run}}</div>',
+        client,
+        profile,
+        onAction,
+        messageIndex: 0,
+    };
+    const view = render(PortableMessage, { ...props, lastMessageId: 1 });
+    const frame = await portableFrame(view.container);
+    const previous = frame.srcdoc;
+    const id = runtimeId(frame);
+    await view.rerender({ ...props, lastMessageId: 2 });
+    await vi.waitFor(() => {
+        globalThis.dispatchEvent(
+            new MessageEvent('message', {
+                origin: 'null',
+                source: frame.contentWindow,
+                data: {
+                    channel: PORTABLE_RENDERER_CHANNEL,
+                    type: 'portable_action',
+                    runtimeId: id,
+                    action: 'run',
+                },
+            }),
+        );
+        expect(onAction).toHaveBeenCalled();
+    });
+    expect(frame.srcdoc).toBe(previous);
+    expect(runtimeId(frame)).toBe(id);
+    onAction.mockClear();
+    await view.rerender({
+        ...props,
+        text: '<div>{{lastmessageid}}{{button::Run::run}}</div>',
+        lastMessageId: 3,
+    });
+    await vi.waitFor(() => expect(runtimeId(frame)).not.toBe(id));
+    expect(frameDocument(frame).body.textContent).toContain('3');
+    globalThis.dispatchEvent(
+        new MessageEvent('message', {
+            origin: 'null',
+            source: frame.contentWindow,
+            data: {
+                channel: PORTABLE_RENDERER_CHANNEL,
+                type: 'portable_action',
+                runtimeId: id,
+                action: 'run',
+            },
+        }),
+    );
+    expect(onAction).not.toHaveBeenCalled();
 });

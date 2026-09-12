@@ -142,7 +142,7 @@ fn hard_crash_assistant_content(root: &Path, assistant_message_id: &str) -> Stri
     rusqlite::Connection::open(hard_crash_database_path(root))
         .expect("open hard-crash message database")
         .query_row(
-            "SELECT content FROM messages WHERE id = ?1",
+            "SELECT content FROM messages_with_checkpoints WHERE id = ?1",
             [assistant_message_id],
             |row| row.get(0),
         )

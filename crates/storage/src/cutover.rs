@@ -1949,7 +1949,7 @@ mod tests {
 
     fn simulated_previous_release(root: &Path) -> (PathBuf, u32) {
         assert_eq!(
-            SCHEMA_VERSION, 42,
+            SCHEMA_VERSION, 43,
             "update previous-release fixture for the latest migration"
         );
         let canonical_path = root.join(LEGACY_DATABASE_RELATIVE_PATH);
@@ -1975,12 +1975,12 @@ mod tests {
             .execute_batch("PRAGMA foreign_keys = OFF;")
             .expect("disable foreign keys for the simulated downgrade");
         connection
-            .execute_batch(
-                "DROP TABLE module_plan_document_parts; DROP TABLE module_plan_documents;",
-            )
-            .expect("restore schema-41 module plan storage");
+            .execute_batch(include_str!(
+                "database/pending_checkpoints/drop_test_schema.sql"
+            ))
+            .expect("restore schema-42 message storage");
         connection
-            .execute("DELETE FROM schema_migrations WHERE version = 42", [])
+            .execute("DELETE FROM schema_migrations WHERE version = 43", [])
             .expect("remove the simulated latest migration registry row");
         connection
             .execute_batch("PRAGMA foreign_keys = ON; PRAGMA wal_checkpoint(TRUNCATE);")

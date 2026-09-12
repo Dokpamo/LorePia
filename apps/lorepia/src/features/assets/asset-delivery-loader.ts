@@ -100,6 +100,7 @@ export async function loadAssetDelivery(
     signal: AbortSignal,
     onWaiting?: () => void,
     priority: AssetLoadPriority = () => 0,
+    options: { maxAttempts?: number } = {},
 ): Promise<AssetDeliveryDto> {
     let deadline = Date.now() + LOAD_TIMEOUT_MS;
     for (let attempt = 0; ; attempt++) {
@@ -119,7 +120,12 @@ export async function loadAssetDelivery(
         } catch (error: unknown) {
             signal.throwIfAborted();
             const normalized = normalizeClientError(error);
-            if (normalized.code !== 'storage_unavailable' || !normalized.recoverable) throw error;
+            if (
+                normalized.code !== 'storage_unavailable' ||
+                !normalized.recoverable ||
+                attempt + 1 >= (options.maxAttempts ?? Infinity)
+            )
+                throw error;
             const remaining = deadline - Date.now();
             if (remaining <= 0) throw timeoutError();
             onWaiting?.();

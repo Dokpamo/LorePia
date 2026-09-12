@@ -423,6 +423,16 @@ export function sanitizePortableTree(
             const source = element.getAttribute('src');
             if (source === null || !mediaUrls.has(source)) element.removeAttribute('src');
         }
+        if (surface === 'message' && element instanceof HTMLImageElement) {
+            element.loading = 'lazy';
+            element.decoding = 'async';
+        }
+        if (surface === 'message' && element instanceof HTMLAudioElement) {
+            if (element.hasAttribute('autoplay'))
+                element.setAttribute('data-portable-autoplay', 'true');
+            element.removeAttribute('autoplay');
+            element.preload = 'none';
+        }
         if (element instanceof HTMLAnchorElement) {
             element.removeAttribute('href');
             element.removeAttribute('target');

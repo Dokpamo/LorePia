@@ -12,6 +12,10 @@ use crate::verified_asset_cache::{
     AssetFileSnapshot, CacheLookup, VerifiedAssetCache, open_asset_file,
 };
 
+mod image_validation;
+#[cfg(test)]
+mod policy_tests;
+
 const MAX_APPROVED_ASSET_READ_BYTES: u64 = 64 * 1_024 * 1_024;
 const MAX_APPROVED_IMAGE_BYTES: u64 = 16 * 1_024 * 1_024;
 
@@ -25,6 +29,13 @@ pub struct ApprovedAssetRange {
     pub descriptor: AssetDescriptor,
     pub start: u64,
     pub bytes: Vec<u8>,
+    /// Same-handle display checks, never accepted from renderer input.
+    pub image_validation_policy: u32,
+}
+
+impl ApprovedAssetRange {
+    /// Storage owns this policy; Core/Shell forward it only to native Rust callers.
+    pub const IMAGE_VALIDATION_POLICY: u32 = 1;
 }
 
 use super::package_cas::{validate_renderer_media_type, verify_open_file_media_type_signature};
@@ -116,11 +127,12 @@ impl Storage {
         }
         let available = descriptor.size_bytes - start;
         let length = requested_bytes.min(available);
-        let mut cache = self.verified_asset_cache()?;
-        let bytes = match cache
-            .read_range(&descriptor, start, length)
-            .map_err(storage_io_error)?
-        {
+        let lease = self
+            .verified_asset_cache()?
+            .lease(&descriptor)
+            .map_err(asset_cache_error)?;
+        let mut entry = lease.lock().map_err(storage_io_error)?;
+        let bytes = match entry.read_range(start, length).map_err(storage_io_error)? {
             CacheLookup::Hit(bytes) => bytes,
             CacheLookup::Changed => {
                 return Err(storage_corrupted(
@@ -128,17 +140,27 @@ impl Storage {
                 ));
             }
             CacheLookup::Miss => {
-                cache
+                let _job = self
+                    .verified_asset_cache()?
                     .begin_verification(descriptor.size_bytes)
                     .map_err(storage_io_error)?;
-                let file = self.open_verified_approved_asset(&descriptor, &relative_path)?;
-                cache
-                    .insert(descriptor.clone(), file)
-                    .map_err(storage_io_error)?;
-                match cache
-                    .read_range(&descriptor, start, length)
-                    .map_err(storage_io_error)?
-                {
+                let (file, validated_png) =
+                    self.open_verified_approved_asset(&descriptor, &relative_path)?;
+                entry.insert(file).map_err(storage_io_error)?;
+                let read = if let Some(bytes) = validated_png {
+                    // Cold CRC already read these exact bytes from this handle.
+                    // Keep a bounded response allocation, never cache the full PNG.
+                    match entry.contains_verified().map_err(storage_io_error)? {
+                        CacheLookup::Hit(()) => {
+                            CacheLookup::Hit(verified_png_range(bytes, start, length)?)
+                        }
+                        CacheLookup::Miss => CacheLookup::Miss,
+                        CacheLookup::Changed => CacheLookup::Changed,
+                    }
+                } else {
+                    entry.read_range(start, length).map_err(storage_io_error)?
+                };
+                match read {
                     CacheLookup::Hit(bytes) => bytes,
                     CacheLookup::Miss | CacheLookup::Changed => {
                         return Err(storage_corrupted(
@@ -149,6 +171,11 @@ impl Storage {
             }
         };
         Ok(ApprovedAssetRange {
+            image_validation_policy: if descriptor.media_type.starts_with("image/") {
+                ApprovedAssetRange::IMAGE_VALIDATION_POLICY
+            } else {
+                0
+            },
             descriptor,
             start,
             bytes,
@@ -214,23 +241,23 @@ impl Storage {
         relative_path: &str,
     ) -> CoreResult<()> {
         self.validate_approved_asset_relative_path(descriptor, relative_path)?;
-        let mut cache = self.verified_asset_cache()?;
-        match cache
-            .contains_verified(descriptor)
-            .map_err(storage_io_error)?
-        {
+        let lease = self
+            .verified_asset_cache()?
+            .lease(descriptor)
+            .map_err(asset_cache_error)?;
+        let mut entry = lease.lock().map_err(storage_io_error)?;
+        match entry.contains_verified().map_err(storage_io_error)? {
             CacheLookup::Hit(()) => Ok(()),
             CacheLookup::Changed => Err(storage_corrupted(
                 "approved asset changed after it was verified",
             )),
             CacheLookup::Miss => {
-                cache
+                let _job = self
+                    .verified_asset_cache()?
                     .begin_verification(descriptor.size_bytes)
                     .map_err(storage_io_error)?;
-                let file = self.open_verified_approved_asset(descriptor, relative_path)?;
-                cache
-                    .insert(descriptor.clone(), file)
-                    .map_err(storage_io_error)
+                let (file, _) = self.open_verified_approved_asset(descriptor, relative_path)?;
+                entry.insert(file).map_err(storage_io_error)
             }
         }
     }
@@ -263,7 +290,7 @@ impl Storage {
         &self,
         descriptor: &AssetDescriptor,
         relative_path: &str,
-    ) -> CoreResult<AssetFileSnapshot> {
+    ) -> CoreResult<(AssetFileSnapshot, Option<Vec<u8>>)> {
         self.validate_approved_asset_relative_path(descriptor, relative_path)?;
         let file =
             open_asset_file(&self.root, descriptor.sha256.as_str()).map_err(storage_io_error)?;
@@ -296,12 +323,14 @@ impl Storage {
         file.file_mut().rewind().map_err(storage_io_error)?;
         verify_open_file_media_type_signature(file.file_mut(), &descriptor.media_type)?;
         file.file_mut().rewind().map_err(storage_io_error)?;
+        let validated_png = image_validation::validate(file.file_mut(), descriptor)?;
+        file.file_mut().rewind().map_err(storage_io_error)?;
         file.ensure_unchanged().map_err(|error| {
             storage_corrupted(format!(
                 "approved asset changed while it was being verified: {error}"
             ))
         })?;
-        Ok(file)
+        Ok((file, validated_png))
     }
 
     fn verified_asset_cache(&self) -> CoreResult<MutexGuard<'_, VerifiedAssetCache>> {
@@ -319,4 +348,27 @@ impl Storage {
         self.approved_asset_hash_verifications
             .load(Ordering::Relaxed)
     }
+}
+
+fn asset_cache_error(error: std::io::Error) -> CoreError {
+    if error.kind() == std::io::ErrorKind::InvalidData {
+        storage_corrupted(error.to_string())
+    } else {
+        storage_io_error(error)
+    }
+}
+
+fn verified_png_range(bytes: Vec<u8>, start: u64, length: u64) -> CoreResult<Vec<u8>> {
+    let start = usize::try_from(start).map_err(|_| storage_corrupted("image offset overflow"))?;
+    let length = usize::try_from(length).map_err(|_| storage_corrupted("image length overflow"))?;
+    if start == 0 && length == bytes.len() {
+        return Ok(bytes);
+    }
+    let end = start
+        .checked_add(length)
+        .ok_or_else(|| storage_corrupted("image range overflow"))?;
+    bytes
+        .get(start..end)
+        .map(<[u8]>::to_vec)
+        .ok_or_else(|| storage_corrupted("verified image range exceeds its bytes"))
 }

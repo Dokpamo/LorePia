@@ -135,7 +135,7 @@ fn load_interrupted_generation_assistant(
                 .query_row(
                     "SELECT id, conversation_id, parent_id, role, content, status,
                             generation_id, created_at
-                     FROM messages
+                     FROM messages_with_checkpoints
                      WHERE id = ?1",
                     [assistant_message_id],
                     map_message,
@@ -280,7 +280,10 @@ fn recover_pending_generation_messages(
     if preserve_partial_generations {
         transaction
             .execute(
-                "UPDATE messages SET status = 'cancelled' WHERE status = 'pending'",
+                "UPDATE messages
+                 SET content=(SELECT content FROM messages_with_checkpoints AS effective
+                              WHERE effective.id=messages.id), status='cancelled'
+                 WHERE status='pending'",
                 [],
             )
             .map_err(storage_db_error)?;

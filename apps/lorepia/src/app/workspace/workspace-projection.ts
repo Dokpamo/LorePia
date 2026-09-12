@@ -39,6 +39,8 @@ export class ConversationProjection {
     private messages: SampleMessage[] = [];
     private scrollMessages: MessageDto[] = [];
     private savedLive: MessageDto | undefined;
+    private branchSource: LorepiaAppState['branches'] | null = null;
+    private branchViews: NonNullable<SampleConversation['branches']> = [];
 
     project(state: LorepiaAppState, displayMode?: ChatDisplayMode): SampleConversation | null {
         const selected = state.selected_conversation;
@@ -47,6 +49,8 @@ export class ConversationProjection {
             this.messages = [];
             this.scrollMessages = [];
             this.savedLive = undefined;
+            this.branchSource = null;
+            this.branchViews = [];
             return null;
         }
         const liveId = state.chat.live_assistant_message_id;
@@ -77,6 +81,14 @@ export class ConversationProjection {
                     },
                 ];
         }
+        if (this.branchSource !== state.branches) {
+            this.branchSource = state.branches;
+            this.branchViews = state.branches.map((item, index) => ({
+                id: item.id,
+                title: item.title ?? t('workspace.branch', { number: index + 1 }),
+                messages: [],
+            }));
+        }
         const pending = this.scrollMessages.at(-1);
         const messages =
             liveId && pending
@@ -99,11 +111,7 @@ export class ConversationProjection {
             totalMessages: state.messages.total_messages,
             mode: displayMode ?? state.conversation_state?.selected_mode ?? 'chat',
             activeBranchId: state.conversation_state?.active_branch_id,
-            branches: state.branches.map((item, index) => ({
-                id: item.id,
-                title: item.title ?? t('workspace.branch', { number: index + 1 }),
-                messages: [],
-            })),
+            branches: this.branchViews,
         };
     }
 }

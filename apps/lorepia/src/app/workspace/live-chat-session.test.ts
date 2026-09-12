@@ -58,7 +58,7 @@ describe('live workspace chat bridge', () => {
         pending.resolve(true);
         await sent;
         expect(session.draft).toBe('another room draft');
-        expect(session.drafts[oldScope]).toBe('');
+        expect(session.drafts[oldScope]).toBeUndefined();
         controller.destroy();
     });
     it('projects verified streaming state once and keeps stored message metadata', async () => {
@@ -89,4 +89,17 @@ describe('live workspace chat bridge', () => {
         expect(view?.messages.some((item) => item.sample)).toBe(false);
         controller.destroy();
     });
+});
+
+it('does not retain emptied or successfully submitted draft keys', async () => {
+    const { controller, session } = await setup();
+    for (let index = 0; index < 500; index++) {
+        session.draft = `Draft ${String(index)}`;
+        if (index % 2) expect(await session.send(() => Promise.resolve(true))).toBe(true);
+        else session.draft = '';
+        expect(Object.keys(session.drafts)).toHaveLength(0);
+    }
+    session.draft = 'Unsent';
+    expect(session.draft).toBe('Unsent');
+    controller.destroy();
 });

@@ -107,3 +107,27 @@ describe('library sorting cost', () => {
         parse.mockRestore();
     });
 });
+
+it('reuses branch views across stream batches and invalidates renamed/reordered branches', () => {
+    const state = history(2);
+    state.branches = Array.from({ length: 500 }, (_, index) => ({
+        ...fixture.branch,
+        id: `b-${String(index)}`,
+        title: `Branch ${String(index)}`,
+    }));
+    const projection = new ConversationProjection();
+    const initial = projection.project(state);
+    const map = vi.spyOn(state.branches, 'map');
+    for (let index = 0; index < 1000; index++) {
+        state.chat.streaming_text = String(index);
+        expect(projection.project(state)?.branches).toBe(initial?.branches);
+    }
+    expect(map).not.toHaveBeenCalled();
+    state.branches = state.branches
+        .slice()
+        .reverse()
+        .map((branch) => ({ ...branch, title: 'Renamed' }));
+    const updated = projection.project(state)?.branches;
+    expect(updated).not.toBe(initial?.branches);
+    expect(updated?.[0]).toMatchObject({ id: 'b-499', title: 'Renamed' });
+});

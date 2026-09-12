@@ -1008,6 +1008,24 @@
     {
       "default_features": false,
       "features": [
+        "gif",
+        "heif",
+        "jpeg",
+        "png",
+        "webp"
+      ],
+      "from": "lorepia-storage",
+      "kind": "normal",
+      "optional": false,
+      "package": "imagesize",
+      "rename": null,
+      "requirement": "=0.15.0",
+      "source": "registry+https://github.com/rust-lang/crates.io-index",
+      "target": null
+    },
+    {
+      "default_features": false,
+      "features": [
         "backup",
         "bundled",
         "cache",

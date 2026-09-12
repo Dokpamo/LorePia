@@ -55,6 +55,12 @@ pub struct AssetProtocolRange {
     pub descriptor: AssetDeliveryDto,
     pub start: u64,
     pub bytes: Vec<u8>,
+    pub image_validation_policy: u32,
+}
+
+impl AssetProtocolRange {
+    pub const IMAGE_VALIDATION_POLICY: u32 =
+        lorepia_core::AssetDeliveryRange::IMAGE_VALIDATION_POLICY;
 }
 
 impl From<AssetDeliveryKind> for AssetDeliveryKindDto {
@@ -133,6 +139,7 @@ impl ShellApi {
             descriptor: range.descriptor.into(),
             start: range.start,
             bytes: range.bytes,
+            image_validation_policy: range.image_validation_policy,
         })
     }
 }
@@ -198,6 +205,7 @@ mod tests {
             },
             start: 0,
             bytes: vec![0],
+            image_validation_policy: AssetProtocolRange::IMAGE_VALIDATION_POLICY,
         };
         assert_not_an_invoke_dto(&range);
     }

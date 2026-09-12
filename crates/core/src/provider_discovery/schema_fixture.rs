@@ -39,6 +39,17 @@ pub(super) fn drop_post_schema_37_migrations(connection: &rusqlite::Connection) 
         ("TRIGGER", "portable_runtime_state_scope_guard_update"),
     ];
     connection
+        .execute_batch(include_str!(
+            "../../../storage/src/database/pending_checkpoints/drop_test_schema.sql"
+        ))
+        .expect("remove schema-43 pending checkpoint storage");
+    assert_eq!(
+        connection
+            .execute("DELETE FROM schema_migrations WHERE version = 43", [])
+            .expect("remove schema-43 registry row"),
+        1
+    );
+    connection
         .execute_batch("DROP TABLE module_plan_document_parts; DROP TABLE module_plan_documents;")
         .expect("remove schema-42 module document storage");
     assert_eq!(

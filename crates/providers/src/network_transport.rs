@@ -1,5 +1,7 @@
 use std::time::Duration;
 
+mod pool;
+
 use lorepia_domain::{AuthBinding, CoreError, CoreErrorCode, CoreResult};
 use reqwest::{
     Client, RequestBuilder, Response,
@@ -63,16 +65,7 @@ impl ProviderHttpTarget {
         let resolved = ResolvedNetworkTarget::resolve(&self.canonical, lookup_timeout)
             .await
             .map_err(|_| resolution_error())?;
-        let builder = Client::builder()
-            .timeout(self.timeout)
-            .connect_timeout(lookup_timeout)
-            .redirect(reqwest::redirect::Policy::none())
-            .referer(false)
-            .no_proxy();
-        let client = resolved
-            .pin_reqwest_builder(builder)
-            .build()
-            .map_err(|_| client_error())?;
+        let client = pool::client_for(&resolved, self.timeout)?;
         // Revalidate only after the pinned client exists, immediately before
         // the caller constructs and sends its request.
         resolved
